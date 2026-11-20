@@ -42,6 +42,7 @@ pub mod mailpit;
 pub mod microsoft_emulator;
 pub mod model_emulator;
 pub mod opensearch;
+pub mod persistent;
 pub mod portmap;
 pub mod proxy;
 pub mod resources;
@@ -258,6 +259,9 @@ pub(crate) fn bring_up(
     plan: &BringUp,
 ) -> Result<StackUp> {
     if !stage.is_dry_run() {
+        if plan.start == Start::Fresh {
+            persistent::ensure_may_wipe(instance, args.wipe_persistent_data)?;
+        }
         stack::clear_state(instance)?;
     }
     stage.record_bring_up(mode, plan);
@@ -628,7 +632,12 @@ fn run_attached(mut stage: Stage, mode: Mode, run: &cli::RunLocalArgs) -> Result
         mode.label(),
         instance.name()
     ));
-    let plan = supervisor::plan_for(mode, &run.flags, args, Start::Fresh);
+    let start = if stage.is_dry_run() {
+        Start::Fresh
+    } else {
+        persistent::attached_start(&instance, run.flags.fresh)?
+    };
+    let plan = supervisor::plan_for(mode, &run.flags, args, start);
     let attached_run = (!stage.is_dry_run())
         .then(|| supervisor::begin_attached(&instance))
         .transpose()?;
@@ -669,7 +678,7 @@ fn run_attached(mut stage: Stage, mode: Mode, run: &cli::RunLocalArgs) -> Result
             &instance,
             &up.env,
             up.target,
-            args.build.build_aux_services,
+            args,
             &mut fe,
         )?;
     }
@@ -854,7 +863,7 @@ fn interact(
     instance: &Instance,
     env: &env_layer::ResolvedEnv,
     target: arch::Target,
-    build_aux_services: bool,
+    args: &cli::RunArgs,
     fe: &mut frontend::Frontend,
 ) -> Result<()> {
     use console::Key;
@@ -890,7 +899,7 @@ fn interact(
                             instance,
                             env,
                             target,
-                            build_aux_services,
+                            args.build.build_aux_services,
                             None,
                         )
                     });
@@ -911,6 +920,16 @@ fn interact(
                 // Kill the frontend's whole process group (bun + Vite), not just
                 // bun — otherwise Vite is orphaned and keeps holding the port.
                 fe.shutdown();
+                // A persistent stack keeps its data: quitting only stops it.
+                if let Err(kept) =
+                    persistent::ensure_may_wipe(instance, args.wipe_persistent_data)
+                {
+                    stage.note(&format!("{kept:#}"));
+                    return stop(&cli::InstanceArgs {
+                        instance: Some(instance.name().to_string()),
+                        port_base: Some(instance.port_base()),
+                    });
+                }
                 // Tear the stack down on quit, while the user is already leaving:
                 // stopping the running containers now is the slow part of
                 // teardown, so doing it here makes the *next* `run_local` skip it
@@ -1695,6 +1714,7 @@ fn instance_volumes(instance: &Instance) -> impl Iterator<Item = String> {
     external_volumes(instance).into_iter().chain([
         format!("{}_openbao_data", instance.project_name()),
         gen_compose::temporal_volume(instance),
+        persistent::localstack_volume(instance),
     ])
 }
 
@@ -1916,17 +1936,19 @@ pub fn stop(args: &cli::InstanceArgs) -> Result<()> {
 }
 
 /// `cargo x reset-local` — drop, recreate, and migrate the instance DB.
-pub fn reset(args: &cli::InstanceArgs) -> Result<()> {
+pub fn reset(args: &cli::InstanceArgs, wipe_persistent_data: bool) -> Result<()> {
     let stage = Stage::from_env();
     let instance = Instance::resolve(args.instance.as_deref(), args.port_base)?;
+    persistent::ensure_may_wipe(&instance, wipe_persistent_data)?;
     db::reset(&stage, &instance)
 }
 
 /// `cargo x destroy-local` — remove the instance's containers, volumes, and
 /// (named instances) networks, and free its allocation.
-pub fn destroy(args: &cli::InstanceArgs) -> Result<()> {
+pub fn destroy(args: &cli::InstanceArgs, wipe_persistent_data: bool) -> Result<()> {
     let stage = Stage::from_env();
     let instance = Instance::resolve(args.instance.as_deref(), args.port_base)?;
+    persistent::ensure_may_wipe(&instance, wipe_persistent_data)?;
     supervisor::stop_processes(&instance);
     // Containers + all volumes (incl. FusionAuth's external ones, which `down -v`
     // leaves behind — the same teardown run_local does for its clean slate).

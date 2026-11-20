@@ -132,6 +132,7 @@ pub fn run(args: &LocalE2eArgs) -> Result<()> {
             verbose: false,
             no_snapshot: false,
             with_cf_tunnel: false,
+            wipe_persistent_data: false,
         },
         ..stack::UpArgs::default()
     };

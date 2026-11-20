@@ -92,6 +92,10 @@ pub struct DownArgs {
     /// wipes them.
     #[arg(long)]
     pub keep_data: bool,
+    /// Also delete a persistent stack's data (see `MACRO_LOCAL_PERSISTENT`),
+    /// which is otherwise refused.
+    #[arg(long)]
+    pub wipe_persistent_data: bool,
 }
 
 /// Durable per-instance record of what a bring-up brought up, so later commands
@@ -252,6 +256,7 @@ fn up_allocated(
         instance.name()
     ));
     if !stage.is_dry_run() {
+        super::persistent::ensure_may_wipe(&instance, args.run.wipe_persistent_data)?;
         supervisor::stop_processes(&instance);
         // A failed run_local's record would otherwise outrank this bring-up in
         // the phase.
@@ -344,6 +349,7 @@ fn bootstrap_from_update(args: &UpdateArgs) -> Result<()> {
             traces: super::cli::TracesBackend::default(),
             with_chrome: false,
             with_cf_tunnel: false,
+            wipe_persistent_data: false,
         },
         infra_only: false,
         json: args.json,
@@ -872,7 +878,7 @@ pub fn down(args: &DownArgs) -> Result<()> {
     if args.keep_data {
         return super::stop(&args.instance);
     }
-    super::destroy(&args.instance)
+    super::destroy(&args.instance, args.wipe_persistent_data)
 }
 
 /// The machine-readable endpoint block `stack up --json` and `status --json` share.

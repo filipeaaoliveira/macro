@@ -51,9 +51,9 @@ enum Cmd {
     /// Stop an instance's containers (keep volumes).
     StopLocal(InstanceArgs),
     /// Drop, recreate, and migrate the instance database.
-    ResetLocal(InstanceArgs),
+    ResetLocal(WipeArgs),
     /// Remove an instance's containers, networks, and volumes.
-    DestroyLocal(InstanceArgs),
+    DestroyLocal(WipeArgs),
     /// Start, seed, and test an isolated local E2E stack.
     LocalE2e(super::e2e::LocalE2eArgs),
     /// Lower-level stack control for Cursor Cloud and bakes. `stack up` always
@@ -96,6 +96,17 @@ pub struct InstanceArgs {
     /// commands find it without the flag.
     #[arg(long)]
     pub port_base: Option<u16>,
+}
+
+/// An instance, for a command that deletes its data.
+#[derive(Args, Clone, Default)]
+pub struct WipeArgs {
+    #[command(flatten)]
+    pub instance: InstanceArgs,
+    /// Also delete a persistent stack's data (see `MACRO_LOCAL_PERSISTENT`),
+    /// which is otherwise refused.
+    #[arg(long)]
+    pub wipe_persistent_data: bool,
 }
 
 /// An instance plus the computers fleet its compose is rendered for.
@@ -167,6 +178,10 @@ pub struct RunArgs {
     /// background process alive to hold them.
     #[arg(long)]
     pub with_cf_tunnel: bool,
+    /// Let `--fresh`, `stack up` and the quit hotkey delete a persistent
+    /// stack's data (see `MACRO_LOCAL_PERSISTENT`), which they otherwise keep.
+    #[arg(long)]
+    pub wipe_persistent_data: bool,
 }
 
 /// Which OTLP trace collector `--traces` should bring up.
@@ -326,8 +341,8 @@ fn run(cli: Cli) -> Result<()> {
             super::seed_env::run_scenario(&instance, &a.scenario_args)
         }
         Cmd::StopLocal(a) => super::stop(&a),
-        Cmd::ResetLocal(a) => super::reset(&a),
-        Cmd::DestroyLocal(a) => super::destroy(&a),
+        Cmd::ResetLocal(a) => super::reset(&a.instance, a.wipe_persistent_data),
+        Cmd::DestroyLocal(a) => super::destroy(&a.instance, a.wipe_persistent_data),
         Cmd::LocalE2e(a) => super::e2e::run(&a),
         Cmd::Stack(cmd) => match cmd {
             StackCmd::Up(a) => super::stack::up(Mode::Local, &a).map(|_| ()),

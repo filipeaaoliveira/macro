@@ -11,13 +11,15 @@ fn full_teardown_removes_vault_storage_without_crossing_instance_boundaries() {
     let default_volumes: BTreeSet<_> = instance_volumes(&default).collect();
     let named_volumes: BTreeSet<_> = instance_volumes(&named).collect();
 
-    assert_eq!(default_volumes.len(), 8);
-    assert_eq!(named_volumes.len(), 8);
+    assert_eq!(default_volumes.len(), 9);
+    assert_eq!(named_volumes.len(), 9);
     assert!(default_volumes.is_disjoint(&named_volumes));
     assert!(default_volumes.contains("macro_openbao_data"));
     assert!(named_volumes.contains("macro-passwords-isolation_openbao_data"));
     assert!(default_volumes.contains("macro_temporal_data"));
     assert!(named_volumes.contains("macro-passwords-isolation_temporal_data"));
+    assert!(default_volumes.contains("macro_localstack_data"));
+    assert!(named_volumes.contains("macro-passwords-isolation_localstack_data"));
     assert!(external_volumes(&named).into_iter().all(|volume| {
         named_volumes.contains(&volume) && volume != "macro-passwords-isolation_openbao_data"
     }));

@@ -224,3 +224,30 @@ fn static_frontend_conflicts_with_no_frontend() {
             .is_err()
     );
 }
+
+#[test]
+fn only_an_explicit_flag_lets_a_command_wipe_a_persistent_stack() {
+    let wipes = |argv: &[&str]| -> bool {
+        let cli = Cli::try_parse_from(std::iter::once("cargo-x").chain(argv.iter().copied()))
+            .unwrap();
+        match cli.command {
+            Cmd::RunLocal(args) => args.run.wipe_persistent_data,
+            Cmd::DestroyLocal(args) | Cmd::ResetLocal(args) => args.wipe_persistent_data,
+            Cmd::Stack(StackCmd::Up(args)) => args.run.wipe_persistent_data,
+            Cmd::Stack(StackCmd::Down(args)) => args.wipe_persistent_data,
+            _ => panic!("unexpected command for {argv:?}"),
+        }
+    };
+    for argv in [
+        &["run-local", "--fresh"][..],
+        &["destroy-local"],
+        &["reset-local"],
+        &["stack", "up"],
+        &["stack", "down"],
+    ] {
+        assert!(!wipes(argv), "{argv:?} wipes without the flag");
+        let mut with_flag = argv.to_vec();
+        with_flag.push("--wipe-persistent-data");
+        assert!(wipes(&with_flag), "{with_flag:?} ignores the flag");
+    }
+}

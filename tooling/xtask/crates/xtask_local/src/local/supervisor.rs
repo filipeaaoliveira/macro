@@ -574,6 +574,9 @@ pub(super) fn decide_start(phase: stack::Phase, job_running: bool, fresh: bool) 
 /// resumes with its data. Only `--fresh` wipes.
 pub fn start_detached(args: &RunLocalFlags, run: &RunArgs) -> Result<()> {
     let instance = Instance::resolve(run.instance.instance.as_deref(), run.instance.port_base)?;
+    if args.fresh {
+        super::persistent::ensure_may_wipe(&instance, run.wipe_persistent_data)?;
+    }
     instance.ensure_artifact_dir()?;
     let dir = run_dir(&instance)?;
     let start_lock = lock_blocking(&dir.join("start.lock"))?;
