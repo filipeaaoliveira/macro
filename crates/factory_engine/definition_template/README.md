@@ -374,7 +374,10 @@ routine bot (`00000000-0000-0000-0000-00000000a2a2`). With a `standing`
 section it starts a Run only when that bot is the `bot` of an Agent in a
 Standing Role that allows `start`; otherwise it is skipped as refused.
 Switching the Automation off and on writes its routine back as the factory
-made it, and its scheduled firings start Runs as its creator again.
+made it, and its scheduled firings start Runs as its creator again. Two
+kinds of Automation need a Role for the routine bot until their creator
+switches them off and on: one made before Macro began recording the
+routine's revision, and one whose routine Macro's SDK upgrade rewrote.
 
 The validator refuses an act not in that list, any act that names a merge, a
 Standing Role with no act or no Agent, an Agent `agents` does not define,

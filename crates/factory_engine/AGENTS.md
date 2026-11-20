@@ -1762,8 +1762,13 @@ triggers:
   as `refused`; the Run keeps the agent as its start. An Automation made
   before the revision was kept has none: its routine's firings act as the
   Macro routine bot until its creator switches it off and on. A routine the
-  scheduler's SDK code upgrade rewrote keeps its revision, so it still
-  fires as the creator. A
+  scheduler's SDK code upgrade rewrote keeps its revision, but its runs carry
+  no proof (`code_rewritten`): code a model rewrote, from a prompt that can
+  hold team-written task content, is no longer the factory's, so its
+  firings act as the Macro routine bot until the creator switches the
+  Automation off and on. The firing key must be the proof's run id exactly
+  as Macro writes it (lower-case, hyphenated): another spelling of the same
+  id is another firing, so it is not the scheduler's own. A
   routine the scheduler refuses (an invalid cron, event routines the
   creator may not have, no linked GitHub account) takes its Automation
   with it, and the refusal says why (400). Only people's actions start
@@ -2323,7 +2328,11 @@ Definition.
   Automation's routine firings carry no proof (or the Automation no
   revision) and act as the Macro routine bot, so under a Definition with
   Standing Roles each is skipped as `refused`, as before this change.
-  Automations made earlier need switching off and on once.
+  Automations made earlier, and any whose routine an SDK code upgrade
+  rewrote, need switching off and on once. A routine switched to write as
+  its owner (signing no bot) used to fire its Automation as its creator; it
+  is now checked as the Macro routine bot, so under Standing Roles it needs
+  a Role that allows `start` for that bot.
 - Deploy `agent_harness_service` with an SDK that has
   `macro.factory.fireAutomation` before a factory that makes Automations:
   saving the routine type-checks its code step against the harness's SDK.
