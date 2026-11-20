@@ -3431,6 +3431,31 @@
           }
         }
       },
+      "BlockerResolutions": {
+        "type": "object",
+        "description": "What became of a Run's Blockers: fixed, or disputed and then upheld or\ndropped. A dispute no round ruled on yet counts as upheld.",
+        "required": ["fixed", "disputedUpheld", "disputedDropped"],
+        "properties": {
+          "disputedDropped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers the fix disputed that a reviewer dropped.",
+            "minimum": 0
+          },
+          "disputedUpheld": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers the fix disputed that a reviewer upheld, or did not drop.",
+            "minimum": 0
+          },
+          "fixed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers the fix said it fixed.",
+            "minimum": 0
+          }
+        }
+      },
       "BoardNext": {
         "type": "object",
         "description": "Where the board's next page starts: past this Run, in the board's order\n(newest first).",
@@ -4019,6 +4044,11 @@
           }
         }
       },
+      "DisputeRuling": {
+        "type": "string",
+        "description": "How the next round's reviewer ruled on a disputed Blocker.",
+        "enum": ["upheld", "dropped"]
+      },
       "DurationStats": {
         "type": "object",
         "description": "A spread of durations: how many, their median and 90th percentile.",
@@ -4255,7 +4285,7 @@
       "FindingKind": {
         "type": "string",
         "description": "What a finding turned out to be once its round ended.",
-        "enum": ["blocker", "follow_up"]
+        "enum": ["blocker", "follow_up", "dismissed"]
       },
       "FiringResult": {
         "type": "object",
@@ -4302,6 +4332,11 @@
           "creator_left_team",
           "agent_account"
         ]
+      },
+      "FixStatus": {
+        "type": "string",
+        "description": "What the fix said of a Blocker it was given.",
+        "enum": ["fixed", "disputed"]
       },
       "FlawMarker": {
         "oneOf": [
@@ -5281,6 +5316,21 @@
             "type": "boolean",
             "description": "Whether it blocks wherever it is: a Blocker of the round before\nfound again, or a reviewer's answer that never read."
           },
+          "dispute": {
+            "type": ["string", "null"],
+            "description": "Why the fix disputes it, as the fixer wrote it."
+          },
+          "fixStatus": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FixStatus",
+                "description": "What the fix said of it, when it was a Blocker the fix was given."
+              }
+            ]
+          },
           "followUpTaskId": {
             "type": ["string", "null"],
             "format": "uuid",
@@ -5333,6 +5383,17 @@
               }
             ]
           },
+          "ruling": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DisputeRuling",
+                "description": "How the next round's reviewer ruled on the dispute; none until a\nreviewer answered."
+              }
+            ]
+          },
           "seq": {
             "type": "integer",
             "format": "int32",
@@ -5356,6 +5417,7 @@
           "blockers",
           "newBlockers",
           "repeatedBlockers",
+          "resolutions",
           "byReviewer",
           "byAgent",
           "recurring"
@@ -5416,6 +5478,10 @@
             "format": "int32",
             "description": "Blockers an earlier round of their Run found too: not fixed.",
             "minimum": 0
+          },
+          "resolutions": {
+            "$ref": "#/components/schemas/BlockerResolutions",
+            "description": "What became of the Blockers given to a fix: fixed, or disputed and\nthen upheld or dropped, over every reviewed Run."
           },
           "reviewedRuns": {
             "type": "integer",
@@ -5733,7 +5799,13 @@
       "RunDetail": {
         "type": "object",
         "description": "A Run and the Steps it took.",
-        "required": ["run", "steps", "reviewRounds", "standingActs"],
+        "required": [
+          "run",
+          "steps",
+          "reviewRounds",
+          "blockerResolutions",
+          "standingActs"
+        ],
         "properties": {
           "baseRequiredChecks": {
             "oneOf": [
@@ -5745,6 +5817,10 @@
                 "description": "Why the checks the base branch requires decide nothing, while the\nRun is at its merge: they could not be read, or the base requires\nnone. Nothing holds the merge on them."
               }
             ]
+          },
+          "blockerResolutions": {
+            "$ref": "#/components/schemas/BlockerResolutions",
+            "description": "What became of its Blockers: fixed, or disputed and then upheld or\ndropped."
           },
           "mainHold": {
             "oneOf": [

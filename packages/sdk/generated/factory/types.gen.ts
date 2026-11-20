@@ -286,6 +286,25 @@ export type BlockerCount = {
 };
 
 /**
+ * What became of a Run's Blockers: fixed, or disputed and then upheld or
+ * dropped. A dispute no round ruled on yet counts as upheld.
+ */
+export type BlockerResolutions = {
+    /**
+     * Blockers the fix disputed that a reviewer dropped.
+     */
+    disputedDropped: number;
+    /**
+     * Blockers the fix disputed that a reviewer upheld, or did not drop.
+     */
+    disputedUpheld: number;
+    /**
+     * Blockers the fix said it fixed.
+     */
+    fixed: number;
+};
+
+/**
  * Where the board's next page starts: past this Run, in the board's order
  * (newest first).
  */
@@ -744,6 +763,11 @@ export type DeliveryInsight = {
 };
 
 /**
+ * How the next round's reviewer ruled on a disputed Blocker.
+ */
+export type DisputeRuling = 'upheld' | 'dropped';
+
+/**
  * A spread of durations: how many, their median and 90th percentile.
  */
 export type DurationStats = {
@@ -884,7 +908,7 @@ export type ExperimentInsight = {
 /**
  * What a finding turned out to be once its round ended.
  */
-export type FindingKind = 'blocker' | 'follow_up';
+export type FindingKind = 'blocker' | 'follow_up' | 'dismissed';
 
 /**
  * What a firing came to.
@@ -903,6 +927,11 @@ export type FiringResult = {
  * Why a firing started no Run.
  */
 export type FiringSkip = 'disabled' | 'task_busy' | 'queue_full' | 'refused' | 'own_branch' | 'creator_left_team' | 'agent_account';
+
+/**
+ * What the fix said of a Blocker it was given.
+ */
+export type FixStatus = 'fixed' | 'disputed';
 
 /**
  * Who marked a Run flawed.
@@ -1677,6 +1706,11 @@ export type ReviewFinding = {
      */
     blocksAnywhere: boolean;
     /**
+     * Why the fix disputes it, as the fixer wrote it.
+     */
+    dispute?: string | null;
+    fixStatus?: null | FixStatus;
+    /**
      * The follow-up task it became, when it is a follow-up and the task
      * was made: its task document's id.
      */
@@ -1696,6 +1730,7 @@ export type ReviewFinding = {
      */
     problem: string;
     role?: null | Role;
+    ruling?: null | DisputeRuling;
     /**
      * The reviewer's Step: its place among the Run's Steps.
      */
@@ -1746,6 +1781,11 @@ export type ReviewQuality = {
      * Blockers an earlier round of their Run found too: not fixed.
      */
     repeatedBlockers: number;
+    /**
+     * What became of the Blockers given to a fix: fixed, or disputed and
+     * then upheld or dropped, over every reviewed Run.
+     */
+    resolutions: BlockerResolutions;
     /**
      * Runs with one or more review rounds.
      */
@@ -1957,6 +1997,11 @@ export type RunDefinition = {
  */
 export type RunDetail = {
     baseRequiredChecks?: null | RequiredChecksState;
+    /**
+     * What became of its Blockers: fixed, or disputed and then upheld or
+     * dropped.
+     */
+    blockerResolutions: BlockerResolutions;
     mainHold?: null | MainHold;
     /**
      * Its review rounds, in order, each with what its reviewers found.
