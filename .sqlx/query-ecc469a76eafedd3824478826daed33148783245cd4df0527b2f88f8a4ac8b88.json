@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT dismissal_undone_at, dismissal_undone_by_user_id\n            FROM factory_improvement\n            WHERE id = $1 AND team_id = $2\n            FOR UPDATE\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "dismissal_undone_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "dismissal_undone_by_user_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "ecc469a76eafedd3824478826daed33148783245cd4df0527b2f88f8a4ac8b88"
+}

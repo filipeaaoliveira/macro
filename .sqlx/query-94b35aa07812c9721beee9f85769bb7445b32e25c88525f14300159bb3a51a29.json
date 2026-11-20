@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT i.id, i.team_id, i.repo_url, i.run_id, i.state, i.refusal, i.created_at,\n                i.settled_at, i.failures, i.dismissal_undone_at, i.dismissal_undone_by_user_id,\n                (\n                    SELECT count(*) FROM factory_improvement_failure f\n                    WHERE f.improvement_id = i.id AND f.dismissed_at IS NOT NULL\n                ) AS \"dismissed!\"\n            FROM factory_improvement i\n            WHERE i.team_id = $1\n            ORDER BY i.created_at DESC, i.id DESC\n            LIMIT $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "refusal",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "settled_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "failures",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "dismissal_undone_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "dismissal_undone_by_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "dismissed!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "94b35aa07812c9721beee9f85769bb7445b32e25c88525f14300159bb3a51a29"
+}

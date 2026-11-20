@@ -12,9 +12,9 @@ use uuid::Uuid;
 use super::{PgRunRepository, PgRunRepositoryErr};
 use crate::domain::models::{RunId, RunOutcome};
 use crate::domain::self_improvement::{
-    DefinitionNaming, Failure, FailureSource, Improvement, ImprovementBegin, ImprovementState,
-    MAX_FAILURE_REASON_BYTES, NewFailure, PendingFailures, RunFailureFacts,
-    SelfImprovementRepository, Settlement,
+    DefinitionNaming, DismissalUndone, Failure, FailureSource, Improvement, ImprovementBegin,
+    ImprovementState, MAX_FAILURE_REASON_BYTES, NewFailure, PendingFailures, RunFailureFacts,
+    SelfImprovementRepository, Settlement, UndoDismissal,
 };
 
 /// The kind column of a Scorer's failure.
@@ -66,10 +66,16 @@ fn improvement(
     created_at: DateTime<Utc>,
     settled_at: Option<DateTime<Utc>>,
     failures: i32,
+    dismissed: i64,
+    undone: (Option<DateTime<Utc>>, Option<String>),
 ) -> Result<Improvement, PgRunRepositoryErr> {
     let state = state
         .parse::<ImprovementState>()
         .map_err(|_| PgRunRepositoryErr::UnknownImprovementState(state))?;
+    let dismissal_undone = match undone {
+        (Some(at), Some(by)) => Some(dismissal_undone(at, by)?),
+        _ => None,
+    };
     Ok(Improvement {
         id,
         team_id,
@@ -80,6 +86,16 @@ fn improvement(
         created_at,
         settled_at,
         failures: u32::try_from(failures).unwrap_or_default(),
+        dismissed: count(dismissed),
+        dismissal_undone,
+    })
+}
+
+/// An undo of a dismissal as its row keeps it.
+fn dismissal_undone(at: DateTime<Utc>, by: String) -> Result<DismissalUndone, PgRunRepositoryErr> {
+    Ok(DismissalUndone {
+        by: MacroUserIdStr::try_from(by.clone()).map_err(|_| PgRunRepositoryErr::InvalidUserId(by))?,
+        at,
     })
 }
 
@@ -234,10 +250,15 @@ impl SelfImprovementRepository for PgRunRepository {
     async fn latest_improvement(&self, team_id: Uuid) -> Result<Option<Improvement>, Self::Err> {
         let row = sqlx::query!(
             r#"
-            SELECT id, team_id, repo_url, run_id, state, refusal, created_at, settled_at, failures
-            FROM factory_improvement
-            WHERE team_id = $1
-            ORDER BY created_at DESC, id DESC
+            SELECT i.id, i.team_id, i.repo_url, i.run_id, i.state, i.refusal, i.created_at,
+                i.settled_at, i.failures, i.dismissal_undone_at, i.dismissal_undone_by_user_id,
+                (
+                    SELECT count(*) FROM factory_improvement_failure f
+                    WHERE f.improvement_id = i.id AND f.dismissed_at IS NOT NULL
+                ) AS "dismissed!"
+            FROM factory_improvement i
+            WHERE i.team_id = $1
+            ORDER BY i.created_at DESC, i.id DESC
             LIMIT 1
             "#,
             team_id,
@@ -255,6 +276,8 @@ impl SelfImprovementRepository for PgRunRepository {
                 row.created_at,
                 row.settled_at,
                 row.failures,
+                row.dismissed,
+                (row.dismissal_undone_at, row.dismissal_undone_by_user_id),
             )
         })
         .transpose()
@@ -268,10 +291,15 @@ impl SelfImprovementRepository for PgRunRepository {
     ) -> Result<Vec<Improvement>, Self::Err> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, team_id, repo_url, run_id, state, refusal, created_at, settled_at, failures
-            FROM factory_improvement
-            WHERE team_id = $1
-            ORDER BY created_at DESC, id DESC
+            SELECT i.id, i.team_id, i.repo_url, i.run_id, i.state, i.refusal, i.created_at,
+                i.settled_at, i.failures, i.dismissal_undone_at, i.dismissal_undone_by_user_id,
+                (
+                    SELECT count(*) FROM factory_improvement_failure f
+                    WHERE f.improvement_id = i.id AND f.dismissed_at IS NOT NULL
+                ) AS "dismissed!"
+            FROM factory_improvement i
+            WHERE i.team_id = $1
+            ORDER BY i.created_at DESC, i.id DESC
             LIMIT $2
             "#,
             team_id,
@@ -291,6 +319,8 @@ impl SelfImprovementRepository for PgRunRepository {
                     row.created_at,
                     row.settled_at,
                     row.failures,
+                    row.dismissed,
+                    (row.dismissal_undone_at, row.dismissal_undone_by_user_id),
                 )
             })
             .collect()
@@ -405,6 +435,107 @@ impl SelfImprovementRepository for PgRunRepository {
         settle(&mut tx, id, settlement).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn improvement(&self, team_id: Uuid, id: Uuid) -> Result<Option<Improvement>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT i.id, i.team_id, i.repo_url, i.run_id, i.state, i.refusal, i.created_at,
+                i.settled_at, i.failures, i.dismissal_undone_at, i.dismissal_undone_by_user_id,
+                (
+                    SELECT count(*) FROM factory_improvement_failure f
+                    WHERE f.improvement_id = i.id AND f.dismissed_at IS NOT NULL
+                ) AS "dismissed!"
+            FROM factory_improvement i
+            WHERE i.id = $1 AND i.team_id = $2
+            "#,
+            id,
+            team_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            improvement(
+                row.id,
+                row.team_id,
+                row.repo_url,
+                row.run_id,
+                row.state,
+                row.refusal,
+                row.created_at,
+                row.settled_at,
+                row.failures,
+                row.dismissed,
+                (row.dismissal_undone_at, row.dismissal_undone_by_user_id),
+            )
+        })
+        .transpose()
+    }
+
+    #[tracing::instrument(err, skip(self, by))]
+    async fn undo_dismissal(
+        &self,
+        team_id: Uuid,
+        id: Uuid,
+        by: &MacroUserIdStr<'static>,
+    ) -> Result<UndoDismissal, Self::Err> {
+        let mut tx = self.pool.begin().await?;
+        // Locked, so a second undo at once waits and reads this one's.
+        let kept = sqlx::query!(
+            r#"
+            SELECT dismissal_undone_at, dismissal_undone_by_user_id
+            FROM factory_improvement
+            WHERE id = $1 AND team_id = $2
+            FOR UPDATE
+            "#,
+            id,
+            team_id,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(kept) = kept else {
+            return Ok(UndoDismissal::NotFound);
+        };
+        if let (Some(at), Some(by)) = (kept.dismissal_undone_at, kept.dismissal_undone_by_user_id)
+        {
+            return Ok(UndoDismissal::AlreadyUndone(dismissal_undone(at, by)?));
+        }
+        // Only the failures it still holds dismissed: one pending again, or
+        // taken by a later Run, is not its own any more.
+        let restored = sqlx::query!(
+            r#"
+            UPDATE factory_improvement_failure SET improvement_id = NULL, dismissed_at = NULL
+            WHERE improvement_id = $1 AND dismissed_at IS NOT NULL
+            "#,
+            id,
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if restored == 0 {
+            return Ok(UndoDismissal::NothingDismissed);
+        }
+        let at = sqlx::query_scalar!(
+            r#"
+            UPDATE factory_improvement
+            SET dismissal_undone_at = now(), dismissal_undone_by_user_id = $2
+            WHERE id = $1
+            RETURNING dismissal_undone_at AS "at!"
+            "#,
+            id,
+            by.as_ref(),
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(UndoDismissal::Undone {
+            restored: u32::try_from(restored).unwrap_or(u32::MAX),
+            undone: DismissalUndone {
+                by: by.clone(),
+                at,
+            },
+        })
     }
 }
 

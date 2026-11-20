@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_improvement\n            SET dismissal_undone_at = now(), dismissal_undone_by_user_id = $2\n            WHERE id = $1\n            RETURNING dismissal_undone_at AS \"at!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "f1b7348a3d60f3a3fdaf0559c2f33a90574a73dc15ea7a3ef80326a9cdac8b90"
+}
