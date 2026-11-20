@@ -55,7 +55,8 @@ Outside the files, all must be done:
   Code one), and give an Agent that machine's agent's `bot` id. Codex's
   cloud agent (`00000000-0000-0000-0000-00000000c0de`) cannot take a Step:
   its sessions cannot hand a result back, and the validator refuses an
-  Agent on it that a Role lists (one only a Standing Role lists reads).
+  Agent on it that a Role lists (one only a Standing Role lists reads)
+  and an Experiment arm in `scorers.json` that chooses one.
 - `instructions` (may): what every session of the Agent is told before the
   Step's prompt. Left as is, `primary` is told to work in small commits.
 - `roles` (may): the Agents of each Role, in order. A Step works with the

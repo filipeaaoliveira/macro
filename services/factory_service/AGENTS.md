@@ -145,7 +145,9 @@ worker that walks each Run's Flow, in one process.
   macrod runs Codex (`--agent codex`, signed in with the owner's own Codex
   login) and its `model` one Codex lists (`docs/runbooks/factory-codex-role.md`).
   Codex's cloud agent cannot hand a Step back: a definition whose Roles list
-  an Agent on it stops the service (`CloudCodex`).
+  an Agent on it stops the service (`CloudCodex`), as does a
+  `FACTORY_EVALUATION` arm choosing one, and a Benchmark configuration
+  choosing one is refused (`CloudCodexAgent`).
 
   When moving off `FACTORY_AGENT_ID`, make that bot the first Agent of every
   Role until the Runs started before have ended: a Step that opened its

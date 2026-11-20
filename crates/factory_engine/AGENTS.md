@@ -659,12 +659,15 @@ tools, so they never hand back. An agent definition whose work Roles list
 an Agent on it does not read: `FACTORY_AGENTS` stops the service, and a
 Definition's `agents.json` is refused, each naming the Agents on it
 (`AgentDefinitionError::CloudCodex`). An Agent on it that only a Standing
-Role lists reads: it takes no Step, so nothing waits on it. Neither a Codex nor a Claude Code
-Agent signed in with its owner's own login records token use, so their
-Steps are unmeasured (below). An attempt
-prepares, opens and prompts only the session the Step works in now, so an
-overlapping attempt never prompts a session handed on: it deletes the one
-it opened and goes on in the Step's current session. Each session keeps the
+Role lists reads: it takes no Step, so nothing waits on it. An Experiment
+arm or a Benchmark configuration may not give a Role such an Agent
+(`check_choices`, `EvaluationDefinitionError::CloudCodexAgent`): the
+arm's Definition or `FACTORY_EVALUATION` does not read, and the suite does
+not start. Neither a Codex nor a Claude Code Agent signed in with its
+owner's own login records token use, so their Steps are unmeasured
+(below). An attempt prepares, opens and prompts only the session the
+Step works in now, so an overlapping attempt never prompts a session
+handed on: it deletes the one it opened and goes on in the Step's current session. Each session keeps the
 bot that runs it, so a stop or a release never depends on the agent
 definition; a session claimed before Steps recorded their Agent and bot is
 of the first Agent of its Role. A Step whose Agent its Role no longer lists

@@ -817,6 +817,47 @@ async fn an_agent_on_the_codex_cloud_agent_reads_in_a_standing_role_only() {
     assert!(definition.agents.cloud_codex_agents().is_empty());
 }
 
+/// An arm of `scorers.json` that gives a Role an Agent on Codex's cloud
+/// agent does not read, though only a Standing Role lists the Agent: the
+/// arm gives it the Role's Step, which it could never hand back.
+#[tokio::test]
+async fn an_arm_choosing_an_agent_on_the_codex_cloud_agent_does_not_read() {
+    let mut files = with(
+        "agents.json",
+        r#"{
+            "agents": {
+                "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+                "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+            },
+            "roles": { "planner": ["primary"], "writer": ["primary"] },
+            "standing": {
+                "intake": { "acts": ["start", "link"], "agents": ["backup"] }
+            }
+        }"#,
+    );
+    files.insert(
+        "scorers.json".to_string(),
+        r#"{ "experiments": [{
+            "name": "other-writer", "flow": "plan",
+            "arms": [{ "name": "usual" }, { "name": "other", "agents": { "writer": "backup" } }]
+        }] }"#
+            .to_string(),
+    );
+
+    let Err(DefinitionError::Evaluation(error @ EvaluationDefinitionError::CloudCodexAgent { .. })) =
+        read(files).await
+    else {
+        panic!("an arm choosing an Agent on the cloud agent is refused");
+    };
+    assert_eq!(
+        error.to_string(),
+        "arm other of experiment other-writer gives role writer agent backup, which runs on \
+         the Codex cloud agent, whose sessions cannot hand back a step's result: run Codex \
+         with macrod on a machine (`macrod service --agent codex`) and use the bot id of \
+         that machine's agent"
+    );
+}
+
 /// The starter's Control Files are the factory's default and its own
 /// files, so a Run that changes its rules waits for a person.
 #[tokio::test]

@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use super::{FakeExecutor, FakeWorkflows, code_service, julia};
 use crate::domain::agents::AgentDefinition;
-use crate::domain::evaluation::EvaluationDefinition;
 use crate::domain::evaluation::insights::{EvaluationService, EvaluationServiceImpl, SuiteError};
+use crate::domain::evaluation::{EvaluationDefinition, EvaluationDefinitionError};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::models::FactoryError;
 use crate::domain::ports::FactoryService;
@@ -181,7 +181,10 @@ fn suites(
     }]}))
     .expect("a definition");
     let agents: AgentDefinition = serde_json::from_value(json!({
-        "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
+        "agents": {
+            "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+        },
         "roles": { "writer": ["primary"] }
     }))
     .expect("an agent definition");
@@ -251,6 +254,20 @@ async fn a_suite_is_refused_for_an_unknown_benchmark_agent_or_repository() {
     assert!(
         matches!(agent, Err(SuiteError::Configuration(_))),
         "{agent:?}"
+    );
+    // A configuration may not give a Role an Agent on Codex's cloud
+    // agent: a trial has no other Agent to fall back on.
+    let cloud = service
+        .start_suite(julia(), "core", writer("backup"), None)
+        .await;
+    assert!(
+        matches!(
+            cloud,
+            Err(SuiteError::Configuration(
+                EvaluationDefinitionError::CloudCodexAgent { .. }
+            ))
+        ),
+        "{cloud:?}"
     );
     github.state().unreachable = true;
     let unreachable = service
