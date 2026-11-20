@@ -152,7 +152,9 @@ worker that walks each Run's Flow, in one process.
   of teams that name none. Only a Definition's `agents.json` holds Standing
   Roles (a `standing` section, which says which agents' bots may start,
   cancel or link a Run, or answer its plan or Blockers Gate, for its
-  owner): `FACTORY_AGENTS` with one stops the service from starting. The agent Steps still run on `LocalAgent` when it
+  owner) and Agent Rules (a `rules` list, which picks a Role's first Agent
+  for a Run whose task tag or repository it matches): `FACTORY_AGENTS` with
+  either stops the service from starting. The agent Steps still run on `LocalAgent` when it
   is unset, Definition or not, so a deployment that runs agents sets it.
 
   Unset, the agent Steps run on `LocalAgent`, which does no work, unless the
