@@ -476,7 +476,7 @@ While `run_local` is attached:
   also recovers a stuck frontend reload and leaves backend services and data intact.
 - Press `q` to stop the stack and exit.
 
-Use `q`, not the terminal close button. `q` stops and removes the containers at once. The next start does not have to clean up a stale stack.
+Use `q`, not the terminal close button. `q` stops and removes the containers at once. The next start does not have to clean up a stale stack. On a [persistent stack](#run-a-persistent-stack), `q` only stops the containers and keeps the data.
 
 ## Run without a terminal
 
@@ -539,6 +539,186 @@ never finish loading Vite's thousands of modules). Then pick up frontend edits w
 
 A failed `rebuild` leaves the old build running: the phase stays `ready`, and `job`
 records the failure. Run state and logs live in `infra/local/generated/<instance>/run`.
+
+## Run a Persistent Stack
+
+A machine that keeps one stack for real use, such as a shared test bench, needs
+its data to survive restarts, reboots and the commands that otherwise start
+clean. Persistent mode does that. It is off unless you switch it on, and an
+instance without it behaves as described in the rest of this guide.
+
+### Switch it on
+
+Name the instances in `MACRO_LOCAL_PERSISTENT`, comma-separated. `macro` is the
+default instance:
+
+```bash
+export MACRO_LOCAL_PERSISTENT=macro
+```
+
+Set it where every shell on the machine and the [boot unit](#start-it-at-boot)
+read it, for example `~/.profile`. The first bring-up in persistent mode creates
+the instance's LocalStack volume (`macro_localstack_data` for the default
+instance). From then on the instance stays persistent while that volume exists,
+even in a shell without the variable.
+
+### What changes
+
+| Area | Persistent instance |
+| --- | --- |
+| Attached `just run_local` | Resumes over the existing volumes instead of starting clean. |
+| `--fresh`, `just stack up`, `just stack down`, `just destroy_local`, `just reset_local` | Refuse while the instance has data, and say why. Pass `--wipe-persistent-data` to delete it on purpose. An instance with no volumes yet starts clean as usual. |
+| The `q` hotkey | Stops the containers and keeps the data. It tears the stack down only if `run_local` was started with `--wipe-persistent-data`. |
+| LocalStack | Runs `gresau/localstack-persist:4.14.0`, the same LocalStack 4.14.0, pinned by digest. It writes S3, DynamoDB, SQS and KMS state to the instance's LocalStack volume every 2 seconds. Provisioning creates only missing resources and never replaces an existing KMS key or alias. |
+| Postgres | Runs with `-c jit=off`. JIT compiled the home feed's query plan on every call, which took seconds on tables this small. |
+| Restarts | Every container has `restart: unless-stopped`, so Docker brings the stack back after a daemon or host restart. `just run_local stop` still stops it. |
+| Temporal | Its gRPC port is not published on the host; the UI is. Run the CLI inside the container: `docker exec macro-temporal-1 temporal workflow list`. |
+| Tests | The instance's Postgres refuses `#[sqlx::test]` databases. Tests that default to `127.0.0.1:7233` cannot reach its Temporal. See [Run tests next to it](#run-tests-next-to-it). |
+
+### What survives what
+
+| Store | Stop and start, container recreate, Docker or host restart | Wipe with `--wipe-persistent-data` |
+| --- | --- | --- |
+| Postgres (`macro_postgres_data`) | Kept | Deleted |
+| FusionAuth (`fusionauth_db_data`, `fusionauth_config`) | Kept | Deleted |
+| Markdown documents (`macro_sync_state`) | Kept | Deleted |
+| OpenBao (`macro_openbao_data`, which holds its seal key) | Kept | Deleted |
+| Temporal (`macro_temporal_data`) | Kept | Deleted |
+| Agent git repositories (`macro_agent_git_repos`) | Kept | Deleted |
+| Kafka (`macro_kafka_data`) | Kept. Consumer offsets expire after 7 days offline. | Deleted |
+| OpenSearch (`macro_opensearch_data`) | Kept | Deleted |
+| LocalStack: S3, DynamoDB, SQS, KMS (`macro_localstack_data`) | Kept. A crash loses at most the last 2 seconds. | Deleted |
+| Redis (`macro_redis_data`) | Kept as of its last RDB save. It is a cache. | Deleted |
+| Mailpit | Lost on a container recreate | Lost |
+| `infra/local/generated/<instance>` (signing keys, kickstart) | Kept. `git clean -xdf` deletes it. | Kept |
+
+A KMS key exists only inside LocalStack: its key material cannot be exported.
+If LocalStack's volume is lost, the next start creates new keys, and every value
+encrypted under the old ones stays unreadable. The tables that hold such values
+are `cursor_configs`, `agent_api_keys`, `codex_connections`,
+`mcp_oauth_authorization_codes`, `microsoft_oauth_grants` and `whatsapp_device`.
+
+### Start it at boot
+
+A systemd user unit starts the stack at boot with the static frontend, so no
+long-lived Vite process is needed. Adjust `WorkingDirectory` to the checkout,
+then save this as `~/.config/systemd/user/macro-local.service`:
+
+```ini
+[Unit]
+Description=Macro persistent local stack
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/src/macro
+Environment=MACRO_LOCAL_PERSISTENT=macro
+# A user unit cannot order itself after the system's docker.service.
+ExecStartPre=/bin/sh -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
+ExecStart=/usr/bin/env nix develop --command just run_local --detach --static-frontend --no-doppler
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=default.target
+```
+
+Enable it, and let the user manager run without a login session:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable macro-local.service
+sudo loginctl enable-linger "$USER"
+```
+
+The start command is safe to repeat: it leaves a healthy stack alone and
+resumes a stopped one over its volumes. Add your usual start flags, such as
+`--env-file`, `--no-computers` or `--traces off`.
+
+### Serve the static frontend
+
+`--static-frontend` serves a built bundle from the proxy instead of Vite: a few
+dozen files instead of thousands of modules per page load. Put local flag
+overrides such as `VITE_ENABLE_FACTORY_RUNS=true` in `apps/web/.env.local`. Both
+Vite and the bundle read that file. The bundle is built in development mode, so
+it also reads `apps/web/.env.development.local`. After a change under `apps/web`
+or to those files, rebuild the bundle:
+
+```bash
+just run_local rebuild --frontend
+```
+
+The bundle resolves its backend from the origin it is served on, so it also
+works from another machine at `https://<host>:8090/app/`.
+
+### Run tests next to it
+
+Point tests at their own Postgres and Temporal. For example:
+
+```bash
+docker run --rm -d --name macro-test-postgres -p 55432:5432 \
+  -e POSTGRES_USER=user -e POSTGRES_PASSWORD=password pgvector/pgvector:pg18
+export DATABASE_URL=postgres://user:password@localhost:55432/macrodb
+temporal server start-dev --port 7233 --headless   # tests default to 127.0.0.1:7233
+```
+
+Remove the Postgres afterwards with `docker rm -fv macro-test-postgres`.
+
+- A `#[sqlx::test]` that reaches the persistent Postgres fails with "this
+  Postgres holds a persistent local stack's data". Check `DATABASE_URL`, and the
+  `.env` files `just setup_test_envs` wrote, which name `localhost:5432`.
+- Don't run `just setup_test_template` or `just setup_macrodb` against the
+  persistent Postgres.
+- `just local-e2e` runs on its own instance, so it never touches the persistent
+  one.
+
+### Back up
+
+Back up before any change to the stack, and on a schedule. For the default
+instance:
+
+```bash
+mkdir -p ~/macro-backup/$(date +%F) && cd "$_"
+docker exec macro-postgres-1 pg_dump -U user -Fc macrodb > macrodb.dump
+docker exec macro-db-1 pg_dumpall -U postgres > fusionauth.sql   # check the user: docker exec macro-db-1 env
+for v in macro_sync_state macro_openbao_data macro_temporal_data macro_agent_git_repos \
+         macro_localstack_data fusionauth_config macro_redis_data; do
+  docker run --rm -v "$v":/v:ro -v "$PWD":/b alpine tar czf "/b/$v.tgz" -C /v .
+done
+tar czf generated.tgz -C <checkout>/infra/local/generated macro
+```
+
+- A tarball of a running service's volume is crash-consistent at best. For a
+  clean copy, stop that container for the copy.
+- The OpenBao tarball holds the vault and its seal key. Keep backups as private
+  as the machine.
+- To export LocalStack's S3 objects as plain files, for example before the
+  switch to persistent mode:
+
+  ```bash
+  docker exec macro-localstack-1 sh -c 'mkdir -p /tmp/s3 && for b in $(awslocal s3api list-buckets --query "Buckets[].Name" --output text); do awslocal s3 sync "s3://$b" "/tmp/s3/$b"; done'
+  docker cp macro-localstack-1:/tmp/s3 ./localstack-s3
+  ```
+
+  Restore a bucket with `awslocal s3 sync /tmp/s3/<bucket> s3://<bucket>` after
+  copying the export back into the container.
+- Redis keeps only an RDB snapshot. For an append-only file as well, run
+  `docker exec macro-redis-1 redis-cli CONFIG SET appendonly yes`. That lasts
+  until the container is recreated.
+
+### Wipe it on purpose
+
+Back up first. Then either start clean or remove everything:
+
+```bash
+just run_local --fresh --wipe-persistent-data
+just destroy_local --wipe-persistent-data
+```
+
+To switch persistent mode off, remove the instance from
+`MACRO_LOCAL_PERSISTENT` and wipe it as above, which also deletes its LocalStack
+volume.
 
 ## Run More than One Stack
 
@@ -922,7 +1102,8 @@ with no background process, kept for Cursor Cloud and environment bakes, which n
 `--infra-only`, or a prebuilt `--binaries-dir` adopted with `update`.
 
 **`just stack up` always deletes the instance's data first.** Use it only when you
-mean that.
+mean that. On a [persistent stack](#run-a-persistent-stack) it refuses unless you
+pass `--wipe-persistent-data`.
 
 ```bash
 just stack up                  # wipe, bring everything up with a static frontend, print URLs, return
