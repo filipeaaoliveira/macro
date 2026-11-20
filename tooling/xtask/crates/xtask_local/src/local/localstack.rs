@@ -86,6 +86,12 @@ const KMS_KEYS: [(&str, &str); 5] = [
 /// it would become unreadable. Every page of aliases is read, so a long list
 /// can't hide one.
 ///
+/// That a persistent stack's keys survive a LocalStack recreate was checked by
+/// hand against `gresau/localstack-persist:4.14.0`: provisioning, removing the
+/// container, recreating it on the same volume and provisioning again kept
+/// the same five key ids, and a ciphertext made before still decrypted with
+/// its encryption context.
+///
 /// A key lives as long as LocalStack's state. Without persistent mode, tearing
 /// LocalStack down loses it, and any `cursor_api_keys` rows encrypted under it
 /// become permanently undecryptable — the rows survive in Postgres but their
