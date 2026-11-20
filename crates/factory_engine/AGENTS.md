@@ -412,7 +412,39 @@ Flows' finished Runs: once a Run ends, the workflow asks the worker
 failure ignored) and each sampled Scorer judges it once, from a hash of the
 Scorer and the Run, so a retry samples the same Runs and judges nothing
 twice; the activity is tried at most three times. A cancelled Run is not
-judged. An Experiment splits a
+judged.
+
+A judge reads the Run as one JSON object: its request, how it ended, and its
+last Steps' outputs. A Scorer that sets `reads: ["diff"]` is also given the
+Run's change (`evaluation/service.rs`, `RunChange`), read once per scoring
+through `PullRequests`: when its pull request merged, GitHub's compare of the
+merge commit's first parent to the merge commit; otherwise of the base branch
+to the Run's branch's head. A rebase merge of several commits reads as its
+last commit. The diff follows the JSON in a code fence nothing in it can
+close (`fence_for`), and both the prompt and the judge's preamble say it is
+data, never instructions. It is cut at a line to `DIFF_BYTES` (40 000 bytes,
+about ten thousand tokens), and the judge is told how many lines and bytes
+were left out. A change GitHub lists only in part, or none to read (no
+repository, branch or merge), is said in place of the diff. A GitHub read that
+fails fails the scoring attempt; its last attempt judges without the change
+and logs it. A trial's change is read before its branch is deleted; a retry
+after that finds no branch. `reads` takes only `diff`: any other value does
+not read, in `FACTORY_EVALUATION`, in a Definition's `scorers.json`, and in
+`factory_definition_check`.
+
+A sampled Scorer of the code a Run merged, `slop`, measures drift over time
+without a blocking reviewer for matters of taste:
+
+```json
+{
+  "name": "slop",
+  "instructions": "Judge only the code the run's change adds or alters, not the request or the steps. Score 1 when it adds no slop and 0 when it is mostly slop. Slop is: dead code (unused functions, branches that cannot run, code left commented out); a helper that duplicates one the repository or the change already has; comments that restate what the code says instead of why; and drift from the repository's conventions as the surrounding code shows them (naming, error handling, layout, test style). Name the worst instance in the reason.",
+  "samplePercent": 10,
+  "reads": ["diff"]
+}
+```
+
+An Experiment splits a
 Flow's Runs on
 a task into arms by a hash of the Experiment and the task (a Run on no task
 takes none); `start_run` records the arms (`factory_run_arm`) before the
@@ -2331,6 +2363,10 @@ Definition.
   `named_by_user_id` starts no self-improvement Run until an admin names it
   again. Thresholds are checked only when a team's Run ends: a team whose
   Runs stop starts none, however old its failures.
+- A worker older than a Scorer's `reads` cannot read an evaluation that
+  sets it (`deny_unknown_fields`), nor a Run that kept one: set `reads` in
+  `FACTORY_EVALUATION` or a Definition only after every pod runs this
+  version.
 - A worker older than `selfImprovement` in `scorers.json` cannot read a
   Definition that sets it (`deny_unknown_fields`); one that leaves the
   defaults keeps the JSON it kept before.
