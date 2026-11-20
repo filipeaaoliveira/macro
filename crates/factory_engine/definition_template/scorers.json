@@ -1,10 +1,16 @@
 {
   "scorers": [
     {
-      "name": "does-what-was-asked",
-      "instructions": "Does the change do what the request asks, and nothing it does not ask for? Score 1 when it does exactly that, 0 when it misses the point.",
+      "name": "delivers-done-when",
+      "instructions": "Did the change deliver the request's Done-when clauses, and only those? Take the clauses from the request; when it states none, take each result it asks for. The run holds no diff: judge the change from what its steps report of it, chiefly the plan, the write and fix steps' reports, the review steps' blockers and the accept step's verdict on each clause. Count a clause as met only when a step shows it was met; a clause no step mentions is not met. Count as extra any change no clause needs, such as a refactor, a feature or a setting the request did not ask for. A follow-up task a reviewer opened for a problem outside the change is not extra. Score 1 when every clause is met and nothing extra was changed. Take off for each clause missed or only partly met, and for each extra change. Score 0 when the change misses the request's point or the run wrote no change. Name in the reason the clause missed or the extra change, if any.",
       "flows": ["code"],
-      "samplePercent": 0
+      "samplePercent": 25
+    },
+    {
+      "name": "blockers-actionable",
+      "instructions": "Did each Blocker the reviewers found name a file, the harm and a fix? Judge only the steps whose entry is `review`: each lists its blockers under `### Blockers`, each one a place, what is wrong, and a `Why:` line. Leave out the accept step's report, which judges the request, not the review. A blocker holds when it names a file (a blocker on `the whole change` names none); when it says the harm, what goes wrong for a user, the code or the team if the change merges as it is, not only that a rule or a taste is broken; and when it says the fix, or makes it plain enough that another agent could make it without asking. Score the share of blockers that hold all three, from 0 to 1, over every review step. A step whose output was cut short counts only the blockers it shows. Score 1 when no review step found a blocker. Name in the reason the first blocker that does not hold, and what it lacks.",
+      "flows": ["code"],
+      "samplePercent": 25
     }
   ],
   "experiments": [],

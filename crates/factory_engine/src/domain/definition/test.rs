@@ -180,10 +180,29 @@ async fn the_starter_definition_reads() {
         .standing_rules
         .is_some_and(|rules| rules.merge);
     assert!(!merge_by_rule, "a person merges in the starter definition");
-    // Every judgment is a model call: the starter's Scorers judge no Run.
-    let scorers = definition.evaluation.scorers();
-    assert!(!scorers.is_empty());
-    assert!(scorers.iter().all(|scorer| scorer.sample_percent == 0));
+    // The starter's two Scorers judge a quarter of the code Flow's Runs:
+    // whether the change delivered the Done-when clauses, and whether the
+    // review's Blockers can be acted on.
+    let scorers: Vec<(&str, &[String], u8)> = definition
+        .evaluation
+        .scorers()
+        .iter()
+        .map(|scorer| {
+            (
+                scorer.name.as_str(),
+                scorer.flows.as_slice(),
+                scorer.sample_percent,
+            )
+        })
+        .collect();
+    let code = ["code".to_string()];
+    assert_eq!(
+        scorers,
+        [
+            ("delivers-done-when", &code[..], 25),
+            ("blockers-actionable", &code[..], 25),
+        ]
+    );
     // The starter documents Standing Roles without turning them on.
     assert!(!definition.agents.has_standing_roles());
 }
