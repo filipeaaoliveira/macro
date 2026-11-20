@@ -627,18 +627,19 @@ pub fn run_stack(mode: Mode, run: &cli::RunLocalArgs) -> Result<()> {
 /// full delete + full create: a person at a terminal expects a clean slate.
 fn run_attached(mut stage: Stage, mode: Mode, run: &cli::RunLocalArgs) -> Result<()> {
     let args = &run.run;
+    // Before anything else: a persistent instance resumes, and a clean start
+    // of one needs the explicit flag.
+    let start = persistent::attached_start(
+        &stage,
+        &Instance::derive(args.instance.instance.as_deref(), args.instance.port_base)?,
+        run.flags.fresh,
+        args.wipe_persistent_data,
+    )?;
     if mode.spec().runs_local_infra {
         // This mode will provision Kafka topics mid-bring-up; reject a build
         // that can't do that before any containers start.
         kafka::ensure_available(&format!("run-{}", mode.label()))?;
     }
-    // Before anything is allocated or stopped: a persistent instance resumes,
-    // and a clean start of one needs the explicit flag.
-    let start = persistent::attached_start(
-        &Instance::derive(args.instance.instance.as_deref(), args.instance.port_base)?,
-        run.flags.fresh,
-        args.wipe_persistent_data,
-    )?;
     let mut instance = allocator::allocate(
         &stage,
         mode,
@@ -933,11 +934,10 @@ fn interact(
                 // Kill the frontend's whole process group (bun + Vite), not just
                 // bun — otherwise Vite is orphaned and keeps holding the port.
                 fe.shutdown();
-                // A persistent stack keeps its data: quitting only stops it.
-                let permit = match persistent::ensure_may_wipe(
-                    instance,
-                    args.wipe_persistent_data,
-                ) {
+                // A persistent stack keeps its data: quitting only stops it,
+                // even after a start with `--wipe-persistent-data`, which
+                // consented to one clean start, not to a wipe at every exit.
+                let permit = match persistent::ensure_may_wipe(stage, instance, false) {
                     Ok(permit) => permit,
                     Err(kept) => {
                         stage.note(&format!("{kept:#}"));
@@ -1959,7 +1959,7 @@ pub fn stop(args: &cli::InstanceArgs) -> Result<()> {
 pub fn reset(args: &cli::InstanceArgs, wipe_persistent_data: bool) -> Result<()> {
     let stage = Stage::from_env();
     let instance = Instance::resolve(args.instance.as_deref(), args.port_base)?;
-    let permit = persistent::ensure_may_wipe(&instance, wipe_persistent_data)?;
+    let permit = persistent::ensure_may_wipe(&stage, &instance, wipe_persistent_data)?;
     db::reset(&stage, &instance, permit)
 }
 
@@ -1968,7 +1968,7 @@ pub fn reset(args: &cli::InstanceArgs, wipe_persistent_data: bool) -> Result<()>
 pub fn destroy(args: &cli::InstanceArgs, wipe_persistent_data: bool) -> Result<()> {
     let stage = Stage::from_env();
     let instance = Instance::resolve(args.instance.as_deref(), args.port_base)?;
-    let permit = persistent::ensure_may_wipe(&instance, wipe_persistent_data)?;
+    let permit = persistent::ensure_may_wipe(&stage, &instance, wipe_persistent_data)?;
     supervisor::stop_processes(&instance);
     // Containers + all volumes (incl. FusionAuth's external ones, which `down -v`
     // leaves behind — the same teardown run_local does for its clean slate).

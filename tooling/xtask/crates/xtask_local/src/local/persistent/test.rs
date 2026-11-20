@@ -31,44 +31,46 @@ fn the_refusal_names_the_instance_and_the_flag() {
 
 #[test]
 fn the_guard_grants_a_permit_only_when_the_data_may_go() {
+    let stage = Stage::from_env();
     let instance = Instance::derive(Some("persistent-guard-test"), None).unwrap();
     {
         let _probe = fake_probe(true, true);
         assert_eq!(
-            ensure_may_wipe(&instance, false).unwrap_err().to_string(),
+            ensure_may_wipe(&stage, &instance, false).unwrap_err().to_string(),
             refusal(&instance)
         );
-        assert!(ensure_may_wipe(&instance, true).unwrap().wipes_persistent_data());
+        assert!(ensure_may_wipe(&stage, &instance, true).unwrap().wipes_persistent_data());
     }
     {
         let _probe = fake_probe(true, false);
-        assert!(!ensure_may_wipe(&instance, false).unwrap().wipes_persistent_data());
+        assert!(!ensure_may_wipe(&stage, &instance, false).unwrap().wipes_persistent_data());
     }
     {
         let _probe = fake_probe(false, true);
-        assert!(!ensure_may_wipe(&instance, false).unwrap().wipes_persistent_data());
+        assert!(!ensure_may_wipe(&stage, &instance, false).unwrap().wipes_persistent_data());
     }
 }
 
 #[test]
 fn an_attached_start_resumes_a_persistent_instance_with_data() {
+    let stage = Stage::from_env();
     let instance = Instance::derive(Some("persistent-guard-test"), None).unwrap();
     {
         let _probe = fake_probe(true, true);
-        assert_eq!(attached_start(&instance, false, false).unwrap(), Start::Resume);
+        assert_eq!(attached_start(&stage, &instance, false, false).unwrap(), Start::Resume);
         assert_eq!(
-            attached_start(&instance, true, false).unwrap_err().to_string(),
+            attached_start(&stage, &instance, true, false).unwrap_err().to_string(),
             refusal(&instance)
         );
         assert!(matches!(
-            attached_start(&instance, true, true).unwrap(),
+            attached_start(&stage, &instance, true, true).unwrap(),
             Start::Fresh(permit) if permit.wipes_persistent_data()
         ));
     }
     {
         let _probe = fake_probe(true, false);
         assert!(matches!(
-            attached_start(&instance, false, false).unwrap(),
+            attached_start(&stage, &instance, false, false).unwrap(),
             Start::Fresh(_)
         ));
     }
@@ -76,7 +78,7 @@ fn an_attached_start_resumes_a_persistent_instance_with_data() {
         // Off, an attached start is always clean.
         let _probe = fake_probe(false, true);
         assert!(matches!(
-            attached_start(&instance, false, false).unwrap(),
+            attached_start(&stage, &instance, false, false).unwrap(),
             Start::Fresh(_)
         ));
     }
@@ -122,4 +124,13 @@ fn an_unexpected_compose_shape_is_an_error_not_replaced() {
     );
     child_mapping(&mut service, "labels").unwrap();
     child_sequence(&mut service, "ports").unwrap();
+}
+
+/// The guards ask Docker whether persistent data exists, and anything short of
+/// a clear answer must stop them rather than read as "no".
+#[test]
+fn a_volume_lookup_that_fails_is_an_error_not_a_missing_volume() {
+    assert!(volume_exists_via("docker-that-does-not-exist", "macro_localstack_data").is_err());
+    // Exits nonzero without saying "no such volume".
+    assert!(volume_exists_via("false", "macro_localstack_data").is_err());
 }

@@ -72,20 +72,50 @@ pub fn localstack_volume(instance: &Instance) -> String {
     format!("{}_localstack_data", instance.project_name())
 }
 
-/// Whether `instance` runs in persistent mode: the switch names it, or its
-/// LocalStack data volume exists. Without a reachable Docker daemon nothing
-/// can be started or wiped, so a failed volume lookup counts as off: commands
-/// that only render files, such as `gen-compose`, need no daemon.
+/// Whether to render `instance`'s files for persistent mode: the switch names
+/// it, or its LocalStack data volume exists. Only for rendering: a failed
+/// volume lookup, or a dry run, counts as off, so commands that only write
+/// files, such as `gen-compose`, need no Docker daemon. The guards use
+/// [`probe`], which refuses instead.
 pub fn is_on(instance: &Instance) -> bool {
     #[cfg(test)]
     if let Some(probe) = FAKE_PROBE.get() {
         return probe.persistent;
     }
-    let switch = macro_env_var::maybe_read_env(SWITCH_VAR);
-    if names(switch.as_deref(), instance.name()) {
+    if switch_names(instance) {
         return true;
     }
-    super::docker::volume_exists(&localstack_volume(instance)).unwrap_or(false)
+    let dry_run = macro_env_var::maybe_read_env("MACRO_LOCAL_DRY_RUN").as_deref() == Some("1");
+    !dry_run && volume_exists(&localstack_volume(instance)).unwrap_or(false)
+}
+
+fn switch_names(instance: &Instance) -> bool {
+    names(
+        macro_env_var::maybe_read_env(SWITCH_VAR).as_deref(),
+        instance.name(),
+    )
+}
+
+/// Whether the Docker volume exists, asked through the `docker` CLI: the same
+/// daemon and context the teardown's `docker` commands use. Anything but a
+/// clear "no such volume" is an error.
+fn volume_exists(name: &str) -> Result<bool> {
+    volume_exists_via("docker", name)
+}
+
+fn volume_exists_via(docker: &str, name: &str) -> Result<bool> {
+    let inspected = std::process::Command::new(docker)
+        .args(["volume", "inspect", name])
+        .output()
+        .with_context(|| format!("running `{docker} volume inspect {name}`"))?;
+    if inspected.status.success() {
+        return Ok(true);
+    }
+    let stderr = String::from_utf8_lossy(&inspected.stderr);
+    if stderr.to_ascii_lowercase().contains("no such volume") {
+        return Ok(false);
+    }
+    bail!("`{docker} volume inspect {name}` failed: {}", stderr.trim())
 }
 
 /// Whether the switch's value names `instance`.
@@ -124,13 +154,30 @@ pub fn fake_probe(persistent: bool, has_data: bool) -> impl Drop {
     Reset
 }
 
+/// What the guards need to know. Fails closed: when Docker can't say whether
+/// the instance has persistent data, the guards refuse rather than assume not.
 fn probe(instance: &Instance) -> Result<Probe> {
     #[cfg(test)]
     if let Some(probe) = FAKE_PROBE.get() {
         return Ok(probe);
     }
-    let persistent = is_on(instance);
-    let has_data = persistent && super::instance_has_volumes(instance)?;
+    let unknown = |error: anyhow::Error| {
+        error.context(format!(
+            "can't tell whether instance {} holds persistent data, so nothing is wiped",
+            instance.name()
+        ))
+    };
+    let persistent =
+        switch_names(instance) || volume_exists(&localstack_volume(instance)).map_err(unknown)?;
+    let mut has_data = false;
+    if persistent {
+        for volume in super::instance_volumes(instance) {
+            if volume_exists(&volume).map_err(unknown)? {
+                has_data = true;
+                break;
+            }
+        }
+    }
     Ok(Probe {
         persistent,
         has_data,
@@ -163,8 +210,14 @@ impl WipePermit {
 
 /// Refuse a command that would delete the data of a persistent instance,
 /// unless `wipe` (`--wipe-persistent-data`) says to. An instance with no
-/// volumes has nothing to lose, so its first start may run clean.
-pub fn ensure_may_wipe(instance: &Instance, wipe: bool) -> Result<WipePermit> {
+/// volumes has nothing to lose, so its first start may run clean. A dry run
+/// deletes nothing and asks Docker nothing.
+pub fn ensure_may_wipe(stage: &Stage, instance: &Instance, wipe: bool) -> Result<WipePermit> {
+    if stage.is_dry_run() {
+        return Ok(WipePermit {
+            wipes_persistent_data: false,
+        });
+    }
     let probe = probe(instance)?;
     if !may_wipe(probe.persistent, probe.has_data, wipe) {
         bail!(refusal(instance));
@@ -194,12 +247,15 @@ pub fn refusal(instance: &Instance) -> String {
 /// How an attached `run_local` starts. Upstream it always starts clean; a
 /// persistent instance with data resumes over its volumes, unless `--fresh`
 /// asks for a clean start, which the guard then still has to allow.
-pub fn attached_start(instance: &Instance, fresh: bool, wipe: bool) -> Result<Start> {
+pub fn attached_start(stage: &Stage, instance: &Instance, fresh: bool, wipe: bool) -> Result<Start> {
+    if stage.is_dry_run() {
+        return Ok(Start::Fresh(ensure_may_wipe(stage, instance, wipe)?));
+    }
     let probe = probe(instance)?;
     if probe.persistent && probe.has_data && !fresh {
         return Ok(Start::Resume);
     }
-    Ok(Start::Fresh(ensure_may_wipe(instance, wipe)?))
+    Ok(Start::Fresh(ensure_may_wipe(stage, instance, wipe)?))
 }
 
 /// Layer persistent mode onto the generated compose override.

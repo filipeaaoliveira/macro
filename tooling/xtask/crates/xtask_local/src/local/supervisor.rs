@@ -577,7 +577,11 @@ pub fn start_detached(args: &RunLocalFlags, run: &RunArgs) -> Result<()> {
     // Refuse here, before the running supervisor is stopped, rather than in
     // the background bring-up, which refuses too.
     if args.fresh {
-        super::persistent::ensure_may_wipe(&instance, run.wipe_persistent_data)?;
+        super::persistent::ensure_may_wipe(
+            &Stage::from_env(),
+            &instance,
+            run.wipe_persistent_data,
+        )?;
     }
     instance.ensure_artifact_dir()?;
     let dir = run_dir(&instance)?;
@@ -675,6 +679,7 @@ pub fn supervise(mode: Mode, flags: &RunLocalFlags, run: &RunArgs) -> Result<()>
         // Volumes mean someone's data, so only an explicit `--fresh` may wipe them.
         let start = if flags.fresh || !super::instance_has_volumes(&instance)? {
             Start::Fresh(super::persistent::ensure_may_wipe(
+                &stage,
                 &instance,
                 run.wipe_persistent_data,
             )?)

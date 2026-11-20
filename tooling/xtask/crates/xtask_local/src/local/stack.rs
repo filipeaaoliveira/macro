@@ -233,6 +233,7 @@ pub fn up(mode: Mode, args: &UpArgs) -> Result<Instance> {
     let stage = Stage::from_env_cli(args.run.verbose);
     // Before anything is allocated or stopped: `up` always wipes.
     let permit = super::persistent::ensure_may_wipe(
+        &stage,
         &Instance::derive(
             args.run.instance.instance.as_deref(),
             args.run.instance.port_base,
