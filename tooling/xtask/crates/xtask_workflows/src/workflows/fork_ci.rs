@@ -3,11 +3,12 @@
 //!
 //! A fork has no Namespace runners, so the checks of `PR CI` queue there
 //! forever. This workflow runs a smaller set of the same checks, with the same
-//! scripts, path filters and `just` recipes, on a self-hosted runner labelled
-//! [`RUNNER`]: fmt, unused dependencies, clippy as the offline SQLx check, and
+//! scripts, path filters and `just` recipes: on a self-hosted runner labelled
+//! [`RUNNER`], fmt, unused dependencies, clippy as the offline SQLx check, and
 //! cargo nextest against Postgres and Redis for the Rust packages a pull
-//! request affects; Biome, the app's types and the affected Vitest tests for
-//! the web app. `Fork CI gate` is the one check a branch rule requires.
+//! request affects; on a GitHub-hosted runner, Biome, the app's types and the
+//! affected Vitest tests for the web app. `Fork CI gate` is the one check a
+//! branch rule requires.
 //!
 //! Only branches pushed to the fork itself reach the self-hosted runner, and a
 //! pull request from another repository fails the gate. That condition is not
@@ -54,14 +55,19 @@ const TRUSTED: &str = "github.event_name == 'workflow_dispatch' || \
 const FILTER_CACHE_DIR: RuntimePath<'static> =
     xtask_paths::runtime_path!("/home/runner/.cache/macro-nextest-filter");
 
-/// Nextest's threads on the self-hosted runner, which has 4 CPUs. More than
-/// the CPUs: most tests wait on Postgres in the Docker sidecar.
+/// Nextest's threads on the self-hosted runner. More than its CPUs: most tests
+/// wait on Postgres in the Docker sidecar, which has 3 CPUs of its own.
 const NEXTEST_TEST_THREADS: u32 = 12;
 
-/// Cargo's jobs in the test job, half the runner's 4 CPUs to keep the build
-/// inside its memory: one compiler of a large crate alone held 4.4 GiB, and
-/// with three of them the kernel killed the runner, job and all.
-const TEST_BUILD_JOBS: u32 = 2;
+/// Cargo's jobs in the test job. The runner has the whole node, 8 CPUs and
+/// 11 GiB, one job at a time. One compiler of a large crate alone held
+/// 4.4 GiB, and three filled 9 GiB until the kernel killed the runner; at
+/// 11 GiB three fit with room for cargo, sccache and one link.
+const TEST_BUILD_JOBS: u32 = 3;
+
+/// Cargo's jobs in the clippy job. Clippy generates no code and holds less
+/// than a build, so four of the 8 CPUs.
+const CHECK_BUILD_JOBS: u32 = 4;
 
 /// Build the workflow.
 pub fn fork_ci() -> Workflow {
@@ -147,11 +153,12 @@ fn changes() -> Job {
 
 /// fmt, unused dependencies and clippy on the affected packages. Clippy runs
 /// with `SQLX_OFFLINE=true`, so a missing or stale `.sqlx` entry fails it. Its
-/// own job, so it runs beside the tests on the other runner instead of before
-/// them.
+/// own job: the runner takes it and the tests one after the other, and a
+/// failure here shows without waiting for the tests.
 fn rust_check() -> Job {
-    self_hosted_job("rust")
+    filtered_job("rust")
         .timeout_minutes(120u32)
+        .add_env(("CARGO_BUILD_JOBS", CHECK_BUILD_JOBS))
         .add_env((
             "RUST_PACKAGES",
             "${{ needs.changes.outputs.rust_packages }}",
@@ -192,10 +199,9 @@ fn rust_test() -> Job {
             "${{ needs.changes.outputs.rust_packages }}",
         ))
         .add_env(("NEXTEST_TEST_THREADS", NEXTEST_TEST_THREADS))
-        // The runner has 9 GiB. Four rustc or linker processes on the large
-        // service crates fill it, and the job then spends its time paging
-        // instead of building: one run held the runner for three hours on half an
-        // hour of CPU. Two compilers and one link at a time aim to stay below it.
+        // The runner has 11 GiB. Unbounded, rustc and linker processes on the
+        // large service crates fill it, and the job pages instead of building:
+        // one run held the runner for three hours on half an hour of CPU.
         .add_env(("CARGO_BUILD_JOBS", TEST_BUILD_JOBS))
         .add_env(("MOLD_JOBS", 1u32))
         .add_env(("REDIS_URI", "redis://127.0.0.1:6379"))
@@ -221,10 +227,15 @@ fn rust_test() -> Job {
 }
 
 /// Biome on the changed files, the app's types, and the Vitest tests the
-/// changed files reach.
+/// changed files reach. On a GitHub-hosted runner, free on a public
+/// repository, beside the Rust jobs: its type check and Vitest hold about
+/// 7 GB, which the self-hosted runner's node cannot hold beside a test build,
+/// so it would wait for the Rust jobs instead. A hosted runner keeps no
+/// caches, so its dev shell, packages and wasm builds start from nothing.
 fn web() -> Job {
-    self_hosted_job("web")
-        .timeout_minutes(45u32)
+    filtered_job("web")
+        .runs_on(HOSTED_RUNNER)
+        .timeout_minutes(60u32)
         // Full history, as `Web App Pr Checks`' Typecheck: the entity icon check
         // reads every committed list of icon names. Without blobs, which git
         // fetches as it reads them.
@@ -267,8 +278,10 @@ fn web() -> Job {
                 .working_directory(xtask_paths::repo_dir!("apps/web"))
                 .timeout_minutes(15u32),
         )
+        // The last step: no `teardown_nix`. It frees /nix for a cache volume to
+        // unmount, and on a hosted runner, where /nix is on the root file system,
+        // its `fuser -km /nix` kills every process on it, the runner's included.
         .add_step(vitest())
-        .add_step(steps::teardown_nix())
 }
 
 /// Passes when every check that had something to check passed. A job skipped
@@ -321,8 +334,8 @@ const GATE_SCRIPT: &str = indoc::indoc! {r#"
 "#};
 
 /// A job on the self-hosted runner, after `changes`, when its filter matched
-/// and the run is trusted.
-fn self_hosted_job(filter_output: &str) -> Job {
+/// and the run is trusted. The web job moves to a hosted runner.
+fn filtered_job(filter_output: &str) -> Job {
     Job::default()
         .needs(vec!["changes".to_string()])
         .cond(Expression::new(format!(
