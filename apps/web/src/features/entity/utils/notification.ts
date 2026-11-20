@@ -263,73 +263,81 @@ export function extractNotificationSenderIds(
 export function getNotificationActionText(n: Notification): string {
   const tag = n.notification_metadata.tag as NotificationType;
 
-  return match(tag)
-    .with('channel_mention', () => 'mentioned')
-    .with('channel_message_send', 'external_chat_message', () => 'sent')
-    .with('channel_message_reaction', () => 'reacted')
-    .with('channel_message_reply', () => 'replied')
-    .with('document_mention', () => 'mentioned')
-    .with('mentioned_in_document_comment', () => 'mentioned')
-    .with('replied_to_document_comment_thread', () => 'replied')
-    .with('initiative_discussion', () => 'commented')
-    .with('entity_access_requested', () => 'requested access')
-    .with('entity_access_granted', () => 'granted access')
-    .with('runtime_access_removed', () => 'removed access')
-    .with('commented_on_document', 'crm_discussion', () => 'commented')
-    .with('channel_invite', () => 'invited')
-    .with('channel_access_requested', () => 'asked to join')
-    .with('new_email', () => 'emailed')
-    .with('invite_to_team', () => 'invited')
-    .with('task_assigned', () => 'assigned')
-    .with('ai_response', () => 'responded')
-    .with('github_pr_status_changed', () => 'updated')
-    .with('github_pr_check_run', () => {
-      const meta = n.notification_metadata;
-      if (
-        meta.tag === 'github_pr_check_run' &&
-        meta.content.state === 'failed'
-      ) {
-        return 'failed';
-      }
+  return (
+    match(tag)
+      .with('channel_mention', () => 'mentioned')
+      .with('channel_message_send', 'external_chat_message', () => 'sent')
+      .with('channel_message_reaction', () => 'reacted')
+      .with('channel_message_reply', () => 'replied')
+      .with('document_mention', () => 'mentioned')
+      .with('mentioned_in_document_comment', () => 'mentioned')
+      .with('replied_to_document_comment_thread', () => 'replied')
+      .with('initiative_discussion', () => 'commented')
+      .with('entity_access_requested', () => 'requested access')
+      .with('entity_access_granted', () => 'granted access')
+      .with('runtime_access_removed', () => 'removed access')
+      .with('commented_on_document', 'crm_discussion', () => 'commented')
+      .with('channel_invite', () => 'invited')
+      .with('channel_access_requested', () => 'asked to join')
+      .with('new_email', () => 'emailed')
+      .with('invite_to_team', () => 'invited')
+      .with('task_assigned', () => 'assigned')
+      .with('ai_response', () => 'responded')
+      .with('github_pr_status_changed', () => 'updated')
+      .with('github_pr_check_run', () => {
+        const meta = n.notification_metadata;
+        if (
+          meta.tag === 'github_pr_check_run' &&
+          meta.content.state === 'failed'
+        ) {
+          return 'failed';
+        }
 
-      return 'completed';
-    })
-    .with('github_review_requested', () => 'requested')
-    .with('github_pr_comment', () => 'commented')
-    .with('github_pr_mention', () => 'mentioned')
-    .with('github_pr_review', () => 'reviewed')
-    .with('call_started', () => 'called')
-    .with('reminder', () => 'reminder')
-    .with('calendar_event_reminder', () => 'starting soon')
-    .with('calendar_event_join_request', () => 'asked to join')
-    .with('password_access_requested', () => 'requested access to')
-    .with('inbox_reauth_required', () => 'needs reconnection')
-    .with('agent_session_settled', () => 'finished')
-    .with('agent_session_waiting_for_input', () => 'asked')
-    .with('agent_session_mentioned', () => 'mentioned')
-    .with('routine_run_finished', () => {
-      const meta = n.notification_metadata;
-      return meta.tag === 'routine_run_finished' &&
-        meta.content.outcome === 'failed'
-        ? 'failed'
-        : 'finished';
-    })
-    .with('agent_sign_in_expiry', () => {
-      const meta = n.notification_metadata;
-      return meta.tag === 'agent_sign_in_expiry' &&
-        meta.content.stage === 'expired'
-        ? 'expired'
-        : 'expiring';
-    })
-    .with('computer_setup', () => {
-      const meta = n.notification_metadata;
-      return meta.tag === 'computer_setup' &&
-        meta.content.outcome.kind === 'failed'
-        ? 'failed'
-        : 'ready';
-    })
-    .with('factory_gate_waiting', () => 'waiting')
-    .exhaustive(() => 'notified');
+        return 'completed';
+      })
+      .with('github_review_requested', () => 'requested')
+      .with('github_pr_comment', () => 'commented')
+      .with('github_pr_mention', () => 'mentioned')
+      .with('github_pr_review', () => 'reviewed')
+      .with('call_started', () => 'called')
+      .with('reminder', () => 'reminder')
+      .with('calendar_event_reminder', () => 'starting soon')
+      .with('calendar_event_join_request', () => 'asked to join')
+      .with('password_access_requested', () => 'requested access to')
+      .with('inbox_reauth_required', () => 'needs reconnection')
+      .with('agent_session_settled', () => 'finished')
+      .with('agent_session_waiting_for_input', () => 'asked')
+      .with('agent_session_mentioned', () => 'mentioned')
+      .with('routine_run_finished', () => {
+        const meta = n.notification_metadata;
+        return meta.tag === 'routine_run_finished' &&
+          meta.content.outcome === 'failed'
+          ? 'failed'
+          : 'finished';
+      })
+      .with('agent_sign_in_expiry', () => {
+        const meta = n.notification_metadata;
+        return meta.tag === 'agent_sign_in_expiry' &&
+          meta.content.stage === 'expired'
+          ? 'expired'
+          : 'expiring';
+      })
+      .with('computer_setup', () => {
+        const meta = n.notification_metadata;
+        return meta.tag === 'computer_setup' &&
+          meta.content.outcome.kind === 'failed'
+          ? 'failed'
+          : 'ready';
+      })
+      // A Run its token budget ended waits on no answer.
+      .with('factory_gate_waiting', () => {
+        const meta = n.notification_metadata;
+        return meta.tag === 'factory_gate_waiting' && meta.content.budgetStopped
+          ? 'stopped'
+          : 'waiting';
+      })
+      .exhaustive(() => 'notified')
+  );
 }
 
 export function extractMessageContent(notification: Notification): string {

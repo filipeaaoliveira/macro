@@ -1434,6 +1434,7 @@ function mapGraphqlNotificationMetadata(
             question: metadata.factoryGateWaitingQuestion,
             asker: metadata.factoryGateWaitingAsker ?? undefined,
             notifyOnly: metadata.factoryGateWaitingNotifyOnly,
+            budgetStopped: metadata.factoryGateWaitingBudgetStopped,
           },
         }) satisfies NotifEventMember<'factory_gate_waiting'>
     )
@@ -2472,6 +2473,19 @@ export function mapGraphqlSoupItem(
             id: entity.id,
             name: entity.teamName,
             ownerId: entity.ownerId,
+            notifications: mapGraphqlNotifications(entity.notifications),
+          },
+        }) as SoupApiItem
+    )
+    .with(
+      { __typename: 'GraphqlSoupUser' },
+      (entity) =>
+        ({
+          tag: 'user',
+          frecency_score: frecency,
+          is_favorited: entity.isFavorited,
+          data: {
+            id: entity.id,
             notifications: mapGraphqlNotifications(entity.notifications),
           },
         }) as SoupApiItem

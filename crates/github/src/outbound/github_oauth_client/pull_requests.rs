@@ -19,8 +19,9 @@ use super::{
     transport_error, unexpected,
 };
 use crate::domain::models::{
-    GithubBranchDeletion, GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError,
-    GithubListing, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
+    GithubBranchDeletion, GithubCheckAnnotation, GithubCheckRun, GithubCheckRunResult,
+    GithubCheckSuite, GithubCommitStatus, GithubError, GithubJobStep, GithubListing,
+    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
     GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
     GithubWorkflowRunStatus,
 };
@@ -37,6 +38,34 @@ const MAX_PAGES: usize = 10;
 
 /// GitHub's message for a branch it does not have, on a ref's deletion.
 const MISSING_REFERENCE: &str = "Reference does not exist";
+
+/// What GitHub's message starts with when a pull request's branch is not
+/// updated because its head is no longer the commit the caller named.
+const EXPECTED_HEAD_MOVED: &str = "expected head sha didn";
+
+/// What GitHub's message holds, in any case, when a pull request's branch
+/// is not updated because its base and it conflict ("merge conflict between
+/// base and head").
+const MERGE_CONFLICT: &str = "merge conflict";
+
+/// What GitHub did when asked to merge a pull request's base into its
+/// branch ([`GithubOauthImpl::update_pull_request_branch`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GithubBranchUpdate {
+    /// GitHub took the request: it merges the base into the branch, as a
+    /// commit of its own on top of the head the caller named, shortly.
+    Started,
+    /// The branch's head is no longer the commit the caller named: someone
+    /// pushed to it, and nothing was merged.
+    HeadMoved,
+    /// The base and the branch conflict, with GitHub's message: nothing
+    /// was merged, and someone resolves it by hand.
+    Conflict(String),
+    /// GitHub declined for another reason, with its message, as for a
+    /// token that lacks a scope or a branch it may not push to: no
+    /// conflict, and asking again changes nothing.
+    Declined(String),
+}
 
 /// Whether git takes `branch` as a branch's name, by the rules of
 /// `git check-ref-format --branch`: no empty part and none that starts with
@@ -237,6 +266,53 @@ struct CheckRunResponse {
 #[derive(serde::Deserialize)]
 struct CheckRunApp {
     id: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunResultsResponse {
+    check_runs: Vec<CheckRunResultResponse>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunResultResponse {
+    id: u64,
+    name: String,
+    status: String,
+    conclusion: Option<String>,
+    app: Option<CheckRunResultApp>,
+    #[serde(default)]
+    output: Option<CheckRunOutput>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunResultApp {
+    slug: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunOutput {
+    title: Option<String>,
+    summary: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckAnnotationResponse {
+    path: String,
+    annotation_level: Option<String>,
+    title: Option<String>,
+    message: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ActionsJobResponse {
+    #[serde(default)]
+    steps: Vec<ActionsJobStepResponse>,
+}
+
+#[derive(serde::Deserialize)]
+struct ActionsJobStepResponse {
+    name: String,
+    conclusion: Option<String>,
 }
 
 impl GithubOauthImpl {
@@ -718,6 +794,107 @@ impl GithubOauthImpl {
         })
     }
 
+    /// The latest check run of each name on the commit `sha`, with its id,
+    /// its app and what its output says, for recording how CI went.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn list_check_run_results(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<GithubListing<GithubCheckRunResult>, GithubError> {
+        let runs = self
+            .read_pages(
+                access_token,
+                &format!("/repos/{owner}/{repo}/commits/{sha}/check-runs"),
+                "failed to list check run results",
+                |page: CheckRunResultsResponse| page.check_runs,
+            )
+            .await?;
+        Ok(GithubListing {
+            complete: runs.complete,
+            items: runs
+                .items
+                .into_iter()
+                .map(|run| {
+                    let (output_title, output_summary) = run
+                        .output
+                        .map(|output| (output.title, output.summary))
+                        .unwrap_or_default();
+                    GithubCheckRunResult {
+                        id: run.id,
+                        name: run.name,
+                        status: run.status,
+                        conclusion: run.conclusion,
+                        app_slug: run.app.and_then(|app| app.slug),
+                        output_title,
+                        output_summary,
+                    }
+                })
+                .collect(),
+        })
+    }
+
+    /// The steps of the GitHub Actions job `job_id`, in order: a check run
+    /// GitHub Actions runs has its job's id.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn actions_job_steps(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        job_id: u64,
+    ) -> Result<Vec<GithubJobStep>, GithubError> {
+        let job: ActionsJobResponse = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/actions/jobs/{job_id}"),
+                &[],
+                "failed to read actions job",
+            )
+            .await?;
+        Ok(job
+            .steps
+            .into_iter()
+            .map(|step| GithubJobStep {
+                name: step.name,
+                conclusion: step.conclusion,
+            })
+            .collect())
+    }
+
+    /// The first `limit` annotations, at most 100, of the check run
+    /// `check_run_id`: one page, in GitHub's order.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn check_run_annotations(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        check_run_id: u64,
+        limit: usize,
+    ) -> Result<Vec<GithubCheckAnnotation>, GithubError> {
+        let per_page = limit.clamp(1, PAGE_SIZE).to_string();
+        let annotations: Vec<CheckAnnotationResponse> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/check-runs/{check_run_id}/annotations"),
+                &[("per_page", per_page.as_str())],
+                "failed to list check run annotations",
+            )
+            .await?;
+        Ok(annotations
+            .into_iter()
+            .map(|annotation| GithubCheckAnnotation {
+                path: annotation.path,
+                level: annotation.annotation_level.unwrap_or_default(),
+                title: annotation.title.filter(|title| !title.trim().is_empty()),
+                message: annotation.message.unwrap_or_default(),
+            })
+            .collect())
+    }
+
     /// Opens a pull request as the user. GitHub declining it is a
     /// [`GithubOpenPullRequestOutcome::Rejected`] value, not an error.
     #[tracing::instrument(skip(self, access_token, pull_request), fields(head = %pull_request.head, base = %pull_request.base), err)]
@@ -800,6 +977,85 @@ impl GithubOauthImpl {
                 "failed to open pull request",
             )),
         }
+    }
+
+    /// Asks GitHub to merge the base of pull request `number` into its
+    /// branch as the user, only while the branch's head is
+    /// `expected_head`: GitHub's "Update branch". It adds a merge commit on
+    /// top of that head, so it never rewrites the branch; a head that moved
+    /// since is left alone. The merge happens after GitHub answers: read the
+    /// branch's head to see it.
+    #[tracing::instrument(skip(self, access_token))]
+    pub async fn update_pull_request_branch(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        expected_head: &str,
+    ) -> Result<GithubBranchUpdate, GithubError> {
+        #[derive(serde::Serialize)]
+        struct UpdateRequest<'a> {
+            expected_head_sha: &'a str,
+        }
+
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+        let response = self
+            .client
+            .put(format!(
+                "{}/repos/{owner}/{repo}/pulls/{number}/update-branch",
+                self.api_base_url()
+            ))
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(&UpdateRequest {
+                expected_head_sha: expected_head,
+            })
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(transport_error)?;
+
+        let status = response.status();
+        if status.is_success() {
+            return Ok(GithubBranchUpdate::Started);
+        }
+        let headers = response.headers().clone();
+        let body = response_text(response).await;
+        if throttling(status, &headers, &body).is_some() {
+            return Err(unexpected(
+                status,
+                &headers,
+                body,
+                "failed to update a pull request's branch",
+            ));
+        }
+        if status == StatusCode::UNPROCESSABLE_ENTITY {
+            let message = serde_json::from_str::<GithubErrorBody>(&body)
+                .map(|error| error.message)
+                .unwrap_or_else(|_| "GitHub declined to update the branch.".to_string());
+            if message.starts_with(EXPECTED_HEAD_MOVED) {
+                return Ok(GithubBranchUpdate::HeadMoved);
+            }
+            if message.to_ascii_lowercase().contains(MERGE_CONFLICT) {
+                return Ok(GithubBranchUpdate::Conflict(message));
+            }
+            return Ok(GithubBranchUpdate::Declined(message));
+        }
+        Err(refusal(status).unwrap_or_else(|| {
+            unexpected(
+                status,
+                &headers,
+                body,
+                "failed to update a pull request's branch",
+            )
+        }))
     }
 
     /// Deletes `branch` as the user, or finds it missing, as when it was

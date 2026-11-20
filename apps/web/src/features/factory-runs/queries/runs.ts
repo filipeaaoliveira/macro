@@ -171,6 +171,15 @@ export function toRun(detail: RunDetail): Run {
         }
       : undefined,
     baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
+    // A Run with no budget, and a service older than budgets, send none.
+    tokenBudget: detail.tokenBudget
+      ? {
+          budget: detail.tokenBudget.budget,
+          used: detail.tokenBudget.used ?? undefined,
+          measured: detail.tokenBudget.measured,
+          stop: detail.tokenBudget.stop ?? undefined,
+        }
+      : undefined,
     // A service older than Standing Roles sends none.
     standingActs: (detail.standingActs ?? []).map((standing) => ({
       act: standing.act,
@@ -206,8 +215,20 @@ export function toRun(detail: RunDetail): Run {
   };
 }
 
-function seedRun(client: QueryClient, run: Run) {
-  client.setQueryData(factoryRunKeys.run(run.id).queryKey, run);
+/**
+ * Seed the Run's own read with what a list read of it. A list reads no
+ * Run's token use, so the use its own read found is kept, rather than
+ * shown unknown until the next read.
+ */
+export function seedRun(client: QueryClient, run: Run) {
+  const key = factoryRunKeys.run(run.id).queryKey;
+  const known = client.getQueryData<Run>(key)?.tokenBudget;
+  const listed = run.tokenBudget;
+  const tokenBudget =
+    listed && listed.used === undefined && known?.used !== undefined
+      ? { ...listed, used: known.used, measured: known.measured }
+      : listed;
+  client.setQueryData(key, { ...run, tokenBudget });
 }
 
 export function taskRunsOptions(client: QueryClient, taskId: string) {

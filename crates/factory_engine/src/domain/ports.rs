@@ -22,6 +22,7 @@ use crate::domain::automations::{
     AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
 };
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
+use crate::domain::check_context::ComparedChanges;
 use crate::domain::evaluation::TeamEvaluation;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{
@@ -31,15 +32,16 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
-    CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
-    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks,
-    RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
-    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    BranchUpdating, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError,
+    FinishedJob, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
+    RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
+    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
 use crate::domain::step_terminal::TerminalRequest;
 use crate::domain::task_thread::ThreadComment;
+use crate::domain::token_budget::{BudgetCheck, BudgetVerdict};
 use factory_records::domain::standing_rules::OrchestratorDefinition;
 
 /// What a Run's workflow did with an answer it was sent.
@@ -302,6 +304,20 @@ pub trait PullRequests: Send + Sync + 'static {
         all_runs: bool,
     ) -> impl Future<Output = Result<Option<(PullRequest, HeadChecks)>, Self::Err>> + Send;
 
+    /// The CI jobs that finished on the commit `sha` of `repository`: each
+    /// check run's latest and each commit status, with what a failed check
+    /// run's output says. With `details`, a few failed jobs are read
+    /// further, each at most twice: the first step that failed of a GitHub
+    /// Actions job, and the failures a check run annotated. Jobs still
+    /// running are left out.
+    fn finished_jobs(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+        details: bool,
+    ) -> impl Future<Output = Result<Vec<FinishedJob>, Self::Err>> + Send;
+
     /// The commit at the head of `branch` of `repository`, with the checks
     /// on it, read with one token: what a watch of a base branch reads on
     /// each look. None when `owner` reaches no such branch. All its check
@@ -355,6 +371,17 @@ pub trait PullRequests: Send + Sync + 'static {
         branch: &str,
     ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
 
+    /// What `head` of `repository` changed against its merge base with
+    /// `base`: that merge base, and the paths GitHub lists, with whether
+    /// they are all of them.
+    fn compare_changes(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> impl Future<Output = Result<ComparedChanges, Self::Err>> + Send;
+
     /// The commit `branch` of `repository` is at; none when the branch is
     /// not there.
     fn branch_head(
@@ -385,6 +412,16 @@ pub trait PullRequests: Send + Sync + 'static {
         head: &str,
     ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
+    /// The parents of the commit `sha` of `repository`, in their order (a
+    /// merge's first is the branch merged into); none when the repository
+    /// has no such commit.
+    fn commit_parents(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
+
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(
         &self,
@@ -402,6 +439,17 @@ pub trait PullRequests: Send + Sync + 'static {
         number: u64,
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
+
+    /// Ask GitHub to merge the base of pull request `number` of
+    /// `repository` into its branch, only while the branch's head is
+    /// `expected_head`.
+    fn update_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        expected_head: &str,
+    ) -> impl Future<Output = Result<BranchUpdating, Self::Err>> + Send;
 
     /// Whether an open pull request of `repository` is based on `branch`.
     fn has_open_pull_request_onto(
@@ -1260,4 +1308,11 @@ pub trait StepService: Send + Sync + 'static {
 
     /// Record how a Run ended.
     fn end_run(&self, finish: RunFinish) -> impl Future<Output = Result<(), StepError>> + Send;
+
+    /// Check the token budget of the Run `check` names before its next
+    /// agent Step: whether it is used, and when it is, keep why.
+    fn check_budget(
+        &self,
+        check: BudgetCheck,
+    ) -> impl Future<Output = Result<BudgetVerdict, StepError>> + Send;
 }

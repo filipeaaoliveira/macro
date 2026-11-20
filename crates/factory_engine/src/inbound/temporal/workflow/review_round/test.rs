@@ -39,6 +39,9 @@ struct Script {
     rules: Option<OrchestratorDefinition>,
     asked: RefCell<Vec<String>>,
     closings: RefCell<Vec<ReviewRoundClosing>>,
+    /// The Run used its token budget: every check before an agent Step
+    /// stops it. A Run within it is not noted, as one without a budget.
+    budget_spent: bool,
 }
 
 impl Script {
@@ -60,6 +63,13 @@ impl Work for Script {
 
     fn asks_on_no_result(&self) -> bool {
         true
+    }
+
+    async fn within_budget(&self, _run_id: RunId) -> bool {
+        if self.budget_spent {
+            self.note("budget spent".to_string());
+        }
+        !self.budget_spent
     }
 
     async fn open(&self, opening: ReviewRoundOpening) -> Result<bool, Failed> {
@@ -466,6 +476,34 @@ async fn a_reviewer_asking_past_its_questions_ends_the_run_for_a_person() {
     assert!(script.closings.borrow()[0].failed);
 }
 
+/// A Run that used its token budget while a reviewer asked closes the
+/// round failed and ends `blocked` before the reviewer goes on, its
+/// session still held for the workflow to stop.
+#[tokio::test]
+async fn a_run_at_its_budget_ends_before_a_reviewer_goes_on() {
+    let script = Script {
+        ends: [(3, "question")].into(),
+        budget_spent: true,
+        ..Script::default()
+    };
+
+    let (round, held) = walk(&script, 1).await;
+
+    assert_eq!(round, Ok(Round::Ended(RunOutcome::Blocked)));
+    assert_eq!(held, [3]);
+    let asked = script.asked();
+    let after_work: Vec<&str> = asked
+        .iter()
+        .skip_while(|asked| !asked.starts_with("ask"))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        after_work,
+        ["ask 3 Question of step 3?", "budget spent", "close 3"]
+    );
+    assert!(script.closings.borrow()[0].failed);
+}
+
 /// A Run whose reviewers may not ask (its Flow predates questions) never
 /// takes the question's path: a Step that somehow ends `question` reads as
 /// any other review and lets go of its session.
@@ -568,6 +606,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     quiet_gates: false,
     task_thread: false,
     queue_limit: None,
+    token_budget: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
         plan: false,
         blockers: false,

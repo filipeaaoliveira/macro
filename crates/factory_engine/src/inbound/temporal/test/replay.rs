@@ -80,6 +80,15 @@
 //!   null fields (recursively, with a JSON tool), which the history reads
 //!   as their defaults.
 //!
+//! Recorded with the markers above, and the token budget's marker
+//! (`factory-token-budget`), from
+//! `a_run_at_its_budget_ends_blocked_before_its_next_agent_step` in
+//! `test/token_budget.rs` with `FACTORY_RECORD_HISTORY` set, stripped of
+//! its null fields as above:
+//! - `plan_stopped_at_token_budget`: a Run with a budget checks it before
+//!   its first agent Step, runs it, and ends `blocked` at the check before
+//!   its second.
+//!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
 
@@ -275,6 +284,15 @@ async fn a_run_scored_once_it_ended_replays() {
     replays(
         "plan_scored_judge_failed",
         include_bytes!("histories/plan_scored_judge_failed.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_stopped_at_its_token_budget_replays() {
+    replays(
+        "plan_stopped_at_token_budget",
+        include_bytes!("histories/plan_stopped_at_token_budget.json"),
     )
     .await;
 }

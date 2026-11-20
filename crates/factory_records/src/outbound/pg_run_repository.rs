@@ -8,6 +8,10 @@ mod flaws;
 mod gate_replies;
 mod insights;
 mod main_hold;
+mod merge_guard;
+mod merge_queue;
+pub use merge_queue::PgMergeTurn;
+mod quality;
 mod review_rounds;
 mod self_improvement;
 mod standing_acts;
@@ -25,7 +29,7 @@ use uuid::Uuid;
 
 use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
-    AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
+    AgentName, AskedBack, BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, GateModelReading,
     HandBack, HandedBack, InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold,
     QueuePlaces, Repository, Role, Run, RunDefinition, RunEnd, RunFlow, RunId, RunInsert,
@@ -133,6 +137,9 @@ pub enum PgRunRepositoryErr {
     /// Underlying database error.
     #[error(transparent)]
     Db(#[from] sqlx::Error),
+    /// A branch update kept a moment ago reads as missing.
+    #[error("a kept branch update is missing")]
+    MissingBranchUpdate,
     /// A stored name breaks the rules its column checks.
     #[error(transparent)]
     InvalidName(#[from] InvalidName),
@@ -142,6 +149,10 @@ pub enum PgRunRepositoryErr {
     /// The board read a place for a Run that this code does not know.
     #[error("unknown board state {0:?}")]
     UnknownBoardState(String),
+    /// A stored CI wait's verdict, or a CI job's result, is not one this
+    /// code knows.
+    #[error("unknown ci verdict or job result {0:?}")]
+    UnknownCiWord(String),
     /// A stored round of checks ended with an outcome this code does not
     /// know.
     #[error("unknown check round outcome {0:?}")]
@@ -235,6 +246,13 @@ pub enum PgRunRepositoryErr {
     /// A stored Run has only part of its Factory Definition.
     #[error("a stored run has only part of its factory definition")]
     PartialDefinition,
+    /// A stored token budget, or the tokens a Run used, does not fit its
+    /// type.
+    #[error("a stored token budget is out of range")]
+    BudgetOutOfRange,
+    /// A stored Run's budget stop is not one this code knows.
+    #[error("unknown token budget stop {0:?}")]
+    UnknownBudgetStop(Option<String>),
 }
 
 struct RunRow {
@@ -268,7 +286,38 @@ struct RunRow {
     flawed_by_user_id: Option<String>,
     flawed_by_scorer: Option<String>,
     flaw_reason: Option<String>,
+    token_budget: Option<i64>,
+    token_budget_stop: Option<String>,
+    token_budget_used: Option<i64>,
 }
+
+/// The token budget a Run keeps, stored as `stored`.
+fn token_budget(stored: Option<i64>) -> Result<Option<u64>, PgRunRepositoryErr> {
+    stored
+        .map(|budget| u64::try_from(budget).map_err(|_| PgRunRepositoryErr::BudgetOutOfRange))
+        .transpose()
+}
+
+/// Why a Run's token budget ended it, stored as `stop` and `used`.
+fn budget_stop(
+    stop: Option<String>,
+    used: Option<i64>,
+) -> Result<Option<BudgetStop>, PgRunRepositoryErr> {
+    match (stop.as_deref(), used) {
+        (None, None) => Ok(None),
+        (Some(BUDGET_SPENT), Some(used)) => Ok(Some(BudgetStop::Spent {
+            used: u64::try_from(used).map_err(|_| PgRunRepositoryErr::BudgetOutOfRange)?,
+        })),
+        (Some(BUDGET_UNREAD), None) => Ok(Some(BudgetStop::Unread)),
+        _ => Err(PgRunRepositoryErr::UnknownBudgetStop(stop)),
+    }
+}
+
+/// How a budget stop for spent tokens is stored.
+const BUDGET_SPENT: &str = "spent";
+
+/// How a budget stop for an unread usage log is stored.
+const BUDGET_UNREAD: &str = "unread";
 
 impl TryFrom<RunRow> for Run {
     type Error = PgRunRepositoryErr;
@@ -298,8 +347,11 @@ impl TryFrom<RunRow> for Run {
         };
         let standing_rules = match (row.standing_rules, row.standing_rules_source) {
             (Some(kinds), Some(source)) => Some(RunRules {
-                definition: OrchestratorDefinition::from_kinds(&kinds)
-                    .ok_or(PgRunRepositoryErr::UnknownStandingRules(kinds))?,
+                definition: OrchestratorDefinition {
+                    token_budget: token_budget(row.token_budget)?,
+                    ..OrchestratorDefinition::from_kinds(&kinds)
+                        .ok_or(PgRunRepositoryErr::UnknownStandingRules(kinds))?
+                },
                 source: source
                     .parse::<RulesSource>()
                     .map_err(|_| PgRunRepositoryErr::UnknownStandingRules(vec![source]))?,
@@ -357,6 +409,7 @@ impl TryFrom<RunRow> for Run {
                 _ => return Err(PgRunRepositoryErr::PartialDefinition),
             },
             end,
+            budget_stop: budget_stop(row.token_budget_stop, row.token_budget_used)?,
         })
     }
 }
@@ -683,6 +736,14 @@ impl RunRepository for PgRunRepository {
                 return Ok(RunInsert::QueueFull(places));
             }
         }
+        // The Run keeps its rules' token budget, so a later change to them
+        // does not change it.
+        let budget = run
+            .standing_rules
+            .definition
+            .token_budget
+            .map(|budget| i64::try_from(budget).map_err(|_| PgRunRepositoryErr::BudgetOutOfRange))
+            .transpose()?;
         let inserted = sqlx::query_as!(
             RunRow,
             r#"
@@ -691,18 +752,19 @@ impl RunRepository for PgRunRepository {
                 control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
                 standing_rules_project_id, automation_id, automation_name, automation_trigger,
                 automation_firing_key, definition_repo_url, definition_commit, definition_agents,
-                definition_evaluation, flow_definition, flow_asks, project_id
+                definition_evaluation, flow_definition, flow_asks, project_id, token_budget
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                $19, $20, $21, $22, $23, $24
+                $19, $20, $21, $22, $23, $24, $25
             )
             RETURNING
                 id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
-                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
+                token_budget, token_budget_stop, token_budget_used
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -729,6 +791,7 @@ impl RunRepository for PgRunRepository {
             run.kept_flow.map(|flow| flow.definition),
             run.kept_flow.map(|flow| flow.asks),
             run.project_id,
+            budget,
         )
         .fetch_one(&mut *transaction)
         .await;
@@ -798,6 +861,20 @@ impl RunRepository for PgRunRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self, wait), fields(run_id = %wait.key.run_id, seq = wait.key.seq))]
+    async fn record_ci_wait(&self, wait: &crate::domain::quality::CiWait) -> Result<(), Self::Err> {
+        quality::record_ci_wait(&self.pool, wait).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn last_ci_wait(
+        &self,
+        run_id: RunId,
+        before: u16,
+    ) -> Result<Option<crate::domain::quality::LastCiWait>, Self::Err> {
+        quality::last_ci_wait(&self.pool, run_id, before).await
     }
 
     #[tracing::instrument(err, skip(self, changes))]
@@ -1047,7 +1124,8 @@ impl RunRepository for PgRunRepository {
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
-                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
+                token_budget, token_budget_stop, token_budget_used
             FROM factory_run
             WHERE id = $1
             "#,
@@ -1151,7 +1229,8 @@ impl RunRepository for PgRunRepository {
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
-                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
+                token_budget, token_budget_stop, token_budget_used
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -1189,7 +1268,8 @@ impl RunRepository for PgRunRepository {
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
-                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
+                token_budget, token_budget_stop, token_budget_used
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1235,7 +1315,8 @@ impl RunRepository for PgRunRepository {
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
-                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
+                token_budget, token_budget_stop, token_budget_used
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1998,6 +2079,44 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn step_sessions(&self, id: RunId) -> Result<Vec<Uuid>, Self::Err> {
+        let sessions = sqlx::query_scalar!(
+            r#"
+            SELECT DISTINCT session_id AS "session_id!"
+            FROM factory_step
+            WHERE run_id = $1 AND session_id IS NOT NULL
+            "#,
+            id.as_uuid(),
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(sessions)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_budget_stop(&self, id: RunId, stop: BudgetStop) -> Result<(), Self::Err> {
+        let (kind, used) = match stop {
+            BudgetStop::Spent { used } => {
+                (BUDGET_SPENT, Some(i64::try_from(used).unwrap_or(i64::MAX)))
+            }
+            BudgetStop::Unread => (BUDGET_UNREAD, None),
+        };
+        sqlx::query!(
+            r#"
+            UPDATE factory_run
+            SET token_budget_stop = $2, token_budget_used = $3
+            WHERE id = $1 AND token_budget IS NOT NULL AND token_budget_stop IS NULL
+            "#,
+            id.as_uuid(),
+            kind,
+            used,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn record_cancel_sender(&self, id: RunId, in_person: bool) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
@@ -2041,6 +2160,14 @@ impl RunRepository for PgRunRepository {
             .execute(&mut *transaction)
             .await?;
         }
+        // A Run that ended holds no place in a merge queue, so a base's
+        // queue holds only Runs still going.
+        sqlx::query!(
+            "DELETE FROM factory_merge_queue WHERE run_id = $1",
+            id.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
         transaction.commit().await?;
         Ok(())
     }

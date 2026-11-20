@@ -1,5 +1,6 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
+use super::GithubBranchUpdate;
 use crate::domain::models::{
     GithubBranchDeletion, GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
     GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
@@ -761,4 +762,191 @@ async fn a_branch_requires_a_pull_request_by_ruleset_or_protection() {
     ));
     assert_eq!(unprotected, Some(false));
     assert_eq!(unknown, None);
+}
+
+/// CI health reads each check run's id, app and output, and an Actions
+/// job's steps in order.
+#[tokio::test]
+async fn check_run_results_and_an_actions_jobs_steps_are_read() {
+    let (runs_server, client) = answering(
+        "200 OK",
+        r#"{"total_count":2,"check_runs":[{"id":41,"name":"test","status":"completed","conclusion":"failure","app":{"id":15368,"slug":"github-actions"},"output":{"title":"Process completed with exit code 1","summary":null}},{"id":42,"name":"lint","status":"completed","conclusion":"success","app":null}]}"#,
+    );
+    let runs = client
+        .list_check_run_results("token", "macro", "app", "abc")
+        .await
+        .unwrap();
+    let runs_request = runs_server.finish();
+    let (job_server, client) = answering(
+        "200 OK",
+        r#"{"id":41,"steps":[{"name":"Set up job","status":"completed","conclusion":"success","number":1},{"name":"Run tests","status":"completed","conclusion":"failure","number":2}]}"#,
+    );
+    let steps = client
+        .actions_job_steps("token", "macro", "app", 41)
+        .await
+        .unwrap();
+    let job_request = job_server.finish();
+
+    assert!(runs.complete);
+    assert_eq!(runs.items[0].id, 41);
+    assert_eq!(runs.items[0].app_slug.as_deref(), Some("github-actions"));
+    assert_eq!(
+        runs.items[0].output_title.as_deref(),
+        Some("Process completed with exit code 1")
+    );
+    assert_eq!(runs.items[1].app_slug, None);
+    assert_eq!(runs.items[1].output_title, None);
+    assert!(
+        runs_request
+            .starts_with("GET /repos/macro/app/commits/abc/check-runs?per_page=100&page=1 ")
+    );
+    assert_eq!(
+        steps
+            .iter()
+            .map(|step| (step.name.as_str(), step.conclusion.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("Set up job", Some("success")),
+            ("Run tests", Some("failure"))
+        ]
+    );
+    assert!(job_request.starts_with("GET /repos/macro/app/actions/jobs/41 "));
+}
+
+/// A check run's annotations are read from one page, with their level,
+/// and a blank title is none.
+#[tokio::test]
+async fn a_check_runs_annotations_are_read() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"[{"path":"src/parser.rs","start_line":3,"end_line":3,"annotation_level":"failure","title":"parser::test::empty","message":"assertion failed","raw_details":null},{"path":".github","start_line":1,"end_line":1,"annotation_level":"failure","title":"","message":"Process completed with exit code 101."}]"#,
+    );
+
+    let annotations = client
+        .check_run_annotations("token", "macro", "app", 41, 20)
+        .await
+        .unwrap();
+    let request = server.finish();
+
+    assert!(
+        request.starts_with("GET /repos/macro/app/check-runs/41/annotations?per_page=20 "),
+        "{request}"
+    );
+    assert_eq!(annotations.len(), 2);
+    assert_eq!(annotations[0].path, "src/parser.rs");
+    assert_eq!(annotations[0].level, "failure");
+    assert_eq!(annotations[0].title.as_deref(), Some("parser::test::empty"));
+    assert_eq!(annotations[0].message, "assertion failed");
+    assert_eq!(annotations[1].title, None);
+}
+
+/// Updating a pull request's branch names the head it may update, so a
+/// push made since is never merged over.
+#[tokio::test]
+async fn update_pull_request_branch_names_the_head_it_updates() {
+    let (server, client) = answering(
+        "202 Accepted",
+        r#"{"message":"Updating pull request branch.","url":"https://github.com/macro/app/pull/7"}"#,
+    );
+
+    let updated = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(updated, GithubBranchUpdate::Started);
+    let request = server.finish();
+    assert!(
+        request.starts_with("PUT /repos/macro/app/pulls/7/update-branch HTTP/1.1"),
+        "{request}"
+    );
+    assert!(
+        request.contains(r#"{"expected_head_sha":"1111111111111111111111111111111111111111"}"#),
+        "{request}"
+    );
+}
+
+/// A head that moved, a base that conflicts with the branch, and any other
+/// refusal are GitHub's answers about the branch, told apart: only GitHub's
+/// merge-conflict answer is a conflict.
+#[tokio::test]
+async fn update_pull_request_branch_reads_github_s_refusals() {
+    let (moved, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"expected head sha didn't match current head ref."}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(answer, GithubBranchUpdate::HeadMoved);
+    moved.finish();
+
+    let (conflict, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"merge conflict between base and head"}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        answer,
+        GithubBranchUpdate::Conflict("merge conflict between base and head".to_string())
+    );
+    conflict.finish();
+
+    // Any other 422 is no conflict, and says what GitHub said.
+    let (scope, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"Resource not accessible: the token lacks the workflow scope"}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        answer,
+        GithubBranchUpdate::Declined(
+            "Resource not accessible: the token lacks the workflow scope".to_string()
+        )
+    );
+    scope.finish();
+
+    let (forbidden, client) = answering("403 Forbidden", r#"{"message":"Forbidden"}"#);
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await;
+    assert!(matches!(answer, Err(GithubError::Forbidden)), "{answer:?}");
+    forbidden.finish();
 }

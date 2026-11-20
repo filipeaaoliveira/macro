@@ -193,6 +193,37 @@ pub enum AgentDefinitionError {
          (services/factory_service/AGENTS.md)"
     )]
     RetiredAgentId,
+    /// Agents whose bots are still placeholder ids, as the Definition
+    /// template ships them ([`is_placeholder_bot`]), in the order the
+    /// definition lists them.
+    #[error("{}", placeholder_bots_message(.0))]
+    PlaceholderBots(Vec<AgentName>),
+}
+
+/// What [`AgentDefinitionError::PlaceholderBots`] says about `agents`.
+fn placeholder_bots_message(agents: &[AgentName]) -> String {
+    let names = agents
+        .iter()
+        .map(AgentName::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    match agents {
+        [_] => format!(
+            "agent {names} has the template's placeholder bot id: replace it with \
+             the id of a Macro agent each member who starts runs may use"
+        ),
+        _ => format!(
+            "agents {names} have the template's placeholder bot ids: replace them with \
+             the ids of Macro agents each member who starts runs may use"
+        ),
+    }
+}
+
+/// Whether `bot` is a placeholder id: all zeros but its last two digits,
+/// as the Definition template's `00000000-0000-0000-0000-000000000001`.
+/// Such an id names no Macro agent.
+pub fn is_placeholder_bot(bot: BotId) -> bool {
+    bot.as_uuid().as_u128() <= 0xff
 }
 
 impl TryFrom<AgentDefinitionFields> for AgentDefinition {
@@ -262,6 +293,17 @@ impl AgentDefinition {
     /// The Agent named `name`, if the definition has it.
     pub fn agent(&self, name: &AgentName) -> Option<&Agent> {
         self.agents.get(name)
+    }
+
+    /// The Agents, by name, whose bots are placeholder ids
+    /// ([`is_placeholder_bot`]): a Definition copied from the template
+    /// before its `bot` ids were replaced.
+    pub fn placeholder_bots(&self) -> Vec<AgentName> {
+        self.agents
+            .iter()
+            .filter(|(_, agent)| is_placeholder_bot(agent.bot))
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 
     /// Whether the definition has a `standing` section, so an agent acting

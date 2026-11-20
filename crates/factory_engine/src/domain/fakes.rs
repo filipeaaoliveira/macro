@@ -7,16 +7,19 @@ mod flaws;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
+mod merge_queue;
 pub(crate) mod self_improvement;
 mod standing_acts;
 mod steering;
 mod task_thread;
+mod token_budget;
 
 pub(crate) use evaluation::{FakeEvaluation, FakeJudge};
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
 pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
 pub(crate) use task_thread::FakeTaskThread;
+pub(crate) use token_budget::FakeRunTokens;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -25,11 +28,11 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
-    CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun,
-    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition, RunEnd,
-    RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd,
-    StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
+    BudgetStop, CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart,
+    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
+    NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition,
+    RunEnd, RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step,
+    StepEnd, StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -38,10 +41,11 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
-    run_branch,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, FinishedJob,
+    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -124,6 +128,8 @@ pub(crate) struct FollowUpComment {
 #[derive(Clone, Default)]
 pub(crate) struct FakeRepo {
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
+    /// The merge queues and the updates of Runs' branches.
+    pub(crate) queue: Arc<Mutex<merge_queue::FakeQueue>>,
     /// The built-in Flow each Run walks.
     pub(crate) flows: Arc<Mutex<BTreeMap<RunId, String>>>,
     pub(crate) steps: Arc<Mutex<Vec<(RunId, Step)>>>,
@@ -131,6 +137,8 @@ pub(crate) struct FakeRepo {
     pub(crate) sessions: Arc<Mutex<Vec<FakeSession>>>,
     /// Each Step's steering by its owner.
     pub(crate) steering: Arc<Mutex<HashMap<StepKey, steering::FakeSteering>>>,
+    /// The CI waits kept, in order, the last of each Step.
+    pub(crate) ci_waits: Arc<Mutex<Vec<factory_records::domain::quality::CiWait>>>,
     /// Each Step's rounds of checks, in order.
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
     /// The task documents that exist.
@@ -562,6 +570,7 @@ impl RunRepository for FakeRepo {
                 commit: definition.commit.to_string(),
             }),
             end: None,
+            budget_stop: None,
         };
         if let Some(kept) = kept_flow {
             self.kept_flows
@@ -606,6 +615,48 @@ impl RunRepository for FakeRepo {
             .expect("merge heads")
             .insert(id, sha.to_string());
         Ok(())
+    }
+
+    async fn record_ci_wait(
+        &self,
+        wait: &factory_records::domain::quality::CiWait,
+    ) -> Result<(), FakeError> {
+        if self.fails("record_ci_wait") {
+            return Err(FakeError);
+        }
+        let mut waits = self.ci_waits.lock().expect("ci waits");
+        match waits.iter_mut().find(|kept| kept.key == wait.key) {
+            Some(kept) if (&kept.head_sha, kept.verdict) == (&wait.head_sha, wait.verdict) => {}
+            Some(kept) => *kept = wait.clone(),
+            None => waits.push(wait.clone()),
+        }
+        Ok(())
+    }
+
+    async fn last_ci_wait(
+        &self,
+        run_id: RunId,
+        before: u16,
+    ) -> Result<Option<factory_records::domain::quality::LastCiWait>, FakeError> {
+        if self.fails("last_ci_wait") {
+            return Err(FakeError);
+        }
+        Ok(self
+            .ci_waits
+            .lock()
+            .expect("ci waits")
+            .iter()
+            .filter(|kept| kept.key.run_id == run_id && kept.key.seq < before)
+            .max_by_key(|kept| kept.key.seq)
+            .map(|kept| factory_records::domain::quality::LastCiWait {
+                head_sha: kept.head_sha.clone(),
+                jobs: kept
+                    .jobs
+                    .iter()
+                    .filter(|job| !job.replaced)
+                    .map(|job| job.name.clone())
+                    .collect(),
+            }))
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
@@ -1506,6 +1557,32 @@ impl RunRepository for FakeRepo {
         Ok(failed.map(|(_, kept)| *kept.fix_action_id.get_or_insert(fix_action_id)))
     }
 
+    async fn step_sessions(&self, id: RunId) -> Result<Vec<Uuid>, FakeError> {
+        let mut sessions: Vec<Uuid> = self
+            .sessions
+            .lock()
+            .expect("sessions")
+            .iter()
+            .filter(|claimed| claimed.key.run_id == id)
+            .map(|claimed| claimed.session.session_id)
+            .collect();
+        sessions.sort();
+        sessions.dedup();
+        Ok(sessions)
+    }
+
+    async fn record_budget_stop(&self, id: RunId, stop: BudgetStop) -> Result<(), FakeError> {
+        if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
+            let budgeted = run
+                .standing_rules
+                .is_some_and(|rules| rules.definition.token_budget.is_some());
+            if budgeted && run.budget_stop.is_none() {
+                run.budget_stop = Some(stop);
+            }
+        }
+        Ok(())
+    }
+
     async fn record_cancel_sender(&self, id: RunId, in_person: bool) -> Result<(), FakeError> {
         let open = self
             .runs
@@ -1547,6 +1624,8 @@ impl RunRepository for FakeRepo {
                 }
             }
         }
+        // As the database: a Run that ended holds no place in a queue.
+        self.queue().queued.retain(|queued| queued.run_id != id);
         Ok(())
     }
 }
@@ -1555,6 +1634,22 @@ impl RunRepository for FakeRepo {
 /// branch opens in it.
 #[derive(Default)]
 pub(crate) struct FakeGithubState {
+    /// The CI jobs that finished on a commit, as CI health reads them,
+    /// unless [`Self::finished_on`] names that commit.
+    pub(crate) finished: Vec<FinishedJob>,
+    /// The CI jobs that finished on each commit named here.
+    pub(crate) finished_on: BTreeMap<String, Vec<FinishedJob>>,
+    /// Whether reading them fails, as an outage would.
+    pub(crate) finished_fails: bool,
+    /// How long reading them takes, as a slow GitHub would.
+    pub(crate) finished_delay: Option<std::time::Duration>,
+    /// The commits whose finished jobs were read, in order.
+    pub(crate) finished_reads: Vec<String>,
+    /// Whether each read of finished jobs asked for details, in order.
+    pub(crate) finished_details: Vec<bool>,
+    /// The commit each read of the open pull request finds its head at
+    /// next, in order; the last one stays. Empty keeps its head.
+    pub(crate) heads: VecDeque<String>,
     /// Whether the Run's owner cannot reach the repository.
     pub(crate) unreachable: bool,
     /// Whether the Run's owner may only read the repository.
@@ -1587,6 +1682,13 @@ pub(crate) struct FakeGithubState {
     pub(crate) changed: Option<Vec<String>>,
     /// The branches or commits whose changes were asked for, in order.
     pub(crate) compared: Vec<String>,
+    /// The merge base GitHub gives of a comparison a round's checks are
+    /// told of; none for a commit no comparison names.
+    pub(crate) check_base: Option<String>,
+    /// Whether comparing for a round's checks fails, as GitHub down does.
+    pub(crate) compare_fails: bool,
+    /// The bases and heads compared for a round's checks, in order.
+    pub(crate) compared_changes: Vec<(String, String)>,
     /// The base branch's head commit and the checks on it; none when the
     /// owner reaches no such branch.
     pub(crate) base: Option<(String, HeadChecks)>,
@@ -1638,6 +1740,22 @@ pub(crate) struct FakeGithubState {
     pub(crate) descendants: BTreeSet<(String, String)>,
     /// The merge base of two commits neither contains the other of.
     pub(crate) merge_bases: BTreeMap<(String, String), String>,
+    /// The parents of each commit, by its id; a commit not listed is none
+    /// GitHub has.
+    pub(crate) parents: BTreeMap<String, Vec<String>>,
+    /// The head commit of each branch that is not a Run's, by its name.
+    pub(crate) other_heads: BTreeMap<String, String>,
+    /// The heads updates of the Run's branch were asked from, in order.
+    pub(crate) updates: Vec<String>,
+    /// What GitHub answers an update of the Run's branch with; `Started`
+    /// when none is set, which moves the pull request's and the branch's
+    /// head to [`Self::updated_head`].
+    pub(crate) update_answer: Option<BranchUpdating>,
+    /// The head GitHub's merge of the base makes, once it merged.
+    pub(crate) updated_head: Option<String>,
+    /// The commit `main` moves to as a merge is asked, as when another
+    /// merge lands just before it.
+    pub(crate) main_moves_on_merge: Option<String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1686,6 +1804,14 @@ impl FakeGithub {
             } else {
                 state.checks.front().cloned()
             };
+            let head = if state.heads.len() > 1 {
+                state.heads.pop_front()
+            } else {
+                state.heads.front().cloned()
+            };
+            if let (Some(head), Some(pull_request)) = (head, state.pull_request.as_mut()) {
+                pull_request.head_sha = head;
+            }
             state
                 .pull_request
                 .clone()
@@ -1784,6 +1910,34 @@ impl PullRequests for FakeGithub {
         Ok(self.read())
     }
 
+    async fn finished_jobs(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        sha: &str,
+        details: bool,
+    ) -> Result<Vec<FinishedJob>, FakeGithubError> {
+        let (delay, read) = {
+            let mut state = self.state();
+            state.finished_reads.push(sha.to_string());
+            state.finished_details.push(details);
+            let read = if state.finished_fails {
+                Err(FakeGithubError::Down)
+            } else {
+                Ok(state
+                    .finished_on
+                    .get(sha)
+                    .cloned()
+                    .unwrap_or_else(|| state.finished.clone()))
+            };
+            (state.finished_delay, read)
+        };
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+        read
+    }
+
     async fn branch_checks(
         &self,
         _owner: &MacroUserIdStr<'static>,
@@ -1864,6 +2018,27 @@ impl PullRequests for FakeGithub {
         Ok(state.changed.clone())
     }
 
+    async fn compare_changes(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<ComparedChanges, FakeGithubError> {
+        let mut state = self.state();
+        state
+            .compared_changes
+            .push((base.to_string(), head.to_string()));
+        if state.compare_fails {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(ComparedChanges {
+            merge_base: state.check_base.clone().unwrap_or_default(),
+            paths: state.changed.clone().unwrap_or_default(),
+            complete: state.changed.is_some(),
+        })
+    }
+
     async fn branch_head(
         &self,
         _owner: &MacroUserIdStr<'static>,
@@ -1873,6 +2048,9 @@ impl PullRequests for FakeGithub {
         let mut state = self.state();
         if state.branch_head_fails {
             return Err(FakeGithubError::Down);
+        }
+        if let Some(head) = state.other_heads.get(_branch) {
+            return Ok(Some(head.clone()));
         }
         if state.branch_heads.is_empty() {
             return Ok(state.head.clone());
@@ -1926,6 +2104,9 @@ impl PullRequests for FakeGithub {
     ) -> Result<Merging, FakeGithubError> {
         let mut state = self.state();
         state.merges.push(head_sha.to_string());
+        if let Some(moved) = state.main_moves_on_merge.take() {
+            state.other_heads.insert("main".to_string(), moved);
+        }
         if let Some(why) = state.merge_refusal.clone() {
             return Ok(Merging::Refused(why));
         }
@@ -1937,6 +2118,35 @@ impl PullRequests for FakeGithub {
         }
         pull_request.state = PullRequestState::Merged;
         Ok(Merging::Merged)
+    }
+
+    async fn update_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+        expected_head: &str,
+    ) -> Result<BranchUpdating, FakeGithubError> {
+        let mut state = self.state();
+        state.updates.push(expected_head.to_string());
+        if let Some(answer) = state.update_answer.clone() {
+            return Ok(answer);
+        }
+        let head = state
+            .pull_request
+            .as_ref()
+            .map(|pull_request| pull_request.head_sha.clone());
+        if head.as_deref() != Some(expected_head) {
+            return Ok(BranchUpdating::HeadMoved);
+        }
+        if let Some(updated) = state.updated_head.clone() {
+            if let Some(pull_request) = state.pull_request.as_mut() {
+                pull_request.head_sha = updated.clone();
+            }
+            state.branch_heads.clear();
+            state.head = Some(updated);
+        }
+        Ok(BranchUpdating::Started)
     }
 
     async fn has_open_pull_request_onto(
@@ -1976,6 +2186,15 @@ impl PullRequests for FakeGithub {
         }
         state.deleted_branches.push(run_branch(run_id));
         Ok(BranchDeletion::Deleted)
+    }
+
+    async fn commit_parents(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        sha: &str,
+    ) -> Result<Option<Vec<String>>, FakeGithubError> {
+        Ok(self.state().parents.get(sha).cloned())
     }
 
     async fn merge_base(

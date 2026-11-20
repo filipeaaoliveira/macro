@@ -11,8 +11,10 @@ import {
   type RunStandingAct,
   type RunStatus,
   type RunStep,
+  type RunTokenBudget,
   runRequestBody,
 } from '../core/run';
+import { formatTokens } from './insight-format';
 import { RunStatusDot, runStatusLabel } from './run-status';
 import { RunTimeline } from './run-timeline';
 
@@ -41,9 +43,38 @@ function runLevelActs(run: Run): RunLevelAct[] {
 }
 
 /**
+ * What a Run's token budget says: what its agents used of it, or that the
+ * budget stopped the Run, and why.
+ */
+export function tokenBudgetLine(budget: RunTokenBudget): string {
+  const limit = formatTokens(budget.budget);
+  const stop = budget.stop;
+  if (stop?.reason === 'spent') {
+    return t('factoryRuns.tokenBudgetSpent', {
+      used: formatTokens(stop.used),
+      budget: limit,
+    });
+  }
+  if (stop?.reason === 'unread') {
+    return t('factoryRuns.tokenBudgetUnread', { budget: limit });
+  }
+  if (budget.used === undefined) {
+    return t('factoryRuns.tokenBudgetOf', { budget: limit });
+  }
+  if (budget.measured === false) {
+    return t('factoryRuns.tokenBudgetUnmeasured', { budget: limit });
+  }
+  return t('factoryRuns.tokenBudgetUsed', {
+    used: formatTokens(budget.used),
+    budget: limit,
+  });
+}
+
+/**
  * Where the Run is, when it started and ended, the repository it works on,
  * the Factory Definition commit it read, the Automation that started it,
- * and what its request says past the title. The status line takes focus
+ * its token budget and what its agents used of it, and what its request
+ * says past the title. The status line takes focus
  * when the control a person used goes away (an answered Gate, a cancelled
  * Run).
  */
@@ -129,6 +160,21 @@ export function RunSummary(props: {
                 name: automation().name,
                 trigger: t(AUTOMATION_TRIGGERS[automation().trigger]),
               })}
+            </p>
+          </section>
+        )}
+      </Show>
+      <Show when={props.run.tokenBudget}>
+        {(budget) => (
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-xs font-medium text-ink-muted">
+              {t('factoryRuns.tokenBudget')}
+            </h3>
+            <p
+              data-token-budget
+              class="text-sm leading-5 [overflow-wrap:anywhere]"
+            >
+              {tokenBudgetLine(budget())}
             </p>
           </section>
         )}

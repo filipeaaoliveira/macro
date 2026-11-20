@@ -286,6 +286,66 @@ workflow never started ends it. An Automation's firing on a task meets the
 `task_busy` check only once its creator may see the task. A Gate in the seconds before its rule or the stand-in decides counts:
 the limit holds the Queue back, not to the exact count.
 
+A team's Orchestrator Definition, or a Project's own, may set a token
+budget (`tokenBudget`, 10,000 to 10,000,000,000 tokens, else 400
+`InvalidTokenBudget`; a Factory Definition's `rules.json` is checked the
+same, `DefinitionError::TokenBudget`; none by default), which
+bounds what a Run's agents spend as `MAX_STEPS` bounds its Steps
+(`src/domain/token_budget.rs`). A Run keeps the budget with its rules
+when it is created (`factory_run.token_budget`), so a change to the
+definition, or a task linked later, does not change a Run under way, and
+`RunStart::token_budget` tells its workflow to check it. Before each
+agent Step (an entry with a `role`, or a review panel, whose reviewers are
+checked once, together), and before each Step that goes on from an
+agent's question (a reviewer's too) or from the owner's `retry` after
+`no_result`, the workflow asks the worker
+(`factory_check_budget`, behind the `factory-token-budget` patch marker,
+for at most two minutes): the worker reads the sessions of the Run's
+Steps (`step_sessions`, each once) and sums what the usage log recorded
+for them as the Run's owner (`ai_usage`'s `SessionUsageReader`), as
+Insights counts tokens: input, output, and input read from or written to
+the prompt cache, all of which the model bills, so a Run's spend is the
+one Insights shows for it. A Run that used its budget or more keeps why
+(`record_budget_stop`, `BudgetStop::Spent` with what it used) and ends
+`blocked` before the Step starts. A usage log that cannot be read is
+logged and lets the Step run; the workflow counts such checks in a row
+(a check whose activity failed outright counts too) and hands the count
+to the next, and the worker ends the Run, as `BudgetStop::Unread`, at
+the `MAX_UNREAD_CHECKS`th (3), so at most two agent Steps in a row run
+unchecked. A check retried after the stop was kept finds it and stops
+again, whatever the log reads then. A Run stopped before a Step that
+would go on from a question or a `retry` ends `blocked` with the asking
+Step still held, so the workflow stops its session, as at `MAX_STEPS`. The
+count of unread checks in a row lives in the workflow's state
+(`FlowWorkflow::budget_unread`), across the Run's Steps. Once the Run's end
+is recorded, `factory_end_run` tells its owner through the Gate notice's
+path (`token_budget::budget_notice`: a `factory_gate_waiting`
+notification flagged `budgetStopped`, pushed, one per Run, whose title
+says the Run stopped at its token budget and whose text says how much was
+used of it, or that the use could not be read; the inbox reads it as
+stopped, not waiting, and nothing waits on it), unless the Run's
+definition is quiet.
+
+The budget applies only to measured runtimes: what an agent's model calls
+recorded in the usage log with its session's id. An agent that records
+none (a local or self-hosted runtime) reads as 0 used, and its Run is
+never stopped; when a Run has Step sessions and none recorded any usage,
+the Run API says so (`tokenBudget.measured` false) and the Run view shows
+the budget as not measured. Usage the factory spends outside the Run's
+Step sessions is not counted: the Gate model's reading of the owner's
+words, the stand-in's answers and the Orchestrator's chat run on other
+sessions. A Benchmark's trials are Runs like any other and take the
+budget of the rules they start under. A Run with no budget is never
+checked: its workflow asks for no marker and calls no activity, so its
+history is what it was, and its Steps run as before. The Run API shows a
+Run's budget (`tokenBudget`: `budget`, what its agents `used` so far, read
+from the usage log when one Run is read, none when it cannot be read or
+the Runs are listed, and `stop` when the budget ended it), and the Run
+view shows it under the Run's header. The marker is taken only by a Run
+with a budget, which only a service with this code starts; a worker from
+before it ignores `RunStart::token_budget` and walks such a Run
+unchecked, and a newer worker replays that history without the marker.
+
 `GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,
 `domain/insights.rs`) sums up how the caller's own Runs went over a period of
 at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step
@@ -294,6 +354,43 @@ with their newest Runs, and the tokens each agent Step's session used, read
 from the usage log by session id (`ai_usage`'s `SessionUsageReader`). It
 reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
 zone or Flow name is 400.
+
+`GET /insights/quality?from=&to=&timeZone=&flow=&repository=`
+(`domain/quality.rs`) reads the same Runs, of one repository
+(`owner/name` or its URL) or of all, for CI health, review quality, cost per
+merged pull request and the autonomy rate. Each wait of `ci` that ends
+`green`, `red` or `timeout` keeps the jobs that finished on its head
+(`PullRequests::finished_jobs`, `RunRepository::record_ci_wait`): passed,
+failed, cancelled, or `setup` when the step that failed sets the job up
+(`SETUP_STEPS`: GitHub Actions' own, checkout, cache, installing
+dependencies or a known toolchain, never a step named "Setup" that runs
+the pull request's work) or GitHub Actions says, at the start of a line, that it
+could not download or resolve an action (`SETUP_ERRORS`); a bare `404` or
+network error is a test's own output. A failed job keeps the first test its
+check run annotated as failed, as `path: title`, at most 200 bytes (never
+its message, which is log output). Beside them the wait keeps,
+marked replaced, the runs cancelled on a head a newer push replaced: earlier
+heads of the wait, and the head of the Run's last wait (`last_ci_wait`),
+less the jobs that wait kept there (a matrix's fail-fast cancels before
+any push), at most two, read without details. Keeping it is best effort and never fails
+the Step: all of it is bounded to 25 s (`CI_RECORD_BOUND`, the jobs' reads
+to 20 s), at most six reads of failed jobs' steps and annotations, and none
+once the keeping would end past the wait's deadline. A retry that reads
+another head or verdict replaces the kept wait. Insights then class a
+failed job as flaky when the same test, or a step named for something
+narrower than the job's whole work (not "Run tests" or a bare command),
+failed in that job on two or more pull requests of the period, else as its
+pull request's own, and list those that did, newest first. They measure a pull request's first wait to its first green one,
+count red waits as CI fix rounds and review rounds that ended `changes` as
+review fix rounds, count rounds per Run, the share clean after the first
+round, Blockers by reviewer Role and by Agent, repeated Blockers (the same
+text an earlier round of the Run found) and texts found in two or more
+Runs. A Run merged with no person stepping in when it merged and ended
+with no Gate a person answered (not a Standing Rule, the stand-in or an
+agent), no Step its owner steered, and no `manual` end. Cost per merged
+pull request is every Run's usage over the merged ones: in dollars when
+every model call was priced, in tokens otherwise. A repository that names
+none is 400.
 
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
 `evaluation/insights.rs`, `inbound/evaluation.rs`): an
@@ -482,7 +579,9 @@ acknowledges the request; `plan`, `write`, `review`, `fix` and `ci_fix`, which
 hand an agent a prompt built from the Step's instructions
 (`built_in_steps/*.md`), the Run's request, and what the Run's earlier Steps
 produced; and `publish`, `ci`, `ready_to_merge` and `merge`, which take the
-Run's branch to a merged pull request (`src/domain/pull_request_steps.rs`). The
+Run's branch to a merged pull request (`src/domain/pull_request_steps.rs`),
+and `update`, which brings a branch behind its base up to date
+(`src/domain/built_in_steps/update.rs`). The
 agent is the `StepAgent` port.
 Each entry an agent does names the Role it fills (`"role": "planner"`), or
 the Roles of its review panel (`"reviewers": [...]`): a Flow that leaves
@@ -690,6 +789,49 @@ agent's work, cut to the 64 KiB a Step keeps. The rounds show on the Step
 `LocalAgent` runs no command, and answers a round of checks `failed`: no
 check ran.
 
+Each check the engine runs is told the change it checks
+(`src/domain/check_context.rs`), since its worktree may hold only the
+checked commit (fetched at depth 1 in a shallow clone), so git alone
+cannot say what changed. Its shell exports two variables, outside the
+check's own command, which the round records and shows as written:
+
+- `MACRO_CHECK_BASE`: the commit the change is made against, the merge base
+  GitHub's comparison of the Run's base (the commit a Benchmark trial is
+  pinned to, else the base branch) with the checked commit gives. Setting
+  the worktree up fetches it when the repository lacks it (at depth 1 in a
+  shallow clone), so `git diff --name-only "$MACRO_CHECK_BASE" HEAD` works;
+  a fetch that fails is said in the set-up's output and on the file's
+  first line (`partial`), and holds nothing up.
+  Empty when the comparison failed and the Run pins no commit.
+- `MACRO_CHECK_CHANGED`: the absolute path of a file listing the changed
+  paths, `<round>.changed` beside the round's worktree in
+  `${XDG_CACHE_HOME:-$HOME/.cache}/macro-check`: outside the repository's
+  tree, so git never sees it and nothing commits it. Setting the worktree
+  up writes it afresh on each attempt (to a file of its own, moved into
+  place); removing the worktree removes it, and the four-hour sweep takes
+  one left behind.
+
+The file's first line says what the list holds: `complete` (every changed
+path, and the base is in the repository), `partial` (the list or the base
+cannot be trusted whole: GitHub lists at most 300 files of a comparison,
+and none of one too large to list; a path holding a line break, and paths
+past 64 KiB once single-quoted for the shell, are left out, since
+sandboxes run the set-up as one `bash -c` argument, which Linux holds to
+128 KiB; or the base could not be fetched, or GitHub gave none), or
+`unavailable` (none: the comparison failed). Each line after it is one path from the
+repository's root, as GitHub names it: a renamed file under both its names,
+the earlier first, and a removed file though the worktree no longer holds
+it. A check that keeps to the change checks everything unless the first
+line is `complete`, or when `MACRO_CHECK_CHANGED` is unset. A comparison
+that fails never holds the checks up nor fails the round: the checks run,
+told the list is `unavailable`, and the engine logs why. Both are read from
+GitHub in the Step's activity, on each attempt, so the workflow and its
+replay are unchanged. A setup command is told neither, and
+`.macro/setup.json` cannot set either (`MACRO_*`), so no repository
+overrides them. Where the agent runs the checks (a runtime that runs no
+command), neither is set. `accept`'s acceptance checks, run by the same
+round, are told the change the same way.
+
 A repository prepares a fresh checkout for the factory in `.macro/setup.json`
 on its base branch (`src/domain/setup.rs`): `setup`, a list of commands, each
 a `name`, a `run` from the repository's root and an optional `timeout`
@@ -708,7 +850,8 @@ configuration (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
 `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_CONFIG*`, `XDG_CONFIG_HOME`), what
 git runs (`GIT_EXEC_PATH`, `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_ASKPASS`,
 `GIT_TEMPLATE_DIR`), the linker (`LD_*`, `DYLD_*`) or is the factory's own
-(`MACRO_*`); `PATH` and harmless git values such as `GIT_TERMINAL_PROMPT`
+(`MACRO_*`, such as the checks' `MACRO_CHECK_BASE` and
+`MACRO_CHECK_CHANGED`); `PATH` and harmless git values such as `GIT_TERMINAL_PROMPT`
 are allowed; a value over 1 KiB or with a control character) ends the Step
 `failed`, saying why. Secrets never live there: a file holding something
 shaped like a key or a token (the Definition's check), or an `env` name
@@ -857,7 +1000,115 @@ the owner whether to merge; `merge` merges only that commit, naming it to
 GitHub, and a merged pull request reads as merged. A head that moved goes back
 to `ci`, and a person's `revise` goes to `fix` with the review's visits reset.
 The merge-gate entry runs at most three times, including visits that end
-`changed` without asking; then the Run ends for a person.
+`changed` without asking; then the Run ends for a person. `held` and
+`behind` start its visits over (below).
+
+A Run never merges a head its base moved past, and Runs merge into one
+base one after the other (`pull_request_steps.rs`, `built_in_steps/update.rs`,
+`factory_records`' `merge_queue.rs`). Both apply only where the Flow the Run
+kept as it started routes them (`StepInput::routes`, read from
+`factory_run.flow_definition`; a Run that kept none is told nothing, since
+it walks an older Flow than the built-in one of its name, and an outcome
+its Flow does not route above `merge` would fall through to the merge):
+
+- `ready_to_merge` and `merge` end `behind` when the head lacks the commit
+  the base branch is at (`PullRequests::merge_base`), so a person is never
+  asked about, and `merge` never merges, a head whose checks ran without a
+  commit the base gained; `merge` also reads a refused merge whose base
+  moved meanwhile (a branch protection that wants branches up to date) as
+  `behind`. The base can still move between `merge`'s read and GitHub's
+  merge, by a merge made outside the factory: only that protection closes
+  that window.
+- `update` (the writer's Step) merges the base into the branch, never
+  rebases it: the branch keeps every commit it had, so nothing anyone
+  pushed is lost, nothing is force-pushed, and the commits review rounds
+  and checks recorded stay reachable. GitHub merges it (`update_branch`,
+  "Update branch", only while the branch's head is the one read; a push
+  since fails the attempt for a retry); when GitHub answers with a merge
+  conflict, the writer resolves it in its session (`resolve.md`: `git
+  merge` the base's head, no rebase, reset or force-push). Any other
+  refusal from GitHub (a token without a scope, a branch it may not push
+  to) is no conflict an agent resolves: the Step ends `conflict` with
+  GitHub's message, which opens the entry's Gate for the owner (below),
+  so a person grants what GitHub asks and answers `retry`, rather than
+  the Run failing. Nothing is kept for it, so `retry` asks GitHub again. The update is
+  kept before the agent is asked (`factory_branch_update`), so a retry goes
+  on the way it started. GitHub merges after it answers, and may never
+  merge (its merge failed later, or someone pushed in between): once its
+  merge has not shown on the branch within `UPDATE_SHOWS_WITHIN` (two
+  minutes), the branch is read again and GitHub asked again from its head
+  now, which replaces the update kept; still nothing shown fails the
+  attempt for a retry, which does the same, so the Step's retries bound
+  it. Then the repository's checks round runs on the
+  branch, as for `write` and `fix`. It ends `done` only when the branch's
+  head is a merge commit whose parents are exactly, in order, the Run's
+  reviewed head and the base's commit the update asked GitHub to merge
+  (`PullRequests::commit_parents`, GitHub's git database), the branch's
+  head is still that merge, and the checks passed: only the base came in,
+  so the Run goes back through `ci` to the merge Gate, which asks again,
+  and the merge becomes the reviewed head, for the next update to merge
+  into. The reviewed head (`factory_reviewed_head`) is the head a review
+  round last passed on (`ReviewRoundsImpl::close_round`) or such a merge;
+  nothing else writes it, so asking GitHub again from a head someone
+  pushed (`restart_branch_update`) never makes that head reviewed. Where
+  the update started does not count: the head GitHub was asked from may be
+  anyone's. Anything else ends it `resolved`, which goes back through
+  `review` and `accept`, their visits reset, then `publish`, `ci` and the
+  merge Gate: an agent's resolution, a fix a checks round asked for,
+  someone's push after the merge or during the wait for it (even one that
+  merged the base itself), a person's resolution GitHub merged a moved
+  base into after their `retry`, a branch that already held its base when
+  the update started, and a Run that keeps no reviewed head (its review
+  passed before the factory kept one). A merge made by hand with exactly
+  those two parents and changes of its own is the one case the parents do
+  not tell apart from GitHub's. `conflict` when the writer could not resolve it, or what it
+  pushed does not hold both the base's head and the branch's former head,
+  opens the entry's Gate (no kind, so no rule, stand-in or Orchestrator
+  answers it): `stop`, or `retry` once a person resolved it on the branch.
+  `retry` runs `update` again, which finds the branch holding its base
+  through the person's commits and ends `resolved`, so a person's
+  resolution is reviewed and accepted before the merge Gate asks, and a
+  `merge_when_green` rule never merges it on CI alone. A `behind` from the
+  merge Gate or from `merge` starts the merge Gate's visits over, so a base
+  people keep merging into never uses up its three askings; what bounds
+  that loop is `update`'s ten visits a Run (a conflict's `retry`s count
+  too), then the Run ends for a person. Each update is a full checks round
+  and CI run, so ten in a row means the base moves faster than the Run's CI
+  can follow, which a person settles (holding merges, or merging it by
+  hand); the merge queue keeps other factory Runs from overtaking one at
+  the front, so only merges made outside the factory use it up there.
+- The merge Gate's approval never carries over an update (a wait in the
+  queue keeps it, below): whatever came in, the merge Gate asks again (a `merge_when_green` rule answers it as
+  before). Telling "unchanged apart from the base" apart would mean
+  trusting a textual merge that can still break the change, and every way
+  into `merge` stays that Gate's `approve` (`Flow::check_merges`).
+- `merge` enters its base's queue (`factory_merge_queue`) once Control
+  Files and the Main Hold let it, keeping its place from the first time it
+  reached its merge, and waits while a Run that reached it first is ahead:
+  one that has not ended and is at its merge or left it less than
+  `QUEUE_PLACE_KEPT` (90 minutes) ago, to update its branch or be asked
+  again, so the Runs behind it do not merge first and leave it behind
+  again. A Run past that goes on without it, and gets its place back when
+  it returns. One Run of a base merges at a time: its turn
+  (`MergeQueueRepository::take_merge_turn`, an advisory lock per base) is
+  taken before it reads the Runs ahead and held through GitHub's merge,
+  so a Run that comes back to its place just as another passed its turn
+  waits for that merge, then finds its head behind the base, rather than
+  merge beside it untested; it is let go on every path, by being dropped. After `QUEUE_WAIT` (25 minutes) still behind someone, `merge`
+  ends `queued`, which `code` routes back to `merge` itself with the
+  approval it has, asking no one (`Flow::check_merges` lets a `merge`
+  entry's `queued` lead only back to that entry). The approval holds only
+  while nothing changed: `merge` merges the approved head only while its
+  checks still pass (else `changed`, back through `ci` to the Gate), the
+  head holds its base (else `behind`), and GitHub's merge names that head
+  (a push since is `changed`). `merge` runs at most twelve times per
+  approval (each `approve` resets its visits; about five hours of waits),
+  then its merge Gate asks again; the Gate's three visits bound a Run's
+  queue waits to some fifteen hours before it ends for a person. A Run
+  that merged leaves the queue; one that leaves its merge otherwise keeps
+  its place. The wait for a Main Hold and the queue's share those 25
+  minutes, short of a Step attempt's 30; a hold set while it waited ends
+  it `held` at once.
 
 Once its pull request merged, the Run's branch `factory/{run id}` is
 deleted, as GitHub's "delete branch after merge" does: by `merge` after
@@ -1228,11 +1479,12 @@ Standing Rule or the stand-in answers was never left to a person, so it
 sent no such notification. `GET /runs/waiting` lists the caller's Runs
 waiting at an unanswered Gate, whatever the definition says.
 
-A Run started without a task files its notice under the owner's User
-entity, which the inbox does not list (`notification_inbox`'s
-`CANDIDATE_TYPES`; a User is no item the inbox can show or check access
-to), so that notice reaches the owner only live and by push, and opens the
-Run from there. Its Gate still shows in "Waiting on you" (`GET
+A Run started without a task files its notice under the owner's own User
+entity. The inbox lists a User's notices only to that user (Soup's
+`user_gate`), each such Run on a row of its own (`notification_inbox`'s
+`place_about_the_viewer`), so the notice reaches the owner in the inbox as
+well as live and by push, opens the Run from there, and is marked done or
+withdrawn as a task's is. Its Gate also shows in "Waiting on you" (`GET
 /runs/waiting`), which lists every waiting Run, with a task or without.
 
 A team's Orchestrator Definition also has an owner section
@@ -1589,7 +1841,8 @@ from it (`built_in_flows::walked_flow`; a Run kept before falls back to the
 built-in Flow of its name). A Definition's Flow must merge only through a
 merge Gate (`Flow::check_merges`, which a test holds the built-in Flows
 to): a Gate on `ready_to_merge` or `merge` is of kind `merge`, a `merge` Gate is only on
-`ready_to_merge`, every way into `merge` is that Gate's `approve`, and the
+`ready_to_merge`, every way into `merge` is that Gate's `approve` (or a
+`merge` entry's `queued` back to itself, which keeps that approval), and the
 entry above `merge`, with no `next`, is that Gate's, never skipped and
 routing every other outcome; so the Orchestrator never approves a merge
 and only the `merge_when_green` rule merges without a person. A Run on its
@@ -1611,7 +1864,9 @@ Flow goes into the workflow's input as a built-in one does, so the workflow
 and the interpreter did not change, and Runs in flight replay as before. A
 starter Definition is in `definition_template/` (the built-in Flows, with no
 post-merge Steps in `code`; `primary` and `backup` Agents whose bots must be
-replaced; a person merges), which a test reads; `factory_definition_check`
+replaced: `read_definition` refuses a placeholder bot id, all zeros but its
+last two digits (`is_placeholder_bot`), so the template as shipped does not
+read; a person merges), which a test reads with its bots replaced; `factory_definition_check`
 (`services/factory_service`) checks one in a folder.
 
 Self-improvement (`src/domain/self_improvement.rs`): a team's Definition
@@ -1726,7 +1981,9 @@ Definition.
   prompts.
 - `src/domain/session_agent.rs`: an agent Step in a Macro agent session.
 - `src/domain/pull_request_steps.rs`: `publish`, `ci`, `ready_to_merge` and
-  `merge`, over the `PullRequests` port.
+  `merge`, over the `PullRequests` port, with the merge queue and the
+  engine's half of `update`; `src/domain/built_in_steps/update.rs`: the
+  `update` Step.
 - `src/domain/review_rounds.rs`: review rounds: what a reviewer hands
   back, the diff a finding is in, and opening and closing a round.
 - `src/domain/built_in_steps/checks_round.rs` and `src/domain/checks.rs`:
@@ -1801,19 +2058,38 @@ Definition.
   request is `unknown`, they merge nothing. A view rendered outside the
   provider merges nothing either for a person who may have the factory
   (`usePrMergeGuard`'s default), and the provider wraps the app's ownerless
-  dialogs too. Limits: the guard is in the web app only, so GitHub itself
-  (and any client calling Macro's merge route) still merges a Run's pull
-  request; and a viewer who cannot see the Run (a teammate on a hidden
-  task, someone off the team) is not guarded, as the lookup must not tell
-  them a Run exists. A Step that finds the Run's pull request keeps its page
+  dialogs too. Macro's GitHub merge route (`POST
+  /github_pull_requests/merge` in `services/authentication_service`) refuses
+  too, whoever calls it, the web app, an agent or another client: a pull
+  request whose page a Run that has not ended keeps
+  (`factory_records::domain::merge_guard`, any owner's Run) is refused
+  before GitHub is asked, 409 naming the Run and its merge Gate to a caller
+  who sees the pull request on GitHub (its branch, `factory/<run_id>`,
+  already shows them the id), and 404 `Not Found`, as GitHub answers, to
+  anyone else, so the refusal tells no one of a Run they could not find on
+  GitHub. A read of the Runs that fails refuses the merge (500): they are in
+  the database the route reads the caller's GitHub grant from, so the
+  merge would rarely get further, and no pull request's head is known
+  there to tell a Run's branch without asking GitHub. A pull request whose
+  Runs all ended, or that no Run opened, merges as before. The engine never
+  calls that route: the `merge` Step (whether a person or
+  `merge_when_green` answered its Gate) merges on GitHub itself, with the
+  owner's token (`outbound/github_pull_requests.rs`), so the refusal never
+  stands in its way. Limits: GitHub itself still merges a Run's pull
+  request; and in the web app a viewer who cannot see the Run (a teammate
+  on a hidden task, someone off the team) sees no mark, as the lookup must
+  not tell them a Run exists, though the route refuses their merge. A Step that finds the Run's pull request keeps its page
   (`keep_page`); `ci` writes it once per wait, not on every poll. A write
   that fails fails the Step, which is retried until the Step's time runs out
   (`STEP_TOTAL`, 2 hours), and then fails as usual. Until the write lands,
-  or if it never does, the pull request is open on GitHub and the guard
-  cannot see it, so it merges as no Run's.
+  or if it never does, the pull request is open on GitHub and neither guard
+  can see it, so it merges as no Run's.
 - `src/domain/self_improvement.rs`: self-improvement: the failures a
   Run's end keeps, when a self-improvement Run starts, its request, and how
   it is settled.
+- `src/domain/quality.rs`: CI health, review quality, cost per merged
+  pull request and the autonomy rate (`GET /insights/quality`), and how a
+  `ci` wait's finished jobs are classed before they are kept.
 - `src/domain/evaluation.rs`: Scorers, Experiments and Benchmarks, their
   sampling and arm assignment; `evaluation/service.rs` scores a Run that
   ended; `evaluation/insights.rs` the evaluation insights and suites.
@@ -2025,6 +2301,22 @@ Definition.
   Event routines need the creator's `enable-event-routines` flag in
   PostHog, and the harness starts no event intake without PostHog: then a
   repository event's or a Task event's routine is refused, or never runs.
+- Deploy the `factory_merge_queue` migration, then every worker, and only
+  then the API: a Run started on the new `code` Flow against an older
+  worker fails at the unknown `update` Step for good. A Run whose review
+  passed on an older worker keeps no reviewed head, so its first update
+  goes back through review. Runs started before
+  keep walking their Flow, take no queue, and never end `behind`. Nothing
+  in the workflow changed, so no patch marker is needed and the recorded
+  histories replay as before.
+- The merge queue is per repository and base branch across owners: a Run
+  waits on another person's Run ahead of it, which it cannot see: `queued`
+  says only that earlier Runs into the base have not merged yet, never
+  which, nor how many. That much shows by design: a shared queue tells
+  each Run's readers that some Run they may not see is ahead of it on
+  that base. A Run
+  stuck at its merge holds the Runs behind it until it ends, merges, or
+  has been away from its merge longer than `QUEUE_PLACE_KEPT`.
 - A worker older than `accept` cannot serve a Run of the `code` Flow that
   names it: deploy every worker before the API starts such Runs. A Run
   started before it never reaches it.

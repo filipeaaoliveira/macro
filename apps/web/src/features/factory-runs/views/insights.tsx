@@ -8,6 +8,7 @@ import type { InsightsState } from '../primitives/insights-state';
 import { EvaluationPanel } from './shared/evaluation-panel';
 import { InsightsBody } from './shared/insights-body';
 import { InsightsFilters } from './shared/insights-filters';
+import { QualityPanel } from './shared/quality-panel';
 import { WaitingRuns } from './shared/waiting-runs';
 
 /** Run insights on desktop: a list header with the filters, then the page. */
@@ -33,6 +34,10 @@ export function InsightsView(props: {
         <WaitingRuns onOpenRun={props.state.setOpenRunId} />
         <InsightsBody
           source={props.source}
+          onOpenRun={props.state.setOpenRunId}
+        />
+        <QualityPanel
+          params={props.state.params}
           onOpenRun={props.state.setOpenRunId}
         />
         <EvaluationPanel

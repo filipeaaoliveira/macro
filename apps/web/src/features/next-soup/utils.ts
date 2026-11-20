@@ -243,7 +243,7 @@ export const openEntityInNewTab = ({
   entity: EntityData;
   location?: SearchLocation;
 }) => {
-  if (entity.type === 'team') return;
+  if (entity.type === 'team' || entity.type === 'user') return;
   location ??= getRowClickFallbackLocation(entity);
   // Build URL for the entity
   let entityPath: string;
@@ -629,8 +629,8 @@ const openEntity = async (
   entity: EntityData,
   options: OpenEntityOptions
 ): Promise<void> => {
-  // A team is an inbox notification group, never a generic page.
-  if (entity.type === 'team') return;
+  // A team or the viewer is an inbox notification group, never a generic page.
+  if (entity.type === 'team' || entity.type === 'user') return;
   const { allowDuplicate, openInNewSplit, splitHandle, mergeHistory } = options;
   let { location } = options;
 
@@ -967,7 +967,9 @@ export function calendarViewTargetForEntity(
 }
 
 // TODO(dev-rb/github): Map GitHub PRs to { type: 'pr', id }.
-function getEntitySplitContent(entity: Exclude<EntityData, { type: 'team' }>) {
+function getEntitySplitContent(
+  entity: Exclude<EntityData, { type: 'team' | 'user' }>
+) {
   return (
     match(entity)
       // The Tasks-hosted route carries the project's own identity, so an open

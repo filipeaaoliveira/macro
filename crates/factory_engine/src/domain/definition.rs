@@ -37,7 +37,7 @@ use factory_records::domain::evaluation::BENCHMARK_FLOW;
 use factory_records::domain::models::Role;
 use factory_records::domain::self_improvement::IMPROVE_FLOW;
 use factory_records::domain::standing_rules::{
-    MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition,
+    MAX_QUEUE_LIMIT, MAX_TOKEN_BUDGET, MIN_QUEUE_LIMIT, MIN_TOKEN_BUDGET, OrchestratorDefinition,
 };
 use serde::Deserialize;
 
@@ -281,6 +281,9 @@ pub enum DefinitionError {
     /// The Queue limit is out of range.
     #[error("{RULES_FILE}: queueLimit must be from {MIN_QUEUE_LIMIT} to {MAX_QUEUE_LIMIT}")]
     QueueLimit,
+    /// The token budget is out of range.
+    #[error("{RULES_FILE}: tokenBudget must be from {MIN_TOKEN_BUDGET} to {MAX_TOKEN_BUDGET}")]
+    TokenBudget,
     /// `factory.json` names a Flow the factory keeps for itself: the
     /// benchmark Flow, or the self-improvement Flow.
     #[error(
@@ -510,11 +513,47 @@ pub fn flow_path(name: &str) -> String {
     format!("flows/{name}.json")
 }
 
+/// `agents.json`'s Agents' names, in the order it lists them.
+#[derive(Deserialize)]
+struct ListedAgents {
+    agents: KeysInOrder,
+}
+
+/// A JSON object's keys, in the order it holds them.
+struct KeysInOrder(Vec<String>);
+
+impl<'de> Deserialize<'de> for KeysInOrder {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Keys;
+
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = KeysInOrder;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("an object")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<KeysInOrder, A::Error> {
+                let mut keys = Vec::new();
+                while let Some((key, _)) = map.next_entry::<String, serde::de::IgnoredAny>()? {
+                    keys.push(key);
+                }
+                Ok(KeysInOrder(keys))
+            }
+        }
+
+        deserializer.deserialize_map(Keys)
+    }
+}
+
 /// Read the Factory Definition `files` hold, and check it: every file
 /// reads, every Flow holds together and names only Steps `serves` says a
-/// worker serves, its Agents fill every Role its Flows name, its rules are
-/// ones the factory takes, and its Scorers, Experiments and Benchmarks
-/// name only its own Flows and Agents.
+/// worker serves, its Agents have no placeholder bot id and fill every Role
+/// its Flows name, its rules are ones the factory takes, and its Scorers,
+/// Experiments and Benchmarks name only its own Flows and Agents.
 pub async fn read_definition<F: DefinitionFiles>(
     files: &F,
     serves: impl Fn(&StepName) -> Option<StepUse>,
@@ -562,6 +601,26 @@ pub async fn read_definition<F: DefinitionFiles>(
 
     // The Agents must fill every Role an entry of its Flows names.
     let agents: AgentDefinition = required(files, AGENTS_FILE).await?;
+    // An Agent whose bot is the template's placeholder names no agent: a
+    // Run would start and then fail at its first Step. The error lists
+    // them as the file does, which only its text still holds.
+    let mut placeholders = agents.placeholder_bots();
+    if !placeholders.is_empty() {
+        let listed = text(files, AGENTS_FILE)
+            .await?
+            .and_then(|text| serde_json::from_str::<ListedAgents>(&text).ok())
+            .map(|listed| listed.agents.0)
+            .unwrap_or_default();
+        placeholders.sort_by_key(|name| {
+            listed
+                .iter()
+                .position(|listed| listed == name.as_str())
+                .unwrap_or(usize::MAX)
+        });
+        return Err(
+            DefinitionError::Agents(AgentDefinitionError::PlaceholderBots(placeholders)).into(),
+        );
+    }
     let roles: BTreeSet<&Role> = flows
         .values()
         .flat_map(|flow| &flow.entries)
@@ -581,6 +640,12 @@ pub async fn read_definition<F: DefinitionFiles>(
         .and_then(|standing_rules| standing_rules.queue_limit);
     if queue_limit.is_some_and(|limit| !(MIN_QUEUE_LIMIT..=MAX_QUEUE_LIMIT).contains(&limit)) {
         return Err(DefinitionError::QueueLimit.into());
+    }
+    let token_budget = rules
+        .standing_rules
+        .and_then(|standing_rules| standing_rules.token_budget);
+    if token_budget.is_some_and(|budget| !(MIN_TOKEN_BUDGET..=MAX_TOKEN_BUDGET).contains(&budget)) {
+        return Err(DefinitionError::TokenBudget.into());
     }
 
     // A Definition's Scorers and Experiments judge and split its own

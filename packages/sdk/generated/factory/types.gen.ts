@@ -268,6 +268,24 @@ export type BenchmarkSummary = {
 };
 
 /**
+ * One reviewer's, or one Agent's, Blockers.
+ */
+export type BlockerCount = {
+    /**
+     * The Blockers it found.
+     */
+    blockers: number;
+    /**
+     * The reviewer's Role, or the Agent.
+     */
+    name: string;
+    /**
+     * The reviews it made: its reviewer Steps.
+     */
+    reviews: number;
+};
+
+/**
  * Where the board's next page starts: past this Run, in the board's order
  * (newest first).
  */
@@ -328,6 +346,19 @@ export type BoardScope = 'mine' | 'team';
  * Where a Run is, as the board groups it.
  */
 export type BoardState = 'running' | 'waiting' | 'held' | 'stopped' | 'finished';
+
+/**
+ * Why a Run's token budget ended it, before an agent Step.
+ */
+export type BudgetStop = {
+    reason: 'spent';
+    /**
+     * The tokens they had used, as Insights counts them.
+     */
+    used: number;
+} | {
+    reason: 'unread';
+};
 
 /**
  * How one check of a verified round ran.
@@ -407,6 +438,113 @@ export type CheckRoundEnd = {
  * How a round of a Step's checks ended.
  */
 export type CheckRoundOutcome = 'passed' | 'failed';
+
+/**
+ * What a CI job's failure was.
+ */
+export type CiCause = 'own' | 'setup' | 'flaky' | 'cancelled';
+
+/**
+ * How many CI failures had each cause.
+ */
+export type CiCauseCounts = {
+    /**
+     * Cancelled.
+     */
+    cancelled: number;
+    /**
+     * Flaky.
+     */
+    flaky: number;
+    /**
+     * The pull request's own.
+     */
+    own: number;
+    /**
+     * The CI's setup.
+     */
+    setup: number;
+};
+
+/**
+ * How the period's pull requests fared in CI.
+ */
+export type CiHealth = {
+    /**
+     * The jobs' failures by cause.
+     */
+    causes: CiCauseCounts;
+    /**
+     * Rounds Runs spent fixing CI: each red wait sends the change to be
+     * fixed.
+     */
+    ciFixRounds: number;
+    firstPushToGreen?: null | DurationStats;
+    /**
+     * Each job, the reddest first.
+     */
+    jobs: Array<CiJobHealth>;
+    /**
+     * Failures, by test or named step, on two or more pull requests,
+     * newest first.
+     */
+    recurring: Array<RecurringCiFailure>;
+    /**
+     * Those that ended red.
+     */
+    redWaits: number;
+    /**
+     * Rounds Runs spent fixing reviewers' Blockers, apart from CI.
+     */
+    reviewFixRounds: number;
+    /**
+     * Runs that waited on CI.
+     */
+    runs: number;
+    /**
+     * Runs that spent one or more.
+     */
+    runsWithCiFixes: number;
+    /**
+     * Waits on CI that ended: green, red or timed out.
+     */
+    waits: number;
+};
+
+/**
+ * One CI job across the period's waits.
+ */
+export type CiJobHealth = {
+    /**
+     * Its failures by cause, cancelled runs included.
+     */
+    causes: CiCauseCounts;
+    /**
+     * How many times it finished, passed or red; a cancelled run is not
+     * counted.
+     */
+    finished: number;
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * How many pull requests it was red on.
+     */
+    pullRequestsFailed: number;
+    /**
+     * How many of those were red.
+     */
+    red: number;
+    /**
+     * The share of them that were red, from 0 to 1.
+     */
+    redRate: number;
+    /**
+     * The repository it runs in, by URL.
+     */
+    repository?: string | null;
+};
 
 /**
  * The Control Files a Run's branch changed: files that decide whether the
@@ -543,6 +681,66 @@ export type DefinitionSettings = {
      * The team; none when the person is on no team.
      */
     teamId?: string | null;
+};
+
+/**
+ * What merging cost, and how often it took no person.
+ */
+export type DeliveryInsight = {
+    /**
+     * Runs that merged with no person stepping in: no Gate a person
+     * answered, no Step they steered, and no manual end.
+     */
+    autonomous: number;
+    /**
+     * The share of ended Runs that did, from 0 to 1.
+     */
+    autonomyRate?: number | null;
+    /**
+     * What every Run cost per merged pull request, in US dollars; none
+     * unless every call was priced.
+     */
+    costPerMergedUsd?: number | null;
+    /**
+     * What their priced model calls cost, in US dollars.
+     */
+    costUsd: number;
+    /**
+     * Runs that ended.
+     */
+    endedRuns: number;
+    /**
+     * Runs that ended for a person to take over.
+     */
+    manual: number;
+    /**
+     * Runs with usage recorded.
+     */
+    measuredRuns: number;
+    /**
+     * Runs that merged their pull request.
+     */
+    merged: number;
+    /**
+     * Ended Runs with a Gate a person answered.
+     */
+    personAnswered: number;
+    /**
+     * Ended Runs with a Step their owner steered.
+     */
+    steered: number;
+    /**
+     * The tokens every Run's agents used.
+     */
+    tokens: TokenCounts;
+    /**
+     * The tokens every Run used per merged pull request.
+     */
+    tokensPerMerged?: number | null;
+    /**
+     * Their model calls with no price.
+     */
+    unpricedCalls: number;
 };
 
 /**
@@ -1123,6 +1321,16 @@ export type OrchestratorDefinition = {
      * Off, as when a definition is sent without it, a Run posts nothing.
      */
     taskThread?: boolean;
+    /**
+     * The token budget: the most tokens a Run's agent Steps may use, as
+     * Insights counts them (input, output, and input read from or written
+     * to the prompt cache). Before each agent Step, a Run that used as
+     * many or more ends `blocked`. None, and a definition sent without it,
+     * sets no budget. From [`MIN_TOKEN_BUDGET`] to [`MAX_TOKEN_BUDGET`].
+     * A Run keeps it with its rules, so a change to the definition does
+     * not change a Run under way.
+     */
+    tokenBudget?: number | null;
 };
 
 /**
@@ -1281,6 +1489,130 @@ export type PullRequestUrls = {
 };
 
 /**
+ * CI health, review quality, cost and autonomy of a person's Runs over a
+ * period.
+ */
+export type QualityInsights = {
+    /**
+     * Whether the period had more Runs than that.
+     */
+    capped: boolean;
+    /**
+     * How their pull requests fared in CI.
+     */
+    ci: CiHealth;
+    /**
+     * What merging cost, and how often it took no person.
+     */
+    delivery: DeliveryInsight;
+    /**
+     * The Flow read, or none for every Flow.
+     */
+    flow?: string | null;
+    /**
+     * The period's first day.
+     */
+    from: string;
+    /**
+     * The repositories the period's Runs work on, to pick one from.
+     */
+    repositories: Array<string>;
+    /**
+     * The repository read, by URL, or none for every repository.
+     */
+    repository?: string | null;
+    /**
+     * How their review rounds went.
+     */
+    review: ReviewQuality;
+    /**
+     * The most Runs read: the newest in the period.
+     */
+    runCap: number;
+    /**
+     * The time zone its days are in.
+     */
+    timeZone: string;
+    /**
+     * Its last day.
+     */
+    to: string;
+};
+
+/**
+ * A Blocker text found in two or more Runs.
+ */
+export type RecurringBlocker = {
+    /**
+     * How many times.
+     */
+    blockers: number;
+    /**
+     * When its round last started.
+     */
+    lastFoundAt: string;
+    /**
+     * The reviewers' Roles that found it.
+     */
+    reviewers: Array<string>;
+    /**
+     * The newest Runs it was found in.
+     */
+    runLinks: Array<RunLink>;
+    /**
+     * In how many Runs it was found.
+     */
+    runs: number;
+    /**
+     * The text, as last written.
+     */
+    text: string;
+};
+
+/**
+ * A failure of a job, by the test or the named step that failed, on two or
+ * more pull requests of the period.
+ */
+export type RecurringCiFailure = {
+    /**
+     * The CI's setup, or flaky.
+     */
+    cause: CiCause;
+    /**
+     * The test that failed, as its check run annotated it: `path: name`.
+     */
+    failure?: string | null;
+    /**
+     * How many times it failed.
+     */
+    failures: number;
+    /**
+     * The job.
+     */
+    job: string;
+    /**
+     * When it last failed.
+     */
+    lastFailedAt: string;
+    /**
+     * How many pull requests it failed on.
+     */
+    pullRequests: number;
+    /**
+     * The repository, by URL.
+     */
+    repository?: string | null;
+    /**
+     * The newest Runs it failed in.
+     */
+    runs: Array<RunLink>;
+    /**
+     * The step that failed, when it was read.
+     */
+    step?: string | null;
+};
+
+/**
  * A trial whose Run was refused.
  */
 export type RefusedTrial = {
@@ -1372,6 +1704,60 @@ export type ReviewFinding = {
      * Why it must change.
      */
     why: string;
+};
+
+/**
+ * How the period's review rounds went.
+ */
+export type ReviewQuality = {
+    /**
+     * Blockers found.
+     */
+    blockers: number;
+    /**
+     * Blockers by Agent, most first.
+     */
+    byAgent: Array<BlockerCount>;
+    /**
+     * Blockers by reviewer Role, most first.
+     */
+    byReviewer: Array<BlockerCount>;
+    /**
+     * The share of them clean, from 0 to 1.
+     */
+    cleanFirstRate?: number | null;
+    /**
+     * Those whose first round found no Blocker.
+     */
+    cleanFirstRounds: number;
+    /**
+     * Runs whose first round ended.
+     */
+    firstRounds: number;
+    /**
+     * Blockers no earlier round of their Run found.
+     */
+    newBlockers: number;
+    /**
+     * Blocker texts found in two or more Runs, in the most Runs first.
+     */
+    recurring: Array<RecurringBlocker>;
+    /**
+     * Blockers an earlier round of their Run found too: not fixed.
+     */
+    repeatedBlockers: number;
+    /**
+     * Runs with one or more review rounds.
+     */
+    reviewedRuns: number;
+    /**
+     * Their rounds.
+     */
+    rounds: number;
+    /**
+     * Rounds per reviewed Run.
+     */
+    roundsPerRun?: number | null;
 };
 
 /**
@@ -1482,6 +1868,7 @@ export type RulesSource = 'default' | 'team' | 'project' | 'definition';
  */
 export type Run = {
     automation?: null | RunAutomation;
+    budgetStop?: null | BudgetStop;
     controlFiles?: null | ControlFileChanges;
     /**
      * When the Run was created.
@@ -1589,6 +1976,7 @@ export type RunDetail = {
      * Its Steps, in the order they started.
      */
     steps: Array<Step>;
+    tokenBudget?: null | RunTokenBudget;
 };
 
 /**
@@ -1739,6 +2127,30 @@ export type RunRules = {
      * Where they came from.
      */
     source: RulesSource;
+};
+
+/**
+ * A Run's token budget as the Run API shows it.
+ */
+export type RunTokenBudget = {
+    /**
+     * The most tokens its agent Steps may use, as it kept it.
+     */
+    budget: number;
+    /**
+     * False when the Run's agent sessions recorded no usage at all, as an
+     * agent whose runtime is not measured (local, self-hosted) records
+     * none: its use reads as 0, and the budget never stops it. True when
+     * it was measured, or not read.
+     */
+    measured: boolean;
+    stop?: null | BudgetStop;
+    /**
+     * The tokens they used so far, as Insights counts them; none when
+     * the usage log could not be read, or the Run was listed rather than
+     * read on its own.
+     */
+    used?: number | null;
 };
 
 /**
@@ -2677,6 +3089,50 @@ export type GetFactoryEvaluationResponses = {
 };
 
 export type GetFactoryEvaluationResponse = GetFactoryEvaluationResponses[keyof GetFactoryEvaluationResponses];
+
+export type GetFactoryQualityData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * The period's first day, `YYYY-MM-DD`.
+         */
+        from: string;
+        /**
+         * Its last day, included. The period lasts at most 366 days.
+         */
+        to: string;
+        /**
+         * The IANA time zone the days are in, such as `Europe/Lisbon`.
+         */
+        timeZone: string;
+        /**
+         * A built-in Flow's name, to read only its Runs.
+         */
+        flow?: string;
+        /**
+         * A GitHub repository, `owner/name` or its URL, to read only the Runs
+         * that work on it.
+         */
+        repository?: string;
+    };
+    url: '/insights/quality';
+};
+
+export type GetFactoryQualityErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryQualityError = GetFactoryQualityErrors[keyof GetFactoryQualityErrors];
+
+export type GetFactoryQualityResponses = {
+    200: QualityInsights;
+};
+
+export type GetFactoryQualityResponse = GetFactoryQualityResponses[keyof GetFactoryQualityResponses];
 
 export type ListFactoryBoardData = {
     body?: never;

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT other.run_id\n            FROM factory_merge_queue mine\n            JOIN factory_merge_queue other\n                ON other.repo_url = mine.repo_url\n                AND other.base_branch = mine.base_branch\n                AND other.place < mine.place\n            JOIN factory_run run ON run.id = other.run_id\n            WHERE mine.run_id = $1\n                AND run.ended_at IS NULL\n                AND (other.left_at IS NULL\n                    OR other.left_at > now() - make_interval(secs => $2))\n            ORDER BY other.place\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d16657228a2ede42063ba45d81dbfb8c5fbd783b200ed0644b9b247a5a1861a8"
+}

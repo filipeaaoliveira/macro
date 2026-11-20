@@ -337,7 +337,12 @@ async fn serve<A: StepAgent + Clone>(
     if let Some(questions) = parts.questions {
         service = service.with_questions(questions);
     }
-    let service = Arc::new(service.with_evaluation(parts.evaluation.clone()));
+    // A read Run shows what its agent Steps used of its token budget.
+    let service = Arc::new(
+        service
+            .with_evaluation(parts.evaluation.clone())
+            .with_usage(parts.usage.clone()),
+    );
     // Once a Run ended and was scored, its team's failures under its
     // Definition may start a self-improvement Run, through the Run API as
     // the Definition's namer.
@@ -361,7 +366,10 @@ async fn serve<A: StepAgent + Clone>(
         WorkerServices {
             steps: StepServiceImpl::new(parts.repo.clone(), steps.clone())
                 .with_owner_gates(parts.gate_notifier.clone(), parts.task_notes)
-                .with_task_thread(parts.task_thread.clone()),
+                .with_task_thread(parts.task_thread.clone())
+                // A Run with a token budget is checked against what the
+                // usage log says its agent sessions used.
+                .with_usage(parts.usage.clone()),
             reviews,
             gates: parts
                 .gates

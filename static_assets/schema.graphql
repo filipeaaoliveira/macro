@@ -5582,6 +5582,10 @@ type GraphqlFactoryGateWaitingMetadata {
 	an answer.
 	"""
 	notifyOnly: Boolean!
+	"""
+	Whether the Run's token budget ended it: no Gate waits.
+	"""
+	budgetStopped: Boolean!
 }
 
 """
@@ -10264,6 +10268,10 @@ enum GraphqlSoupEntityType {
 	"""
 	TEAM
 	"""
+	The viewer, listed only by attention feeds, for notices about them.
+	"""
+	USER
+	"""
 	An entity outside Soup, such as a routine. Only the deprecated
 	notification `entityType` returns it; read `targetEntityType` instead.
 	Rejected as input.
@@ -10738,6 +10746,61 @@ type GraphqlSoupTeam implements GraphqlSoupEntity {
 	The user who owns the team.
 	"""
 	ownerId: String!
+	"""
+	Properties assigned to this entity that the authenticated user may view.
+	"""
+	properties: [GraphqlProperty!]!
+	"""
+	Notifications associated with this entity for the authenticated user.
+	"""
+	notifications(filter: GraphqlNotificationFilter, limit: Int): [GraphqlNotification!]!
+	"""
+	Whether the authenticated viewer has favorited this entity.
+	"""
+	isFavorited: Boolean!
+	"""
+	The authenticated viewer's effective permission for this entity.
+	"""
+	viewerPermission: GraphqlEntityPermission
+	"""
+	The newest activity on this entity, newest first. Loaded lazily and
+	batched across entities; an activity outage degrades to an empty
+	timeline. Deeper history belongs to the viewer's activity feed.
+	"""
+	activity(limit: Int): [GraphqlActivityEvent!]!
+	"""
+	The viewer's frecency score for this entity, when loaded.
+	"""
+	frecencyScore: Float
+}
+
+"""
+The viewer. Only attention feeds list it, for notices about them alone
+filed under their User, such as a factory Run without a task waiting on
+them; no one is listed another person's.
+"""
+type GraphqlSoupUser implements GraphqlSoupEntity {
+	"""
+	The viewer's Macro user id.
+	"""
+	id: ID!
+	"""
+	Canonical entity kind.
+	"""
+	entityType: GraphqlSoupEntityType!
+	"""
+	Server-only projection facts are unavailable for users.
+	"""
+	cacheProjection: SoupCacheProjection
+	"""
+	No name: a row filed under the viewer names what its notice is about.
+	"""
+	displayName: String
+	"""
+	Common metadata; the viewer owns their own notices, and records no
+	timestamps here.
+	"""
+	metadata: GraphqlEntityMetadata!
 	"""
 	Properties assigned to this entity that the authenticated user may view.
 	"""

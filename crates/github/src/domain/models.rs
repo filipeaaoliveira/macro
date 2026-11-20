@@ -18,8 +18,9 @@ pub(crate) use app_jwt::app_jwt;
 pub use github_pull_requests::domain::models::{
     EnrichGithubPullRequestsProxyRequest, EnrichGithubPullRequestsResponse,
     EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GitRef,
-    GithubBranchDeletion, GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubDraftOutcome,
-    GithubKey, GithubListing, GithubMergeMethod, GithubMergeOutcome, GithubMergeRejection,
+    GithubBranchDeletion, GithubCheckAnnotation, GithubCheckRun, GithubCheckRunResult,
+    GithubCheckSuite, GithubCommitStatus, GithubDraftOutcome, GithubJobStep, GithubKey,
+    GithubListing, GithubMergeMethod, GithubMergeOutcome, GithubMergeRejection,
     GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestCheckRun,
     GithubPullRequestComment, GithubPullRequestDetails, GithubPullRequestHead,
     GithubPullRequestLabel, GithubPullRequestMerge, GithubPullRequestMergeability,

@@ -32,6 +32,7 @@ import type {
   ProjectEntity,
   SearchData,
   TeamEntity,
+  UserEntity,
   WithSearch,
 } from '@entity';
 import { type GithubPullRequestLabel, toSubType } from '@entity/types/entity';
@@ -99,7 +100,8 @@ type SoupEntity =
   | CalendarEventEntity
   | ForeignEntity
   | HarnessEntity
-  | TeamEntity;
+  | TeamEntity
+  | UserEntity;
 
 type SoupItemWithOptionalNotifications = DisplayableSoupItem & {
   data: {
@@ -1002,6 +1004,14 @@ export const mapApiSoupItemToEntity = (
       name: item.data.name,
       ownerId: item.data.ownerId,
       type: 'team' as const,
+    }))
+    // The viewer has no name of their own here: a row filed under them names
+    // what its notice is about.
+    .with({ tag: 'user' }, (item) => ({
+      id: item.data.id,
+      name: '',
+      ownerId: item.data.id,
+      type: 'user' as const,
     }))
     .with({ tag: 'document' }, (item) => ({
       ...item.data,

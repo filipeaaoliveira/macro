@@ -59,7 +59,19 @@ struct CompareMergeBase {
 }
 
 #[derive(serde::Deserialize)]
+struct GitCommit {
+    parents: Vec<BranchCommit>,
+}
+
+#[derive(serde::Deserialize)]
 struct CompareResponse {
+    #[serde(default)]
+    files: Option<Vec<CompareFile>>,
+}
+
+#[derive(serde::Deserialize)]
+struct CompareChangesResponse {
+    merge_base_commit: BranchCommit,
     #[serde(default)]
     files: Option<Vec<CompareFile>>,
 }
@@ -83,6 +95,20 @@ pub struct ComparedFile {
     /// Its unified diff's hunks; none when GitHub gives none, as for a
     /// binary file or one too large to show.
     pub patch: Option<String>,
+}
+
+/// What one commit changed against its merge base with another, as
+/// GitHub's comparison lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComparedChanges {
+    /// The merge base: the commit the paths changed against.
+    pub merge_base: String,
+    /// The paths changed, a renamed file under both its names, the earlier
+    /// first; as many as GitHub listed.
+    pub paths: Vec<String>,
+    /// Whether the paths are every change: GitHub lists at most 300 files
+    /// of a comparison, and none of one too large to list.
+    pub complete: bool,
 }
 
 impl GithubOauthImpl {
@@ -265,6 +291,48 @@ impl GithubOauthImpl {
         Ok(Some(paths))
     }
 
+    /// What `head` changed against its merge base with `base`: the merge
+    /// base, and the paths GitHub lists, a renamed file under both its
+    /// names, with whether they are all of them.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn compare_changes(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<ComparedChanges, GithubError> {
+        let compared: CompareChangesResponse = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/compare/{base}...{head}"),
+                // One commit to a page: the commits are not read, and
+                // GitHub lists the files on the first page whatever its
+                // size.
+                &[("per_page", "1")],
+                "failed to compare commits",
+            )
+            .await?;
+        // GitHub answers a comparison too large to list with no files, and
+        // cuts a longer list at the most it lists.
+        let complete = compared
+            .files
+            .as_ref()
+            .is_some_and(|files| files.len() < COMPARE_FILES_LISTED);
+        let files = compared.files.unwrap_or_default();
+        let mut paths = Vec::new();
+        for file in files {
+            paths.extend(file.previous_filename);
+            paths.push(file.filename);
+        }
+        Ok(ComparedChanges {
+            merge_base: compared.merge_base_commit.sha,
+            paths,
+            complete,
+        })
+    }
+
     /// The best common ancestor of the commits `base` and `head`, both full
     /// commit ids: the newest commit both contain. `None` when they share
     /// no history, or one is not in the repository (GitHub answers 404),
@@ -297,6 +365,50 @@ impl GithubOauthImpl {
             .await;
         match compared {
             Ok(compared) => Ok(Some(compared.merge_base_commit.sha)),
+            Err(GithubError::RepositoryUnavailable) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The parents of the commit `sha`, a full commit id, in their order: a
+    /// merge commit's first is the branch merged into, the second the one
+    /// merged in. `None` when the repository has no such commit (GitHub
+    /// answers 404), and for an id that is not a full commit id. It reads
+    /// the git database, which lists no files, so the read stays small
+    /// whatever the commit changed. An owner or repository name GitHub would
+    /// not take is refused before any request.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn commit_parents(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<Option<Vec<String>>, GithubError> {
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+        if !is_commit_id(sha) {
+            return Ok(None);
+        }
+        let commit: Result<GitCommit, GithubError> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/git/commits/{sha}"),
+                &[],
+                "failed to read a commit",
+            )
+            .await;
+        match commit {
+            Ok(commit) => Ok(Some(
+                commit
+                    .parents
+                    .into_iter()
+                    .map(|parent| parent.sha)
+                    .collect(),
+            )),
             Err(GithubError::RepositoryUnavailable) => Ok(None),
             Err(error) => Err(error),
         }

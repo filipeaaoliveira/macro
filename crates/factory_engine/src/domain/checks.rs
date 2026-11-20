@@ -18,6 +18,10 @@
 //! check the factory runs itself may take, from 1 to 1200 (20 minutes), 600
 //! when left out; a Step starts it only with that much time left. `rounds` is how
 //! many times a Step runs the checks at most, 3 when left out.
+//!
+//! A check the factory runs itself is told the change it checks, in
+//! `MACRO_CHECK_BASE` and `MACRO_CHECK_CHANGED`
+//! ([`crate::domain::check_context`]).
 
 #[cfg(test)]
 mod test;

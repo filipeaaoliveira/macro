@@ -136,6 +136,11 @@ pub(super) async fn walk_step<W: Work>(
             {
                 return Ok(Round::Ended(RunOutcome::Cancelled));
             }
+            // The Step that goes on is an agent's: a Run that used its
+            // token budget ends here, and its held session is stopped.
+            if !work.within_budget(key.run_id).await {
+                return Ok(Round::Ended(RunOutcome::Blocked));
+            }
             let Some(seq) = resume() else {
                 return Ok(Round::Ended(RunOutcome::Blocked));
             };
@@ -172,6 +177,9 @@ pub(super) async fn walk_step<W: Work>(
                 return Ok(Round::Ended(RunOutcome::Cancelled));
             };
             if answer == Outcome::retry() {
+                if !work.within_budget(key.run_id).await {
+                    return Ok(Round::Ended(RunOutcome::Blocked));
+                }
                 let Some(seq) = resume() else {
                     return Ok(Round::Ended(RunOutcome::Blocked));
                 };

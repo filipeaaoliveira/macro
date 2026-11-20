@@ -45,6 +45,9 @@ struct Script {
     rules: Option<OrchestratorDefinition>,
     asked: RefCell<Vec<String>>,
     requests: RefCell<Vec<StepRequest>>,
+    /// The Run used its token budget: every check before an agent Step
+    /// stops it. A Run within it is not noted, as one without a budget.
+    budget_spent: bool,
 }
 
 impl Script {
@@ -66,6 +69,13 @@ impl Work for Script {
 
     fn asks_on_no_result(&self) -> bool {
         !self.before_no_result_gates
+    }
+
+    async fn within_budget(&self, _run_id: RunId) -> bool {
+        if self.budget_spent {
+            self.note("budget spent".to_string());
+        }
+        !self.budget_spent
     }
 
     async fn open(&self, _opening: ReviewRoundOpening) -> Result<bool, Failed> {
@@ -469,6 +479,55 @@ async fn a_run_out_of_steps_at_an_answer_ends_blocked() {
     assert_eq!(held, [1]);
 }
 
+/// A Run that used its token budget while its agent asked ends `blocked`
+/// before the Role goes on with the answer, the asking Step still held for
+/// the workflow to stop its session.
+#[tokio::test]
+async fn a_run_at_its_budget_ends_before_going_on_from_a_question() {
+    let script = Script {
+        ends: [(1, "question")].into(),
+        budget_spent: true,
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan(false), asking(2), 10).await;
+
+    assert_eq!(walked, Ok(Round::Ended(RunOutcome::Blocked)));
+    assert_eq!(held, [1]);
+    assert_eq!(
+        script.asked(),
+        [
+            "start 1",
+            "run 1",
+            "end 1 question",
+            "ask 1 Question of step 1?",
+            "budget spent"
+        ]
+    );
+}
+
+/// A Run that used its token budget ends `blocked` on its owner's `retry`
+/// of an agent that stopped without a result, before the Role goes on.
+#[tokio::test]
+async fn a_run_at_its_budget_ends_before_a_retry() {
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        answers: RefCell::new(vec![Outcome::retry()]),
+        budget_spent: true,
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan(false), asking(0), 10).await;
+
+    assert_eq!(walked, Ok(Round::Ended(RunOutcome::Blocked)));
+    assert_eq!(held, [1]);
+    assert_eq!(
+        script.asked().last().map(String::as_str),
+        Some("budget spent")
+    );
+    assert!(!script.asked().iter().any(|asked| asked == "start 2"));
+}
+
 /// Every Standing Rule on.
 const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     stand_in: factory_records::domain::standing_rules::StandInKinds {
@@ -482,6 +541,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     quiet_gates: false,
     task_thread: false,
     queue_limit: None,
+    token_budget: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
         plan: false,
         blockers: false,

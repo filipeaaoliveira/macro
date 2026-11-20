@@ -22,6 +22,7 @@ use crate::domain::definition::DefinitionError;
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 use crate::domain::gate_owner::OwnerNote;
 use crate::domain::setup::RepositorySetup;
+use crate::domain::token_budget::RunTokenBudget;
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
@@ -31,6 +32,11 @@ pub struct RunStart {
     pub run_id: RunId,
     /// The Flow it walks.
     pub flow: Flow,
+    /// Whether the Run keeps a token budget, which the workflow checks
+    /// before each agent Step. Left out when it keeps none, so the start of
+    /// a Run without one reads as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub token_budget: bool,
 }
 
 /// One Step for a worker to run. A field it does not know is refused, so a
@@ -177,6 +183,18 @@ pub struct StepInput<'a> {
     /// The commit the Run's branch starts from, when the Run is a Benchmark
     /// trial pinned to one; otherwise the branch starts from its base.
     pub base_commit: Option<&'a str>,
+    /// The outcomes the Step's entry routes in the Flow the Run walks: a
+    /// pull request Step ends with one a Flow may lack (`behind`, `queued`)
+    /// only when its entry routes it, so a Run on an older Flow goes on as
+    /// that Flow did.
+    pub routes: &'a [Outcome],
+}
+
+impl StepInput<'_> {
+    /// Whether the Step's entry routes `outcome`.
+    pub fn routes(&self, outcome: &str) -> bool {
+        self.routes.iter().any(|routed| routed.as_str() == outcome)
+    }
 }
 
 /// What an agent is asked to do for one Step.
@@ -404,6 +422,37 @@ pub struct HeadChecks {
     pub actions_unread: bool,
 }
 
+/// A CI job that finished on a commit, as CI health records it: a check
+/// run's latest, or a commit status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinishedJob {
+    /// Its name: the check run's, or the commit status's context.
+    pub name: String,
+    /// How it ended: [`CheckState::Passed`] or [`CheckState::Failed`].
+    pub state: CheckState,
+    /// For a GitHub Actions job that failed, the first of its steps that
+    /// failed, when its steps could be read.
+    pub failed_step: Option<String>,
+    /// What a check run that failed says of itself: its output's title and
+    /// summary.
+    pub detail: Option<String>,
+    /// The failures a check run that failed annotated, such as the tests
+    /// that failed, when they could be read.
+    pub annotations: Vec<FailureAnnotation>,
+}
+
+/// A failure a check run annotated: a test that failed, or an error of the
+/// CI itself, which GitHub Actions puts on `.github`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureAnnotation {
+    /// The file it is on, from the repository's root.
+    pub path: String,
+    /// Its title, when it has one, such as the test's name.
+    pub title: Option<String>,
+    /// What it says.
+    pub message: String,
+}
+
 /// The checks a pull request's base requires, as far as they could be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequiredChecks {
@@ -547,6 +596,22 @@ pub enum Merging {
     Refused(String),
 }
 
+/// What asking GitHub to merge a pull request's base into its branch came
+/// to: GitHub's "Update branch", which adds a merge commit on top of the
+/// branch's head and never rewrites it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BranchUpdating {
+    /// GitHub took it, and merges the base into the branch shortly.
+    Started,
+    /// The branch's head is no longer the commit named: nothing merged.
+    HeadMoved,
+    /// The base and the branch conflict, for this reason: nothing merged.
+    Conflict(String),
+    /// GitHub declined for another reason, as for a token that lacks a
+    /// scope: no conflict, and asking again changes nothing.
+    Declined(String),
+}
+
 /// What an agent handed back for a Step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentAnswer {
@@ -617,6 +682,9 @@ pub struct RunDetail {
     /// Roles, in order: who started, cancelled or linked it, and answered
     /// its Gates.
     pub standing_acts: Vec<StandingActRecord>,
+    /// Its token budget and what its agent Steps used of it; none for a
+    /// Run that keeps no budget.
+    pub token_budget: Option<RunTokenBudget>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their
@@ -1014,6 +1082,15 @@ pub enum FactoryError {
         min: u16,
         /// The highest Queue limit.
         max: u16,
+    },
+    /// A token budget below the smallest or above the largest one a
+    /// definition may set.
+    #[error("the token budget must be from {min} to {max}")]
+    InvalidTokenBudget {
+        /// The smallest token budget.
+        min: u64,
+        /// The largest token budget.
+        max: u64,
     },
     /// A Run already runs on the task, so an Automation starts none.
     #[error("a run is already running on this task")]

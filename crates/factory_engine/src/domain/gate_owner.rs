@@ -143,6 +143,7 @@ pub fn gate_notice(run: &Run, step: &Step) -> Option<GateNotice> {
             question: FactoryGateWaitingMetadata::excerpt(&gate.question),
             asker,
             notify_only: false,
+            budget_stopped: false,
         },
         push: true,
     })
@@ -181,6 +182,7 @@ pub fn gate_told(run: &Run, step: &Step, question: &str) -> Option<GateNotice> {
             question: FactoryGateWaitingMetadata::excerpt(question),
             asker: None,
             notify_only: true,
+            budget_stopped: false,
         },
         push: false,
     })
@@ -229,6 +231,7 @@ pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateN
             question: FactoryGateWaitingMetadata::excerpt(&told),
             asker: None,
             notify_only: true,
+            budget_stopped: false,
         },
         push: false,
     })

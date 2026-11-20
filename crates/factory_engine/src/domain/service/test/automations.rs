@@ -498,6 +498,7 @@ async fn a_full_queue_starts_no_run() {
         TEAM,
         OrchestratorDefinition {
             queue_limit: Some(2),
+            token_budget: None,
             ..OrchestratorDefinition::DEFAULT
         },
     );

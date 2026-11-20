@@ -9,6 +9,7 @@ mod diff;
 mod index;
 mod key;
 mod pull_request;
+mod repository_name;
 mod update;
 
 use chrono::{DateTime, Utc};
@@ -20,8 +21,9 @@ pub use changes::{
     github_key_of,
 };
 pub use checks::{
-    GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubListing, GithubRequiredCheck,
-    GithubRequiredChecks, GithubWorkflowRun, GithubWorkflowRunStatus,
+    GithubCheckAnnotation, GithubCheckRun, GithubCheckRunResult, GithubCheckSuite,
+    GithubCommitStatus, GithubJobStep, GithubListing, GithubRequiredCheck, GithubRequiredChecks,
+    GithubWorkflowRun, GithubWorkflowRunStatus,
 };
 pub use diff::{
     ChangesetRange, GitRef, GithubPullRequestDiff, GithubPullRequestDiffError, PullRequestRef,
@@ -42,6 +44,7 @@ pub use pull_request::{
     GithubPullRequestUser, GithubRepositoryAccess, GithubRepositoryMergeSettings,
     MergeGithubPullRequestRequest, MergeGithubPullRequestResponse, latest_reviews,
 };
+pub use repository_name::{is_github_owner, is_github_repository_name};
 pub use update::{
     GithubDraftOutcome, GithubPullRequestState, GithubPullRequestUpdateRejection,
     GithubStateOutcome, SetGithubPullRequestDraftRequest, SetGithubPullRequestDraftResponse,

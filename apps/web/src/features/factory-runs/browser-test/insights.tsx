@@ -24,6 +24,7 @@ import type {
   RunInsights,
   RunLink,
 } from '../core/insights';
+import type { QualityInsights, QualityParams } from '../core/quality';
 import type { Run } from '../core/run';
 import { RunInsightsView } from '../insights-view';
 
@@ -398,6 +399,13 @@ function createFixtureInsights(): InsightsContext {
       updating: () => false,
       retry: () => {},
     }),
+    // Two repositories' CI waits, review rounds and merges.
+    quality: (params) => ({
+      state: () => 'ready',
+      data: () => qualityFixture(params()),
+      updating: () => false,
+      retry: () => {},
+    }),
     flowNames: () => ({
       state: () => 'ready',
       data: () => ['plan', 'reply'],
@@ -482,3 +490,128 @@ render(
   ),
   document.getElementById('root')!
 );
+
+const APP = 'https://github.com/macro/app';
+
+/** CI health, review quality, cost and autonomy for the fixture's period. */
+function qualityFixture(params: QualityParams): QualityInsights {
+  const run = RUNS[0];
+  const link = {
+    id: run?.id ?? '00000000-0000-7000-8000-000000000001',
+    title: 'Collapse repeated dashes',
+    createdAt: '2026-11-10T09:00:00Z',
+    outcome: 'success' as const,
+  };
+  return {
+    from: params.from,
+    to: params.to,
+    timeZone: params.timeZone,
+    flow: params.flow ?? null,
+    repository: params.repository ?? null,
+    repositories: [APP, 'https://github.com/macro/site'],
+    runCap: 1000,
+    capped: false,
+    ci: {
+      waits: 14,
+      redWaits: 5,
+      runs: 9,
+      causes: { own: 2, setup: 2, flaky: 2, cancelled: 1 },
+      jobs: [
+        {
+          repository: APP,
+          name: 'test',
+          finished: 13,
+          red: 4,
+          redRate: 4 / 13,
+          causes: { own: 2, setup: 0, flaky: 2, cancelled: 1 },
+          pullRequestsFailed: 3,
+        },
+        {
+          repository: APP,
+          name: 'build',
+          finished: 14,
+          red: 2,
+          redRate: 2 / 14,
+          causes: { own: 0, setup: 2, flaky: 0, cancelled: 0 },
+          pullRequestsFailed: 2,
+        },
+      ],
+      firstPushToGreen: { count: 8, medianSeconds: 1260, p90Seconds: 5400 },
+      ciFixRounds: 5,
+      runsWithCiFixes: 4,
+      reviewFixRounds: 7,
+      recurring: [
+        {
+          repository: APP,
+          job: 'build',
+          step: 'Set up job',
+          cause: 'setup',
+          pullRequests: 2,
+          failures: 2,
+          lastFailedAt: '2026-11-12T10:20:00Z',
+          runs: [link],
+        },
+        {
+          repository: APP,
+          job: 'test',
+          step: 'Run tests',
+          cause: 'flaky',
+          pullRequests: 2,
+          failures: 2,
+          lastFailedAt: '2026-11-11T10:20:00Z',
+          runs: [link],
+        },
+      ],
+    },
+    review: {
+      reviewedRuns: 9,
+      rounds: 16,
+      roundsPerRun: 16 / 9,
+      firstRounds: 9,
+      cleanFirstRounds: 3,
+      cleanFirstRate: 3 / 9,
+      blockers: 14,
+      newBlockers: 11,
+      repeatedBlockers: 3,
+      byReviewer: [
+        { name: 'correctness-reviewer', reviews: 16, blockers: 9 },
+        { name: 'scope-reviewer', reviews: 16, blockers: 3 },
+        { name: 'tests-reviewer', reviews: 16, blockers: 2 },
+      ],
+      byAgent: [
+        { name: 'primary', reviews: 40, blockers: 12 },
+        { name: 'backup', reviews: 8, blockers: 2 },
+      ],
+      recurring: [
+        {
+          text: 'The new code path has no test that fails without the change.',
+          runs: 3,
+          blockers: 4,
+          reviewers: ['tests-reviewer'],
+          lastFoundAt: '2026-11-12T09:40:00Z',
+          runLinks: [link],
+        },
+      ],
+    },
+    delivery: {
+      endedRuns: 10,
+      merged: 6,
+      autonomous: 3,
+      autonomyRate: 0.3,
+      personAnswered: 3,
+      steered: 1,
+      manual: 2,
+      measuredRuns: 10,
+      tokens: {
+        input: 820000,
+        output: 96000,
+        cacheRead: 5400000,
+        cacheWrite: 310000,
+      },
+      costUsd: 18.6,
+      unpricedCalls: 0,
+      costPerMergedUsd: 3.1,
+      tokensPerMerged: 1104333,
+    },
+  };
+}

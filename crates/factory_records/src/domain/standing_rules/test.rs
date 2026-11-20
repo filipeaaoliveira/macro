@@ -10,6 +10,7 @@ fn a_definition_is_stored_as_the_kinds_its_rules_decide() {
         quiet_gates: false,
         task_thread: false,
         queue_limit: None,
+        token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
             plan: false,
             blockers: false,
@@ -37,6 +38,7 @@ fn the_owner_section_is_stored_beside_the_kinds() {
         quiet_gates: false,
         task_thread: false,
         queue_limit: None,
+        token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
             plan: false,
             blockers: false,
@@ -121,6 +123,7 @@ fn the_kinds_the_stand_in_answers_are_stored_beside_the_rules() {
         quiet_gates: false,
         task_thread: false,
         queue_limit: None,
+        token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
             plan: false,
             blockers: false,
@@ -149,6 +152,7 @@ fn the_stand_in_never_answers_a_merge_and_is_off_by_default() {
         quiet_gates: false,
         task_thread: false,
         queue_limit: None,
+        token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
             plan: false,
             blockers: false,
@@ -182,6 +186,7 @@ fn the_owner_section_and_the_stand_in_are_stored_together() {
         quiet_gates: false,
         task_thread: false,
         queue_limit: None,
+        token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
             plan: false,
             blockers: false,
@@ -280,4 +285,31 @@ fn the_kinds_the_orchestrator_may_approve_are_stored_beside_the_rules() {
     assert!(definition.orchestrator_approves(RuleGateKind::Plan));
     assert!(!definition.orchestrator_approves(RuleGateKind::Merge));
     assert!(!OrchestratorDefinition::DEFAULT.orchestrator_approves(RuleGateKind::Plan));
+}
+
+#[test]
+fn a_token_budget_is_read_and_sent_only_when_set() {
+    let sent: OrchestratorDefinition = serde_json::from_str(
+        r#"{"plan": false, "blockers": true, "merge": false, "tokenBudget": 500000}"#,
+    )
+    .expect("a definition with a budget");
+    assert_eq!(sent.token_budget, Some(500_000));
+    assert_eq!(
+        serde_json::to_value(sent).expect("serialize")["tokenBudget"],
+        500_000
+    );
+
+    let without: OrchestratorDefinition =
+        serde_json::from_str(r#"{"plan": false, "blockers": true, "merge": false}"#)
+            .expect("a definition without one");
+    assert_eq!(without.token_budget, None);
+    assert!(
+        serde_json::to_value(without)
+            .expect("serialize")
+            .get("tokenBudget")
+            .is_none()
+    );
+    // The budget has a column of its own: it is no stored kind.
+    assert_eq!(sent.kinds(), without.kinds());
+    assert_eq!(OrchestratorDefinition::DEFAULT.token_budget, None);
 }

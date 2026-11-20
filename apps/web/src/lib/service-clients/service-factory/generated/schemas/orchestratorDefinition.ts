@@ -6,6 +6,7 @@
  */
 
 import type { OrchestratorDefinitionQueueLimit } from './orchestratorDefinitionQueueLimit';
+import type { OrchestratorDefinitionTokenBudget } from './orchestratorDefinitionTokenBudget';
 import type { OrchestratorKinds } from './orchestratorKinds';
 import type { StandInKinds } from './standInKinds';
 
@@ -69,4 +70,16 @@ the rules and before the person; off for every kind when left out. */
 and how it ended) to one comment thread on the task, as its owner.
 Off, as when a definition is sent without it, a Run posts nothing. */
   taskThread?: boolean;
+  /**
+   * The token budget: the most tokens a Run's agent Steps may use, as
+Insights counts them (input, output, and input read from or written
+to the prompt cache). Before each agent Step, a Run that used as
+many or more ends `blocked`. None, and a definition sent without it,
+sets no budget. From [`MIN_TOKEN_BUDGET`] to [`MAX_TOKEN_BUDGET`].
+A Run keeps it with its rules, so a change to the definition does
+not change a Run under way.
+   * @minimum 10000
+   * @maximum 10000000000
+   */
+  tokenBudget?: OrchestratorDefinitionTokenBudget;
 }

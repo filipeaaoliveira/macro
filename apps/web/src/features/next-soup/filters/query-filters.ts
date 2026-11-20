@@ -200,6 +200,7 @@ export function filterSoupItemByRequestBody(
       { tag: 'crmContact' },
       { tag: 'harness' },
       { tag: 'team' },
+      { tag: 'user' },
       () => {
         // These partitions are opt-in through the filter AST only.
         return false;

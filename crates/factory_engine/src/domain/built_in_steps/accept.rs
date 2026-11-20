@@ -28,6 +28,7 @@
 use tokio::time::Instant;
 
 use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{CheckRound, CheckRoundOutcome, MAX_OUTPUT_BYTES, Outcome};
 use factory_records::domain::ports::RunRepository;
 
@@ -103,7 +104,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository,
     M: MainWatches,
 {
     /// Have the verifier check the head of the Run's branch, and the

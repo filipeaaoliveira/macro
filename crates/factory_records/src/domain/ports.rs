@@ -6,7 +6,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
+    BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, NewSteer, Outcome,
     PassedOver, QueueHold, Role, Run, RunFlow, RunId, RunInsert, RunOutcome, SessionStep,
     SteerRefusal, Steered, Step, StepKey, StepSession, StepSteering, StoppingSession, TaskLink,
@@ -425,6 +425,25 @@ pub trait RunRepository: Send + Sync + 'static {
         url: &str,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// Keep how a wait of a `ci` Step on its pull request's checks ended,
+    /// with the jobs it saw finish. A Step keeps its last wait: a retry
+    /// that read another head or verdict, as green after a red on the same
+    /// head once a failed job ran again, replaces the wait and its jobs, so
+    /// the kept wait is the one the Step routed. Keeping the same head and
+    /// verdict again changes nothing.
+    fn record_ci_wait(
+        &self,
+        wait: &crate::domain::quality::CiWait,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The head the Run's last kept `ci` wait before the Step at `before`
+    /// read, with the jobs it kept there, if one was kept.
+    fn last_ci_wait(
+        &self,
+        run_id: RunId,
+        before: u16,
+    ) -> impl Future<Output = Result<Option<crate::domain::quality::LastCiWait>, Self::Err>> + Send;
+
     /// Keep the Control Files the Run's branch changed, as last read,
     /// replacing what was kept before: none clears it. Keeping it again
     /// changes nothing.
@@ -524,6 +543,21 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         id: RunId,
         outcome: RunOutcome,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The agent sessions the Run `id`'s Steps worked in, each once, as
+    /// Insights reads them: a Step that went on from its agent's question
+    /// shares the asking Step's session.
+    fn step_sessions(&self, id: RunId)
+    -> impl Future<Output = Result<Vec<Uuid>, Self::Err>> + Send;
+
+    /// Keep why the Run `id`'s token budget ends it, before its end is
+    /// recorded. A Run that already has a budget stop keeps the first, so a
+    /// retry changes nothing; a Run with no budget keeps none.
+    fn record_budget_stop(
+        &self,
+        id: RunId,
+        stop: BudgetStop,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Keep that the cancel about to be sent to the Run `id` comes from its

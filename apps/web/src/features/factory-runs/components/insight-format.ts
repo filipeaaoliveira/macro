@@ -12,6 +12,27 @@ export function formatInsightDuration(seconds: number): string {
   }).format(value);
 }
 
+/** A duration as a figure and its unit, in the interface's language. */
+export function durationFigure(seconds: number | null | undefined): {
+  value: number | undefined;
+  unit: string | undefined;
+} {
+  if (seconds === undefined || seconds === null) {
+    return { value: undefined, unit: undefined };
+  }
+  const { value, unit } = durationIn(seconds);
+  const rounded = Math.round(value * 10) / 10;
+  const parts = new Intl.NumberFormat(formatLocale(), {
+    style: 'unit',
+    unit,
+    unitDisplay: 'short',
+  }).formatToParts(rounded);
+  return {
+    value: rounded,
+    unit: parts.find((part) => part.type === 'unit')?.value,
+  };
+}
+
 /** A token count, shortened past a thousand: `950`, `12K`, `1.4M`. */
 export function formatTokens(tokens: number): string {
   return new Intl.NumberFormat(formatLocale(), {

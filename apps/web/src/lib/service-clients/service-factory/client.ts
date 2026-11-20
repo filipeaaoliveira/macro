@@ -17,6 +17,7 @@ import {
   getGetFactoryDefinitionUrl,
   getGetFactoryEvaluationUrl,
   getGetFactoryInsightsUrl,
+  getGetFactoryQualityUrl,
   getGetFactoryRunUrl,
   getGetFactorySessionStepUrl,
   getGetFactoryStandingRulesUrl,
@@ -50,9 +51,11 @@ import type {
   FlowsResponse,
   GetFactoryEvaluationParams,
   GetFactoryInsightsParams,
+  GetFactoryQualityParams,
   ListFactoryBoardParams,
   NoteStepRequest,
   PullRequestRuns,
+  QualityInsights,
   ReplyToGateRequest,
   ResumeStepRequest,
   RunDetail,
@@ -206,6 +209,18 @@ export const factoryClient = {
   getEvaluation(params: GetFactoryEvaluationParams, signal?: AbortSignal) {
     return fetchWithToken<EvaluationInsights>(
       `${host()}${getGetFactoryEvaluationUrl(params)}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * CI health, review quality, cost per merged pull request and the
+   * autonomy rate of the caller's own Runs over a period, of one
+   * repository or of all.
+   */
+  getQuality(params: GetFactoryQualityParams, signal?: AbortSignal) {
+    return fetchWithToken<QualityInsights>(
+      `${host()}${getGetFactoryQualityUrl(params)}`,
       { method: 'GET', signal }
     );
   },

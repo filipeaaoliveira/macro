@@ -377,6 +377,8 @@ async fn usage_is_summed_by_entry_and_run_for_the_caller() {
         output,
         cache_read: 0,
         cache_write: 0,
+        cost_usd: 0.0,
+        unpriced_calls: 0,
     };
     let service = service(records, vec![used(1, 100, 10), used(2, 50, 5)]);
 

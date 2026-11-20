@@ -174,6 +174,12 @@ pub(crate) type GithubLinkServiceType = GithubLinkServiceImpl<
     >,
 >;
 
+/// Refuses Macro's GitHub merge route under a factory Run that goes on.
+pub(crate) type FactoryMergeGuardType = crate::domain::factory_merge_guard::FactoryMergeGuard<
+    factory_records::outbound::pg_run_repository::PgRunRepository,
+    crate::outbound::factory_merge_guard::GithubLinkSight<GithubLinkServiceType>,
+>;
+
 pub(crate) type EntityAccessServiceType = EntityAccessServiceImpl<PgAccessRepository>;
 
 /// Buys and manages Macro computers on team subscriptions.
@@ -255,6 +261,7 @@ pub(crate) struct ApiContext {
     pub inbox_connections:
         Arc<email::domain::inbox_entitlement::InboxConnectionService<email::outbound::EmailPgRepo>>,
     pub github_link_service: Arc<GithubLinkServiceType>,
+    pub factory_merge_guard: Arc<FactoryMergeGuardType>,
     pub auth_client: Arc<fusionauth::FusionAuthClient>,
     pub microsoft_auth: Option<Arc<dyn MicrosoftAuth>>,
     /// Encrypts users' Cursor API keys.

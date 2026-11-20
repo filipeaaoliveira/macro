@@ -8,6 +8,7 @@ import { factoryRunKeys } from './keys';
 import {
   createAppRunsContext,
   runOptions,
+  seedRun,
   taskRunsOptions,
   waitingRunsOptions,
 } from './runs';
@@ -477,6 +478,35 @@ describe('createAppRunsContext', () => {
     expect(client.getQueryData(runOptions('run-2').queryKey)?.request).toBe(
       'Add a due date column'
     );
+  });
+
+  it('keeps a Run’s known token use when a list seeds it again', () => {
+    const client = new QueryClient();
+    const run: Run = {
+      id: 'run-9',
+      request: 'Plan it',
+      createdAt: '2026-11-16T09:00:00Z',
+      steps: [],
+    };
+    const key = factoryRunKeys.run('run-9').queryKey;
+    client.setQueryData(key, {
+      ...run,
+      tokenBudget: { budget: 100_000, used: 42_000, measured: true },
+    });
+
+    // A list reads the budget, not the use.
+    seedRun(client, { ...run, tokenBudget: { budget: 100_000 } });
+    expect(client.getQueryData<Run>(key)?.tokenBudget).toEqual({
+      budget: 100_000,
+      used: 42_000,
+      measured: true,
+    });
+
+    // The Run's own read replaces it, and a Run with no budget has none.
+    seedRun(client, { ...run, tokenBudget: { budget: 100_000, used: 50_000 } });
+    expect(client.getQueryData<Run>(key)?.tokenBudget?.used).toBe(50_000);
+    seedRun(client, run);
+    expect(client.getQueryData<Run>(key)?.tokenBudget).toBeUndefined();
   });
 
   it('stops reading a Run again once it has ended', async () => {

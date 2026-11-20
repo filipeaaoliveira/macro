@@ -144,6 +144,81 @@ async fn a_comparison_github_cut_short_is_unknown() {
     server.finish();
 }
 
+/// A comparison gives its merge base and every path it changed, a renamed
+/// file under both its names, the earlier first.
+#[tokio::test]
+async fn compared_changes_keep_the_merge_base_and_both_sides_of_a_rename() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"merge_base_commit":{"sha":"3333333333333333333333333333333333333333"},"files":[
+            {"filename":"apps/web/main.ts","status":"modified"},
+            {"filename":"docs/old.md","status":"removed"},
+            {"filename":"crates/new/lib.rs","previous_filename":"crates/old/lib.rs","status":"renamed"}
+        ]}"#,
+    );
+
+    let changes = client
+        .compare_changes(
+            "token",
+            "macro",
+            "app",
+            "main",
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        changes.merge_base,
+        "3333333333333333333333333333333333333333"
+    );
+    assert_eq!(
+        changes.paths,
+        [
+            "apps/web/main.ts",
+            "docs/old.md",
+            "crates/old/lib.rs",
+            "crates/new/lib.rs",
+        ]
+    );
+    assert!(changes.complete);
+    assert!(server.finish().starts_with(
+        "GET /repos/macro/app/compare/main...1111111111111111111111111111111111111111?per_page=1 HTTP/1.1"
+    ));
+}
+
+/// A comparison GitHub cut at the 300 files it lists keeps the files it
+/// listed, and says they are not all; one with no files listed at all, as
+/// GitHub answers one too large, lists none and says so too. An empty list
+/// is a comparison that changed nothing.
+#[tokio::test]
+async fn compared_changes_say_when_github_lists_only_part() {
+    let files: Vec<String> = (0..300)
+        .map(|n| format!(r#"{{"filename":"file{n}.rs"}}"#))
+        .collect();
+    let base = r#""merge_base_commit":{"sha":"3333333333333333333333333333333333333333"}"#;
+    for (body, listed, complete) in [
+        (
+            format!(r#"{{{base},"files":[{}]}}"#, files.join(",")),
+            300,
+            false,
+        ),
+        (format!("{{{base}}}"), 0, false),
+        (format!(r#"{{{base},"files":[]}}"#), 0, true),
+    ] {
+        let (server, client) = answering("200 OK", &body);
+
+        let changes = client
+            .compare_changes("token", "macro", "app", "main", "factory/run")
+            .await
+            .unwrap();
+
+        assert_eq!(changes.paths.len(), listed, "{body}");
+        assert_eq!(changes.complete, complete, "{body}");
+        server.finish();
+    }
+}
+
 /// A branch's head is the commit GitHub names for it; a branch the user
 /// reaches none of is none.
 #[tokio::test]
@@ -345,4 +420,54 @@ async fn merge_base_refuses_an_owner_or_repository_github_would_not_take() {
             "{owner:?}/{repo:?}: {refused:?}"
         );
     }
+}
+
+/// A commit's parents are read from the git database, in their order; a
+/// commit GitHub does not have has none, and an id that is not a full
+/// commit id is never sent.
+#[tokio::test]
+async fn a_commit_s_parents_are_read_in_their_order() {
+    let merge = "3333333333333333333333333333333333333333";
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"sha":"3333333333333333333333333333333333333333","parents":[{"sha":"1111111111111111111111111111111111111111"},{"sha":"2222222222222222222222222222222222222222"}]}"#,
+    );
+    let parents = client
+        .commit_parents("token", "macro", "app", merge)
+        .await
+        .unwrap();
+    assert_eq!(
+        parents,
+        Some(vec![
+            "1111111111111111111111111111111111111111".to_string(),
+            "2222222222222222222222222222222222222222".to_string(),
+        ])
+    );
+    assert!(server.finish().starts_with(&format!(
+        "GET /repos/macro/app/git/commits/{merge} HTTP/1.1"
+    )));
+
+    let (missing, client) = answering("404 Not Found", r#"{"message":"Not Found"}"#);
+    assert_eq!(
+        client
+            .commit_parents("token", "macro", "app", merge)
+            .await
+            .unwrap(),
+        None
+    );
+    missing.finish();
+
+    let (_unused, client) = answering("200 OK", "{}");
+    assert_eq!(
+        client
+            .commit_parents("token", "macro", "app", "main")
+            .await
+            .unwrap(),
+        None
+    );
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+    assert!(matches!(
+        client.commit_parents("token", "..", "app", merge).await,
+        Err(GithubError::Internal(_))
+    ));
 }

@@ -105,6 +105,7 @@ async fn a_definition_reads_its_flows_agents_rules_and_scorers() {
         Some(OrchestratorDefinition {
             blockers: true,
             queue_limit: Some(5),
+            token_budget: None,
             ..OrchestratorDefinition::default()
         })
     );
@@ -128,12 +129,39 @@ async fn rules_and_scorers_left_out_take_the_defaults() {
     assert_eq!(definition.evaluation, EvaluationDefinition::default());
 }
 
+/// The Definition template, as shipped.
+fn template() -> LocalDefinitionFiles {
+    LocalDefinitionFiles::new(concat!(env!("CARGO_MANIFEST_DIR"), "/definition_template"))
+}
+
+/// A team's copy of a Definition whose placeholder bot ids it replaced
+/// with real ones, and changed nothing else.
+struct Customized(LocalDefinitionFiles);
+
+impl DefinitionFiles for Customized {
+    type Err = std::io::Error;
+
+    async fn read(&self, path: &str) -> Result<Option<String>, std::io::Error> {
+        let text = self.0.read(path).await?;
+        if path != "agents.json" {
+            return Ok(text);
+        }
+        Ok(text.map(|text| {
+            text.replace("00000000-0000-0000-0000-000000000001", PRIMARY_BOT)
+                .replace("00000000-0000-0000-0000-000000000002", BACKUP_BOT)
+        }))
+    }
+}
+
+const PRIMARY_BOT: &str = "00000000-0000-0000-0000-00000000c1a0";
+
+const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0de";
+
 #[tokio::test]
 async fn the_starter_definition_reads() {
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/definition_template");
-    let definition = read_definition(&LocalDefinitionFiles::new(root), built_in_step_use)
+    let definition = read_definition(&Customized(template()), built_in_step_use)
         .await
-        .expect("the starter definition reads");
+        .expect("the starter definition reads once its bots are replaced");
 
     assert_eq!(
         definition.flows.keys().collect::<Vec<_>>(),
@@ -270,6 +298,38 @@ async fn rules_the_factory_does_not_take_do_not_read() {
         ))
         .await,
         Err(DefinitionError::QueueLimit)
+    );
+    for budget in ["9999", "10000000001"] {
+        assert_eq!(
+            read(with(
+                "rules.json",
+                &format!(
+                    r#"{{ "standingRules": {{ "plan": false, "blockers": false, "merge": false, "tokenBudget": {budget} }} }}"#
+                )
+            ))
+            .await,
+            Err(DefinitionError::TokenBudget),
+            "a budget of {budget}"
+        );
+    }
+}
+
+/// A token budget in range reads with the rules, and is kept on each Run
+/// that starts under them.
+#[tokio::test]
+async fn a_token_budget_in_range_reads() {
+    let definition = read(with(
+        "rules.json",
+        r#"{ "standingRules": { "plan": false, "blockers": true, "merge": false, "tokenBudget": 2000000 } }"#,
+    ))
+    .await
+    .expect("a definition with a budget");
+    assert_eq!(
+        definition
+            .rules
+            .standing_rules
+            .and_then(|rules| rules.token_budget),
+        Some(2_000_000)
     );
 }
 
@@ -553,6 +613,51 @@ async fn a_merge_needs_a_merge_gate_s_approval() {
         }
     );
 
+    // A merge that waited its turn goes on waiting with its approval: its
+    // `queued` back to itself reads, but into another merge, or any other
+    // outcome back to itself, does not.
+    let mut waiting = merge_step();
+    waiting["on"]["queued"] = to("merge");
+    let waiting = read(shipping(serde_json::json!([
+        merge_gate("merge-gate", "merge", to("merge")),
+        waiting
+    ])))
+    .await;
+    assert!(waiting.is_ok(), "{waiting:?}");
+
+    let mut elsewhere = merge_step();
+    elsewhere["on"]["queued"] = to("other-merge");
+    let mut other = merge_step();
+    other["id"] = serde_json::json!("other-merge");
+    let elsewhere = read(shipping(serde_json::json!([
+        merge_gate("merge-gate", "merge", to("merge")),
+        elsewhere,
+        other
+    ])))
+    .await;
+    assert_eq!(
+        flow_error(elsewhere),
+        FlowError::UnguardedMerge {
+            from: entry("merge"),
+            to: entry("other-merge"),
+        }
+    );
+
+    let mut again = merge_step();
+    again["on"]["refused"] = to("merge");
+    let again = read(shipping(serde_json::json!([
+        merge_gate("merge-gate", "merge", to("merge")),
+        again
+    ])))
+    .await;
+    assert_eq!(
+        flow_error(again),
+        FlowError::UnguardedMerge {
+            from: entry("merge"),
+            to: entry("merge"),
+        }
+    );
+
     // A Run that would start at the merge.
     let first = read(shipping(serde_json::json!([merge_step()]))).await;
     assert_eq!(
@@ -589,14 +694,87 @@ async fn an_escaped_or_newer_token_is_a_secret() {
     assert!(read(with("agents.json", &words)).await.is_ok());
 }
 
+/// A team that copies the template and leaves its placeholder bot ids
+/// can't save it as its Definition or start a Run of it: the validator,
+/// the team setting and a Run all read it this way.
+#[tokio::test]
+async fn the_starter_definition_s_placeholder_bots_do_not_read() {
+    let error = match read_definition(&template(), built_in_step_use).await {
+        Err(DefinitionReadError::Invalid(error)) => error,
+        Err(DefinitionReadError::Files(error)) => panic!("the starter's files: {error}"),
+        Ok(_) => panic!("the starter's placeholder bots must not read"),
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "agents.json: agents primary, backup have the template's placeholder bot ids: \
+         replace them with the ids of Macro agents each member who starts runs may use"
+    );
+}
+
+/// An Agent whose bot is all zeros but its last two digits names no
+/// agent, and the error names `agents.json` and the Agent; one past them
+/// is an id like any other.
+#[tokio::test]
+async fn a_placeholder_bot_id_does_not_read() {
+    let agents = |bot: &str| AGENTS.replace("00000000-0000-0000-0000-00000000c1a0", bot);
+    let primary = AgentName::try_from("primary".to_string()).expect("an agent");
+
+    for bot in [
+        "00000000-0000-0000-0000-000000000000",
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-0000000000ff",
+    ] {
+        let error = read(with("agents.json", &agents(bot)))
+            .await
+            .expect_err("a placeholder bot");
+        assert_eq!(
+            error,
+            DefinitionError::Agents(AgentDefinitionError::PlaceholderBots(vec![primary.clone()])),
+            "{bot}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "agents.json: agent primary has the template's placeholder bot id: replace it \
+             with the id of a Macro agent each member who starts runs may use",
+        );
+    }
+
+    let real = "00000000-0000-0000-0000-000000000100";
+    assert!(read(with("agents.json", &agents(real))).await.is_ok());
+    let random = "6f1c2a9e-4b7d-4e2a-9c3f-0d8e5b1a7c42";
+    assert!(read(with("agents.json", &agents(random))).await.is_ok());
+}
+
+/// Every Agent that keeps a placeholder bot id is named, in the order
+/// `agents.json` lists them rather than by name.
+#[tokio::test]
+async fn every_placeholder_bot_is_named_in_the_file_s_order() {
+    let agents = r#"{
+        "agents": {
+            "primary": { "bot": "00000000-0000-0000-0000-000000000001" },
+            "spare": { "bot": "00000000-0000-0000-0000-00000000c0de" },
+            "backup": { "bot": "00000000-0000-0000-0000-000000000002" }
+        },
+        "roles": { "planner": ["primary"], "writer": ["primary"] }
+    }"#;
+    let name = |name: &str| AgentName::try_from(name.to_string()).expect("an agent");
+
+    assert_eq!(
+        read(with("agents.json", agents)).await,
+        Err(DefinitionError::Agents(
+            AgentDefinitionError::PlaceholderBots(vec![name("primary"), name("backup")])
+        ))
+    );
+}
+
 /// The starter's Control Files are the factory's default and its own
 /// files, so a Run that changes its rules waits for a person.
 #[tokio::test]
 async fn the_starter_s_control_files_keep_the_default_and_its_own_files() {
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/definition_template");
-    let definition = read_definition(&LocalDefinitionFiles::new(root), built_in_step_use)
+    let definition = read_definition(&Customized(template()), built_in_step_use)
         .await
-        .expect("the starter definition reads");
+        .expect("the starter definition reads once its bots are replaced");
     let patterns = definition.rules.control_files.expect("its own list");
 
     for pattern in ControlFiles::default_patterns()

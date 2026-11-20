@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT standing_rules, queue_limit, token_budget FROM factory_team_settings\n            WHERE team_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "standing_rules",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 1,
+        "name": "queue_limit",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "token_budget",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "148d86e74f13b1d8b8c475d8433f96c4d7b1853c0b3b6003ee3d2e5686823d9a"
+}

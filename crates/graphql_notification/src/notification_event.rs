@@ -988,6 +988,11 @@ impl GraphqlFactoryGateWaitingMetadata {
     async fn notify_only(&self) -> bool {
         self.0.notify_only
     }
+
+    /// Whether the Run's token budget ended it: no Gate waits.
+    async fn budget_stopped(&self) -> bool {
+        self.0.budget_stopped
+    }
 }
 
 /// GraphQL wrapper for team invitation metadata.

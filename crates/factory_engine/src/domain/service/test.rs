@@ -35,6 +35,7 @@ mod standing;
 mod standing_rules;
 mod step_terminal;
 mod task_thread;
+mod token_budget;
 
 /// Keeps what it was sent. Refuses every answer when `refuse` is set; a
 /// start fails when `fail` is set, and leaves its workflow behind when
@@ -117,6 +118,8 @@ struct FakeExecutor {
     failure: Option<WorkFailure>,
     given: Arc<Mutex<Vec<Vec<u16>>>>,
     noted: Arc<Mutex<Vec<Vec<String>>>>,
+    /// The outcomes each Step's entry routes, as it was given them.
+    routed: Arc<Mutex<Vec<Vec<String>>>>,
     /// Whether it serves every Step, not only `reply`.
     serves_all: bool,
     /// What the Step Terminal asked of the sessions Steps work in, in order.
@@ -132,6 +135,7 @@ impl Default for FakeExecutor {
             failure: None,
             given: Arc::default(),
             noted: Arc::default(),
+            routed: Arc::default(),
             serves_all: false,
             steered: Arc::default(),
             steer_refused: false,
@@ -183,6 +187,12 @@ impl StepExecutor for FakeExecutor {
             .map(|note| note.text.clone())
             .collect();
         self.noted.lock().expect("noted").push(notes);
+        let routed = input
+            .routes
+            .iter()
+            .map(|outcome| outcome.as_str().to_string())
+            .collect();
+        self.routed.lock().expect("routed").push(routed);
         Ok(StepReport {
             outcome: Outcome::done(),
             output: self.output.clone(),
@@ -857,6 +867,42 @@ async fn running_a_step_reads_the_run_and_records_nothing() {
     assert_eq!(report.output, "Replied");
     let recorded = repo.list_steps(run_id).await.expect("steps");
     assert_eq!(recorded[0].end, None);
+}
+
+/// A Step is told what its entry routes in the Flow its Run kept as it
+/// started, the one its workflow walks; a Run that kept none, which walks
+/// an older Flow than the built-in one of its name, is told nothing, so its
+/// merge never ends with an outcome that Flow does not route.
+#[tokio::test]
+async fn a_step_is_told_what_its_entry_routes_in_the_flow_its_run_kept() {
+    let repo = FakeRepo::default();
+    let run_id = julia_s_run(&repo).await;
+    repo.flows
+        .lock()
+        .expect("flows")
+        .insert(run_id, "code".to_string());
+    let executor = FakeExecutor::default();
+    let steps = StepServiceImpl::new(repo.clone(), executor.clone());
+    let at_merge_gate = |seq| StepRequest {
+        entry: EntryId::try_from("merge-gate".to_string()).expect("valid"),
+        ..reply_step(run_id, seq)
+    };
+
+    steps.start_step(at_merge_gate(1)).await.expect("start");
+    steps.run_step(at_merge_gate(1)).await.expect("run");
+    let code: serde_json::Value =
+        serde_json::from_str(include_str!("../../../flows/code.json")).expect("json");
+    repo.kept_flows
+        .lock()
+        .expect("kept flows")
+        .insert(run_id, (code, true));
+    steps.start_step(at_merge_gate(2)).await.expect("start");
+    steps.run_step(at_merge_gate(2)).await.expect("run");
+
+    let routed = executor.routed.lock().expect("routed").clone();
+    assert_eq!(routed[0], Vec::<String>::new());
+    assert!(routed[1].contains(&"behind".to_string()), "{routed:?}");
+    assert!(routed[1].contains(&"approve".to_string()), "{routed:?}");
 }
 
 #[tokio::test]

@@ -10,7 +10,9 @@ use uuid::Uuid;
 use super::{CI_WAIT, PullRequestStepError, PullRequestSteps};
 
 mod branch_cleanup;
+mod ci_waits;
 mod control_files;
+mod merge_queue;
 mod page;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches, ci, suite};
 use crate::domain::models::{
@@ -46,6 +48,7 @@ fn input(run_id: RunId) -> StepInput<'static> {
         resumes: None,
         owner_notes: &[],
         base_commit: None,
+        routes: &[],
     }
 }
 

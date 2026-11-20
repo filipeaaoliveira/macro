@@ -488,6 +488,15 @@ export type TeamEntity = EntityBase & {
   type: 'team';
 };
 
+/**
+ * The viewer. Only the notifications inbox lists it, for notices about them
+ * alone filed under them (a factory Run without a task waiting on its owner);
+ * it has no page of its own.
+ */
+export type UserEntity = EntityBase & {
+  type: 'user';
+};
+
 /** A Macro Form. Like a database, not a Soup entity: `createdAt` is its only timestamp. */
 export type FormEntity = EntityBase & {
   type: 'form';
@@ -555,6 +564,7 @@ export type EntityData =
   | FormEntity
   | HarnessEntity
   | TeamEntity
+  | UserEntity
   | RoutineEntity
   | CalendarEventEntity
   | ForeignEntity;
@@ -576,6 +586,7 @@ const ENTITY_TYPE_VALUES = new Set<EntityData['type']>([
   'form',
   'harness',
   'team',
+  'user',
   'routine',
   'calendar_event',
   'foreign',

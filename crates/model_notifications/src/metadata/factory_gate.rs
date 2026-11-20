@@ -1,7 +1,8 @@
 //! Notification sent to a software factory Run's owner when one of its
 //! Gates waits on them: no Standing Rule answered it, or an agent asked
 //! them a question; or, flagged `notify_only`, when a notify-only Gate
-//! tells them something while the Run goes on.
+//! tells them something while the Run goes on; or, flagged
+//! `budget_stopped`, when the Run's token budget ended it.
 use super::*;
 
 /// The most characters of the Gate's question, or of the Run's request,
@@ -33,6 +34,10 @@ pub struct FactoryGateWaitingMetadata {
     /// the Run goes on without an answer; absent for a Gate that waits.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub notify_only: bool,
+    /// Whether the Run's token budget ended it: no Gate waits, and the
+    /// notice tells the owner why the Run stopped; absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub budget_stopped: bool,
 }
 
 impl FactoryGateWaitingMetadata {
@@ -55,6 +60,9 @@ impl Notification for FactoryGateWaitingMetadata {
 
 impl NotificationTitle for FactoryGateWaitingMetadata {
     fn format_title(&self, _sender_id: Option<MacroUserIdStr<'_>>) -> Result<String, Report> {
+        if self.budget_stopped {
+            return Ok("A factory run stopped at its token budget".to_owned());
+        }
         if self.notify_only {
             return Ok("For your information: a factory run goes on".to_owned());
         }

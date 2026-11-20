@@ -76,6 +76,12 @@ link flow, following the hexagonal architecture pattern.
   leaves the remote result uncertain; a crash can leave no grant. Preserve
   Macro links so a later verified OAuth attempt can recreate it.
 
+- `github_oauth_client.rs` writes `owner` and `repo` into API paths as they
+  come. `merge_pull_request` refuses (`GithubMergeRejection::Invalid`,
+  without asking GitHub) any that is not a name GitHub gives
+  (`is_github_owner`, `is_github_repository_name` in
+  `github_pull_requests`): a crafted part could merge another pull request
+  than the one named. Check the same way before a new path takes them.
 - Webhook signature verification uses `hmac`/`subtle` for constant-time
   comparison — don't swap in a plain `==` when touching
   `github_sync_router.rs`.

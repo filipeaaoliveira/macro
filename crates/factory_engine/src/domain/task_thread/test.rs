@@ -38,6 +38,7 @@ fn run() -> Run {
         automation: None,
         definition: None,
         end: None,
+        budget_stop: None,
     }
 }
 

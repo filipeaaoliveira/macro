@@ -7,6 +7,7 @@
 
 import type { MacroUserIdStr } from './macroUserIdStr';
 import type { RunAutomationProperty } from './runAutomationProperty';
+import type { RunBudgetStop } from './runBudgetStop';
 import type { RunControlFiles } from './runControlFiles';
 import type { RunDefinitionProperty } from './runDefinitionProperty';
 import type { RunEndProperty } from './runEndProperty';
@@ -23,6 +24,7 @@ import type { RunTaskId } from './runTaskId';
  */
 export interface Run {
   automation?: RunAutomationProperty;
+  budgetStop?: RunBudgetStop;
   controlFiles?: RunControlFiles;
   /** When the Run was created. */
   createdAt: string;

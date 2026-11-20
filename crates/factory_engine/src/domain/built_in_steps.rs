@@ -1,7 +1,8 @@
 //! The Steps the factory knows: `reply` acknowledges the Run's request;
 //! `plan`, `write`, `review`, `fix` and `ci_fix` hand it to an agent; and
 //! `publish`, `ci`, `ready_to_merge` and `merge` take the Run's branch to a
-//! merged pull request on GitHub ([`PullRequestSteps`]).
+//! merged pull request on GitHub ([`PullRequestSteps`]); `update` brings a
+//! branch behind its base up to date (`update`).
 //! On a repository, `write` and `fix` then have the agent run the checks
 //! the repository declares, in rounds (`checks_round`). `accept`, before
 //! the merge, has a verifier check the change does what the Run's request
@@ -12,12 +13,14 @@
 mod accept;
 mod checks_round;
 mod review_panel;
+mod update;
 
 pub(crate) use review_panel::review_outcomes;
 #[cfg(test)]
 mod test;
 
 use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{
     CheckRoundOutcome, Outcome, Repository, Role, Step, StepKey, StepSession,
 };
@@ -149,6 +152,10 @@ enum BuiltInStep {
     ReadyToMerge,
     /// The commit a person agreed to is merged.
     Merge,
+    /// The Run's base is merged into its branch, which lacks a commit of
+    /// it: by GitHub, or by an agent that resolves their conflict; then the
+    /// repository's checks run on it again.
+    Update,
     /// A verifier checks the head of the Run's branch does what the
     /// request asks, before the merge.
     Accept,
@@ -175,6 +182,7 @@ impl BuiltInStep {
             "ci" => Some(Self::Ci),
             "ready_to_merge" => Some(Self::ReadyToMerge),
             "merge" => Some(Self::Merge),
+            "update" => Some(Self::Update),
             "accept" => Some(Self::Accept),
             "deploy" => Some(Self::Deploy),
             "verify" => Some(Self::Verify),
@@ -188,7 +196,7 @@ impl BuiltInStep {
     fn agent_role(self) -> Option<Role> {
         let role = match self {
             Self::Plan => "planner",
-            Self::Write => "writer",
+            Self::Write | Self::Update => "writer",
             Self::Review => "reviewer",
             Self::Fix | Self::CiFix => "fixer",
             Self::Accept | Self::Verify => VERIFIER,
@@ -323,7 +331,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository,
     M: MainWatches,
 {
     /// The built-in Steps, with `agent` doing the agent Steps.
@@ -484,7 +492,7 @@ impl<A, G, R, M> StepExecutor for BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
 {
     type Err = BuiltInStepError;
@@ -566,7 +574,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
 {
     async fn run_built_in(
@@ -641,6 +649,7 @@ where
             BuiltInStep::Ci => Ok(self.pull_requests.ci(input).await?),
             BuiltInStep::ReadyToMerge => Ok(self.pull_requests.ready_to_merge(input).await?),
             BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
+            BuiltInStep::Update => self.update_branch(step, input).await,
             BuiltInStep::Accept => self.accept_change(step, input).await,
             BuiltInStep::Deploy | BuiltInStep::Verify => {
                 // An earlier attempt of an old `verify` may have left its

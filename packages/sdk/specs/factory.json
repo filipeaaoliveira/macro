@@ -945,6 +945,114 @@
         }
       }
     },
+    "/insights/quality": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "CI health, review quality, cost and autonomy of the caller's own Runs\nover a period: each CI job's red rate and its failures by cause, the\nfailures that hit two or more pull requests, the time from a pull\nrequest's first push to green and the fix rounds spent on CI and on\nreview; review rounds, Blockers by reviewer and by Agent, and Blocker\ntexts that recur; cost per merged pull request and the share of Runs\nthat merged with no person stepping in. At most the newest 1,000 Runs of\nthe period are read.",
+        "operationId": "get_factory_quality",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "The period's first day, `YYYY-MM-DD`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Its last day, included. The period lasts at most 366 days.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "description": "The IANA time zone the days are in, such as `Europe/Lisbon`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "flow",
+            "in": "query",
+            "description": "A built-in Flow's name, to read only its Runs.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repository",
+            "in": "query",
+            "description": "A GitHub repository, `owner/name` or its URL, to read only the Runs\nthat work on it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityInsights"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs": {
       "get": {
         "tags": ["factory"],
@@ -3300,6 +3408,29 @@
           }
         }
       },
+      "BlockerCount": {
+        "type": "object",
+        "description": "One reviewer's, or one Agent's, Blockers.",
+        "required": ["name", "reviews", "blockers"],
+        "properties": {
+          "blockers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The Blockers it found.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The reviewer's Role, or the Agent."
+          },
+          "reviews": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The reviews it made: its reviewer Steps.",
+            "minimum": 0
+          }
+        }
+      },
       "BoardNext": {
         "type": "object",
         "description": "Where the board's next page starts: past this Run, in the board's order\n(newest first).",
@@ -3373,6 +3504,39 @@
         "type": "string",
         "description": "Where a Run is, as the board groups it.",
         "enum": ["running", "waiting", "held", "stopped", "finished"]
+      },
+      "BudgetStop": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Its agent Steps had used its budget or more.",
+            "required": ["used", "reason"],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": ["spent"]
+              },
+              "used": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The tokens they had used, as Insights counts them.",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The usage log could not be read for as many agent Steps in a row\nas the factory lets a Run go on unchecked.",
+            "required": ["reason"],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": ["unread"]
+              }
+            }
+          }
+        ],
+        "description": "Why a Run's token budget ended it, before an agent Step."
       },
       "CheckResult": {
         "type": "object",
@@ -3469,6 +3633,173 @@
         "type": "string",
         "description": "How a round of a Step's checks ended.",
         "enum": ["passed", "failed"]
+      },
+      "CiCause": {
+        "type": "string",
+        "description": "What a CI job's failure was.",
+        "enum": ["own", "setup", "flaky", "cancelled"]
+      },
+      "CiCauseCounts": {
+        "type": "object",
+        "description": "How many CI failures had each cause.",
+        "required": ["own", "setup", "flaky", "cancelled"],
+        "properties": {
+          "cancelled": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Cancelled.",
+            "minimum": 0
+          },
+          "flaky": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Flaky.",
+            "minimum": 0
+          },
+          "own": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The pull request's own.",
+            "minimum": 0
+          },
+          "setup": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The CI's setup.",
+            "minimum": 0
+          }
+        }
+      },
+      "CiHealth": {
+        "type": "object",
+        "description": "How the period's pull requests fared in CI.",
+        "required": [
+          "waits",
+          "redWaits",
+          "runs",
+          "causes",
+          "jobs",
+          "ciFixRounds",
+          "runsWithCiFixes",
+          "reviewFixRounds",
+          "recurring"
+        ],
+        "properties": {
+          "causes": {
+            "$ref": "#/components/schemas/CiCauseCounts",
+            "description": "The jobs' failures by cause."
+          },
+          "ciFixRounds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Rounds Runs spent fixing CI: each red wait sends the change to be\nfixed.",
+            "minimum": 0
+          },
+          "firstPushToGreen": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DurationStats",
+                "description": "From a pull request's first wait on CI, once it was pushed, to the\nend of its first green wait."
+              }
+            ]
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CiJobHealth"
+            },
+            "description": "Each job, the reddest first."
+          },
+          "recurring": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecurringCiFailure"
+            },
+            "description": "Failures, by test or named step, on two or more pull requests,\nnewest first."
+          },
+          "redWaits": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Those that ended red.",
+            "minimum": 0
+          },
+          "reviewFixRounds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Rounds Runs spent fixing reviewers' Blockers, apart from CI.",
+            "minimum": 0
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that waited on CI.",
+            "minimum": 0
+          },
+          "runsWithCiFixes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that spent one or more.",
+            "minimum": 0
+          },
+          "waits": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Waits on CI that ended: green, red or timed out.",
+            "minimum": 0
+          }
+        }
+      },
+      "CiJobHealth": {
+        "type": "object",
+        "description": "One CI job across the period's waits.",
+        "required": [
+          "name",
+          "finished",
+          "red",
+          "redRate",
+          "causes",
+          "pullRequestsFailed"
+        ],
+        "properties": {
+          "causes": {
+            "$ref": "#/components/schemas/CiCauseCounts",
+            "description": "Its failures by cause, cancelled runs included."
+          },
+          "finished": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times it finished, passed or red; a cancelled run is not\ncounted.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "pullRequestsFailed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many pull requests it was red on.",
+            "minimum": 0
+          },
+          "red": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of those were red.",
+            "minimum": 0
+          },
+          "redRate": {
+            "type": "number",
+            "format": "double",
+            "description": "The share of them that were red, from 0 to 1."
+          },
+          "repository": {
+            "type": ["string", "null"],
+            "description": "The repository it runs in, by URL."
+          }
+        }
       },
       "ControlFileChanges": {
         "type": "object",
@@ -3594,6 +3925,97 @@
             "type": ["string", "null"],
             "format": "uuid",
             "description": "The team; none when the person is on no team."
+          }
+        }
+      },
+      "DeliveryInsight": {
+        "type": "object",
+        "description": "What merging cost, and how often it took no person.",
+        "required": [
+          "endedRuns",
+          "merged",
+          "autonomous",
+          "personAnswered",
+          "steered",
+          "manual",
+          "measuredRuns",
+          "tokens",
+          "costUsd",
+          "unpricedCalls"
+        ],
+        "properties": {
+          "autonomous": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that merged with no person stepping in: no Gate a person\nanswered, no Step they steered, and no manual end.",
+            "minimum": 0
+          },
+          "autonomyRate": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "The share of ended Runs that did, from 0 to 1."
+          },
+          "costPerMergedUsd": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "What every Run cost per merged pull request, in US dollars; none\nunless every call was priced."
+          },
+          "costUsd": {
+            "type": "number",
+            "format": "double",
+            "description": "What their priced model calls cost, in US dollars."
+          },
+          "endedRuns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that ended.",
+            "minimum": 0
+          },
+          "manual": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that ended for a person to take over.",
+            "minimum": 0
+          },
+          "measuredRuns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs with usage recorded.",
+            "minimum": 0
+          },
+          "merged": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that merged their pull request.",
+            "minimum": 0
+          },
+          "personAnswered": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Ended Runs with a Gate a person answered.",
+            "minimum": 0
+          },
+          "steered": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Ended Runs with a Step their owner steered.",
+            "minimum": 0
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenCounts",
+            "description": "The tokens every Run's agents used."
+          },
+          "tokensPerMerged": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The tokens every Run used per merged pull request.",
+            "minimum": 0
+          },
+          "unpricedCalls": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Their model calls with no price.",
+            "minimum": 0
           }
         }
       },
@@ -4413,6 +4835,13 @@
           "taskThread": {
             "type": "boolean",
             "description": "The task thread section: a Run on a task posts its main updates\n(its start, each Step's end, its Gates, its pull request, its merge\nand how it ended) to one comment thread on the task, as its owner.\nOff, as when a definition is sent without it, a Run posts nothing."
+          },
+          "tokenBudget": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The token budget: the most tokens a Run's agent Steps may use, as\nInsights counts them (input, output, and input read from or written\nto the prompt cache). Before each agent Step, a Run that used as\nmany or more ends `blocked`. None, and a definition sent without it,\nsets no budget. From [`MIN_TOKEN_BUDGET`] to [`MAX_TOKEN_BUDGET`].\nA Run keeps it with its rules, so a change to the definition does\nnot change a Run under way.",
+            "maximum": 10000000000,
+            "minimum": 10000
           }
         },
         "additionalProperties": false
@@ -4605,6 +5034,181 @@
           }
         }
       },
+      "QualityInsights": {
+        "type": "object",
+        "description": "CI health, review quality, cost and autonomy of a person's Runs over a\nperiod.",
+        "required": [
+          "from",
+          "to",
+          "timeZone",
+          "repositories",
+          "runCap",
+          "capped",
+          "ci",
+          "review",
+          "delivery"
+        ],
+        "properties": {
+          "capped": {
+            "type": "boolean",
+            "description": "Whether the period had more Runs than that."
+          },
+          "ci": {
+            "$ref": "#/components/schemas/CiHealth",
+            "description": "How their pull requests fared in CI."
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/DeliveryInsight",
+            "description": "What merging cost, and how often it took no person."
+          },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The Flow read, or none for every Flow."
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "The period's first day."
+          },
+          "repositories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The repositories the period's Runs work on, to pick one from."
+          },
+          "repository": {
+            "type": ["string", "null"],
+            "description": "The repository read, by URL, or none for every repository."
+          },
+          "review": {
+            "$ref": "#/components/schemas/ReviewQuality",
+            "description": "How their review rounds went."
+          },
+          "runCap": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most Runs read: the newest in the period.",
+            "minimum": 0
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "The time zone its days are in."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Its last day."
+          }
+        }
+      },
+      "RecurringBlocker": {
+        "type": "object",
+        "description": "A Blocker text found in two or more Runs.",
+        "required": [
+          "text",
+          "runs",
+          "blockers",
+          "reviewers",
+          "lastFoundAt",
+          "runLinks"
+        ],
+        "properties": {
+          "blockers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times.",
+            "minimum": 0
+          },
+          "lastFoundAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When its round last started."
+          },
+          "reviewers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The reviewers' Roles that found it."
+          },
+          "runLinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunLink"
+            },
+            "description": "The newest Runs it was found in."
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "In how many Runs it was found.",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string",
+            "description": "The text, as last written."
+          }
+        }
+      },
+      "RecurringCiFailure": {
+        "type": "object",
+        "description": "A failure of a job, by the test or the named step that failed, on two or\nmore pull requests of the period.",
+        "required": [
+          "job",
+          "cause",
+          "pullRequests",
+          "failures",
+          "lastFailedAt",
+          "runs"
+        ],
+        "properties": {
+          "cause": {
+            "$ref": "#/components/schemas/CiCause",
+            "description": "The CI's setup, or flaky."
+          },
+          "failure": {
+            "type": ["string", "null"],
+            "description": "The test that failed, as its check run annotated it: `path: name`."
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times it failed.",
+            "minimum": 0
+          },
+          "job": {
+            "type": "string",
+            "description": "The job."
+          },
+          "lastFailedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last failed."
+          },
+          "pullRequests": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many pull requests it failed on.",
+            "minimum": 0
+          },
+          "repository": {
+            "type": ["string", "null"],
+            "description": "The repository, by URL."
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunLink"
+            },
+            "description": "The newest Runs it failed in."
+          },
+          "step": {
+            "type": ["string", "null"],
+            "description": "The step that failed, when it was read."
+          }
+        }
+      },
       "RefusedTrial": {
         "type": "object",
         "description": "A trial whose Run was refused.",
@@ -4738,6 +5342,97 @@
           "why": {
             "type": "string",
             "description": "Why it must change."
+          }
+        }
+      },
+      "ReviewQuality": {
+        "type": "object",
+        "description": "How the period's review rounds went.",
+        "required": [
+          "reviewedRuns",
+          "rounds",
+          "firstRounds",
+          "cleanFirstRounds",
+          "blockers",
+          "newBlockers",
+          "repeatedBlockers",
+          "byReviewer",
+          "byAgent",
+          "recurring"
+        ],
+        "properties": {
+          "blockers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers found.",
+            "minimum": 0
+          },
+          "byAgent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockerCount"
+            },
+            "description": "Blockers by Agent, most first."
+          },
+          "byReviewer": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockerCount"
+            },
+            "description": "Blockers by reviewer Role, most first."
+          },
+          "cleanFirstRate": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "The share of them clean, from 0 to 1."
+          },
+          "cleanFirstRounds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Those whose first round found no Blocker.",
+            "minimum": 0
+          },
+          "firstRounds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs whose first round ended.",
+            "minimum": 0
+          },
+          "newBlockers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers no earlier round of their Run found.",
+            "minimum": 0
+          },
+          "recurring": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecurringBlocker"
+            },
+            "description": "Blocker texts found in two or more Runs, in the most Runs first."
+          },
+          "repeatedBlockers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers an earlier round of their Run found too: not fixed.",
+            "minimum": 0
+          },
+          "reviewedRuns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs with one or more review rounds.",
+            "minimum": 0
+          },
+          "rounds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Their rounds.",
+            "minimum": 0
+          },
+          "roundsPerRun": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "Rounds per reviewed Run."
           }
         }
       },
@@ -4890,6 +5585,17 @@
               {
                 "$ref": "#/components/schemas/RunAutomation",
                 "description": "The Automation that started it, as it was then; none for a Run a\nperson started."
+              }
+            ]
+          },
+          "budgetStop": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BudgetStop",
+                "description": "Why its token budget ended it, when it did; none for a Run it did\nnot end, or that has none."
               }
             ]
           },
@@ -5075,6 +5781,17 @@
               "$ref": "#/components/schemas/Step"
             },
             "description": "Its Steps, in the order they started."
+          },
+          "tokenBudget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunTokenBudget",
+                "description": "Its token budget and what its agent Steps used of it; none for a\nRun that keeps no budget."
+              }
+            ]
           }
         }
       },
@@ -5314,6 +6031,40 @@
           "source": {
             "$ref": "#/components/schemas/RulesSource",
             "description": "Where they came from."
+          }
+        }
+      },
+      "RunTokenBudget": {
+        "type": "object",
+        "description": "A Run's token budget as the Run API shows it.",
+        "required": ["budget", "measured"],
+        "properties": {
+          "budget": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The most tokens its agent Steps may use, as it kept it.",
+            "minimum": 0
+          },
+          "measured": {
+            "type": "boolean",
+            "description": "False when the Run's agent sessions recorded no usage at all, as an\nagent whose runtime is not measured (local, self-hosted) records\nnone: its use reads as 0, and the budget never stops it. True when\nit was measured, or not read."
+          },
+          "stop": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BudgetStop",
+                "description": "Why the budget ended the Run, when it did."
+              }
+            ]
+          },
+          "used": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The tokens they used so far, as Insights counts them; none when\nthe usage log could not be read, or the Run was listed rather than\nread on its own.",
+            "minimum": 0
           }
         }
       },

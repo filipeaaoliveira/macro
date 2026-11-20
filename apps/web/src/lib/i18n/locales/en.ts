@@ -23,6 +23,7 @@ import entityIcons from './en/entity-icons';
 import factoryBoard from './en/factory-board';
 import factoryEvaluation from './en/factory-evaluation';
 import factoryInsights from './en/factory-insights';
+import factoryQuality from './en/factory-quality';
 import factoryRuns from './en/factory-runs';
 import importJobs from './en/import-jobs';
 import localRuntime from './en/local-runtime';
@@ -78,6 +79,7 @@ export default {
   factoryBoard,
   factoryEvaluation,
   factoryInsights,
+  factoryQuality,
   factoryRuns,
   importJobs,
   suggestions,

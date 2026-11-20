@@ -11,6 +11,7 @@ use crate::harness::SoupHarness;
 use crate::initiative::SoupInitiative;
 use crate::project::SoupProject;
 use crate::team::SoupTeam;
+use crate::user::SoupUser;
 use crate::{
     chat::SoupChat,
     comms::{SoupChannel, SoupChannelThread},
@@ -62,6 +63,8 @@ pub enum SoupItem<T = ()> {
     Harness(SoupHarness),
     /// Team, listed only by attention feeds.
     Team(SoupTeam),
+    /// The viewer, listed only by attention feeds.
+    User(SoupUser),
 }
 
 impl<T> SoupItem<T> {
@@ -114,6 +117,7 @@ impl<T> SoupItem<T> {
                 EntityType::Harness.with_entity_string(harness.id.to_string())
             }
             SoupItem::Team(team) => EntityType::Team.with_entity_string(team.id.to_string()),
+            SoupItem::User(user) => EntityType::User.with_entity_string(user.id.clone()),
         }
     }
 
@@ -140,8 +144,9 @@ impl<T> SoupItem<T> {
             SoupItem::AgentSession(session) => session.updated_at,
             SoupItem::DatabaseRow(row) => row.updated_at,
             SoupItem::Harness(harness) => harness.updated_at,
-            // Teams have no timestamps; only attention feeds list them.
-            SoupItem::Team(_) => DateTime::<Utc>::UNIX_EPOCH,
+            // Teams and the viewer have no timestamps; only attention feeds
+            // list them.
+            SoupItem::Team(_) | SoupItem::User(_) => DateTime::<Utc>::UNIX_EPOCH,
         }
     }
 
@@ -166,7 +171,8 @@ impl<T> SoupItem<T> {
             | SoupItem::ChannelThread(_)
             | SoupItem::Call(_)
             | SoupItem::ForeignEntity(_)
-            | SoupItem::DatabaseRow(_) => None,
+            | SoupItem::DatabaseRow(_)
+            | SoupItem::User(_) => None,
         }
     }
 
@@ -289,7 +295,7 @@ impl<T> SoupItem<T> {
             ) => row.updated_at,
             (SoupItem::Harness(harness), SimpleSortMethod::CreatedAt) => harness.created_at,
             (SoupItem::Harness(harness), _) => harness.updated_at,
-            (SoupItem::Team(_), _) => DateTime::<Utc>::UNIX_EPOCH,
+            (SoupItem::Team(_) | SoupItem::User(_), _) => DateTime::<Utc>::UNIX_EPOCH,
         }
     }
 
@@ -334,7 +340,7 @@ impl<T> SoupItem<T> {
             )),
             SoupItem::CrmContact(_) => None,
             SoupItem::ForeignEntity(_) => None,
-            SoupItem::Harness(_) | SoupItem::Team(_) => None,
+            SoupItem::Harness(_) | SoupItem::Team(_) | SoupItem::User(_) => None,
             // Agent sessions have no properties entity type yet.
             SoupItem::AgentSession(_) => None,
             SoupItem::DatabaseRow(row) => Some(EntityReference::new(
@@ -602,6 +608,7 @@ impl<T> SoupItem<T> {
             }
             SoupItem::Harness(harness) => SoupItem::Harness(harness),
             SoupItem::Team(team) => SoupItem::Team(team),
+            SoupItem::User(user) => SoupItem::User(user),
             SoupItem::AgentSession(SoupAgentSession {
                 id,
                 name,
@@ -695,6 +702,7 @@ impl<T> Identify for SoupItem<T> {
             SoupItem::DatabaseRow(row) => row.id,
             SoupItem::Harness(harness) => harness.id,
             SoupItem::Team(team) => team.id,
+            SoupItem::User(user) => user.uuid(),
         }
     }
 }

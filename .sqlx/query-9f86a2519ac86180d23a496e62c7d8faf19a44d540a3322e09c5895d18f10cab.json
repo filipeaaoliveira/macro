@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_branch_update\n            SET base_sha = $3, from_head = $4, conflict = $5, updated_head = $6\n            WHERE run_id = $1 AND seq = $2 AND NOT conflict AND updated_head IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9f86a2519ac86180d23a496e62c7d8faf19a44d540a3322e09c5895d18f10cab"
+}
