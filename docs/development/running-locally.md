@@ -556,11 +556,18 @@ default instance:
 export MACRO_LOCAL_PERSISTENT=macro
 ```
 
-Set it where every shell on the machine and the [boot unit](#start-it-at-boot)
-read it, for example `~/.profile`. The first bring-up in persistent mode creates
-the instance's LocalStack volume (`macro_localstack_data` for the default
-instance). From then on the instance stays persistent while that volume exists,
-even in a shell without the variable.
+Set it where every shell on the machine reads it, such as `~/.bashrc` (which
+non-login SSH commands read too, unlike `~/.profile`), and in the
+[boot unit](#start-it-at-boot)'s `Environment=`.
+
+An instance also stays persistent while its LocalStack volume exists
+(`macro_localstack_data` for the default instance), even in a shell without the
+variable. Create the volume as soon as you switch persistent mode on, so the
+guards apply before the first bring-up:
+
+```bash
+docker volume create macro_localstack_data
+```
 
 ### What changes
 
@@ -568,12 +575,13 @@ even in a shell without the variable.
 | --- | --- |
 | Attached `just run_local` | Resumes over the existing volumes instead of starting clean. |
 | `--fresh`, `just stack up`, `just stack down`, `just destroy_local`, `just reset_local` | Refuse while the instance has data, and say why. Pass `--wipe-persistent-data` to delete it on purpose. An instance with no volumes yet starts clean as usual. |
-| The `q` hotkey | Stops the containers and keeps the data. It tears the stack down only if `run_local` was started with `--wipe-persistent-data`. |
+| The `q` hotkey | Stops the containers and keeps the data. It tears the stack down only if `run_local` was started with `--wipe-persistent-data`. Docker does not restart containers that were stopped this way, so the stack stays down, across reboots too, until `just run_local` or the [boot unit](#start-it-at-boot) starts it. |
+| `just destroy`, `just local-e2e-seed`, and every `drop_db` or `reset_db` recipe aimed at `localhost:5432` | Refuse, and say why. Set `MACRO_LOCAL_WIPE_PERSISTENT_DATA=1` to run them on purpose. These recipes only know the default instance. |
 | LocalStack | Runs `gresau/localstack-persist:4.14.0`, the same LocalStack 4.14.0, pinned by digest. It writes S3, DynamoDB, SQS and KMS state to the instance's LocalStack volume every 2 seconds. Provisioning creates only missing resources and never replaces an existing KMS key or alias. |
 | Postgres | Runs with `-c jit=off`. JIT compiled the home feed's query plan on every call, which took seconds on tables this small. |
-| Restarts | Every container has `restart: unless-stopped`, so Docker brings the stack back after a daemon or host restart. `just run_local stop` still stops it. |
+| Restarts | Every container has `restart: unless-stopped`, so Docker brings the stack back after a daemon or host restart. `just run_local stop` and the `q` hotkey still stop it, and it then stays stopped until started again. |
 | Temporal | Its gRPC port is not published on the host; the UI is. Run the CLI inside the container: `docker exec macro-temporal-1 temporal workflow list`. |
-| Tests | The instance's Postgres refuses `#[sqlx::test]` databases. Tests that default to `127.0.0.1:7233` cannot reach its Temporal. See [Run tests next to it](#run-tests-next-to-it). |
+| Tests | The instance's Postgres refuses `#[sqlx::test]` databases in `macrodb`, `contacts` and `macrodb_pwconc`. Tests that default to `127.0.0.1:7233` cannot reach its Temporal. See [Run tests next to it](#run-tests-next-to-it). |
 
 ### What survives what
 
@@ -665,11 +673,21 @@ temporal server start-dev --port 7233 --headless   # tests default to 127.0.0.1:
 
 Remove the Postgres afterwards with `docker rm -fv macro-test-postgres`.
 
-- A `#[sqlx::test]` that reaches the persistent Postgres fails with "this
-  Postgres holds a persistent local stack's data". Check `DATABASE_URL`, and the
-  `.env` files `just setup_test_envs` wrote, which name `localhost:5432`.
-- Don't run `just setup_test_template` or `just setup_macrodb` against the
-  persistent Postgres.
+- A `#[sqlx::test]` that reaches the persistent Postgres through `macrodb`,
+  `contacts` or `macrodb_pwconc` fails with "this Postgres holds a persistent
+  local stack's data". A `DATABASE_URL` naming another database on that server
+  is not refused. Check `DATABASE_URL`, and the `.env` files
+  `just setup_test_envs` wrote, which name `localhost:5432`.
+- Don't run these against the persistent stack. Some refuse; the rest have no
+  guard:
+  - `just destroy`, `just local-e2e-seed`, `just reset_local`, `just destroy_local`,
+    `just stack up`, `just stack down`, and any `drop_db` or `reset_db` recipe
+    (they refuse);
+  - `just setup_test_template` and `just setup_macrodb` (no guard: they migrate
+    the persistent Postgres);
+  - `docker compose down -v` typed by hand (no guard: it deletes the sync,
+    agent repository, OpenBao and Temporal volumes; the LocalStack volume is
+    external and survives).
 - `just local-e2e` runs on its own instance, so it never touches the persistent
   one.
 
@@ -715,6 +733,9 @@ Back up first. Then either start clean or remove everything:
 just run_local --fresh --wipe-persistent-data
 just destroy_local --wipe-persistent-data
 ```
+
+The recipes outside `run_local` take `MACRO_LOCAL_WIPE_PERSISTENT_DATA=1`
+instead of the flag, for example `MACRO_LOCAL_WIPE_PERSISTENT_DATA=1 just destroy`.
 
 To switch persistent mode off, remove the instance from
 `MACRO_LOCAL_PERSISTENT` and wipe it as above, which also deletes its LocalStack
