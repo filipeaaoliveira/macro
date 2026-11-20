@@ -1038,6 +1038,57 @@ async fn only_the_schedulers_proof_of_its_run_fires_as_the_creator() {
     );
 }
 
+/// The scheduler's proof keys its firing on the run it names in that run
+/// id's canonical spelling only: the same id posted upper-case, without
+/// hyphens, in braces or as a URN is not the scheduler's own firing, so it
+/// acts as the Macro routine bot, which no Standing Role here lists. One
+/// proof starts one Run, however its run id is spelled.
+#[tokio::test]
+async fn one_proof_fires_once_whatever_the_spelling_of_its_run() {
+    let repo = super::definition::team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = super::standing::notes_definition();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, code_service(&repo, &workflows, &github), &triggers);
+    automations
+        .create_automation(julia(), true, notes_automation(schedule()))
+        .await
+        .expect("created");
+    let id = run_id("own");
+    let spellings = [
+        id.hyphenated().to_string(),
+        id.hyphenated().to_string().to_uppercase(),
+        id.simple().to_string(),
+        id.braced().to_string(),
+        id.urn().to_string(),
+    ];
+
+    let mut started = Vec::new();
+    for firing in spellings {
+        let fired = automations
+            .fire_from_routine(
+                &julia(),
+                ROUTINE,
+                scheduled("own"),
+                RoutineFiring {
+                    firing: firing.clone(),
+                    task_id: None,
+                    github: None,
+                },
+                routine_bot(),
+            )
+            .await
+            .expect("fired");
+        if let Some(run) = fired.run_id {
+            started.push((firing, run));
+        }
+    }
+
+    assert_eq!(started.len(), 1, "{started:?}");
+    assert_eq!(started[0].0, id.to_string());
+    assert_eq!(workflows.started.lock().expect("started").len(), 1);
+}
+
 /// Under Standing Roles, a Task event the scheduler watches fires its
 /// Automation as its creator, with no Role for the routine bot.
 #[tokio::test]

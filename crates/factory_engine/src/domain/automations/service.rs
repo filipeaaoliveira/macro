@@ -204,7 +204,9 @@ where
 /// revision the factory last wrote the routine at, so the run runs the
 /// trigger and code the factory wrote, signed for the Macro routine bot
 /// (`MACRO_NEW_BOT_ID`) as the factory's `Agent` routine is. The proof
-/// names its run, which keys the firing, so it fires once. Any other run
+/// names its run, which keys the firing only in its canonical spelling
+/// (lower-case and hyphenated), so it fires once: another spelling of the
+/// same run would claim a firing of its own. Any other run
 /// acts as the agent its credential is signed for or its agent session,
 /// else as the Macro routine bot: Run Now, by a person or an agent, and a
 /// run of a routine changed since, by anyone, need a Standing Role that
@@ -217,8 +219,7 @@ fn routine_acting(
 ) -> Option<ActingAgent> {
     let routine_bot = ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID);
     let schedulers_own = scheduler_run.is_some_and(|run| {
-        automation.routine_revision == Some(run.revision)
-            && Uuid::parse_str(firing_key).is_ok_and(|key| key == run.run_id)
+        automation.routine_revision == Some(run.revision) && firing_key == run.run_id.to_string()
     });
     if schedulers_own && acting.as_ref() == Some(&routine_bot) {
         return None;
