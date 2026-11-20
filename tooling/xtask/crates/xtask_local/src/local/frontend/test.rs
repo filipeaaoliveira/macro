@@ -151,3 +151,22 @@ fn a_second_frontend_build_in_a_checkout_waits_for_the_first() {
     locked_rx.recv().unwrap();
     second.join().unwrap();
 }
+
+/// `vite build` loads `.env.<mode>*` files for the mode the config resolves,
+/// and the app's config takes it from `MODE`. Without it the bundle would drop
+/// local overrides kept in `apps/web/.env.development.local`, such as
+/// `VITE_ENABLE_FACTORY_RUNS`, that the dev server applies.
+#[test]
+fn the_static_bundle_reads_the_development_env_files_like_the_dev_server() {
+    for mode in [Mode::Local, Mode::Dev] {
+        let build = static_build_command(mode);
+        let env: Vec<_> = build.get_envs().collect();
+        assert!(
+            env.contains(&(
+                std::ffi::OsStr::new("MODE"),
+                Some(std::ffi::OsStr::new("development"))
+            )),
+            "{env:?}"
+        );
+    }
+}
