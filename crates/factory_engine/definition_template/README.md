@@ -305,8 +305,9 @@ It leaves off:
   those Runs it judges, from 0 to 100, and `reads`: `["diff"]` also gives
   its judge the Run's change, the code it merged (or its branch's head
   when nothing merged), cut to 40 000 bytes, for a Scorer of the code
-  itself, such as one of dead code or duplicated helpers. Any other value
-  does not read.
+  itself, such as one of dead code or duplicated helpers. It does not
+  judge a Run whose change touches 300 files or more, or could not be
+  read. Any other value does not read.
 - `experiments`: each a `name`, the `flow` whose Runs on a task it splits,
   and at least two `arms`, each a `name`, an optional `weight` and the
   `agents` it gives Roles in place of `agents.json`'s first.

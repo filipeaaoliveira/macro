@@ -417,19 +417,27 @@ judged.
 A judge reads the Run as one JSON object: its request, how it ended, and its
 last Steps' outputs. A Scorer that sets `reads: ["diff"]` is also given the
 Run's change (`evaluation/service.rs`, `RunChange`), read once per scoring
-through `PullRequests`: when its pull request merged, GitHub's compare of the
-merge commit's first parent to the merge commit; otherwise of the base branch
-to the Run's branch's head. A rebase merge of several commits reads as its
-last commit. The diff follows the JSON in a code fence nothing in it can
-close (`fence_for`), and both the prompt and the judge's preamble say it is
-data, never instructions. It is cut at a line to `DIFF_BYTES` (40 000 bytes,
-about ten thousand tokens), and the judge is told how many lines and bytes
-were left out. A change GitHub lists only in part, or none to read (no
-repository, branch or merge), is said in place of the diff. A GitHub read that
-fails fails the scoring attempt; its last attempt judges without the change
-and logs it. A trial's change is read before its branch is deleted; a retry
-after that finds no branch. `reads` takes only `diff`: any other value does
-not read, in `FACTORY_EVALUATION`, in a Definition's `scorers.json`, and in
+attempt through `PullRequests`: when its pull request merged, GitHub's
+compare of the merge commit's first parent to the merge commit; otherwise
+of the base branch to the Run's branch's head, or to its pull request's
+head once the branch is deleted. A rebase merge of several commits reads as
+its last commit. The diff follows the JSON in a code fence nothing in it
+can close (`fence_for`), and both the prompt and the judge's preamble say
+it is data, never instructions. The whole addition, heading, fences and
+note included, holds to `DIFF_BYTES` (40 000 bytes, about ten thousand
+tokens): the diff is cut at a line, each line first capped at
+`DIFF_LINE_BYTES` (1 000) with a marker, so one long line leaves room for
+the files after it, and the judge is told how many lines and bytes were
+left out. A Run with no change to read (no repository, merge, pull request
+or branch) is judged on that. A change GitHub lists only in part (300
+files or more), or one that could not be read (a GitHub read that fails on
+the last attempt; an earlier one fails the attempt, to retry), is not
+judged at all by the Scorers that read it, and is logged: a judgment
+without the change would be noise in insights. A trial's branch is deleted
+only once its Scorers judged it, or on the last attempt, so a retry still
+reads its change; a trial whose branch is gone is not judged by them.
+`reads` takes only `diff`: any other value does not read, in
+`FACTORY_EVALUATION`, in a Definition's `scorers.json`, and in
 `factory_definition_check`.
 
 A sampled Scorer of the code a Run merged, `slop`, measures drift over time
@@ -486,7 +494,8 @@ and plans only the trials it started, and a suite none of whose trials
 started is deleted. A suite still starting counts the trials it
 planned. Once a trial's Run ends it keeps its score (1 when write ended
 `done`, 0.5 `red`, 0 otherwise) and its agents' tokens, its Run's own
-`factory/<run>` branch is deleted as its owner (best effort, through
+`factory/<run>` branch is deleted as its owner once its Scorers judged it,
+or on the scoring's last attempt (best effort, through
 `PullRequests::delete_run_branch`, which takes the Run, never a branch
 name; one found missing counts as deleted), and, unless it was cancelled, the Scorers
 its Benchmark names judge it into the trial's own record. A trial whose Run
