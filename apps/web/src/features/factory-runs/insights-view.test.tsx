@@ -758,7 +758,9 @@ describe('RunInsightsView', () => {
     );
     // No figure reads in tokens either.
     expect(
-      screen.queryByText('3 model calls have no price, so cost reads in tokens.')
+      screen.queryByText(
+        '3 model calls have no price, so cost reads in tokens.'
+      )
     ).toBeNull();
   });
 
