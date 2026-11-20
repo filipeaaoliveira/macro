@@ -22,14 +22,16 @@ use macro_authorization::{
 };
 use model_error_response::ErrorResponse;
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::domain::evaluation::insights::{
-    ArmInsight, ArmScoreInsight, BenchmarkSummary, EvaluationInsights, EvaluationService,
-    ExperimentInsight, ImprovementInsight, PendingSource, RefusedTrial, ScorerInsight,
-    SelfImprovementInsight, SuiteError, SuiteInsight, SuiteStarted, TrialInsight, TrialScore,
+    ArmInsight, ArmScoreInsight, BenchmarkSummary, DismissalUndoneResponse, EvaluationInsights,
+    EvaluationService, ExperimentInsight, ImprovementInsight, PendingSource, RefusedTrial,
+    ScorerInsight, SelfImprovementInsight, SuiteError, SuiteInsight, SuiteStarted, TrialInsight,
+    TrialScore, UndoDismissalError,
 };
 use crate::domain::insights::{InsightsQuery, TokenCounts};
-use crate::inbound::http::acting_agent;
+use crate::inbound::http::{acting_agent, is_in_person};
 use crate::inbound::insights::InsightsParams;
 use factory_records::domain::self_improvement::ImprovementState;
 
@@ -75,6 +77,8 @@ impl<S, Auth> FromRef<EvaluationRouterState<S, Auth>> for MacroAuthorizationStat
 /// - `GET /insights/evaluation` — the Scorers, Experiments and Benchmark
 ///   suites of the caller's Runs over a period.
 /// - `POST /benchmarks/{benchmark}/suites` — start a suite.
+/// - `POST /self-improvements/{id}/undo-dismissal` — send a rejected
+///   self-improvement Run's dismissed failures back to pending.
 pub fn evaluation_router<S, Auth, T>(state: EvaluationRouterState<S, Auth>) -> Router<T>
 where
     S: EvaluationService,
@@ -86,6 +90,10 @@ where
         .route(
             "/benchmarks/{benchmark}/suites",
             post(start_suite_handler::<S, Auth>),
+        )
+        .route(
+            "/self-improvements/{id}/undo-dismissal",
+            post(undo_dismissal_handler::<S, Auth>),
         )
         .with_state(state)
 }
@@ -226,10 +234,91 @@ impl IntoResponse for SuiteError {
     }
 }
 
+/// The self-improvement Run whose dismissal to undo.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Path)]
+pub struct ImprovementPath {
+    /// The self-improvement Run's id (`selfImprovement.last.id`).
+    pub id: Uuid,
+}
+
+/// Undo the dismissal of the failures a person's rejection of one of the
+/// caller's team's self-improvement Runs dismissed (its pull request closed
+/// unmerged, or its Run cancelled in person): when the rejection was of the
+/// proposed fix and not of the failures, they go back to pending and count
+/// toward the next self-improvement Run's thresholds at the team's next
+/// Run end, after any pause the rejection started. Only failures it still
+/// holds go back. Only the admin who named the team's Definition, or the
+/// owner of the self-improvement Run, may, in their own signed-in session
+/// (403 otherwise); a Run that dismissed nothing is refused (409). The undo
+/// is kept with who and when; undoing again answers it and changes nothing
+/// (`restored` 0).
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "undo_factory_improvement_dismissal",
+    path = "/self-improvements/{id}/undo-dismissal",
+    params(ImprovementPath),
+    responses(
+        (status = 200, body = DismissalUndoneResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(improvement_id = %path.id))]
+pub async fn undo_dismissal_handler<S, Auth>(
+    State(state): State<EvaluationRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(path): Path<ImprovementPath>,
+) -> Result<Json<DismissalUndoneResponse>, UndoDismissalError>
+where
+    S: EvaluationService,
+    Auth: MacroAuthorizationService,
+{
+    if !is_in_person(&caller.authorization, &headers) {
+        return Err(UndoDismissalError::NotAPerson);
+    }
+    let actor = caller.authorization.user.macro_user_id;
+    Ok(Json(state.service.undo_dismissal(&actor, path.id).await?))
+}
+
+impl IntoResponse for UndoDismissalError {
+    fn into_response(self) -> axum::response::Response {
+        let status_code = match self {
+            UndoDismissalError::Internal(_) => {
+                tracing::error!(error = ?self, "undoing a dismissal failed");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        message: "internal server error".into(),
+                    }),
+                )
+                    .into_response();
+            }
+            UndoDismissalError::NotFound => StatusCode::NOT_FOUND,
+            UndoDismissalError::NotAllowed | UndoDismissalError::NotAPerson => {
+                StatusCode::FORBIDDEN
+            }
+            UndoDismissalError::NothingDismissed => StatusCode::CONFLICT,
+        };
+        (
+            status_code,
+            Json(ErrorResponse {
+                message: self.to_string().into(),
+            }),
+        )
+            .into_response()
+    }
+}
+
 /// The evaluation routes' OpenAPI document, merged into the Run API's.
 #[derive(utoipa::OpenApi)]
 #[openapi(
-    paths(evaluation_handler, start_suite_handler),
+    paths(evaluation_handler, start_suite_handler, undo_dismissal_handler),
     components(schemas(
         EvaluationInsights,
         ScorerInsight,
@@ -244,6 +333,7 @@ impl IntoResponse for SuiteError {
         PendingSource,
         ImprovementInsight,
         ImprovementState,
+        DismissalUndoneResponse,
         TokenCounts,
         StartSuiteRequest,
         SuiteStarted,
