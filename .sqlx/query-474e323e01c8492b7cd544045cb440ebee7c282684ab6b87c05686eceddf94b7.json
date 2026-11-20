@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_review_finding f\n            SET ruling = r.ruling, ruled_by = $2\n            FROM UNNEST($3::int[], $4::int[], $5::text[]) AS r(seq, place, ruling)\n            WHERE f.run_id = $1\n              AND f.seq = r.seq\n              AND f.place = r.place\n              AND f.fix_status = 'disputed'\n              AND f.ruling IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4Array",
+        "Int4Array",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "474e323e01c8492b7cd544045cb440ebee7c282684ab6b87c05686eceddf94b7"
+}

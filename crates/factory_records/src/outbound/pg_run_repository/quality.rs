@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::review_rounds::stored_word;
 use super::{PgRunRepository, PgRunRepositoryErr, number};
 use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::insights::{RunSummary, TITLE_CHARS};
@@ -19,7 +20,7 @@ use crate::domain::quality::{
     BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWait, CiWaitRecord, LastCiWait, QualityRecords,
     QualityRun, QualityScope, ReviewRoundRecord, ReviewerRecord, RunQualityRepository,
 };
-use crate::domain::review_rounds::ReviewRoundOutcome;
+use crate::domain::review_rounds::{DisputeRuling, FixStatus, ReviewRoundOutcome};
 
 /// Keep `wait`, replacing the one its Step kept unless that read the same
 /// head and verdict: the last attempt's wait is the one the Step routed.
@@ -438,7 +439,7 @@ impl RunQualityRepository for PgRunRepository {
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
         let blockers = sqlx::query!(
             r#"
-            SELECT run_id, seq, round_seq, problem
+            SELECT run_id, seq, round_seq, problem, fix_status, ruling
             FROM factory_review_finding
             WHERE run_id = ANY($1) AND kind = 'blocker'
             ORDER BY run_id, seq, place
@@ -454,6 +455,8 @@ impl RunQualityRepository for PgRunRepository {
                 seq: number(row.seq)?,
                 round_seq: number(row.round_seq)?,
                 problem: row.problem,
+                fix_status: stored_word(row.fix_status, FixStatus::from_word)?,
+                ruling: stored_word(row.ruling, DisputeRuling::from_word)?,
             })
         })
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;

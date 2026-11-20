@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                f.run_id, f.round_seq, f.seq, f.place, s.role, f.path, f.start_line, f.end_line,\n                f.problem, f.why, f.blocks_anywhere, f.kind, f.follow_up_task_id, f.follow_up_key,\n                f.follow_up_commented\n            FROM factory_review_finding f\n            JOIN factory_step s ON s.run_id = f.run_id AND s.seq = f.seq\n            WHERE f.run_id = ANY($1)\n            ORDER BY f.run_id, f.round_seq, f.seq, f.place\n            ",
+  "query": "\n            SELECT\n                f.run_id, f.round_seq, f.seq, f.place, s.role, f.path, f.start_line, f.end_line,\n                f.problem, f.why, f.blocks_anywhere, f.kind, f.follow_up_task_id, f.follow_up_key,\n                f.follow_up_commented, f.repeats_dropped, f.fix_status, f.dispute, f.ruling,\n                f.ruled_by\n            FROM factory_review_finding f\n            JOIN factory_step s ON s.run_id = f.run_id AND s.seq = f.seq\n            WHERE f.run_id = ANY($1)\n            ORDER BY f.run_id, f.round_seq, f.seq, f.place\n            ",
   "describe": {
     "columns": [
       {
@@ -77,6 +77,31 @@
         "ordinal": 14,
         "name": "follow_up_commented",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "repeats_dropped",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "fix_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "dispute",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "ruling",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "ruled_by",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
@@ -99,8 +124,13 @@
       true,
       true,
       true,
-      false
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
     ]
   },
-  "hash": "d86908a47f2cc9687324554761074d157377eaae4f955af0636a7ce7a7d17b5b"
+  "hash": "5a0c1ef4b80bdaf84a51d7e27f9506e937f5b2e45feceaec6d27921db2ad6c84"
 }

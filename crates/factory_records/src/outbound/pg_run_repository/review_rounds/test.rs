@@ -8,8 +8,8 @@ use super::super::PgRunRepository;
 use crate::domain::models::{EntryId, NewRun, Outcome, RunId, RunInsert, StepKey};
 use crate::domain::ports::RunRepository;
 use crate::domain::review_rounds::{
-    Finding, FindingClass, FindingKind, Lines, ReviewRoundFailure, ReviewRoundOutcome,
-    ReviewRoundRepository, ReviewRoundStart,
+    DisputeRuling, Finding, FindingClass, FindingKind, FixAnswer, FixStatus, Lines,
+    ReviewRoundFailure, ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart, Ruling,
 };
 
 /// A new Run of Julia's, with the round that starts at Step 3 recorded and
@@ -69,6 +69,7 @@ fn finding(path: &str, lines: Option<(u32, u32)>) -> Finding {
         problem: format!("{path} is wrong"),
         why: "It breaks the build".to_string(),
         blocks_anywhere: false,
+        repeats_dropped: false,
     }
 }
 
@@ -339,4 +340,163 @@ async fn rounds_are_numbered_across_the_run_through_a_reset(pool: PgPool) {
     assert_eq!(numbered, [(3, 1, 1), (8, 2, 1)]);
     let listed = repo.runs_review_rounds(&[id]).await.expect("listed");
     assert_eq!(listed.get(&id), Some(&rounds));
+}
+
+/// The fix's word on each Blocker of a round is kept, with why it disputes
+/// one, and replaced while no reviewer ruled on it. The next round's
+/// reviewer's rulings are kept with its findings, replace what an earlier
+/// attempt of its Step ruled, and leave a dispute another Step ruled on as
+/// it was. A finding that repeats a dropped one is kept dismissed.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_fix_s_disputes_and_the_next_round_s_rulings_are_kept(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = reviewing(&repo).await;
+    let first = StepKey { run_id: id, seq: 3 };
+    let found = [
+        finding("src/a.rs", None),
+        finding("src/b.rs", None),
+        finding("src/c.rs", None),
+    ];
+    repo.record_findings(first, 3, &found)
+        .await
+        .expect("record");
+    let blockers: Vec<FindingClass> = (1..=3)
+        .map(|place| FindingClass {
+            seq: 3,
+            place,
+            kind: FindingKind::Blocker,
+        })
+        .collect();
+    repo.classify_findings(id, 3, &blockers)
+        .await
+        .expect("classify");
+    let answer = |place, status, dispute: Option<&str>| FixAnswer {
+        seq: 3,
+        place,
+        status,
+        dispute: dispute.map(str::to_string),
+    };
+    repo.record_fix(id, 3, &[answer(1, FixStatus::Disputed, Some("At first"))])
+        .await
+        .expect("fix");
+    repo.record_fix(
+        id,
+        3,
+        &[
+            answer(1, FixStatus::Fixed, None),
+            answer(2, FixStatus::Disputed, Some("The sandbox has no network")),
+            answer(3, FixStatus::Disputed, Some("The file is generated")),
+        ],
+    )
+    .await
+    .expect("fix again");
+
+    let second = ReviewRoundStart {
+        seq: 5,
+        round: 2,
+        reviewers: 2,
+        head_sha: "def456".to_string(),
+        diff_base: "abc123".to_string(),
+        fix_diff: true,
+    };
+    repo.start_review_round(id, &second).await.expect("round 2");
+    let entry = EntryId::try_from("review".to_string()).expect("entry");
+    for seq in [5, 6] {
+        repo.start_step(StepKey { run_id: id, seq }, &entry, 2)
+            .await
+            .expect("start");
+    }
+    let ruling = |place, ruling| Ruling {
+        seq: 3,
+        place,
+        ruling,
+    };
+    let reviewer = StepKey { run_id: id, seq: 5 };
+    repo.record_answer(
+        reviewer,
+        5,
+        &[],
+        &[
+            ruling(2, DisputeRuling::Dropped),
+            ruling(1, DisputeRuling::Dropped),
+        ],
+    )
+    .await
+    .expect("first attempt");
+    let mut repeats = finding("src/c.rs", None);
+    repeats.repeats_dropped = true;
+    repo.record_answer(
+        reviewer,
+        5,
+        &[repeats],
+        &[
+            ruling(2, DisputeRuling::Upheld),
+            ruling(3, DisputeRuling::Dropped),
+        ],
+    )
+    .await
+    .expect("retried");
+    // Another reviewer's ruling on a dispute already ruled on changes
+    // nothing.
+    repo.record_answer(
+        StepKey { run_id: id, seq: 6 },
+        5,
+        &[],
+        &[ruling(3, DisputeRuling::Upheld)],
+    )
+    .await
+    .expect("other");
+    repo.classify_findings(
+        id,
+        5,
+        &[FindingClass {
+            seq: 5,
+            place: 1,
+            kind: FindingKind::Dismissed,
+        }],
+    )
+    .await
+    .expect("classify");
+    // A ruled dispute keeps what the fix said.
+    repo.record_fix(id, 3, &[answer(3, FixStatus::Fixed, None)])
+        .await
+        .expect("late fix");
+
+    let rounds = repo.review_rounds(id).await.expect("rounds");
+    let kept: Vec<_> = rounds[0]
+        .findings
+        .iter()
+        .map(|blocker| {
+            (
+                blocker.fix_status,
+                blocker.dispute.as_deref(),
+                blocker.ruling,
+                blocker.ruled_by,
+            )
+        })
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            (Some(FixStatus::Fixed), None, None, None),
+            (
+                Some(FixStatus::Disputed),
+                Some("The sandbox has no network"),
+                Some(DisputeRuling::Upheld),
+                Some(5),
+            ),
+            (
+                Some(FixStatus::Disputed),
+                Some("The file is generated"),
+                Some(DisputeRuling::Dropped),
+                Some(5),
+            ),
+        ]
+    );
+    let dismissed = &rounds[1].findings[0];
+    assert!(dismissed.repeats_dropped);
+    assert_eq!(dismissed.kind, Some(FindingKind::Dismissed));
 }

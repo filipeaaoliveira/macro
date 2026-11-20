@@ -122,7 +122,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119044000_factory_ci_job_failure.sql`,
   `20261119045000_factory_ci_job_replaced.sql`,
   `20261119050000_factory_token_budget.sql`,
-  `20261119050100_factory_token_budget_validate.sql`), `factory_step_steer`,
+  `20261119050100_factory_token_budget_validate.sql`,
+  `20261120030000_factory_review_dispute.sql`,
+  `20261120030100_factory_review_dispute_validate.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
@@ -213,6 +215,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   references `"Document"` and is cleared when the task is deleted.
   `mark_follow_up_commented` sets `follow_up_commented` on a round's
   findings linked to a task, and repeating it changes nothing.
+  `record_fix` keeps what the fix said of each Blocker of a round
+  (`fix_status`, and the `dispute` reason, at most 2 KiB), replacing it
+  while no reviewer has ruled on it. `record_answer` is `record_findings`
+  with the reviewer's rulings on the disputes of the round before
+  (`ruling`, `ruled_by`): they replace what an earlier attempt of its Step
+  ruled, in the same transaction, and a dispute another Step ruled on
+  keeps its ruling. A finding that repeats a Blocker its reviewer dropped
+  (`repeats_dropped`) is classified `dismissed`.
 - `list_waiting_runs` reads one owner's Runs that have not ended and wait
   on an unanswered Gate, newest first, through `factory_run_user_open_idx`
   (open Runs only) and the Gates' primary key, up to its limit.
