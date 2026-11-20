@@ -420,6 +420,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   id and when it was filed (`task_filed_at`), which a deleted task document
   leaves set, so it is not filed again.
 
+- `newest_definition_read` gives the commit the newest Run of a team's
+  members under its Definition read (repository ignoring case), for the
+  Definition setting: one `LATERAL` per member walks their Runs newest first
+  through `factory_run_user_created_idx` until one ran under it, so a
+  member with many Runs under no Definition costs a longer walk.
+
 - Self-improvement (`20261119020000_factory_self_improvement.sql`):
   `factory_team_definition.named_by_user_id` keeps who named a team's
   Definition (`set_team_definition`; null for one named before, or once

@@ -30,11 +30,11 @@ use uuid::Uuid;
 use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
     AgentName, AskedBack, BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
-    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, GateModelReading,
-    HandBack, HandedBack, InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold,
-    QueuePlaces, Repository, Role, Run, RunDefinition, RunEnd, RunFlow, RunId, RunInsert,
-    RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered, Step, StepEnd, StepKey,
-    StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink, TeamMembership,
+    ClaimedSession, ControlFileChanges, DefinitionRead, EntryId, Gate, GateAnswer, GateKind,
+    GateModelReading, HandBack, HandedBack, InvalidName, NewRun, NewSteer, Outcome, PassedOver,
+    QueueHold, QueuePlaces, Repository, Role, Run, RunDefinition, RunEnd, RunFlow, RunId,
+    RunInsert, RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered, Step, StepEnd,
+    StepKey, StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -973,6 +973,40 @@ impl RunRepository for PgRunRepository {
         .fetch_optional(&self.pool)
         .await?;
         Ok(repo_url)
+    }
+
+    // Each member's newest Run under the Definition (its repository
+    // compared ignoring case) is found walking their Runs newest first
+    // (`factory_run_user_created_idx`); the newest of those is the team's.
+    #[tracing::instrument(err, skip(self))]
+    async fn newest_definition_read(
+        &self,
+        team_id: Uuid,
+        repo_url: &str,
+    ) -> Result<Option<DefinitionRead>, Self::Err> {
+        let read = sqlx::query_as!(
+            DefinitionRead,
+            r#"
+            SELECT r.definition_commit AS "commit!", r.created_at
+            FROM team_user tu
+            CROSS JOIN LATERAL (
+                SELECT run.definition_commit, run.created_at, run.id
+                FROM factory_run run
+                WHERE run.user_id = tu.user_id
+                    AND lower(run.definition_repo_url) = lower($2)
+                ORDER BY run.created_at DESC, run.id DESC
+                LIMIT 1
+            ) r
+            WHERE tu.team_id = $1
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT 1
+            "#,
+            team_id,
+            repo_url,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(read)
     }
 
     #[tracing::instrument(err, skip(self))]

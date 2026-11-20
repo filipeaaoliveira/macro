@@ -7,10 +7,10 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, NewSteer, Outcome,
-    PassedOver, QueueHold, Role, Run, RunFlow, RunId, RunInsert, RunOutcome, SessionStep,
-    SteerRefusal, Steered, Step, StepKey, StepSession, StepSteering, StoppingSession, TaskLink,
-    TeamMembership,
+    ControlFileChanges, DefinitionRead, EntryId, GateAnswer, HandBack, HandedBack, NewRun,
+    NewSteer, Outcome, PassedOver, QueueHold, Role, Run, RunFlow, RunId, RunInsert, RunOutcome,
+    SessionStep, SteerRefusal, Steered, Step, StepKey, StepSession, StepSteering, StoppingSession,
+    TaskLink, TeamMembership,
 };
 use crate::domain::standing_rules::StandingRule;
 
@@ -509,6 +509,15 @@ pub trait RunRepository: Send + Sync + 'static {
         repo_url: Option<&str>,
         named_by: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The commit of the Factory Definition `repo_url` (compared ignoring
+    /// case) that the newest Run of the team `team_id`'s members started
+    /// under it read; none when none of them started one under it.
+    fn newest_definition_read(
+        &self,
+        team_id: Uuid,
+        repo_url: &str,
+    ) -> impl Future<Output = Result<Option<DefinitionRead>, Self::Err>> + Send;
 
     /// The Agents of the Factory Definition the Run `id` started under, as
     /// it kept them; none when it started under none.

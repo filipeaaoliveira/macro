@@ -19,9 +19,9 @@ use axum::{
 };
 use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
-    AskedBack, ControlFileChanges, EntryId, FlawMarker, Gate, GateAnswer, GateModelReading,
-    HandBack, Outcome, Run, RunDefinition, RunEnd, RunFlaw, RunId, RunOutcome, StandInAnswer,
-    Steer, SteerAction, Step, StepEnd, StepTerminal,
+    AskedBack, ControlFileChanges, DefinitionRead, EntryId, FlawMarker, Gate, GateAnswer,
+    GateModelReading, HandBack, Outcome, Run, RunDefinition, RunEnd, RunFlaw, RunId, RunOutcome,
+    StandInAnswer, Steer, SteerAction, Step, StepEnd, StepTerminal,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -36,8 +36,9 @@ use crate::domain::board::{
     BoardNext, BoardPage, BoardRun, BoardScope, PullRequestRun, PullRequestRuns,
 };
 use crate::domain::models::{
-    ActingAgent, Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
-    PersonOnly, RunDetail, SessionStepRef, StandingRulesSettings,
+    ActingAgent, Answerer, ControlFilesSettings, DefinitionContents, DefinitionFlow,
+    DefinitionPullRequest, DefinitionRole, DefinitionScorer, DefinitionSettings, FactoryError,
+    FlowSummary, PersonOnly, RunDetail, SessionStepRef, StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -1384,6 +1385,12 @@ impl IntoResponse for FactoryError {
         control_files::SetControlFilesRequest,
         DefinitionSettings,
         definition::SetDefinitionRequest,
+        DefinitionRead,
+        DefinitionContents,
+        DefinitionFlow,
+        DefinitionRole,
+        DefinitionScorer,
+        DefinitionPullRequest,
         RunDefinition,
         StandingRulesSettings,
         OrchestratorDefinition,

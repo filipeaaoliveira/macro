@@ -458,6 +458,17 @@ pub struct RunDefinition {
     pub commit: String,
 }
 
+/// The commit of a Factory Definition the newest Run under it read, and
+/// when that Run started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionRead {
+    /// The commit the Run read the Definition at.
+    pub commit: String,
+    /// When the Run started.
+    pub created_at: DateTime<Utc>,
+}
+
 /// The Control Files a Run's branch changed: files that decide whether the
 /// repository's checks pass, such as its tests, lint configuration and CI
 /// workflows. The Run is Tampered when it changed one its request does not
