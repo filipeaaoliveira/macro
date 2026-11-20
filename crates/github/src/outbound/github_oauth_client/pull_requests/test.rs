@@ -2,8 +2,9 @@ use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
 use super::GithubBranchUpdate;
 use crate::domain::models::{
-    GithubBranchDeletion, GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
-    GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
+    GithubBranchDeletion, GithubError, GithubOpenPullRequest, GithubOpenPullRequestItem,
+    GithubOpenPullRequestOutcome, GithubRepositoryAccess, GithubRequiredCheck,
+    GithubRequiredChecks, GithubWorkflowRunStatus,
 };
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
@@ -130,6 +131,42 @@ async fn find_pull_request_by_head_reads_the_newest_of_the_branch_with_its_head(
     assert_eq!(found.head_sha, "abc123");
     assert!(server.finish().starts_with(
         "GET /repos/macro/app/pulls?head=macro%3Afactory%2Frun&state=all&sort=created&direction=desc&per_page=1 HTTP/1.1"
+    ));
+}
+
+/// Open pull requests are listed most recently updated first, one page of
+/// at most the limit, with their title, page and whether each is a draft.
+#[tokio::test]
+async fn open_pull_requests_are_listed_with_their_title_and_page() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"[{"number":7,"title":"Add a scorer","html_url":"https://github.com/macro/def/pull/7","draft":true,"state":"open"},{"number":3,"title":"Fix a flow","html_url":"https://github.com/macro/def/pull/3","state":"open"}]"#,
+    );
+
+    let open = client
+        .list_open_pull_requests("token", "macro", "def", 20)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        open,
+        vec![
+            GithubOpenPullRequestItem {
+                number: 7,
+                title: "Add a scorer".to_string(),
+                html_url: "https://github.com/macro/def/pull/7".to_string(),
+                draft: true,
+            },
+            GithubOpenPullRequestItem {
+                number: 3,
+                title: "Fix a flow".to_string(),
+                html_url: "https://github.com/macro/def/pull/3".to_string(),
+                draft: false,
+            },
+        ]
+    );
+    assert!(server.finish().starts_with(
+        "GET /repos/macro/def/pulls?state=open&sort=updated&direction=desc&per_page=20 HTTP/1.1"
     ));
 }
 

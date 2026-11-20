@@ -21,9 +21,9 @@ use super::{
 use crate::domain::models::{
     GithubBranchDeletion, GithubCheckAnnotation, GithubCheckRun, GithubCheckRunResult,
     GithubCheckSuite, GithubCommitStatus, GithubError, GithubJobStep, GithubListing,
-    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
-    GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
-    GithubWorkflowRunStatus,
+    GithubOpenPullRequest, GithubOpenPullRequestItem, GithubOpenPullRequestOutcome,
+    GithubPullRequestHead, GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks,
+    GithubWorkflowRun, GithubWorkflowRunStatus,
 };
 
 #[cfg(test)]
@@ -136,6 +136,15 @@ struct PullRequestListItem {
     state: String,
     merged_at: Option<String>,
     head: PullRequestHeadRef,
+}
+
+#[derive(serde::Deserialize)]
+struct OpenPullRequestListItem {
+    number: u64,
+    title: String,
+    html_url: String,
+    #[serde(default)]
+    draft: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -618,6 +627,48 @@ impl GithubOauthImpl {
             )
             .await?;
         Ok(!open.is_empty())
+    }
+
+    /// The repository's open pull requests, most recently updated first,
+    /// at most `limit` (one page, up to [`PAGE_SIZE`]). An owner or
+    /// repository name GitHub would not take is refused before any request.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn list_open_pull_requests(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        limit: usize,
+    ) -> Result<Vec<GithubOpenPullRequestItem>, GithubError> {
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+        let per_page = limit.clamp(1, PAGE_SIZE).to_string();
+        let open: Vec<OpenPullRequestListItem> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/pulls"),
+                &[
+                    ("state", "open"),
+                    ("sort", "updated"),
+                    ("direction", "desc"),
+                    ("per_page", per_page.as_str()),
+                ],
+                "failed to list open pull requests",
+            )
+            .await?;
+        Ok(open
+            .into_iter()
+            .take(limit)
+            .map(|pull_request| GithubOpenPullRequestItem {
+                number: pull_request.number,
+                title: pull_request.title,
+                html_url: pull_request.html_url,
+                draft: pull_request.draft,
+            })
+            .collect())
     }
 
     /// The newest pull request, open or closed, from the repository's own
