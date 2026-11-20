@@ -1654,9 +1654,9 @@ async fn undone_failures_count_toward_the_next_improvement() {
     assert_eq!(held, 3);
 }
 
-/// Only the admin who named the Definition, or the owner of the rejected
-/// improvement's Run, undoes its dismissal; another member, a namer no
-/// longer an admin, and an agent's account are refused, Insights offers
+/// Only a team admin who named the Definition or owns the rejected
+/// improvement's Run undoes its dismissal; another member, a namer or Run
+/// owner no longer an admin, and an agent's account are refused, Insights offers
 /// them no undo, and nothing changes. An improvement that dismissed
 /// nothing, or none of the team's, is refused too.
 #[tokio::test]
@@ -1748,19 +1748,83 @@ async fn only_the_namer_or_the_run_owner_undoes_a_dismissal() {
     assert_eq!(undone.restored, 2);
     assert_eq!(bench.pending().await, 2);
 
-    // With no namer kept, the Run's owner still may, even no longer an
-    // admin.
+    // With no namer kept, the Run's owner, still an admin, may.
     bench
         .repo
         .definition_namers
         .lock()
         .expect("namers")
         .remove(&TEAM);
-    set_julia(&bench.repo, Some(false));
     let again = insights.undo_dismissal(&julia(), id).await.expect("owner");
     assert_eq!(again.restored, 0);
     assert!(matches!(
         insights.undo_dismissal(&teo(), id).await,
         Err(UndoDismissalError::NotAllowed)
     ));
+
+    // Once a member, the Run's owner may not.
+    set_julia(&bench.repo, Some(false));
+    assert!(matches!(
+        insights.undo_dismissal(&julia(), id).await,
+        Err(UndoDismissalError::NotAllowed)
+    ));
+}
+
+/// The admin who named the Definition rejects her self-improvement Run and
+/// is then made a member: though she owns the Run, she may no longer undo
+/// its dismissal, Insights offers her no undo, and nothing changes. While
+/// she was an admin, she could as its owner once someone else named it.
+#[tokio::test]
+async fn a_demoted_namer_who_owns_the_run_may_not_undo_a_dismissal() {
+    use crate::domain::evaluation::insights::{
+        EvaluationService, EvaluationServiceImpl, UndoDismissalError,
+    };
+
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    let insights = EvaluationServiceImpl::new(
+        bench.repo.clone(),
+        bench.service.clone(),
+        Arc::new(EvaluationDefinition::default()),
+        None,
+    );
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    let run = bench.improvement_runs()[0];
+    let id = bench
+        .repo
+        .latest_improvement(TEAM)
+        .await
+        .expect("read")
+        .expect("kept")
+        .id;
+
+    // Julia, its owner, cancels it in person: rejected.
+    bench.cancel(run, None, true).await;
+    bench.improvement().after_run_end(run).await.expect("after");
+    assert_eq!(bench.pending().await, 0);
+    assert!(last_shown(&insights, &julia()).await.can_undo_dismissal);
+
+    // Named by Teo, Julia, an admin, may still undo as the Run's owner.
+    bench
+        .repo
+        .definition_namers
+        .lock()
+        .expect("namers")
+        .insert(TEAM, teo().to_string());
+    assert!(last_shown(&insights, &julia()).await.can_undo_dismissal);
+    bench
+        .repo
+        .definition_namers
+        .lock()
+        .expect("namers")
+        .insert(TEAM, julia().to_string());
+
+    // Made a member, the namer and owner Julia may not.
+    set_julia(&bench.repo, Some(false));
+    assert!(!last_shown(&insights, &julia()).await.can_undo_dismissal);
+    assert!(matches!(
+        insights.undo_dismissal(&julia(), id).await,
+        Err(UndoDismissalError::NotAllowed)
+    ));
+    assert_eq!(bench.pending().await, 0, "nothing changed");
 }

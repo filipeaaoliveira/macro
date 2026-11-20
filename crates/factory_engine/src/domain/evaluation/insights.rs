@@ -240,8 +240,8 @@ pub struct ImprovementInsight {
     pub dismissal_undone_at: Option<DateTime<Utc>>,
     /// Whether the caller may undo the dismissal now: it holds dismissed
     /// failures, was not undone, and they are a person (never an agent's
-    /// account) who named the Definition and is still an admin of the
-    /// team, or who owns its Run.
+    /// account) who is still an admin of the team and named the
+    /// Definition or owns its Run.
     pub can_undo_dismissal: bool,
 }
 
@@ -285,11 +285,12 @@ fn undo_internal(error: impl std::error::Error + Send + Sync + 'static) -> UndoD
 }
 
 /// Whether `actor`, a person on the team (`membership`), may undo the
-/// dismissal of `improvement`'s failures: they named the team's Definition
-/// (`naming`) and are still an admin of the team, as a self-improvement Run
-/// starts only for such a namer ([`namer_standing`]), or they own its Run,
-/// whoever may have rejected it in Macro. The caller refuses an agent's
-/// account first.
+/// dismissal of `improvement`'s failures: they are still an admin of the
+/// team, as a self-improvement Run starts only for an admin namer
+/// ([`namer_standing`]), and they named the team's Definition (`naming`)
+/// or own its Run, whoever may have rejected it in Macro. A namer or Run
+/// owner demoted to member may not. The caller refuses an agent's account
+/// first.
 async fn may_undo<R>(
     repo: &R,
     actor: &MacroUserIdStr<'static>,
@@ -300,7 +301,10 @@ async fn may_undo<R>(
 where
     R: SelfImprovementRepository,
 {
-    if membership.admin && naming.is_some_and(|naming| naming.named_by.as_ref() == Some(actor)) {
+    if !membership.admin {
+        return Ok(false);
+    }
+    if naming.is_some_and(|naming| naming.named_by.as_ref() == Some(actor)) {
         return Ok(true);
     }
     let Some(run_id) = improvement.run_id else {
