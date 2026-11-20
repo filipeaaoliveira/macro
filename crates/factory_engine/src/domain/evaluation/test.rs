@@ -1147,10 +1147,10 @@ async fn a_run_that_merged_nothing_is_judged_on_its_branch_head() {
     );
 }
 
-/// A change over the budget is cut at a line, and the judge told how much
-/// was left out.
-#[tokio::test]
-async fn a_change_over_the_budget_is_cut_at_a_line() {
+/// Score a live Run of Julia's, ended `done`, whose branch is at `head`
+/// with `patch` as its one file's diff against `main`, by
+/// [`reading_definition`]'s Scorers; the prompt `slop` was given.
+async fn slop_prompt(head: Option<&str>, files: Option<Vec<ChangedFile>>) -> Option<String> {
     let repo = FakeRepo::default();
     let session = Uuid::from_u128(7);
     let run = ended_run(&repo, "code", RunOutcome::Success, "done", session).await;
@@ -1158,21 +1158,170 @@ async fn a_change_over_the_budget_is_cut_at_a_line() {
     judge.then(0.5);
     judge.then(0.5);
     let github = FakeGithub::default();
-    let head = "6666666666666666666666666666666666666666";
+    {
+        let mut state = github.state();
+        state.head = head.map(str::to_string);
+        if let (Some(head), Some(files)) = (head, files) {
+            state
+                .diffs
+                .insert(("main".to_string(), head.to_string()), files);
+        }
+    }
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge.clone(),
+        usage(session),
+        github,
+        Arc::new(reading_definition()),
+    );
+    scoring.score_run(run, false).await.expect("scored");
+    judge
+        .asked()
+        .into_iter()
+        .map(|(_, question)| question)
+        .find(|question| {
+            question
+                .instructions
+                .contains("Is the change free of slop?")
+        })
+        .map(|question| question.prompt)
+}
+
+/// The change as `slop` was given it: from its heading to the end.
+fn change_part(prompt: &str) -> &str {
+    let (_, change) = prompt.split_once("\n\n").expect("a change after the run");
+    change
+}
+
+const HEAD: &str = "6666666666666666666666666666666666666666";
+
+/// A change over the budget is cut at a line, and the judge told how much
+/// was left out: the whole of what it is given of it, heading, fences and
+/// note included, within the budget.
+#[tokio::test]
+async fn a_change_over_the_budget_is_cut_at_a_line() {
     // 2000 lines of 30 bytes: 60 000 bytes, over the budget.
     let patch: String = (0..2000)
         .map(|line| format!("+line {line:05} of the change....\n"))
         .collect();
     assert_eq!(patch.len(), 60_000);
+    let files = vec![ChangedFile::from_patch(
+        "big.txt".to_string(),
+        None,
+        Some(&patch),
+    )];
+
+    let prompt = slop_prompt(Some(HEAD), Some(files)).await.expect("asked");
+
+    let change = change_part(&prompt);
+    assert!(change.len() <= DIFF_BYTES, "{} bytes given", change.len());
+    let (_, diff) = change.split_once("```diff\n").expect("the diff");
+    let (kept, note) = diff.split_once("```").expect("its fence closes");
+    assert!(kept.ends_with("of the change....\n"), "cut at a line");
+    let lines_kept = kept.lines().count() - 1;
+    assert!(lines_kept > 1200, "{lines_kept} lines kept");
+    let left = 2000 - lines_kept;
+    assert_eq!(
+        note,
+        format!(
+            "\n({left} more lines, {} bytes, of the change are left out: a judge reads at most {DIFF_BYTES} bytes of it.)",
+            left * 30
+        )
+    );
+}
+
+/// A diff whose long runs of backticks make its fence long still holds,
+/// fences included, to the budget.
+#[tokio::test]
+async fn a_long_fence_counts_against_the_budget() {
+    // 100 lines of 500 backticks: the fence takes 501.
+    let patch = format!("+{}\n", "`".repeat(500)).repeat(100);
+    let files = vec![ChangedFile::from_patch(
+        "ticks.md".to_string(),
+        None,
+        Some(&patch),
+    )];
+
+    let prompt = slop_prompt(Some(HEAD), Some(files)).await.expect("asked");
+
+    let change = change_part(&prompt);
+    assert!(change.len() <= DIFF_BYTES, "{} bytes given", change.len());
+    let fence = "`".repeat(501);
+    assert!(change.contains(&format!("\n{fence}diff\n")), "opened");
+    assert!(
+        change.contains(&format!("\n{fence}\n(")),
+        "closed before the note"
+    );
+}
+
+/// One line over the cap is cut at a character, with a marker, and the
+/// files after it are still given.
+#[tokio::test]
+async fn a_long_line_is_cut_and_the_files_after_it_are_given() {
+    // "+" then 25 000 two-byte characters: 50 001 bytes, cut at byte 999,
+    // the character boundary before the cap.
+    let long = format!("+{}\n", "é".repeat(25_000));
+    let files = vec![
+        ChangedFile::from_patch("min.js".to_string(), None, Some(&long)),
+        ChangedFile::from_patch(
+            "src/lib.rs".to_string(),
+            None,
+            Some("@@ -1 +1 @@\n-old\n+new\n"),
+        ),
+    ];
+
+    let prompt = slop_prompt(Some(HEAD), Some(files)).await.expect("asked");
+
+    let change = change_part(&prompt);
+    let cut = format!("+{} [49002 bytes of this line cut]\n", "é".repeat(499));
+    assert!(change.contains(&cut), "{change}");
+    assert!(change.contains("diff --git a/src/lib.rs b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n"));
+    assert!(!change.contains("left out"));
+}
+
+/// A Run with no branch and no pull request is judged on having no change.
+#[tokio::test]
+async fn a_run_with_no_change_is_judged_on_that() {
+    let prompt = slop_prompt(None, None).await.expect("asked");
+
+    assert_eq!(change_part(&prompt), "The run left no change to read.");
+}
+
+/// A change GitHub lists only in part is not judged by a Scorer that reads
+/// it; the others judge, and nothing is retried.
+#[tokio::test]
+async fn a_change_too_large_to_list_is_not_judged() {
+    // No diff is registered for the head: GitHub lists only part of it.
+    let prompt = slop_prompt(Some(HEAD), None).await;
+
+    assert_eq!(prompt, None);
+}
+
+/// A Run whose branch is deleted is read at its pull request's head.
+#[tokio::test]
+async fn a_deleted_branch_is_read_at_its_pull_request_s_head() {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let run = ended_run(&repo, "code", RunOutcome::Failed, "red", session).await;
+    let judge = Arc::new(FakeJudge::default());
+    judge.then(0.5);
+    judge.then(0.5);
+    let github = FakeGithub::default();
     {
         let mut state = github.state();
-        state.head = Some(head.to_string());
+        state.pull_request = Some(PullRequest {
+            number: 7,
+            url: "https://github.com/acme/widgets/pull/7".to_string(),
+            state: PullRequestState::Closed,
+            head_sha: FakeGithub::HEAD.to_string(),
+            merge_commit: None,
+        });
         state.diffs.insert(
-            ("main".to_string(), head.to_string()),
+            ("main".to_string(), FakeGithub::HEAD.to_string()),
             vec![ChangedFile::from_patch(
-                "big.txt".to_string(),
+                "a.rs".to_string(),
                 None,
-                Some(&patch),
+                Some("+closed\n"),
             )],
         );
     }
@@ -1187,20 +1336,184 @@ async fn a_change_over_the_budget_is_cut_at_a_line() {
     scoring.score_run(run, false).await.expect("scored");
 
     let slop = asked_of(&judge, "Is the change free of slop?");
-    let (_, change) = slop.prompt.split_once("```diff\n").expect("the diff");
-    let (kept, note) = change.split_once("```").expect("its fence closes");
-    assert!(kept.len() <= DIFF_BYTES, "{} bytes kept", kept.len());
-    assert!(kept.ends_with("of the change....\n"), "cut at a line");
-    // The `diff --git` line takes 31 bytes: 1332 lines of 30 fit after it.
-    let lines_kept = kept.lines().count() - 1;
-    assert_eq!(lines_kept, (DIFF_BYTES - 31) / 30);
-    let left = 2000 - lines_kept;
-    assert_eq!(
-        note,
-        format!(
-            "\n({left} more lines, {} bytes, of the change are left out: a judge reads at most {DIFF_BYTES} bytes of it.)",
-            left * 30
-        )
+    assert!(slop.prompt.contains("+closed\n"), "{}", slop.prompt);
+}
+
+/// GitHub failing to give the change fails an earlier attempt, to retry;
+/// on the last, the Scorer that reads it does not judge, and the others
+/// do.
+#[tokio::test]
+async fn an_unread_change_is_retried_then_not_judged() {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let run = ended_run(&repo, "code", RunOutcome::Success, "done", session).await;
+    let judge = Arc::new(FakeJudge::default());
+    judge.then(0.9);
+    judge.then(0.9);
+    let github = FakeGithub::default();
+    github.state().find_fails = true;
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge.clone(),
+        usage(session),
+        github,
+        Arc::new(reading_definition()),
+    );
+
+    scoring
+        .score_run(run, false)
+        .await
+        .expect_err("the change is read again");
+    scoring
+        .score_run(run, true)
+        .await
+        .expect("judged without slop");
+
+    let kept = repo.evaluation.lock().expect("evaluation").clone();
+    let scorers: Vec<_> = kept.run_scores[&run]
+        .iter()
+        .map(|score| score.scorer.as_str())
+        .collect();
+    assert_eq!(scorers, ["correctness"]);
+    assert!(
+        judge
+            .asked()
+            .iter()
+            .all(|(_, question)| !question.instructions.contains("slop"))
+    );
+}
+
+/// A definition whose Benchmark's trials `slop` judges, reading the diff.
+fn trial_definition() -> EvaluationDefinition {
+    read(json!({
+        "scorers": [{
+            "name": "slop",
+            "instructions": "Is the change free of slop?",
+            "samplePercent": 0,
+            "reads": ["diff"]
+        }],
+        "benchmarks": [{
+            "name": "core",
+            "repository": "https://github.com/acme/widgets",
+            "tasks": [{ "name": "typo", "request": "Fix the typo in the README." }],
+            "scorers": ["slop"]
+        }]
+    }))
+    .expect("a definition")
+}
+
+/// A trial of Julia's, ended `done`, its branch at [`PIN`] with one file
+/// changed against `main`, scored with [`trial_definition`].
+async fn diff_trial(
+    judge: Arc<FakeJudge>,
+) -> (
+    FakeRepo,
+    FakeGithub,
+    RunId,
+    ScoringServiceImpl<FakeRepo, Arc<FakeJudge>, FakeUsage, FakeGithub>,
+) {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let run = ended_run(&repo, "benchmark", RunOutcome::Success, "done", session).await;
+    let suite_id = Uuid::from_u128(600);
+    let configuration = [(role("writer"), agent("backup"))].into_iter().collect();
+    repo.insert_suite(&NewSuite {
+        id: suite_id,
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    let trial = TrialKey {
+        suite_id,
+        task: "typo".to_string(),
+    };
+    repo.insert_trial(&trial, run, PIN).await.expect("trial");
+    let github = FakeGithub::default();
+    {
+        let mut state = github.state();
+        state.head = Some(PIN.to_string());
+        state.diffs.insert(
+            ("main".to_string(), PIN.to_string()),
+            vec![ChangedFile::from_patch(
+                "README.md".to_string(),
+                None,
+                Some("-teh\n+the\n"),
+            )],
+        );
+    }
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge,
+        usage(session),
+        github.clone(),
+        Arc::new(trial_definition()),
+    );
+    (repo, github, run, scoring)
+}
+
+/// A trial's branch is kept while its Scorers have yet to judge it, so a
+/// retry still reads its change; it is deleted once they judged.
+#[tokio::test]
+async fn a_retried_trial_still_reads_its_change() {
+    let judge = Arc::new(FakeJudge::default());
+    judge.then_fail();
+    judge.then(0.7);
+    let (repo, github, run, scoring) = diff_trial(judge.clone()).await;
+
+    scoring
+        .score_run(run, false)
+        .await
+        .expect_err("the judge failed");
+    assert!(
+        github.state().deleted_branches.is_empty(),
+        "kept for the retry"
+    );
+    scoring.score_run(run, false).await.expect("judged");
+
+    let asked = judge.asked();
+    assert_eq!(asked.len(), 2);
+    assert!(
+        asked[1].1.prompt.contains("-teh\n+the\n"),
+        "{}",
+        asked[1].1.prompt
+    );
+    let kept = repo.evaluation.lock().expect("evaluation").clone();
+    let judged = &kept.trial_scores[&(Uuid::from_u128(600), "typo".to_string())];
+    assert_eq!(judged[0].scorer, "slop");
+    assert_eq!(judged[0].score, 0.7);
+    assert_eq!(github.state().deleted_branches, [format!("factory/{run}")]);
+}
+
+/// On its last attempt a trial's branch is deleted however its judging
+/// went; a trial whose branch is gone is not judged on its change.
+#[tokio::test]
+async fn a_trial_whose_branch_is_gone_is_not_judged_on_its_change() {
+    let judge = Arc::new(FakeJudge::default());
+    judge.then_fail();
+    judge.then(0.7);
+    let (repo, github, run, scoring) = diff_trial(judge.clone()).await;
+
+    scoring
+        .score_run(run, true)
+        .await
+        .expect_err("the judge failed");
+    assert_eq!(github.state().deleted_branches, [format!("factory/{run}")]);
+    scoring
+        .score_run(run, true)
+        .await
+        .expect("nothing to judge");
+
+    assert_eq!(judge.asked().len(), 1);
+    assert!(
+        !repo
+            .evaluation
+            .lock()
+            .expect("evaluation")
+            .trial_scores
+            .contains_key(&(Uuid::from_u128(600), "typo".to_string()))
     );
 }
 
