@@ -116,12 +116,13 @@ where
         let acts_as = program.code_identity();
         // The scheduler's proof, for a run it started itself: the run's id
         // (its code's `run.id`) at the configuration it was claimed at.
-        let scheduler_run = firing.started_by_scheduler().then(|| {
-            agent_correlation::context::SchedulerRun {
-                run_id: handle.action_id,
-                revision: action.configuration_revision.get(),
-            }
-        });
+        let scheduler_run =
+            firing
+                .started_by_scheduler()
+                .then(|| agent_correlation::context::SchedulerRun {
+                    run_id: handle.action_id,
+                    revision: action.configuration_revision.get(),
+                });
         // Code gets the triggering item whenever there is one.
         let trigger = match firing {
             RoutineRun::Event(run) if has_code => Some(self.trigger(owner, run).await?),

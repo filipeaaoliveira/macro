@@ -886,8 +886,18 @@ async fn an_agent_fires_an_automation_only_through_a_standing_role() {
     };
 
     // A routine of another agent's, even with a valid proof, acts as it.
-    let refused = fire("run-1", scheduled("run-1"), bot(super::standing::PRIMARY_BOT)).await;
-    let intake = fire("run-2", scheduled("run-2"), bot(super::standing::BACKUP_BOT)).await;
+    let refused = fire(
+        "run-1",
+        scheduled("run-1"),
+        bot(super::standing::PRIMARY_BOT),
+    )
+    .await;
+    let intake = fire(
+        "run-2",
+        scheduled("run-2"),
+        bot(super::standing::BACKUP_BOT),
+    )
+    .await;
     let by_schedule = fire("run-3", scheduled("run-3"), routine_bot()).await;
     let by_hand = fire("run-4", None, routine_bot()).await;
     let in_session = fire(
@@ -989,7 +999,9 @@ async fn only_the_schedulers_proof_of_its_run_fires_as_the_creator() {
     let edited_revision = triggers.changed();
     let edited = fire("edited", proof("edited", edited_revision), routine_bot()).await;
 
-    let own = own.run_id.expect("the scheduler's own run starts it as its creator");
+    let own = own
+        .run_id
+        .expect("the scheduler's own run starts it as its creator");
     assert!(replayed.repeated, "{replayed:?}");
     assert_eq!(replayed.run_id, Some(own));
     for refused in [&by_hand, &as_owner, &proof_as_owner, &other_run, &edited] {
