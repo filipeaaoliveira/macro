@@ -16,7 +16,7 @@ use factory_records::domain::standing_rules::{
 };
 use uuid::Uuid;
 
-use super::{FakeExecutor, julia, reply_step};
+use super::{FakeExecutor, julia, keep_notify_only_reply, reply_step};
 use crate::domain::fakes::{FakeGithub, FakeNotifier, FakeRepo, FakeTaskNotes, FakeTaskThread};
 use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling, GateTelling};
@@ -57,12 +57,15 @@ async fn run_on_task(repo: &FakeRepo, rules: RunRules) -> (RunId, Uuid) {
             request: "Fix the login bug",
             user_id: &julia(),
             task_id: Some(task),
+            project_id: None,
             repository: None,
             created_in_person: true,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -150,6 +153,7 @@ async fn a_run_s_updates_are_posted_once_each_to_one_thread_on_its_task() {
             user_id: julia(),
             approved_control_files: None,
             agent_session: None,
+            standing: None,
         },
     };
     steps.answer_gate(answered.clone()).await.expect("answer");
@@ -293,6 +297,15 @@ async fn a_thread_that_cannot_be_posted_to_fails_nothing() {
 async fn an_update_without_its_thread_starts_the_thread_first() {
     let repo = FakeRepo::default();
     let (run_id, _) = run_on_task(&repo, rules(true, false)).await;
+    // The new thread's first comment is stamped now, the one updates reply
+    // to at the Run's creation: within one millisecond the two ids are the
+    // same and the second update finds its thread without looking.
+    repo.runs
+        .lock()
+        .expect("runs")
+        .get_mut(&run_id)
+        .expect("run")
+        .created_at = Utc::now() - TimeDelta::minutes(1);
     let thread = FakeTaskThread::default();
     let steps = service(&repo, &FakeNotifier::default(), &thread);
     for seq in [1, 2] {
@@ -409,12 +422,15 @@ async fn a_review_round_is_one_comment() {
             request: "Add dark mode",
             user_id: &julia(),
             task_id: Some(task),
+            project_id: None,
             repository: Some(&repository),
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules(true, false),
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -578,6 +594,7 @@ async fn an_orchestrator_answer_is_posted_as_the_orchestrator_s() {
                 user_id: julia(),
                 approved_control_files: None,
                 agent_session: Some(Uuid::from_u128(0xa6e)),
+                standing: None,
             },
         })
         .await
@@ -604,6 +621,7 @@ async fn an_orchestrator_answer_is_posted_as_the_orchestrator_s() {
 async fn a_notify_only_gate_is_told_once_per_entry_until_the_run_ends() {
     let repo = FakeRepo::default();
     let (run_id, task) = run_on_task(&repo, rules(true, false)).await;
+    keep_notify_only_reply(&repo, run_id);
     let notifier = FakeNotifier::default();
     let thread = FakeTaskThread::default();
     let steps = service(&repo, &notifier, &thread);
@@ -633,7 +651,7 @@ async fn a_notify_only_gate_is_told_once_per_entry_until_the_run_ends() {
             .all(|notice| notice.notification_id == told_id(run_id, &entry))
     );
     assert!(!sent[0].push);
-    assert_eq!(sent[0].task_id, task);
+    assert_eq!(sent[0].task_id, Some(task));
     assert_eq!(sent[0].metadata.question, "The plan is ready.");
     assert!(sent[0].metadata.notify_only);
     let texts = thread.texts();

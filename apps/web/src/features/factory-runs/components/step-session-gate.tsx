@@ -2,7 +2,7 @@ import { useFeatureFlag } from '@app/lib/analytics/posthog';
 import { t } from '@app/lib/i18n';
 import { enableFactoryRuns } from '@core/constant/featureFlags';
 import { factoryClient } from '@service-factory/client';
-import { useQuery } from '@tanstack/solid-query';
+import { queryOptions, useQuery } from '@tanstack/solid-query';
 import { type ParentProps, Show } from 'solid-js';
 import { factoryRunKeys } from '../queries/keys';
 
@@ -17,18 +17,23 @@ export function runLink(runId: string): string {
  * session.
  */
 function useSessionStep(sessionId: () => string | undefined) {
-  return useQuery(() => {
-    const id = sessionId();
-    return {
-      queryKey: factoryRunKeys.sessionStep(id ?? '').queryKey,
-      queryFn: async ({ signal }) => {
-        const result = await factoryClient.getSessionStep(id ?? '', signal);
-        // Not a Step's session, or not the person's: the composer stays.
-        return result.isOk() ? result.value : null;
-      },
-      enabled: Boolean(id),
-      staleTime: Number.POSITIVE_INFINITY,
-    };
+  return useQuery(() => sessionStepOptions(sessionId()));
+}
+
+/**
+ * The read of the factory Step working in the session `id`, built at
+ * module scope so the cached query keeps no view alive.
+ */
+function sessionStepOptions(id: string | undefined) {
+  return queryOptions({
+    queryKey: factoryRunKeys.sessionStep(id ?? '').queryKey,
+    queryFn: async ({ signal }) => {
+      const result = await factoryClient.getSessionStep(id ?? '', signal);
+      // Not a Step's session, or not the person's: the composer stays.
+      return result.isOk() ? result.value : null;
+    },
+    enabled: Boolean(id),
+    staleTime: Number.POSITIVE_INFINITY,
   });
 }
 

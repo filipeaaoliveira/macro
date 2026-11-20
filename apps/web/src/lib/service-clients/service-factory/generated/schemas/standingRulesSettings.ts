@@ -18,6 +18,9 @@ export interface StandingRulesSettings {
   canEdit: boolean;
   /** Which kinds of Gate the factory answers on its own. */
   definition: OrchestratorDefinition;
+  /** Whether the team names a Factory Definition, whose `rules.json`
+sets its Runs' Standing Rules in place of these and the Projects'. */
+  definitionNamed: boolean;
   /** Whether it is the factory's default: the team set none, or the
 person is on no team. */
   isDefault: boolean;

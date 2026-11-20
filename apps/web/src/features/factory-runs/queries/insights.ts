@@ -34,11 +34,39 @@ export function insightsOptions(params: InsightsParams) {
   });
 }
 
+export function evaluationOptions(params: InsightsParams) {
+  return queryOptions({
+    queryKey: factoryRunKeys.evaluation(params).queryKey,
+    queryFn: ({ signal }) =>
+      throwOnErr(() =>
+        factoryClient.getEvaluation(
+          {
+            from: params.from,
+            to: params.to,
+            timeZone: params.timeZone,
+            flow: params.flow,
+          },
+          signal
+        )
+      ),
+    staleTime: INSIGHTS_STALE_MS,
+    placeholderData: keepPreviousData,
+  });
+}
+
 /** The insights context on the factory service. */
 export function createAppInsightsContext(): InsightsContext {
   return {
     insights: (params) => {
       const query = useQuery(() => insightsOptions(params()));
+      return {
+        ...toSource(query),
+        updating: () => query.isPlaceholderData,
+      };
+    },
+
+    evaluation: (params) => {
+      const query = useQuery(() => evaluationOptions(params()));
       return {
         ...toSource(query),
         updating: () => query.isPlaceholderData,

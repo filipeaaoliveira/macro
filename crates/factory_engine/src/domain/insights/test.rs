@@ -185,6 +185,59 @@ async fn runs_are_counted_on_their_local_day_by_outcome_and_flow() {
     assert!(!insights.capped);
 }
 
+/// A Run that failed for the factory's plumbing and a Run whose result was
+/// found wrong count apart from a Run that failed for its work, and from
+/// one that succeeded.
+#[tokio::test]
+async fn infrastructure_and_flawed_runs_count_apart_from_failed_and_success() {
+    let records = InsightsRecords {
+        runs: vec![
+            summary(
+                4,
+                Some("code"),
+                "2026-11-11T12:00:00Z",
+                Some((RunOutcome::Flawed, "2026-11-11T13:00:00Z")),
+            ),
+            summary(
+                3,
+                Some("code"),
+                "2026-11-11T11:00:00Z",
+                Some((RunOutcome::Infrastructure, "2026-11-11T11:30:00Z")),
+            ),
+            summary(
+                2,
+                Some("code"),
+                "2026-11-11T10:00:00Z",
+                Some((RunOutcome::Failed, "2026-11-11T10:30:00Z")),
+            ),
+            summary(
+                1,
+                Some("code"),
+                "2026-11-11T09:00:00Z",
+                Some((RunOutcome::Success, "2026-11-11T09:30:00Z")),
+            ),
+        ],
+        ..InsightsRecords::default()
+    };
+    let service = service(records, Vec::new());
+
+    let insights = service
+        .insights(&julia(), query("2026-11-11", "2026-11-11", "UTC"))
+        .await
+        .expect("insights");
+
+    let kinds = OutcomeCounts {
+        success: 1,
+        failed: 1,
+        infrastructure: 1,
+        flawed: 1,
+        ..OutcomeCounts::default()
+    };
+    assert_eq!(insights.totals, kinds);
+    assert_eq!(insights.days[0].counts, kinds);
+    assert_eq!(insights.flows[0].counts, kinds);
+}
+
 #[tokio::test]
 async fn entries_follow_their_flows_order_with_their_outcomes_and_troubled_runs() {
     let records = InsightsRecords {

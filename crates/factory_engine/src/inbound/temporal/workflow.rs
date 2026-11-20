@@ -32,8 +32,9 @@
 //! question, is told to the Run's owner once the workflow takes its
 //! answers (`factory_notify_gate`, behind the [`GATE_OWNER_PATCH`]
 //! marker); a Gate the stand-in answers tells no one. The worker notifies
-//! only for a Run whose owner section is on, and its result changes
-//! nothing the workflow decides. A Run whose
+//! unless the Run's definition is quiet (by default it notifies, whatever
+//! the owner section says), and its result changes nothing the workflow
+//! decides, so the default changed with no new marker. A Run whose
 //! history waited on a Gate before the marker replays without it.
 //!
 //! A notify-only Gate (`GateDefinition::notify_only`) never waits: once
@@ -58,6 +59,14 @@
 //! and routes `failed`. No worker before the marker ended a Step so, so
 //! Runs in flight replay as before.
 //!
+//! A Step whose work failed for good for a machine, quota or network
+//! reason (its attempts ran out of time, or its agents' quota ran out, as
+//! the activity's failure says) ends `failed` like any other, and the Flow
+//! routes `failed`; a Run that ends `failed` right on it ends
+//! `infrastructure`, behind the [`INFRASTRUCTURE_PATCH`] marker, so a Run
+//! whose history ended before it replays `failed`. A review round fails so
+//! only when every reviewer that failed did so for infrastructure.
+//!
 //! Cancelling the workflow cancels the running Step, whose activity drops
 //! its work before the cancellation completes, or the wait for an answer.
 //! The workflow then stops the Step's agent, which only it can tell was
@@ -67,12 +76,14 @@
 //! recorded.
 
 mod review_round;
+mod run_end;
 mod step;
 mod work;
 
 use std::time::Duration;
 
 use factory_records::domain::models::{Outcome, RunOutcome, StepKey};
+use temporalio_common::RetryPolicy;
 use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::{workflow, workflow_methods};
 use temporalio_sdk::workflows::select;
@@ -94,8 +105,10 @@ use crate::domain::models::{RunFinish, RunStart, StepReport, StepRequest};
 use crate::domain::questions::gate_question;
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::inbound::temporal::gate_activities::GateActivities;
+use crate::inbound::temporal::scoring_activities::ScoringActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW, REPLY_GATE_UPDATE};
 use review_round::{Panel, Round, review_round};
+use run_end::RunEnding;
 use step::walk_step;
 use work::TemporalWork;
 
@@ -136,6 +149,22 @@ const CLOSE_ROUND_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// past it the round fails, and the Flow routes `failed`.
 const CLOSE_ROUND_TOTAL: Duration = Duration::from_secs(2 * 60 * 60);
 
+/// How long one attempt to score a Run may take: a judge's model call for
+/// each Scorer that samples it.
+const SCORE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// How long scoring a Run may take in all, across its attempts, before it
+/// is given up on. It must leave room for [`SCORE_ATTEMPTS`] attempts of
+/// [`SCORE_TIMEOUT`] with their backoff (here 3 × 5 minutes and seconds of
+/// backoff in 30 minutes), or an attempt that sees itself as last never
+/// runs, and what it would keep unchecked is never kept.
+const SCORE_TOTAL: Duration = Duration::from_secs(30 * 60);
+
+/// How many times scoring a Run is tried: a judge that keeps failing is
+/// given up on, rather than called again for half an hour. The scoring
+/// activity's last attempt is the one numbered this.
+pub(crate) const SCORE_ATTEMPTS: u32 = 3;
+
 /// How long one attempt to stop a Step's agent may take: past the agent's
 /// own watch of its stopped session, and the session's delete.
 const STOP_TIMEOUT: Duration = Duration::from_secs(3 * 60);
@@ -163,10 +192,20 @@ pub(crate) const GATE_REPLIES_PATCH: &str = "factory-gate-replies";
 /// passed it.
 pub(crate) const NOTIFY_ONLY_PATCH: &str = "factory-notify-only-gates";
 
+/// The marker of the workflow that scores a Run once it ended
+/// (`factory_score_run`). Renaming it breaks the replay of Runs that passed
+/// it.
+pub(crate) const SCORING_PATCH: &str = "factory-scoring";
+
 /// The marker of the workflow that asks the Run's owner about a Step whose
 /// agent stopped without a result, rather than fail it. Renaming it breaks
 /// the replay of Runs that passed it.
 pub(crate) const NO_RESULT_PATCH: &str = "factory-no-result-gates";
+
+/// The marker of the workflow that ends a Run `infrastructure`, rather than
+/// `failed`, when the work it failed on failed for a machine, quota or
+/// network reason. Renaming it breaks the replay of Runs that passed it.
+pub(crate) const INFRASTRUCTURE_PATCH: &str = "factory-infrastructure-outcome";
 
 /// The workflow of one Run.
 #[workflow]
@@ -215,6 +254,9 @@ impl FlowWorkflow {
         // started before them carries, never takes their path, so its
         // history replays as before.
         let questions = Questions::of(&start.flow);
+        // Whether the Run ends `infrastructure`, from the rounds the Flow
+        // routes.
+        let mut ending = RunEnding::default();
         let outcome = loop {
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
@@ -255,15 +297,27 @@ impl FlowWorkflow {
                 };
                 review_round(&temporal, &panel, &mut held, &mut resume).await?
             };
-            match walked {
-                Round::Routed(outcome) => {
-                    if let Err(error) = interpreter.record(&mut state, &outcome) {
-                        stopped = Some(error);
-                        break RunOutcome::Failed;
-                    }
-                }
-                Round::Ended(outcome) => break outcome,
+            let routed = match &walked {
+                Round::Routed(outcome) => outcome.clone(),
+                Round::FailedForInfrastructure => Outcome::failed(),
+                Round::Ended(outcome) => break *outcome,
+            };
+            if let Err(error) = interpreter.record(&mut state, &routed) {
+                stopped = Some(error);
+                break RunOutcome::Failed;
             }
+            ending.routed(&walked, &state);
+        };
+
+        // A Run that ends `failed` right on work that failed for a machine,
+        // quota or network reason ends `infrastructure`, behind the marker:
+        // a Run whose history ended before it replays `failed`.
+        let outcome = if ending.infrastructure(outcome, stopped.is_some())
+            && ctx.patched(INFRASTRUCTURE_PATCH)
+        {
+            RunOutcome::Infrastructure
+        } else {
+            outcome
         };
 
         // A cancelled workflow records its end on a token of its own, which
@@ -287,6 +341,32 @@ impl FlowWorkflow {
         // Any other end holds no Step.
         for request in &held {
             stop(ctx, request).await;
+        }
+
+        // The Run is scored last, on a token of its own as its end is, so a
+        // cancelled trial still gets its result. Scoring decides nothing the
+        // Run does: its failure is ignored. A Run whose history ended before
+        // the marker replays without it.
+        if ctx.patched(SCORING_PATCH) {
+            let _ = ctx
+                .execute_activity(
+                    ScoringActivities::score_run,
+                    start.run_id,
+                    ActivityOptions::with_close_timeouts(
+                        ActivityCloseTimeouts::ScheduleAndStartToClose {
+                            schedule_to_close: SCORE_TOTAL,
+                            start_to_close: SCORE_TIMEOUT,
+                        },
+                    )
+                    .cancellation_token(WorkflowCancellationToken::new())
+                    .retry_policy(
+                        RetryPolicy::builder()
+                            .maximum_attempts(SCORE_ATTEMPTS)
+                            .build(),
+                    )
+                    .build(),
+                )
+                .await;
         }
 
         match (outcome, stopped) {
@@ -650,6 +730,9 @@ pub(super) struct Questions {
     /// How many questions each Step's work may ask; the next one ends the
     /// Run for a person.
     pub(super) most: u8,
+    /// Whether the Run's owner is asked about a Step whose agent stopped
+    /// without a result: never on an unattended Flow, whose Step fails.
+    pub(super) owner_answers: bool,
 }
 
 impl Questions {
@@ -660,6 +743,7 @@ impl Questions {
         Self {
             may_ask: most > 0,
             most,
+            owner_answers: !flow.unattended,
         }
     }
 

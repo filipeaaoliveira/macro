@@ -96,6 +96,7 @@ export function StartRunDialog(props: {
       )
       .with('noPushAccess', () => t('factoryRuns.repositoryNoPush'))
       .with('queueFull', () => t('factoryRuns.queueFull'))
+      .with('definitionUnreadable', () => t('factoryRuns.definitionUnreadable'))
       .exhaustive();
 
   return (

@@ -33,6 +33,7 @@ mod going_on;
 mod quota_memory;
 mod reminder;
 mod run_check;
+mod setup;
 mod step_terminal;
 
 /// What happens to one call: it works, or fails with this error. A call
@@ -95,7 +96,12 @@ struct FakeSessions {
     /// How a command run in the session ends: none for a runtime that runs
     /// no command.
     command_output: Option<SessionCommandOutput>,
+    /// How each command run in the session ends, in order, before
+    /// `command_output` answers the rest.
+    exec_replies: Arc<Mutex<VecDeque<Result<SessionCommandOutput, RoutineSessionError>>>>,
     exec_calls: Arc<Mutex<Vec<ExecRoutineSession>>>,
+    /// How long each command run in the session takes.
+    exec_takes: Option<std::time::Duration>,
     /// A follow-up lands, but the session's runtime then stays
     /// disconnected, as one the harness could not restore, until the
     /// session is deleted.
@@ -134,7 +140,9 @@ impl FakeSessions {
             follow_up_handed: None,
             follow_up_calls: Arc::default(),
             command_output: None,
+            exec_replies: Arc::default(),
             exec_calls: Arc::default(),
+            exec_takes: None,
             follow_up_loses: false,
             lost: Arc::default(),
             last_words: None,
@@ -333,6 +341,12 @@ impl RoutineSessions for FakeSessions {
         command: ExecRoutineSession,
     ) -> Result<SessionCommandOutput, RoutineSessionError> {
         self.exec_calls.lock().expect("execs").push(command);
+        if let Some(takes) = self.exec_takes {
+            tokio::time::sleep(takes).await;
+        }
+        if let Some(reply) = self.exec_replies.lock().expect("exec replies").pop_front() {
+            return reply;
+        }
         self.command_output
             .clone()
             .ok_or(RoutineSessionError::CommandUnsupported)
@@ -434,12 +448,15 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
             request: "Add a dark mode toggle",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");
@@ -463,6 +480,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         answer_by: None,
         resumes: None,
         afresh: None,
+        setup: None,
     }
 }
 
@@ -495,6 +513,9 @@ const PRIMARY: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc1a0));
 
 /// The bot whose sessions `backup` runs in.
 const BACKUP: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc0de));
+
+/// The bot whose sessions `spare` runs in.
+const SPARE: BotId = BotId::new_from_uuid(Uuid::from_u128(0x5a5e));
 
 /// A planner is `primary`, on its own model and instructions, or `backup`
 /// when `primary` cannot start.
@@ -591,6 +612,39 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
             .prompt
             .contains("leave nothing running in the background")
     );
+}
+
+/// A Step of a Run started under a Factory Definition runs in a session of
+/// the Agents the Run kept from it, not the deployment's.
+#[tokio::test]
+async fn a_step_of_a_run_under_a_definition_takes_the_agents_it_kept() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    let kept = serde_json::json!({
+        "agents": {
+            "lead": { "bot": Uuid::from_u128(0x1ead), "model": "definition-model" }
+        },
+        "roles": { "planner": ["lead"] }
+    });
+    repo.definition_agents
+        .lock()
+        .expect("definition agents")
+        .insert(key.run_id, kept);
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    assert_eq!(
+        prepared[0].selection.bot_id,
+        BotId::new_from_uuid(Uuid::from_u128(0x1ead))
+    );
+    assert_eq!(
+        prepared[0].selection.model.as_deref(),
+        Some("definition-model")
+    );
+    assert_eq!(recorded(&repo, key).1, Some(name("lead")));
 }
 
 /// A Step of a Run that works on a repository opens its session in it, so
@@ -1242,6 +1296,121 @@ async fn an_agent_out_of_quota_passes_the_step_to_the_next_agent_of_its_role() {
     );
     assert_eq!(recorded(&repo, key).1, Some(name("backup")));
     assert_eq!(claimed.session_id, prepared[1].session_id.as_uuid());
+}
+
+/// A Run whose Experiment arm gives the Step's Role another Agent runs the
+/// Step in that Agent's session first; the Role's own Agents follow it when
+/// it cannot start.
+#[tokio::test]
+async fn a_run_s_arm_chooses_the_agent_its_steps_start_with() {
+    use factory_records::domain::evaluation::{EvaluationRepository, RunArm};
+
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    repo.record_arms(
+        key.run_id,
+        &[RunArm {
+            experiment: "planner-agent".to_string(),
+            arm: "spare".to_string(),
+            agents: [(planner(), name("spare"))].into_iter().collect(),
+        }],
+    )
+    .await
+    .expect("arm kept");
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let bots: Vec<BotId> = prepared.iter().map(|call| call.selection.bot_id).collect();
+    assert_eq!(bots, [SPARE, PRIMARY]);
+    assert_eq!(recorded(&repo, key).1, Some(name("primary")));
+}
+
+/// A Benchmark trial runs on its suite's configuration only: when the
+/// Agent it chose cannot start for lack of quota, no other takes the Step,
+/// which fails.
+#[tokio::test]
+async fn a_trial_s_agent_out_of_quota_fails_its_step() {
+    use factory_records::domain::evaluation::{EvaluationRepository, NewSuite, TrialKey};
+
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let suite_id = Uuid::from_u128(600);
+    let configuration = [(planner(), name("spare"))].into_iter().collect();
+    repo.insert_suite(&NewSuite {
+        id: suite_id,
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    repo.insert_trial(
+        &TrialKey {
+            suite_id,
+            task: "typo".to_string(),
+        },
+        task.key.run_id,
+        "1111111111111111111111111111111111111111",
+    )
+    .await
+    .expect("trial");
+
+    let failed = agent(&sessions, &repo).answer(task).await;
+
+    assert!(
+        matches!(failed, Err(SessionAgentError::NoQuota(_))),
+        "{failed:?}"
+    );
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let bots: Vec<BotId> = prepared.iter().map(|call| call.selection.bot_id).collect();
+    assert_eq!(bots, [SPARE]);
+}
+
+/// A trial whose suite chose an Agent the definition no longer has fails
+/// its Step: no other Agent of its Role stands in.
+#[tokio::test]
+async fn a_trial_s_agent_no_longer_defined_fails_its_step() {
+    use factory_records::domain::evaluation::{EvaluationRepository, NewSuite, TrialKey};
+
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    let suite_id = Uuid::from_u128(600);
+    let configuration = [(planner(), name("gone"))].into_iter().collect();
+    repo.insert_suite(&NewSuite {
+        id: suite_id,
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    repo.insert_trial(
+        &TrialKey {
+            suite_id,
+            task: "typo".to_string(),
+        },
+        task.key.run_id,
+        "1111111111111111111111111111111111111111",
+    )
+    .await
+    .expect("trial");
+
+    let failed = agent(&sessions, &repo).answer(task).await;
+
+    assert!(
+        matches!(&failed, Err(SessionAgentError::UnknownAgent(agent)) if *agent == name("gone")),
+        "{failed:?}"
+    );
+    assert!(sessions.prepared_calls.lock().expect("prepared").is_empty());
 }
 
 /// An Agent refused its prompt for lack of quota opened a session that did

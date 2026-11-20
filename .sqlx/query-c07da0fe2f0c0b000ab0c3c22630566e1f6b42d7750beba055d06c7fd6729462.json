@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                run_id, seq, round, work_output, checks, commands, declared, setup,\n                check_action_id, started_at,\n                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results,\n                checked_commit\n            FROM factory_check_round\n            WHERE run_id = $1 AND seq = $2\n            ORDER BY round\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "round",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "work_output",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "checks",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "commands",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
+        "name": "declared",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "setup",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "check_action_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "report",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "fix_action_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
+        "name": "quota_ran_out",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "results",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "checked_commit",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c07da0fe2f0c0b000ab0c3c22630566e1f6b42d7750beba055d06c7fd6729462"
+}

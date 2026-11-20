@@ -16,8 +16,15 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/review_rounds.rs` and
   `src/outbound/pg_run_repository/review_rounds.rs`: `ReviewRoundRepository`,
   a Run's review rounds and what their reviewers found.
+- `src/domain/flaws.rs` and `src/outbound/pg_run_repository/flaws.rs`:
+  `FlawRepository`, which marks a Run that ended `success` flawed, keeping
+  who marked it (its owner, or a Scorer by name), why and when.
 - `src/domain/insights.rs` and `src/outbound/pg_run_repository/insights.rs`:
   `RunInsightsRepository`, the reads behind Run insights.
+- `src/domain/self_improvement.rs` and
+  `src/outbound/pg_run_repository/self_improvement.rs`:
+  `SelfImprovementRepository`, a team's failures under its Factory
+  Definition and the self-improvement Runs that address them.
 - `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
   `MainHoldRepository`, the merges Runs made and the Main Holds on the base
   branches they merge to.
@@ -25,22 +32,36 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/outbound/pg_run_repository/standing_rules.rs`:
   `StandingRulesRepository`, teams' and Projects' Standing Rules, and the
   Gate kinds, rules and Orchestrator Definition they are made of.
+- `src/domain/standing_acts.rs` and
+  `src/outbound/pg_run_repository/standing_acts.rs`: `StandingActRepository`,
+  the bot behind an agent session of a Run's owner (`agent_session.bot_id`)
+  and what agents did to Runs under a Factory Definition's Standing Roles
+  (`factory_standing_act`): one start, one cancel and one answer per Gate,
+  every link, each with its bot and its agent session, if it came from one.
 - `src/domain/automations.rs` and
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.
+- `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
+  `RunBoardRepository`, the board's read of Runs across tasks, and of the
+  Runs that opened some pull requests.
+- `src/domain/evaluation.rs` and
+  `src/outbound/pg_run_repository/evaluation.rs`: `EvaluationRepository`,
+  Experiment arms, Scorers' judgments, Benchmark suites and trials.
 - `src/domain/gate_replies.rs` and
   `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
   a person's answer read from their words, the factory asking back, the
-  stand-in's answer, the owner's past answers and the answered Gates a
-  replay measures the model on.
+  stand-in's answer or why it left the Gate to the owner (the Gate model's
+  reading, as for asking back), the owner's past answers and the answered
+  Gates a replay measures the model on.
 
 ## Scope
 
 - Owns: the `factory_run`, `factory_step`, `factory_gate`,
   `factory_check_round`, `factory_team_settings`, `factory_merge`,
   `factory_main_hold`, `factory_review_round`, `factory_review_finding`,
-  `factory_project_rules`, `factory_automation` and
-  `factory_automation_firing` tables
+  `factory_project_rules`, `factory_automation`,
+  `factory_automation_firing`, `factory_team_definition` and
+  `factory_standing_act` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
@@ -64,7 +85,30 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118141500_factory_orchestrator_answers.sql`,
   `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`,
-  `20261118170000_factory_step_terminal.sql`), and `factory_step_steer`.
+  `20261118160000_factory_queue_limit_minimum.sql`,
+  `20261118170000_factory_step_terminal.sql`,
+  `20261118180000_factory_step_pause_limit.sql`,
+  `20261118190000_factory_run_board.sql`,
+  `20261118200000_factory_gate_model_readings.sql`,
+  `20261118200200_factory_gate_asked_back_tampered.sql`,
+  `20261118210000_factory_evaluation.sql`,
+  `20261118210100_factory_benchmark_trial_base.sql`,
+  `20261118210200_factory_benchmark_suite_planned_trials.sql`,
+  `20261118213000_factory_definition.sql`,
+  `20261118213100_factory_run_flow.sql`,
+  `20261118213200_factory_run_definition_evaluation.sql`,
+  `20261118220000_factory_run_outcome_kinds.sql`,
+  `20261118233000_factory_run_pull_request_url_index.sql`,
+  `20261119000000_factory_standing_act.sql`,
+  `20261119000100_factory_standing_act_sessionless.sql`,
+  `20261119003000_factory_repository_setup.sql`,
+  `20261119010000_factory_quiet_gates.sql`,
+  `20261119020000_factory_self_improvement.sql`,
+  `20261119020100_factory_improvement_failure_dismissed.sql`,
+  `20261119030000_factory_run_cancelled_in_person.sql`), `factory_step_steer`,
+  `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
+  `factory_benchmark_trial`, `factory_benchmark_trial_score`,
+  `factory_improvement` and `factory_improvement_failure`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -165,12 +209,58 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   whether an account is an agent's.
 - `factory_run.flow` is the built-in Flow's name, which `insert_run` keeps;
   it is null only for Runs recorded before it was.
+- `factory_run.project_id` is the Project the Run's task was in when it was
+  kept, set once by `insert_run` (`NewRun::project_id`): a record, not a
+  reference, null for Runs kept before it. `pull_request_url` is the page of
+  the Run's pull request, replaced by `set_pull_request_url` each time a
+  pull request Step finds it.
+- `board_runs` reads, for each owner (the person, and for a team's board
+  `team_user`'s members of `team_id`), their newest Runs past a
+  `(created_at, id)` cursor in order through `factory_run_user_created_idx`,
+  up to the limit, then merges the owners' Runs newest first and cuts them
+  to it; the states of Runs that go read through `factory_run_user_open_idx`
+  in a query of their own with a literal `ended_at IS NULL`. A first page
+  starts past the latest time there is. It runs under a 5 s timeout and
+  `plan_cache_mode = force_custom_plan`: a generic plan, which a reused
+  statement may get, cannot tell which filters are unset and reads and
+  sorts every Run of the owners (on 280k Runs, 90 to 330 ms against 0.2 to
+  0.5 ms). Where a Run is (`BoardState`) is read in the same query: its
+  outcome, an unanswered Gate, and for a Run whose latest Step is at its
+  merge (an entry that runs `ready_to_merge` or `merge` in the Flow the Run
+  kept, in its own row; for a Run that kept none, one of the built-in merge
+  entries given), its base's Main Hold, each by primary key; it also
+  reads whether its task is a live task (`task_live`: a task document, not
+  trashed) and, only then, its name. A search reads the request and a live
+  task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads
+  every Run of the owners (some 200 ms on 280k). A held Run is held only at
+  its merge, so a merged Run is `finished`, as is a `flawed` one. A
+  Benchmark's trials (Flow `benchmark`) are no one's work: neither of its
+  queries reads them.
+- `pull_request_runs` reads, for each key asked (`pull_request_key`) on its
+  own, the Runs whose `lower(pull_request_url)` is that key, through
+  `factory_run_pull_request_url_idx` (one index search per key), of the
+  person or a member of the team given: only the newest Run of each owner
+  and task (`DISTINCT ON`, since whether a caller sees a Run depends only on
+  those), newest first up to the limit for that key, so one pull request's
+  Runs never crowd out another's. Each is where it is as `board_runs` reads
+  it (a flawed Run finished, one at its merge by the Flow it kept); the rows
+  come newest first across keys. A Benchmark's trials are read: a trial
+  opens no pull request, and a page kept on one by hand still guards its
+  merge.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps
   and Gates by primary key, in one read-only
   snapshot under a 5 s timeout. Keep its first `WHERE` and `ORDER BY` on that
   index, and every later read on the Runs' ids.
+- `insert_suite` counts one person's starts one after the other (an
+  advisory lock on their id in its transaction) and refuses a suite while
+  one of the same Benchmark of theirs runs (a trial's Run not ended, or no
+  trial yet and started in the last five minutes) or its trials would pass
+  `MAX_OPEN_TRIALS`. `read_evaluation` lists only suites with a trial.
+- A trial's judgments (`factory_benchmark_trial_score`) never go in
+  `factory_run_score`, and `read_insights` and `read_evaluation` leave Runs
+  of the `benchmark` Flow out, so a Benchmark moves no live number.
 - A Run's or Step's end columns are all null or all set (`factory_*_end`
   checks); the row mappings refuse anything else.
 - A Run that works on code keeps its repository and base branch together
@@ -194,12 +284,16 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   team. `factory_project_rules` keeps a team's rules for one Project (an
   initiative), and goes with either. Rules are stored as the Gate kinds
   they decide (`plan`, `blockers`, `merge`), `owner_gates` when the
-  definition's owner section is on, the kinds the Orchestrator may approve
+  definition's owner section is on, `quiet_gates` when its Gates notify
+  no one, the kinds the Orchestrator may approve
   (`orchestrator_plan`, `orchestrator_blockers`), and `task_thread` when its
   task thread section is on (`OrchestratorDefinition::kinds`), checked
-  against those names (`20261118150000_factory_standing_rules_names.sql`
+  against those names (`20261119010000_factory_quiet_gates.sql`
   allows every one of them). A definition kept before a section has none of
-  it, and reads with it off. The definition's Queue limit has a
+  it, and reads with it off. `quiet_gates` is an opt-out, so a definition
+  without it notifies: the migration that added it set it on no row, so
+  every kept definition (a team's, a Project's and a Run's), its owner
+  section off or on, notifies until an admin turns it off. The definition's Queue limit has a
   column of its own beside them (`queue_limit`,
   `20261118131500_factory_queue_limit.sql`, held from `MIN_QUEUE_LIMIT`
   to `MAX_QUEUE_LIMIT`, 1 to 1000, by
@@ -294,6 +388,41 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   a claim back when filing failed, and `record_hold_task` keeps the task's
   id and when it was filed (`task_filed_at`), which a deleted task document
   leaves set, so it is not filed again.
+
+- Self-improvement (`20261119020000_factory_self_improvement.sql`):
+  `factory_team_definition.named_by_user_id` keeps who named a team's
+  Definition (`set_team_definition`; null for one named before, or once
+  their account is gone). In the same transaction, `set_team_definition`
+  settles the team's open improvement on another repository (ignoring
+  case), or any when it names none, as `closed`. `record_failures` keeps a Run's failure once per
+  Run and source (`kind` `scorer` with its name and score, or `flawed`
+  with `scorer` ''), with its team and the Definition repository it ran
+  under. A failure is pending while `improvement_id` is null;
+  `pending_failures` counts them through
+  `factory_improvement_failure_pending_idx` (team, oldest first), matching
+  the Definition's repository ignoring case, as `begin_improvement`'s claim
+  does.
+  `begin_improvement` keeps a self-improvement Run as `starting` and
+  claims the oldest pending failures in one transaction;
+  `factory_improvement_open_idx` holds a team to one `starting` or `open`
+  Run, so a second begin keeps nothing (`AlreadyOpen`), and one with
+  nothing pending keeps nothing. `link_improvement_run` opens it with its
+  Run, only while starting. `settle_improvement` settles an open one once:
+  `merged` marks its failures addressed (`addressed_at`), a person's
+  rejection (`Settlement::Rejected`, kept `closed`; a cancel is one only
+  when `failure_facts` reads `cancelled_in_person`, which
+  `record_cancel_sender` sets or clears for each cancel while the Run has
+  not ended, `20261119030000_factory_run_cancelled_in_person.sql`) dismisses them
+  (`dismissed_at`, `20261119020100_factory_improvement_failure_dismissed.sql`;
+  they keep its `improvement_id`, so they are never pending again), and
+  `closed` and `refused` (with why) clear their `improvement_id`, so they
+  are pending again. `failures` keeps how many it claimed. `recent_improvements` reads
+  a team's latest ones, newest first, for the pause after those that did
+  not merge (`factory_improvement_team_created_idx`). Neither table decides
+  who merges: the `improve` Flow keeps its plan and merge Gates for a
+  person (`crates/factory_engine`). Both tables go with the
+  team; a failure goes with its Run, and an improvement's Run is cleared
+  when the Run goes.
 
 ## Related
 

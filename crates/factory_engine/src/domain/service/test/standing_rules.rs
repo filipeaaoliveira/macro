@@ -31,6 +31,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: true,
     owner_gates: false,
+    quiet_gates: false,
     task_thread: false,
     queue_limit: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -55,12 +56,15 @@ async fn run_with(repo: &FakeRepo, rules: RunRules) -> StepKey {
             request: "Fix the login bug",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: Some(&base()),
             created_in_person: true,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -345,12 +349,15 @@ async fn a_rule_never_answers_an_agents_question() {
             request: "Fix the login bug",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: Some(&base()),
             created_in_person: true,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: team_rules(EVERY_RULE),
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -386,5 +393,28 @@ async fn a_rule_never_answers_an_agents_question() {
         .expect("rule");
 
     assert_eq!(ruled, None);
+    assert!(repo.rule_answers.lock().expect("answers").is_empty());
+}
+
+/// A Gate whose Run's Flow cannot be read, kept but unreadable or not kept
+/// at all, is taken as kept for a person: no rule answers it.
+#[tokio::test]
+async fn a_gate_of_a_run_whose_flow_does_not_read_waits_for_a_person() {
+    let repo = FakeRepo::default();
+    let unreadable = run_with(&repo, team_rules(EVERY_RULE)).await;
+    repo.kept_flows.lock().expect("kept flows").insert(
+        unreadable.run_id,
+        (serde_json::json!({ "entries": "not a list" }), false),
+    );
+    let missing = run_with(&repo, team_rules(EVERY_RULE)).await;
+    repo.flows.lock().expect("flows").remove(&missing.run_id);
+
+    for key in [unreadable, missing] {
+        let ruled = steps(&repo)
+            .rule_gate(merge_ruling(key))
+            .await
+            .expect("rule");
+        assert_eq!(ruled, None, "{}", key.run_id);
+    }
     assert!(repo.rule_answers.lock().expect("answers").is_empty());
 }

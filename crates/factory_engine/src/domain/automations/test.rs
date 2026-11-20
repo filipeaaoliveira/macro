@@ -232,5 +232,10 @@ fn a_run_s_own_branch_is_marked() {
 
     assert!(on("factory/0195f2a4-6a1c-7e33-9d7e-1f2b3c4d5e6f"));
     assert!(!on("factory/notes"));
+    // Only the id as a Run's branch writes it: hyphenated, in lower case.
+    assert!(!on("factory/0195F2A4-6A1C-7E33-9D7E-1F2B3C4D5E6F"));
+    assert!(!on("factory/0195f2a46a1c7e339d7e1f2b3c4d5e6f"));
+    assert!(!on("factory/{0195f2a4-6a1c-7e33-9d7e-1f2b3c4d5e6f}"));
+    assert!(!on("factory/urn:uuid:0195f2a4-6a1c-7e33-9d7e-1f2b3c4d5e6f"));
     assert!(!on("fix-login"));
 }

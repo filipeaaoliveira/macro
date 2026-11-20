@@ -793,14 +793,28 @@ pub enum GithubOpenPullRequestOutcome {
     Rejected(String),
 }
 
+/// What deleting a branch did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubBranchDeletion {
+    /// The branch was deleted.
+    Deleted,
+    /// The repository has no such branch, as when it was deleted already.
+    Missing,
+}
+
 /// What a user may do with a repository, as GitHub says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubRepositoryAccess {
+    /// Its `owner/name` as GitHub names it now: another than the one asked
+    /// for when GitHub followed a renamed or transferred repository.
+    pub full_name: Option<String>,
     /// The branch a clone checks out, absent for a repository with no
     /// commits.
     pub default_branch: Option<String>,
     /// Whether the user may push to it.
     pub push: bool,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub delete_branch_on_merge: bool,
 }
 
 /// A pull request's number, state and head, from GitHub's pull request
@@ -817,8 +831,6 @@ pub struct GithubPullRequestHead {
     pub merged: bool,
     /// The commit its head branch is at.
     pub head_sha: String,
-    /// The commit its merge made on its base; none until it is merged.
-    pub merge_commit_sha: Option<String>,
 }
 
 /// A request to merge one pull request on the user's behalf.

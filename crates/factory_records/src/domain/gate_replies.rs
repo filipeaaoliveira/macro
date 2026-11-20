@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    EntryId, GateAnswer, GateKind, Outcome, RunId, StandInAnswer, StepKey,
+    EntryId, GateAnswer, GateKind, GateModelReading, Outcome, RunId, StandInAnswer, StepKey,
 };
 
 /// A person's past answer to a Gate, as the stand-in reads it.
@@ -34,9 +34,12 @@ pub struct AnsweredGate {
     pub entry: EntryId,
     /// The Run's owner.
     pub owner: MacroUserIdStr<'static>,
-    /// The built-in Flow the Run walked; none for a Run recorded before
+    /// The name of the Flow the Run walked; none for a Run recorded before
     /// Runs kept it.
     pub flow: Option<String>,
+    /// The Flow the Run walked, as it kept it; none for a Run kept before
+    /// Runs kept theirs.
+    pub flow_definition: Option<serde_json::Value>,
     /// The Run's request.
     pub request: String,
     /// Who asked: the Flow, or the Step's agent.
@@ -67,12 +70,16 @@ pub trait GateReplyRepository: Send + Sync + 'static {
     type Err: std::error::Error + Send + Sync + 'static;
 
     /// Record that the factory asked back for `reply`, the person's words
-    /// on the Gate of `key`, while the Gate has no answer; a later reply
-    /// replaces it. Whether it was recorded.
+    /// on the Gate of `key`, which the Gate model read as `reading`, and
+    /// whether because they approved a Tampered Run (`refused_tampered`),
+    /// while the Gate has no answer; a later reply replaces them. Whether
+    /// it was recorded.
     fn ask_back(
         &self,
         key: StepKey,
         reply: &str,
+        reading: &GateModelReading,
+        refused_tampered: bool,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// Answer the Gate of `key` with `answer`, read from `reply`, the words
@@ -98,6 +105,15 @@ pub trait GateReplyRepository: Send + Sync + 'static {
         key: StepKey,
         answer: &StandInAnswer,
     ) -> impl Future<Output = Result<Option<StandInAnswer>, Self::Err>> + Send;
+
+    /// Record that the stand-in, asked about the Gate of `key`, left it to
+    /// the owner, and how the Gate model read it (`reading`), while the
+    /// Gate has no answer and no stand-in answer; a retry replaces it.
+    fn decline_stand_in(
+        &self,
+        key: StepKey,
+        reading: &GateModelReading,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Answer the Gate of `key` with the stand-in's answer it keeps, once
     /// the owner let it stand, while the Gate has no answer. What the Gate

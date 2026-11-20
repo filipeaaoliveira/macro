@@ -12,6 +12,7 @@ import {
   GateReply,
   GateStatus,
 } from '../../components/gate-card';
+import { MarkRunFlawed } from '../../components/run-flaw';
 import { gateAsker, runTitle } from '../../core/run';
 import { createFocusRescue } from '../../primitives/focus-rescue';
 import type { RunController } from '../../primitives/run-controller';
@@ -74,7 +75,7 @@ export function MobileRunSheet(props: {
           </MobileDrawer.Title>
           <Show when={source.data()}>
             {(run) => (
-              <Show when={!run().end}>
+              <Show when={props.controller.owned() && !run().end}>
                 <div class="flex shrink-0 flex-col gap-3 px-5 pb-3">
                   <Show when={props.controller.waiting()}>
                     {(waiting) => (
@@ -135,6 +136,20 @@ export function MobileRunSheet(props: {
                   </div>
                 </div>
               </Show>
+            )}
+          </Show>
+          <Show
+            when={
+              props.controller.owned() &&
+              source.data()?.end?.outcome === 'success'
+                ? source.data()
+                : undefined
+            }
+          >
+            {(run) => (
+              <div class="flex shrink-0 justify-end px-5 pb-3">
+                <MarkRunFlawed runId={run().id} />
+              </div>
             )}
           </Show>
           <MobileDrawer.ScrollBody>

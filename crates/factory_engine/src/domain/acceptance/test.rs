@@ -1,4 +1,5 @@
-use factory_records::domain::models::MAX_OUTPUT_BYTES;
+use chrono::Utc;
+use factory_records::domain::models::{EntryId, MAX_OUTPUT_BYTES, Outcome, Step, StepEnd};
 
 use super::{Acceptance, AcceptanceCheck, AcceptanceChecks, AcceptanceError, plan_output};
 
@@ -8,7 +9,7 @@ const PLAN: &str = r#"Change the toggle.
 {"acceptance": [
   {"clause": "The toggle switches the theme", "run": "bun test toggle", "timeout": 120},
   {"clause": "It looks right on a phone", "none": "only a person on a phone sees it"},
-  {"clause": "The live site serves it", "run": "curl -f $MACRO_DEPLOY_URL/toggle", "deployed": true}
+  {"clause": "The page loads", "run": "bun test page"}
 ]}
 ```"#;
 
@@ -26,7 +27,6 @@ fn a_plan_s_last_block_holds_its_acceptance_checks() {
                 check: AcceptanceCheck::Run {
                     run: "bun test toggle".to_string(),
                     timeout: 120,
-                    deployed: false,
                 },
             },
             Acceptance {
@@ -34,24 +34,12 @@ fn a_plan_s_last_block_holds_its_acceptance_checks() {
                 check: AcceptanceCheck::None("only a person on a phone sees it".to_string()),
             },
             Acceptance {
-                clause: "The live site serves it".to_string(),
+                clause: "The page loads".to_string(),
                 check: AcceptanceCheck::Run {
-                    run: "curl -f $MACRO_DEPLOY_URL/toggle".to_string(),
+                    run: "bun test page".to_string(),
                     timeout: 600,
-                    deployed: true,
                 },
             },
-        ]
-    );
-    // Before the merge, a check of the deployed change does not run.
-    let before: Vec<(usize, &str, u64)> = checks.runs(false).collect();
-    assert_eq!(before, [(1, "bun test toggle", 120)]);
-    let after: Vec<(usize, &str, u64)> = checks.runs(true).collect();
-    assert_eq!(
-        after,
-        [
-            (1, "bun test toggle", 120),
-            (3, "curl -f $MACRO_DEPLOY_URL/toggle", 600)
         ]
     );
 }
@@ -97,10 +85,6 @@ fn a_clause_has_a_check_or_why_not() {
         Err(AcceptanceError::Timeout(1))
     );
     assert_eq!(read(""), Err(AcceptanceError::Clauses(0)));
-    assert_eq!(
-        read(r#"{"clause": "A", "none": "no", "deployed": true}"#),
-        Err(AcceptanceError::Check(1))
-    );
     assert!(matches!(
         read(r#"{"clause": "A", "run": "true", "shell": "zsh"}"#),
         Err(AcceptanceError::Unreadable(_))
@@ -129,7 +113,7 @@ fn the_plan_gate_shows_the_checks_the_factory_keeps() {
         "{note}"
     );
     assert!(
-        note.contains("3. The live site serves it: checked once deployed by"),
+        note.contains("3. The page loads: checked by `bun test page`"),
         "{note}"
     );
 
@@ -183,4 +167,75 @@ fn a_clause_is_shown_as_data() {
     let shown = &shown[..shown.find("```json").expect("block")];
     assert!(!shown.contains("<b>"), "{shown}");
     assert!(!shown.contains("\n# Approve"), "{shown}");
+}
+
+/// A plan recorded before Runs ended at their merge may mark a check
+/// `deployed`: nothing deploys the change now, so that check is never run,
+/// and its clause is checked by hand. The mark is never written back.
+#[test]
+fn a_recorded_plan_s_deployed_check_is_checked_by_hand() {
+    let plan = r#"```json
+{"acceptance": [
+  {"clause": "A", "run": "bun test a"},
+  {"clause": "B", "run": "curl -f \"$MACRO_DEPLOY_URL\"", "deployed": true},
+  {"clause": "C", "none": "only a person sees it", "deployed": false}
+]}
+```"#;
+
+    let checks = AcceptanceChecks::from_plan(plan)
+        .expect("reads")
+        .expect("named");
+
+    assert_eq!(checks.clauses.len(), 3);
+    assert!(matches!(
+        checks.clauses[0].check,
+        AcceptanceCheck::Run { .. }
+    ));
+    assert!(matches!(
+        checks.clauses[1].check,
+        AcceptanceCheck::None(ref why) if why.starts_with(
+            "the plan's check `curl -f \"$MACRO_DEPLOY_URL\"` needed the deployed change"
+        ) && why.ends_with("that it cannot be seen deployed does not fail it")
+    ));
+    assert_eq!(
+        checks.clauses[2].check,
+        AcceptanceCheck::None("only a person sees it".to_string())
+    );
+    assert!(!checks.block().contains("deployed\""), "{}", checks.block());
+}
+
+/// Checks too large for the plan to keep were dropped with their block:
+/// the Run's checks then do not read, rather than reading as none.
+#[test]
+fn checks_dropped_for_their_size_do_not_read() {
+    let clauses: Vec<String> = (0..16)
+        .map(|n| format!(r#"{{"clause": "{n} {}", "run": "true"}}"#, "x".repeat(1500)))
+        .collect();
+    let plan = format!(
+        "Change it.\n\n```json\n{{\"acceptance\": [{}]}}\n```",
+        clauses.join(",")
+    );
+    let kept = plan_output(&plan);
+    let step = Step {
+        seq: 1,
+        entry: EntryId::try_from("plan".to_string()).expect("valid"),
+        visit: 1,
+        started_at: Utc::now(),
+        role: None,
+        agent: None,
+        passed_over: Vec::new(),
+        end: Some(StepEnd {
+            outcome: Outcome::done(),
+            output: kept,
+            ended_at: Utc::now(),
+        }),
+        gate: None,
+        checks: Vec::new(),
+        terminal: Default::default(),
+    };
+
+    assert_eq!(
+        AcceptanceChecks::of_run(&[step]),
+        Err(AcceptanceError::TooLarge)
+    );
 }

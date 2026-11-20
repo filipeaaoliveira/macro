@@ -18,6 +18,12 @@ import {
 import type { Run, RunStep } from './core/run';
 import { RunView } from './run-view';
 
+const touch = vi.hoisted(() => ({ device: false }));
+
+vi.mock('@core/mobile/isTouchDevice', () => ({
+  isTouchDevice: () => touch.device,
+}));
+
 vi.mock('@core/component/Toast/Toast', () => ({
   toast: { alert: vi.fn(), failure: vi.fn(), success: vi.fn() },
 }));
@@ -39,6 +45,7 @@ vi.stubGlobal(
 const waitingRun: Run = {
   id: 'run-1',
   request: 'Add a due date column\n\nShow it in the task list.',
+  ownerId: 'macro|julia@example.com',
   createdAt: '2026-11-16T09:00:00Z',
   taskId: 'task-1',
   steps: [
@@ -68,11 +75,14 @@ function mount(options: {
   answerGate?: RunsContext['answerGate'];
   replyToGate?: RunsContext['replyToGate'];
   cancelRun?: RunsContext['cancelRun'];
+  markRunFlawed?: RunsContext['markRunFlawed'];
   state?: Accessor<'pending' | 'error' | 'ready'>;
   retry?: () => void;
+  viewerId?: string;
 }) {
   const [run, setRun] = createSignal<Run | undefined>(waitingRun);
   const context: RunsContext = {
+    viewerId: () => options.viewerId ?? 'macro|julia@example.com',
     taskRuns: () => ({
       state: () => 'ready',
       data: () => [waitingRun],
@@ -99,6 +109,7 @@ function mount(options: {
     answerGate: options.answerGate ?? vi.fn(async () => DONE),
     replyToGate: options.replyToGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
+    markRunFlawed: options.markRunFlawed ?? vi.fn(async () => DONE),
     steerStep: vi.fn(async () => DONE),
   };
   render(() => (
@@ -112,6 +123,7 @@ function mount(options: {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  touch.device = false;
 });
 
 describe('RunView', () => {
@@ -369,6 +381,38 @@ describe('RunView', () => {
     expect(screen.getByText('Checks running…')).toBeTruthy();
   });
 
+  it('names the setup command that failed before the round ran its checks', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          seq: 1,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:00:00Z',
+          checks: [
+            {
+              round: 1,
+              checks: ['web'],
+              startedAt: '2026-11-16T09:30:00Z',
+              verified: true,
+              checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+              results: [{ name: 'setup:install', exitCode: 1 }],
+              end: {
+                outcome: 'failed',
+                report: 'the setup failed',
+                endedAt: '2026-11-16T09:40:00Z',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('setup install exited 1, web')).toBeTruthy();
+  });
+
   it('answers the open Gate once, with the note', async () => {
     let finish!: (result: RunActionResult) => void;
     const answerGate = vi.fn(
@@ -452,7 +496,11 @@ describe('RunView', () => {
           ...first,
           gate: {
             ...first.gate,
-            askedBack: { reply: 'Hmm', at: '2026-11-16T09:02:00Z' },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:02:00Z',
+              refusedTampered: false,
+            },
           },
         },
       ],
@@ -492,6 +540,133 @@ describe('RunView', () => {
     expect(
       screen.getByRole('button', { name: 'Revise' }).hasAttribute('disabled')
     ).toBe(false);
+  });
+
+  it('says why the stand-in left a Gate, and how the words asked back on were read', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standInDeclined: {
+              pick: 'approve',
+              confidence: 62,
+              reason: 'The plan leaves the migration out.',
+            },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:02:00Z',
+              refusedTampered: false,
+              reading: {
+                confidence: 40,
+                reason: 'The reply asks a question back.',
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText('The stand-in left this one to you.')
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        'It leaned toward Approve (62% sure). The plan leaves the migration out.'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        'It couldn’t tell which answer fits. The reply asks a question back.'
+      )
+    ).toBeTruthy();
+
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standInDeclined: { reason: '' },
+          },
+        },
+      ],
+    });
+    expect(await screen.findByText('It didn’t answer.')).toBeTruthy();
+  });
+
+  it('says why words approving a Tampered Run were asked back', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            askedBack: {
+              reply: 'Approve',
+              at: '2026-11-16T09:05:00Z',
+              reading: { pick: 'approve', confidence: 98, reason: 'Clear.' },
+              refusedTampered: true,
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText(
+        'This run changed its Control Files, so approving it needs the Approve button, which lists them.'
+      )
+    ).toBeTruthy();
+  });
+
+  it('shows words asked back on in the stand-in’s window, not the window', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standIn: {
+              answer: 'approve',
+              reason: 'You approved every plan like this one.',
+              confidence: 93,
+              until: '2026-11-16T09:11:00Z',
+            },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:05:00Z',
+              refusedTampered: false,
+              reading: {
+                pick: 'revise',
+                confidence: 70,
+                reason: 'The reply doubts the plan.',
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText(
+        'It leaned toward Revise (70% sure). The reply doubts the plan.'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.queryByText('The stand-in answered Approve for you (93% sure)')
+    ).toBeNull();
   });
 
   it('says when the stand-in answered, and when an answer was read from a reply', async () => {
@@ -1188,5 +1363,122 @@ describe('RunView', () => {
     expect(await screen.findByText('Answered:')).toBeTruthy();
     expect(screen.getByText('Yes, in red')).toBeTruthy();
     expect(screen.queryByText('The Planner has a question')).toBeNull();
+  });
+  it('marks a run that ended done flawed, with what is wrong', async () => {
+    const markRunFlawed = vi.fn(async () => DONE);
+    const { setRun } = mount({ markRunFlawed });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark flawed' }));
+    const confirm = screen
+      .getAllByRole('button', { name: 'Mark flawed' })
+      .find((button) => button.getAttribute('data-variant') === 'danger');
+    if (!confirm) throw new Error('No confirm button');
+    // Nothing goes until the person says what is wrong.
+    fireEvent.click(confirm);
+    expect(markRunFlawed).not.toHaveBeenCalled();
+
+    fireEvent.input(
+      screen.getByRole('textbox', { name: 'What’s wrong with the result' }),
+      { target: { value: '  The column is never filled  ' } }
+    );
+    fireEvent.click(confirm);
+
+    await waitFor(() =>
+      expect(markRunFlawed).toHaveBeenCalledWith({
+        runId: 'run-1',
+        reason: 'The column is never filled',
+      })
+    );
+  });
+
+  it('refuses a reason longer than the factory keeps', async () => {
+    const markRunFlawed = vi.fn(async () => DONE);
+    const { setRun } = mount({ markRunFlawed });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark flawed' }));
+    fireEvent.input(
+      screen.getByRole('textbox', { name: 'What’s wrong with the result' }),
+      { target: { value: 'é'.repeat(2049) } }
+    );
+    const confirm = screen
+      .getAllByRole('button', { name: 'Mark flawed' })
+      .find((button) => button.getAttribute('data-variant') === 'danger');
+    if (!confirm) throw new Error('No confirm button');
+    fireEvent.click(confirm);
+
+    expect(
+      await screen.findByText(/The reason must be at most 4,?096 bytes/)
+    ).toBeTruthy();
+    expect(markRunFlawed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['dialog', false],
+    ['phone sheet', true],
+  ])(
+    'offers the flaw mark in the %s only to the run’s owner',
+    async (_, device) => {
+      touch.device = device;
+      const succeeded: Run = {
+        ...waitingRun,
+        end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+      };
+      const teammate = mount({ viewerId: 'macro|teo@example.com' });
+      teammate.setRun(succeeded);
+
+      expect(
+        await screen.findAllByText('Add a due date column')
+      ).not.toHaveLength(0);
+      expect(screen.queryByRole('button', { name: 'Mark flawed' })).toBeNull();
+
+      cleanup();
+      const owner = mount({});
+      owner.setRun(succeeded);
+
+      expect(
+        await screen.findByRole('button', { name: 'Mark flawed' })
+      ).toBeTruthy();
+    }
+  );
+
+  it('offers no flaw mark for a run that did not end done', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'infrastructure', endedAt: '2026-11-16T09:10:00Z' },
+    });
+
+    expect(await screen.findByText('Infrastructure failure')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Mark flawed' })).toBeNull();
+  });
+
+  it('shows why a flawed run is flawed and which scorer said so', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      end: {
+        outcome: 'flawed',
+        endedAt: '2026-11-16T09:10:00Z',
+        flaw: {
+          by: { kind: 'scorer', name: 'tests-pass' },
+          reason: 'Two tests fail on main',
+          markedAt: '2026-11-16T10:00:00Z',
+        },
+      },
+    });
+
+    expect(await screen.findByText('Two tests fail on main')).toBeTruthy();
+    expect(
+      screen.getByText(/Marked flawed by the tests-pass scorer/)
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Mark flawed' })).toBeNull();
   });
 });

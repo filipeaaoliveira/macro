@@ -3,25 +3,31 @@
 //! `publish`, `ci`, `ready_to_merge` and `merge` take the Run's branch to a
 //! merged pull request on GitHub ([`PullRequestSteps`]).
 //! On a repository, `write` and `fix` then have the agent run the checks
-//! the repository declares, in rounds (`checks_round`). Once merged,
-//! `deploy` waits for the change's deploy; `accept`, before the merge, and
-//! `verify`, after it, have a verifier check the change does what the Run's
-//! request asks (`verify`).
+//! the repository declares, in rounds (`checks_round`). `accept`, before
+//! the merge, has a verifier check the change does what the Run's request
+//! asks (`accept`). A Run ends at its merge: `deploy` and `verify`, which
+//! once followed it, run only for the Runs whose Flow still names them, and
+//! end at once ([`past_merge_outcome`]). No new Flow may name them.
 
+mod accept;
 mod checks_round;
 mod review_panel;
+
+pub(crate) use review_panel::review_outcomes;
 #[cfg(test)]
 mod test;
-mod verify;
 
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey, StepSession};
+use factory_records::domain::models::{
+    CheckRoundOutcome, Outcome, Repository, Role, Step, StepKey, StepSession,
+};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::acceptance::plan_output;
 use crate::domain::agents::{REVIEWER_ROLES, VERIFIER};
+use crate::domain::checks::fence_for;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
 use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport, run_branch};
@@ -34,7 +40,31 @@ use crate::domain::questions::{
     SESSION_LOST_NOTE, answers_brief, ask_instructions, going_on_prompt,
 };
 use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
-use crate::domain::verification::VerifyFile;
+use crate::domain::setup::{RepositorySetup, SETUP_FILE};
+use crate::domain::verification::{VerifyFile, VerifyFileError};
+
+/// What a `deploy` or `verify` Step reports: a Run ends at its merge, and
+/// one whose Flow still names them goes no further.
+const ENDED_AT_MERGE: &str = "The change is merged, and the run ends at its merge: \
+     the factory no longer waits for a deploy or checks the merged change.";
+
+/// How an old `verify` Step ends a round of acceptance checks an earlier
+/// attempt of it left open.
+const ROUND_ENDED_AT_MERGE: &str =
+    "The run ended at its merge: these checks of the merged change no longer run.";
+
+/// The outcome a `deploy` or `verify` Step, of a Run whose Flow still goes
+/// on past its merge, ends with at once: the one every such Flow routes to
+/// the Run's `success`. `deploy`'s `off` ends the Run there; a Run already
+/// in `verify` ends with its `pass`, as the first of those Flows has no
+/// `off` from `verify`. None for any other Step.
+pub(crate) fn past_merge_outcome(step: &str) -> Option<&'static str> {
+    match step {
+        "deploy" => Some("off"),
+        "verify" => Some("pass"),
+        _ => None,
+    }
+}
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -78,6 +108,24 @@ const CI_FIX_INSTRUCTIONS: &str = include_str!("built_in_steps/ci_fix.md");
 /// Where an agent works when the Run works on a repository.
 const REPOSITORY_INSTRUCTIONS: &str = include_str!("built_in_steps/repository.md");
 
+/// How a worker does the built-in Step `step`, if it is one: what
+/// [`BuiltInSteps`] serves, for a check that runs without a worker, as a
+/// Factory Definition's.
+pub fn built_in_step_use(step: &StepName) -> Option<StepUse> {
+    let built_in = BuiltInStep::named(step)?;
+    // A new Flow may not name the Steps past a merge: only a Run whose
+    // Flow, in its workflow's input, still names them runs them, and
+    // that Flow is never read again.
+    if matches!(built_in, BuiltInStep::Deploy | BuiltInStep::Verify) {
+        return None;
+    }
+    if built_in.agent_role().is_some() {
+        Some(StepUse::Agent)
+    } else {
+        Some(StepUse::Work)
+    }
+}
+
 /// One of the Steps [`BuiltInSteps`] does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BuiltInStep {
@@ -104,9 +152,13 @@ enum BuiltInStep {
     /// A verifier checks the head of the Run's branch does what the
     /// request asks, before the merge.
     Accept,
-    /// The merge is waited for to deploy.
+    /// Once waited for the merge to deploy. Only a Run started on a `code`
+    /// Flow that named it reaches it, once merged: it ends `off` at once,
+    /// which ends the Run `success`.
     Deploy,
-    /// A verifier checks the merged change does what the request asks.
+    /// Once had a verifier check the merged change. Only a Run started on
+    /// a `code` Flow that named it reaches it, once merged: it ends `pass`
+    /// at once, which ends the Run `success`.
     Verify,
 }
 
@@ -174,6 +226,8 @@ pub enum BuiltInStepError {
         retryable: bool,
         /// Whether the agent's quota ran out.
         out_of_quota: bool,
+        /// Whether the agent was still at work when the wait for it ended.
+        overdue: bool,
     },
     /// The agent ended the Step with an outcome the Step does not have.
     #[error("the agent ended step {step} with {outcome}, which it does not end with")]
@@ -190,6 +244,10 @@ pub enum BuiltInStepError {
     /// to.
     #[error("step {0}'s question has no answer to go on with")]
     Unanswered(u16),
+    /// The repository's setup does not read, failed, or cannot run where
+    /// the agent works: the Step ends `failed` with this, for its owner.
+    #[error("the repository's setup failed: {0}")]
+    Setup(String),
 }
 
 impl BuiltInStepError {
@@ -197,6 +255,7 @@ impl BuiltInStepError {
         BuiltInStepError::Agent {
             retryable: error.retryable(),
             out_of_quota: error.out_of_quota(),
+            overdue: error.overdue(),
             report: rootcause::Report::new(error).into_dynamic(),
         }
     }
@@ -211,7 +270,36 @@ impl Retryable for BuiltInStepError {
             | BuiltInStepError::NotAnAgentStep(_)
             | BuiltInStepError::NoRepository(_)
             | BuiltInStepError::UnexpectedOutcome { .. }
-            | BuiltInStepError::Unanswered(_) => false,
+            | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::Setup(_) => false,
+        }
+    }
+}
+
+impl AgentFailure for BuiltInStepError {
+    fn out_of_quota(&self) -> bool {
+        match self {
+            BuiltInStepError::Agent { out_of_quota, .. } => *out_of_quota,
+            BuiltInStepError::UnknownStep(_)
+            | BuiltInStepError::NotAnAgentStep(_)
+            | BuiltInStepError::NoRepository(_)
+            | BuiltInStepError::UnexpectedOutcome { .. }
+            | BuiltInStepError::PullRequest(_)
+            | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::Setup(_) => false,
+        }
+    }
+
+    fn overdue(&self) -> bool {
+        match self {
+            BuiltInStepError::Agent { overdue, .. } => *overdue,
+            BuiltInStepError::UnknownStep(_)
+            | BuiltInStepError::NotAnAgentStep(_)
+            | BuiltInStepError::NoRepository(_)
+            | BuiltInStepError::UnexpectedOutcome { .. }
+            | BuiltInStepError::PullRequest(_)
+            | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::Setup(_) => false,
         }
     }
 }
@@ -289,6 +377,13 @@ where
             }
             None => prompt(instructions, &outcomes, input),
         };
+        let setup = self.setup(input).await?;
+        let asked_prompt = match &setup {
+            Some(setup) if input.resumes.is_none() => {
+                format!("{asked_prompt}{}", setup_note(setup))
+            }
+            _ => asked_prompt,
+        };
         let task = AgentTask {
             key: input.key,
             owner: input.owner.clone(),
@@ -305,11 +400,13 @@ where
             // earlier session's work may be lost.
             afresh: input.resumes.map(|_| {
                 format!(
-                    "{}{}",
+                    "{}{}{}",
                     prompt(instructions, &outcomes, input),
+                    setup.as_ref().map(setup_note).unwrap_or_default(),
                     SESSION_LOST_NOTE
                 )
             }),
+            setup,
         };
         let answer = match self.agent.answer(task).await {
             Ok(answer) => answer,
@@ -318,6 +415,9 @@ where
             // the workflow to ask the Run's owner. A reviewer's fails the
             // Step as before: its review round asks no one.
             Err(error) => {
+                if let Some(report) = error.setup_failed() {
+                    return Err(BuiltInStepError::Setup(report.to_string()));
+                }
                 if !input.reviewer
                     && let Some(last_words) = error.stopped_without_result()
                 {
@@ -340,6 +440,28 @@ where
             outcome: answer.outcome,
             output: answer.text,
         })
+    }
+
+    /// The setup the Run's base declares for its repository, which each
+    /// new agent session of the Step runs before its first prompt: none
+    /// when the Run works on no repository, or the base declares none or an
+    /// empty one. A file that does not read fails the Step, saying why.
+    async fn setup(
+        &self,
+        input: StepInput<'_>,
+    ) -> Result<Option<RepositorySetup>, BuiltInStepError> {
+        if input.repository.is_none() {
+            return Ok(None);
+        }
+        let Some(text) = self.pull_requests.declared_setup(&input).await? else {
+            return Ok(None);
+        };
+        let setup = RepositorySetup::parse(&text).map_err(|error| {
+            BuiltInStepError::Setup(format!(
+                "The repository's setup could not run, so the agent did not start: {error}"
+            ))
+        })?;
+        Ok(Some(setup).filter(|setup| !setup.is_empty()))
     }
 
     /// [`Self::ask_agent`] for a Step that only makes sense on the Run's
@@ -368,12 +490,7 @@ where
     type Err = BuiltInStepError;
 
     fn serves(&self, step: &StepName) -> Option<StepUse> {
-        let built_in = BuiltInStep::named(step)?;
-        if built_in.agent_role().is_some() {
-            Some(StepUse::Agent)
-        } else {
-            Some(StepUse::Work)
-        }
+        built_in_step_use(step)
     }
 
     async fn run(
@@ -381,82 +498,15 @@ where
         step: &StepName,
         input: StepInput<'_>,
     ) -> Result<StepReport, BuiltInStepError> {
-        let built_in =
-            BuiltInStep::named(step).ok_or_else(|| BuiltInStepError::UnknownStep(step.clone()))?;
-        match built_in {
-            BuiltInStep::Reply => Ok(StepReport {
-                outcome: Outcome::done(),
-                output: format!("Received the request: {}", input.request),
+        // A setup that does not read, fails or cannot run ends the Step
+        // `failed`, with what its owner needs to see, rather than a
+        // failure's fixed output; no agent turn was spent on it.
+        match self.run_built_in(step, input).await {
+            Err(BuiltInStepError::Setup(output)) => Ok(StepReport {
+                outcome: Outcome::failed(),
+                output,
             }),
-            // On a repository, the plan ends with its acceptance checks,
-            // which the Step keeps written out for the person at its Gate.
-            BuiltInStep::Plan if input.repository.is_some() => {
-                let file = self.pull_requests.base_verify_file(&input).await?;
-                let instructions = format!(
-                    "{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
-                    deploy_note(file.as_ref().ok())
-                );
-                let plan = self
-                    .ask_agent(step, &instructions, vec![Outcome::done()], input)
-                    .await?;
-                if plan.outcome != Outcome::done() {
-                    return Ok(plan);
-                }
-                Ok(StepReport {
-                    output: plan_output(&plan.output),
-                    ..plan
-                })
-            }
-            BuiltInStep::Plan => {
-                self.ask_agent(step, PLAN_INSTRUCTIONS, vec![Outcome::done()], input)
-                    .await
-            }
-            BuiltInStep::Write => {
-                let outcomes = vec![Outcome::done(), Outcome::unchanged()];
-                if input.repository.is_some() {
-                    self.work_and_check(step, WRITE_INSTRUCTIONS, outcomes, input)
-                        .await
-                } else {
-                    self.ask_agent(step, WRITE_INSTRUCTIONS, outcomes, input)
-                        .await
-                }
-            }
-            BuiltInStep::Review => match input.review {
-                Some(round) if input.reviewer || in_round(round, input.key.seq) => {
-                    self.review_in_round(step, round, input).await
-                }
-                _ => {
-                    let outcomes = outcomes(&["pass", "changes"]);
-                    self.ask_agent_in_repository(step, REVIEW_INSTRUCTIONS, outcomes, input)
-                        .await
-                }
-            },
-            BuiltInStep::Fix => {
-                if input.repository.is_none() {
-                    return Err(BuiltInStepError::NoRepository(step.clone()));
-                }
-                let instructions = fix_instructions(input.review);
-                self.work_and_check(step, &instructions, vec![Outcome::done()], input)
-                    .await
-            }
-            BuiltInStep::CiFix => {
-                let outcomes = vec![Outcome::done()];
-                self.ask_agent_in_repository(step, CI_FIX_INSTRUCTIONS, outcomes, input)
-                    .await
-            }
-            BuiltInStep::Publish => Ok(self.pull_requests.publish(input).await?),
-            BuiltInStep::Ci => Ok(self.pull_requests.ci(input).await?),
-            BuiltInStep::ReadyToMerge => Ok(self.pull_requests.ready_to_merge(input).await?),
-            BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
-            BuiltInStep::Accept => {
-                self.verify_change(step, input, verify::Phase::BeforeMerge)
-                    .await
-            }
-            BuiltInStep::Deploy => Ok(self.pull_requests.deploy(input).await?),
-            BuiltInStep::Verify => {
-                self.verify_change(step, input, verify::Phase::AfterMerge)
-                    .await
-            }
+            ran => ran,
         }
     }
 
@@ -512,31 +562,155 @@ where
     }
 }
 
-/// What the planner is told of the repository's deploy, so it marks a
-/// check `deployed` only where one runs: from the repository's verify file,
-/// none when it does not read.
-fn deploy_note(file: Option<&VerifyFile>) -> String {
+impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+where
+    A: StepAgent,
+    G: PullRequests,
+    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
+    M: MainWatches,
+{
+    async fn run_built_in(
+        &self,
+        step: &StepName,
+        input: StepInput<'_>,
+    ) -> Result<StepReport, BuiltInStepError> {
+        let built_in =
+            BuiltInStep::named(step).ok_or_else(|| BuiltInStepError::UnknownStep(step.clone()))?;
+        match built_in {
+            BuiltInStep::Reply => Ok(StepReport {
+                outcome: Outcome::done(),
+                output: format!("Received the request: {}", input.request),
+            }),
+            // On a repository, the plan ends with its acceptance checks,
+            // which the Step keeps written out for the person at its Gate.
+            BuiltInStep::Plan if input.repository.is_some() => {
+                let file = self.pull_requests.base_verify_file(&input).await?;
+                let instructions = format!(
+                    "{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
+                    verify_note(&file)
+                );
+                let plan = self
+                    .ask_agent(step, &instructions, vec![Outcome::done()], input)
+                    .await?;
+                if plan.outcome != Outcome::done() {
+                    return Ok(plan);
+                }
+                Ok(StepReport {
+                    output: plan_output(&plan.output),
+                    ..plan
+                })
+            }
+            BuiltInStep::Plan => {
+                self.ask_agent(step, PLAN_INSTRUCTIONS, vec![Outcome::done()], input)
+                    .await
+            }
+            BuiltInStep::Write => {
+                let outcomes = vec![Outcome::done(), Outcome::unchanged()];
+                if input.repository.is_some() {
+                    self.work_and_check(step, WRITE_INSTRUCTIONS, outcomes, input)
+                        .await
+                } else {
+                    self.ask_agent(step, WRITE_INSTRUCTIONS, outcomes, input)
+                        .await
+                }
+            }
+            BuiltInStep::Review => match input.review {
+                Some(round) if input.reviewer || in_round(round, input.key.seq) => {
+                    self.review_in_round(step, round, input).await
+                }
+                _ => {
+                    let outcomes = outcomes(&["pass", "changes"]);
+                    self.ask_agent_in_repository(step, REVIEW_INSTRUCTIONS, outcomes, input)
+                        .await
+                }
+            },
+            BuiltInStep::Fix => {
+                if input.repository.is_none() {
+                    return Err(BuiltInStepError::NoRepository(step.clone()));
+                }
+                let instructions = fix_instructions(input.review);
+                self.work_and_check(step, &instructions, vec![Outcome::done()], input)
+                    .await
+            }
+            BuiltInStep::CiFix => {
+                let outcomes = vec![Outcome::done()];
+                self.ask_agent_in_repository(step, CI_FIX_INSTRUCTIONS, outcomes, input)
+                    .await
+            }
+            BuiltInStep::Publish => Ok(self.pull_requests.publish(input).await?),
+            BuiltInStep::Ci => Ok(self.pull_requests.ci(input).await?),
+            BuiltInStep::ReadyToMerge => Ok(self.pull_requests.ready_to_merge(input).await?),
+            BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
+            BuiltInStep::Accept => self.accept_change(step, input).await,
+            BuiltInStep::Deploy | BuiltInStep::Verify => {
+                // An earlier attempt of an old `verify` may have left its
+                // round of acceptance checks open: it never ends now.
+                let repo = self.pull_requests.records();
+                let rounds = repo
+                    .check_rounds(input.key)
+                    .await
+                    .map_err(checks_round::records)?;
+                for round in rounds.iter().filter(|round| round.end.is_none()) {
+                    repo.end_check_round(
+                        input.key,
+                        round.round,
+                        CheckRoundOutcome::Failed,
+                        ROUND_ENDED_AT_MERGE,
+                    )
+                    .await
+                    .map_err(checks_round::records)?;
+                }
+                Ok(StepReport {
+                    outcome: accept::outcome(past_merge_outcome(step.as_str()).unwrap_or("off")),
+                    output: ENDED_AT_MERGE.to_string(),
+                })
+            }
+        }
+    }
+}
+
+/// What the agent is told of the repository's `setup`, which ran in its
+/// checkout before its first prompt: the commands, and the values they ran
+/// with, which its own commands may need too.
+fn setup_note(setup: &RepositorySetup) -> String {
+    let mut note = String::from("\n");
+    let names: Vec<&str> = setup
+        .setup
+        .iter()
+        .map(|command| command.name.as_str())
+        .collect();
+    if !names.is_empty() {
+        note.push_str(&format!(
+            "The factory ran the repository's setup (`{SETUP_FILE}`) in your checkout before this prompt: {}.\n",
+            names.join(", ")
+        ));
+    }
+    if !setup.env.is_empty() {
+        let exports = setup.exports();
+        let fence = fence_for(&exports);
+        let said = if names.is_empty() {
+            format!("The repository's setup (`{SETUP_FILE}`) gives these values")
+        } else {
+            "It ran with these values".to_string()
+        };
+        note.push_str(&format!(
+            "{said}; run your own commands with them too:\n\n{fence}sh\n{exports}{fence}\n"
+        ));
+    }
+    note
+}
+
+/// What the planner is told when the repository's verify file turns
+/// acceptance off, or does not read; nothing otherwise.
+fn verify_note(file: &Result<VerifyFile, VerifyFileError>) -> String {
     match file {
-        Some(file) if !file.verify => {
+        Ok(file) if !file.verify => {
             "\nThe repository turns its verify phase off: the factory runs \
              none of these checks, but write them for the person who reads the plan.\n"
                 .to_string()
         }
-        Some(VerifyFile {
-            deploy: Some(deploy),
-            ..
-        }) => format!(
-            "\nThe repository deploys each merge to the `{}` environment: a check marked \
-             `deployed` reaches the deployed change at `$MACRO_DEPLOY_URL` when the deployment \
-             names its address, and is not run when it names none.\n",
-            escape(&deploy.environment)
-        ),
-        Some(_) => "\nThe repository declares no deploy: mark no check `deployed`, since such a \
-                    check is never run here.\n"
-            .to_string(),
-        None => {
-            "\nThe repository's verify file does not read: mark no check `deployed`.\n".to_string()
-        }
+        Ok(_) => String::new(),
+        Err(error) => format!("\n{}: the change is checked.\n", escape(&error.to_string())),
     }
 }
 
@@ -584,7 +758,7 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
     };
     let workplace = input
         .repository
-        .map(|repository| workplace(repository, &run_branch(input.key.run_id)))
+        .map(|repository| workplace(repository, &run_branch(input.key.run_id), input.base_commit))
         .unwrap_or_default();
     format!(
         "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{ask}{workplace}\n\
@@ -597,12 +771,18 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
 }
 
 /// Where the agent works: a checkout of the Run's repository, on the Run's
-/// branch `branch`.
-fn workplace(repository: &Repository, branch: &str) -> String {
+/// branch `branch`, made from `base_commit` when the Run pins one, else
+/// from its base branch.
+fn workplace(repository: &Repository, branch: &str, base_commit: Option<&str>) -> String {
+    let start = match base_commit {
+        Some(commit) => format!("commit `{commit}` (fetch it if your checkout lacks it)"),
+        None => format!("`origin/{}`", repository.base_branch),
+    };
     format!(
         "\n{}",
         REPOSITORY_INSTRUCTIONS
             .replace("{branch}", branch)
+            .replace("{start}", &start)
             .replace("{base}", &repository.base_branch)
             .replace("{repository}", &repository.url)
     )

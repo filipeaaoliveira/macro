@@ -1,6 +1,8 @@
 //! Axum router for the Run API.
 
+mod board;
 mod control_files;
+mod definition;
 mod main_hold;
 mod standing_rules;
 #[cfg(test)]
@@ -15,9 +17,11 @@ use axum::{
     response::IntoResponse,
     routing::{get, post, put},
 };
+use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
-    AskedBack, ControlFileChanges, EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd,
-    RunId, RunOutcome, StandInAnswer, Steer, SteerAction, Step, StepEnd, StepTerminal,
+    AskedBack, ControlFileChanges, EntryId, FlawMarker, Gate, GateAnswer, GateModelReading,
+    HandBack, Outcome, Run, RunDefinition, RunEnd, RunFlaw, RunId, RunOutcome, StandInAnswer,
+    Steer, SteerAction, Step, StepEnd, StepTerminal,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -28,9 +32,12 @@ use model_error_response::ErrorResponse;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::board::{
+    BoardNext, BoardPage, BoardRun, BoardScope, PullRequestRun, PullRequestRuns,
+};
 use crate::domain::models::{
-    Answerer, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly, RunDetail,
-    SessionStepRef, StandingRulesSettings,
+    ActingAgent, Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
+    PersonOnly, RunDetail, SessionStepRef, StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -81,6 +88,10 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///
 /// Routes:
 /// - `GET /flows` — the built-in Flows a Run can be started of.
+/// - `GET /runs` — a page of the board: the caller's Runs, or their
+///   team's on tasks they can see, newest first, by where each one is.
+/// - `POST /runs/by-pull-requests` — the Runs that opened some pull
+///   requests, among those the caller's team board shows.
 /// - `POST /runs` — create a Run of a built-in Flow, owned by the acting
 ///   user, and start it, unless it holds as many places in its Queue as the
 ///   Queue limit: Runs waiting on it, and Runs yet to reach their first Gate.
@@ -88,7 +99,8 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   first.
 /// - `GET /runs/waiting` — the caller's Runs that wait on them at a Gate,
 ///   newest first, and those that hold a place before their first Gate.
-/// - `GET /runs/{id}` — read a Run and the Steps it took.
+/// - `GET /runs/{id}` — read a Run and the Steps it took: the caller's, or
+///   a team member's on a task they can see.
 /// - `POST /runs/{id}/steps/{seq}/answer` — answer the Gate of the Run's
 ///   Step `seq`.
 /// - `POST /runs/{id}/steps/{seq}/reply` — reply to it in words, which the
@@ -103,11 +115,16 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   without.
 /// - `POST /runs/{id}/steps/{seq}/stop` — stop it: it ends `failed`.
 /// - `POST /runs/{id}/cancel` — cancel a Run.
+/// - `POST /runs/{id}/flaw` — mark a Run that ended `success` flawed, with
+///   why.
 /// - `PUT /runs/{id}/task` — link a Run to the Macro task it works on.
 /// - `POST /hand-backs` — an agent Step's session hands back its result.
 /// - `GET /settings/control-files` — the Control File patterns the caller's
 ///   Runs are checked against.
 /// - `PUT /settings/control-files` — set them, or go back to the default.
+/// - `GET /settings/definition` — the Factory Definition the caller's team
+///   names, and whether it reads.
+/// - `PUT /settings/definition` — name one, or none.
 /// - `GET /settings/standing-rules` — the Standing Rules the caller's Runs
 ///   are created with.
 /// - `PUT /settings/standing-rules` — set the team's, or go back to the
@@ -125,7 +142,14 @@ where
 {
     Router::new()
         .route("/flows", get(list_flows_handler::<S, Auth>))
-        .route("/runs", post(create_run_handler::<S, Auth>))
+        .route(
+            "/runs",
+            get(board::list_board_handler::<S, Auth>).post(create_run_handler::<S, Auth>),
+        )
+        .route(
+            "/runs/by-pull-requests",
+            post(board::pull_request_runs_handler::<S, Auth>),
+        )
         .route(
             "/tasks/{task_id}/runs",
             get(list_task_runs_handler::<S, Auth>),
@@ -161,12 +185,18 @@ where
             post(stop_step_handler::<S, Auth>),
         )
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
+        .route("/runs/{id}/flaw", post(flaw_run_handler::<S, Auth>))
         .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
         .route("/hand-backs", post(hand_back_handler::<S, Auth>))
         .route(
             "/settings/control-files",
             get(control_files::get_control_files_handler::<S, Auth>)
                 .put(control_files::set_control_files_handler::<S, Auth>),
+        )
+        .route(
+            "/settings/definition",
+            get(definition::get_definition_handler::<S, Auth>)
+                .put(definition::set_definition_handler::<S, Auth>),
         )
         .route(
             "/settings/standing-rules",
@@ -306,6 +336,14 @@ pub struct ResumeStepRequest {
     pub note: Option<String>,
 }
 
+/// Request body for marking a Run flawed.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FlawRunRequest {
+    /// Why its result is wrong: 1 to 4096 bytes once trimmed.
+    pub reason: String,
+}
+
 /// Request body for handing back an agent Step's result.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -316,7 +354,10 @@ pub struct HandBackRequest {
     pub text: String,
 }
 
-/// List the built-in Flows a Run can be started of, by name.
+/// List the Flows the caller can start a Run of, by name: their team's
+/// Factory Definition's, read at its default branch's head, when the team
+/// names one (400 `unreachableDefinition` or `invalidDefinition` when it
+/// does not read), else the built-in Flows.
 #[utoipa::path(
     get,
     tag = "factory",
@@ -324,22 +365,25 @@ pub struct HandBackRequest {
     path = "/flows",
     responses(
         (status = 200, body = FlowsResponse),
+        (status = 400, body = RunErrorResponse),
         (status = 401, body = ErrorResponse),
         (status = 403, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
     )
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_flows_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
-    _caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
-) -> Json<FlowsResponse>
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+) -> Result<Json<FlowsResponse>, FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    Json(FlowsResponse {
-        flows: state.service.list_flows(),
-    })
+    let actor = caller.authorization.user.macro_user_id;
+    Ok(Json(FlowsResponse {
+        flows: state.service.list_flows(&actor).await?,
+    }))
 }
 
 /// Create a Run of a built-in Flow, owned by the caller, and start its
@@ -381,6 +425,7 @@ where
     // request names: an agent could otherwise name the file it means to
     // weaken.
     let created_in_person = is_in_person(&caller.authorization, &headers);
+    let acting = acting_agent(&caller.authorization, &headers);
     // The id is lowercase, whatever case the caller named it in: a
     // `MacroUserIdStr` lowercases what it parses, as `"User".id` is stored.
     let actor = caller.authorization.user.macro_user_id;
@@ -393,6 +438,7 @@ where
             body.task_id,
             body.repo_url,
             created_in_person,
+            acting,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(created)))
@@ -887,6 +933,51 @@ fn answerer(
     ))
 }
 
+/// The agent a call acts as for the caller, for Standing Roles to check:
+/// none for the person in their own signed-in session and for an internal
+/// caller. A program in an agent session acts as that session, as the
+/// correlation layer validated it against the call's credential. A program
+/// in no session whose credential is signed for a bot (a self-hosted
+/// agent's code-mode call, a routine's run for an agent) acts as that bot:
+/// the signature names it, so it cannot be forged. A program signed only
+/// for the person (their own API key or token, a routine running as them
+/// with no agent) is the person acting, which Standing Roles do not
+/// govern. So is a public MCP credential in no session: Macro signs the
+/// person's own MCP client or API key, directly or through code mode, for
+/// the Macro bot only to label its posts (`signed_for_the_person`).
+pub(crate) fn acting_agent(
+    authorization: &UserOrInternalAuthorization,
+    headers: &HeaderMap,
+) -> Option<ActingAgent> {
+    if is_in_person(authorization, headers) || authorization.caller != UserOrInternalCaller::User {
+        return None;
+    }
+    program_agent(&authorization.user)
+}
+
+/// The agent a program's call acts as, for a caller never in person (a
+/// routine's run): its agent session, or else the bot its credential is
+/// signed for, unless that only labels the person's own client.
+pub(crate) fn program_agent(
+    user: &macro_authorization::MacroUserAuthentication,
+) -> Option<ActingAgent> {
+    agent_correlation::context::current_session()
+        .map(ActingAgent::Session)
+        .or_else(|| {
+            user.agent_id
+                .filter(|_| !signed_for_the_person(user))
+                .map(ActingAgent::Bot)
+        })
+}
+
+/// Whether a credential in no session names the Macro bot only as the
+/// label of the person's own client: public MCP signs the person's MCP
+/// client or API key for `MACRO_AI_BOT_ID`, with no routine, where a
+/// self-hosted agent's call is signed for its own bot.
+fn signed_for_the_person(user: &macro_authorization::MacroUserAuthentication) -> bool {
+    user.agent_id == Some(bot_id::MACRO_AI_BOT_ID) && user.routine_id.is_none()
+}
+
 /// Whether the caller is the person in their own signed-in session: not an
 /// internal caller, an API key or token, an agent's or a routine's program.
 /// An agent's account signs in as a person does; the service, which reads
@@ -925,15 +1016,63 @@ pub(crate) fn is_in_person(
 pub async fn cancel_run_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(params): Path<GetRunParams>,
 ) -> Result<StatusCode, FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
+    let acting = acting_agent(&caller.authorization, &headers);
+    let in_person = is_in_person(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
-    state.service.cancel_run(&actor, params.id).await?;
+    state
+        .service
+        .cancel_run(&actor, params.id, acting, in_person)
+        .await?;
     Ok(StatusCode::ACCEPTED)
+}
+
+/// Mark one of the caller's Runs flawed: it ended `success`, and they
+/// found its result wrong. The Run then reads `flawed`, with who marked it,
+/// why and when. Marking a flawed Run again keeps its first mark. Only the
+/// Run's owner marks it, in their own signed-in session: an agent's code,
+/// an API key or token and an internal caller are refused (403).
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "flaw_factory_run",
+    path = "/runs/{id}/flaw",
+    params(GetRunParams),
+    request_body = FlawRunRequest,
+    responses(
+        (status = 200, body = RunDetail),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %params.id))]
+pub async fn flaw_run_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(params): Path<GetRunParams>,
+    Json(body): Json<FlawRunRequest>,
+) -> Result<Json<RunDetail>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = in_person(caller.authorization, &headers)?;
+    let detail = state
+        .service
+        .mark_run_flawed(&actor, params.id, &body.reason)
+        .await?;
+    Ok(Json(detail))
 }
 
 /// Link one of the caller's Runs to a Macro task they can see,
@@ -958,6 +1097,7 @@ where
 pub async fn link_task_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(params): Path<GetRunParams>,
     Json(body): Json<LinkTaskRequest>,
 ) -> Result<Json<RunDetail>, FactoryError>
@@ -965,11 +1105,12 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
+    let acting = acting_agent(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
     Ok(Json(
         state
             .service
-            .link_task(&actor, params.id, body.task_id)
+            .link_task(&actor, params.id, body.task_id, acting)
             .await?,
     ))
 }
@@ -1023,9 +1164,13 @@ impl FactoryError {
         match self {
             FactoryError::InvalidFlow(_)
             | FactoryError::EmptyRequest
+            | FactoryError::HalfCursor
+            | FactoryError::TooManyPullRequests { .. }
             | FactoryError::RequestTooLarge { .. }
             | FactoryError::NoteTooLarge { .. }
             | FactoryError::EmptyNote
+            | FactoryError::FlawReasonSize { .. }
+            | FactoryError::InvalidScorer(_)
             | FactoryError::UnknownTask
             | FactoryError::NotATask
             | FactoryError::UnknownUser
@@ -1035,6 +1180,8 @@ impl FactoryError {
             | FactoryError::InvalidRepository
             | FactoryError::UnreachableRepository
             | FactoryError::NoPushAccess
+            | FactoryError::UnreachableDefinition
+            | FactoryError::InvalidDefinition(_)
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
@@ -1054,6 +1201,7 @@ impl FactoryError {
             | FactoryError::NotAPerson
             | FactoryError::NotATeamAdmin
             | FactoryError::ReservedForAPerson(_)
+            | FactoryError::NotInStandingRole { .. }
             | FactoryError::NotTheAutomationOwner
             | FactoryError::NotARoutine => StatusCode::FORBIDDEN,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
@@ -1063,7 +1211,9 @@ impl FactoryError {
             | FactoryError::StepEnded
             | FactoryError::NotSteerable(_)
             | FactoryError::TaskBusy
-            | FactoryError::FiringRepeated => StatusCode::CONFLICT,
+            | FactoryError::NotSucceeded
+            | FactoryError::FiringRepeated
+            | FactoryError::DefinitionNamed => StatusCode::CONFLICT,
             FactoryError::TriggerUnavailable | FactoryError::SessionUnreachable => {
                 StatusCode::BAD_GATEWAY
             }
@@ -1094,6 +1244,18 @@ pub enum RunErrorCode {
     /// An agent answering for the Run's owner tried what the factory keeps
     /// for the owner in person.
     ReservedForAPerson,
+    /// An agent acting for the caller tried an act no Standing Role its bot
+    /// fills allows; the message names the Standing Roles that allow it.
+    NotInStandingRole,
+    /// The caller's linked GitHub account cannot read the repository of
+    /// their team's Factory Definition.
+    UnreachableDefinition,
+    /// Their team's Factory Definition does not read; the message says
+    /// which file and why.
+    InvalidDefinition,
+    /// Their team's Factory Definition sets this: it changes by pull
+    /// request.
+    DefinitionNamed,
 }
 
 /// What a refused or failed request answers: a message, and for a refusal
@@ -1117,6 +1279,10 @@ impl FactoryError {
             FactoryError::ControlFilesNotApproved => Some(RunErrorCode::ControlFilesNotApproved),
             FactoryError::QueueFull { .. } => Some(RunErrorCode::QueueFull),
             FactoryError::ReservedForAPerson(_) => Some(RunErrorCode::ReservedForAPerson),
+            FactoryError::NotInStandingRole { .. } => Some(RunErrorCode::NotInStandingRole),
+            FactoryError::UnreachableDefinition => Some(RunErrorCode::UnreachableDefinition),
+            FactoryError::InvalidDefinition(_) => Some(RunErrorCode::InvalidDefinition),
+            FactoryError::DefinitionNamed => Some(RunErrorCode::DefinitionNamed),
             _ => None,
         }
     }
@@ -1151,6 +1317,8 @@ impl IntoResponse for FactoryError {
         list_flows_handler,
         list_task_runs_handler,
         list_waiting_runs_handler,
+        board::list_board_handler,
+        board::pull_request_runs_handler,
         create_run_handler,
         get_run_handler,
         answer_gate_handler,
@@ -1161,10 +1329,13 @@ impl IntoResponse for FactoryError {
         resume_step_handler,
         stop_step_handler,
         cancel_run_handler,
+        flaw_run_handler,
         link_task_handler,
         hand_back_handler,
         control_files::get_control_files_handler,
         control_files::set_control_files_handler,
+        definition::get_definition_handler,
+        definition::set_definition_handler,
         standing_rules::get_standing_rules_handler,
         standing_rules::set_standing_rules_handler,
         standing_rules::set_project_standing_rules_handler
@@ -1174,6 +1345,14 @@ impl IntoResponse for FactoryError {
         FlowSummary,
         TaskRunsResponse,
         WaitingRunsResponse,
+        BoardPage,
+        BoardRun,
+        PullRequestRuns,
+        PullRequestRun,
+        board::PullRequestUrls,
+        BoardNext,
+        BoardState,
+        BoardScope,
         CreateRunRequest,
         AnswerGateRequest,
         ReplyToGateRequest,
@@ -1182,10 +1361,13 @@ impl IntoResponse for FactoryError {
         SessionStepRef,
         LinkTaskRequest,
         HandBackRequest,
+        FlawRunRequest,
         RunDetail,
         Run,
         RunEnd,
         RunOutcome,
+        RunFlaw,
+        FlawMarker,
         Step,
         StepEnd,
         StepTerminal,
@@ -1194,10 +1376,14 @@ impl IntoResponse for FactoryError {
         Gate,
         GateAnswer,
         AskedBack,
+        GateModelReading,
         StandInAnswer,
         ControlFileChanges,
         ControlFilesSettings,
         control_files::SetControlFilesRequest,
+        DefinitionSettings,
+        definition::SetDefinitionRequest,
+        RunDefinition,
         StandingRulesSettings,
         OrchestratorDefinition,
         StandInKinds,

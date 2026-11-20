@@ -9,7 +9,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use super::{PgRunRepository, PgRunRepositoryErr, number, percent};
 use crate::domain::gate_replies::{AnsweredGate, GateReplyRepository, PastAnswer};
 use crate::domain::models::{
-    EntryId, GateAnswer, GateKind, Outcome, RunId, StandInAnswer, StepKey,
+    EntryId, GateAnswer, GateKind, GateModelReading, Outcome, RunId, StandInAnswer, StepKey,
 };
 
 /// How many of the owner's newest Runs the stand-in looks through for
@@ -20,17 +20,29 @@ const PAST_RUNS_READ: i64 = 100;
 impl GateReplyRepository for PgRunRepository {
     type Err = PgRunRepositoryErr;
 
-    #[tracing::instrument(err, skip(self, reply))]
-    async fn ask_back(&self, key: StepKey, reply: &str) -> Result<bool, Self::Err> {
+    #[tracing::instrument(err, skip(self, reply, reading))]
+    async fn ask_back(
+        &self,
+        key: StepKey,
+        reply: &str,
+        reading: &GateModelReading,
+        refused_tampered: bool,
+    ) -> Result<bool, Self::Err> {
         let asked = sqlx::query!(
             r#"
             UPDATE factory_gate
-            SET asked_back_reply = $3, asked_back_at = now()
+            SET asked_back_reply = $3, asked_back_at = now(), asked_back_pick = $4,
+                asked_back_confidence = $5, asked_back_reason = $6,
+                asked_back_refused_tampered = $7
             WHERE run_id = $1 AND seq = $2 AND answer IS NULL
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
             reply,
+            reading.pick.as_ref().map(Outcome::as_str),
+            reading.confidence.map(i16::from),
+            reading.reason,
+            refused_tampered,
         )
         .execute(&self.pool)
         .await?
@@ -78,7 +90,8 @@ impl GateReplyRepository for PgRunRepository {
             r#"
             UPDATE factory_gate
             SET stand_in_answer = $3, stand_in_reason = $4, stand_in_confidence = $5,
-                stand_in_until = $6
+                stand_in_until = $6, stand_in_declined_pick = NULL,
+                stand_in_declined_confidence = NULL, stand_in_declined_reason = NULL
             WHERE run_id = $1 AND seq = $2 AND answer IS NULL AND stand_in_answer IS NULL
             "#,
             key.run_id.as_uuid(),
@@ -124,6 +137,30 @@ impl GateReplyRepository for PgRunRepository {
             }
             _ => Err(PgRunRepositoryErr::PartialGate),
         }
+    }
+
+    #[tracing::instrument(err, skip(self, reading))]
+    async fn decline_stand_in(
+        &self,
+        key: StepKey,
+        reading: &GateModelReading,
+    ) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_gate
+            SET stand_in_declined_pick = $3, stand_in_declined_confidence = $4,
+                stand_in_declined_reason = $5
+            WHERE run_id = $1 AND seq = $2 AND answer IS NULL AND stand_in_answer IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            reading.pick.as_ref().map(Outcome::as_str),
+            reading.confidence.map(i16::from),
+            reading.reason,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -222,6 +259,7 @@ impl GateReplyRepository for PgRunRepository {
                 s.entry,
                 r.user_id AS owner,
                 r.flow,
+                r.flow_definition,
                 r.request,
                 s.outcome,
                 s.output AS "output?",
@@ -261,6 +299,7 @@ impl GateReplyRepository for PgRunRepository {
                     owner: MacroUserIdStr::try_from(row.owner.clone())
                         .map_err(|_| PgRunRepositoryErr::InvalidUserId(row.owner))?,
                     flow: row.flow,
+                    flow_definition: row.flow_definition,
                     request: row.request,
                     kind: GateKind::of(outcome.as_ref()),
                     question: row.question,

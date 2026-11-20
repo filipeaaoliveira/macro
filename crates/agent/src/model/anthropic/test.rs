@@ -1,4 +1,5 @@
 use super::*;
+use crate::completion::PromptCache;
 use crate::model::metering::{ProviderSupport, WireProtocol};
 use ai_usage::financial::ProviderModel;
 use bytes::Bytes;
@@ -52,6 +53,12 @@ impl HttpClientExt for CaptureTransport {
 }
 
 async fn captured_wire_body(streaming: bool) -> Value {
+    captured_body(streaming, PromptCache::Write).await
+}
+
+/// The body a request leaves with, from the completion model a one-shot
+/// completion picks for `cache`.
+async fn captured_body(streaming: bool, cache: PromptCache) -> Value {
     let transport = CaptureTransport::default();
     let client = anthropic::Client::builder()
         .api_key("test-anthropic-key")
@@ -91,12 +98,13 @@ async fn captured_wire_body(streaming: bool) -> Value {
         output_schema: None,
         record_telemetry_content: false,
     };
+    let completion = model.completion_for(cache);
     if streaming {
-        let mut response = model.completion().stream(request).await.unwrap();
+        let mut response = completion.stream(request).await.unwrap();
         // Rig starts its HTTP request lazily on the first stream poll.
         let _ = response.next().await;
     } else {
-        assert!(model.completion().completion(request).await.is_err());
+        assert!(completion.completion(request).await.is_err());
     }
     let captured = transport.0.lock().unwrap();
     assert_eq!(captured.len(), 1, "request must reach the HTTP boundary");
@@ -141,6 +149,19 @@ async fn completion_caches_tools_system_and_conversation() {
 #[tokio::test]
 async fn stream_caches_tools_system_and_conversation() {
     assert_cached_wire_body(true).await;
+}
+
+#[tokio::test]
+async fn a_skipped_prompt_cache_marks_no_breakpoint() {
+    // A one-shot prompt nothing reads back writes nothing to the cache; one
+    // that writes it marks it.
+    let skipped = captured_body(false, PromptCache::Skip).await;
+    assert!(
+        !skipped.to_string().contains("cache_control"),
+        "an uncached request carries no breakpoint: {skipped}"
+    );
+    let written = captured_body(false, PromptCache::Write).await;
+    assert_eq!(written["cache_control"], json!({"type": "ephemeral"}));
 }
 
 #[test]

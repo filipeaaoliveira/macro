@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use factory_records::domain::gate_replies::{AnsweredGate, GateReplyRepository, PastAnswer};
 use factory_records::domain::models::{
-    AskedBack, EntryId, GateAnswer, Outcome, RunId, StandInAnswer, StepKey,
+    AskedBack, EntryId, GateAnswer, GateModelReading, Outcome, RunId, StandInAnswer, StepKey,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 
@@ -17,16 +17,40 @@ use crate::domain::ports::{GateModel, ModelPick, ModelQuestion};
 impl GateReplyRepository for FakeRepo {
     type Err = FakeError;
 
-    async fn ask_back(&self, key: StepKey, reply: &str) -> Result<bool, FakeError> {
+    async fn ask_back(
+        &self,
+        key: StepKey,
+        reply: &str,
+        reading: &GateModelReading,
+        refused_tampered: bool,
+    ) -> Result<bool, FakeError> {
         let asked = self.with_step(key, |step| {
             let gate = step.gate.as_mut().filter(|gate| gate.answer.is_none())?;
             gate.asked_back = Some(AskedBack {
                 reply: reply.to_string(),
                 at: Utc::now(),
+                reading: Some(reading.clone()),
+                refused_tampered,
             });
             Some(())
         });
         Ok(asked.flatten().is_some())
+    }
+
+    async fn decline_stand_in(
+        &self,
+        key: StepKey,
+        reading: &GateModelReading,
+    ) -> Result<(), FakeError> {
+        self.with_step(key, |step| {
+            if let Some(gate) = step.gate.as_mut()
+                && gate.answer.is_none()
+                && gate.stand_in.is_none()
+            {
+                gate.stand_in_declined = Some(reading.clone());
+            }
+        });
+        Ok(())
     }
 
     async fn answer_gate_from_reply(
@@ -64,6 +88,9 @@ impl GateReplyRepository for FakeRepo {
     ) -> Result<Option<StandInAnswer>, FakeError> {
         let kept = self.with_step(key, |step| {
             let gate = step.gate.as_mut().filter(|gate| gate.answer.is_none())?;
+            if gate.stand_in.is_none() {
+                gate.stand_in_declined = None;
+            }
             Some(gate.stand_in.get_or_insert_with(|| answer.clone()).clone())
         });
         Ok(kept.flatten())
@@ -161,6 +188,8 @@ impl GateReplyRepository for FakeRepo {
 pub(crate) struct FakeGateModel {
     pub(crate) picks: Arc<Mutex<VecDeque<Result<ModelPick, FakeError>>>>,
     pub(crate) asked: Arc<Mutex<Vec<ModelQuestion>>>,
+    /// The Runs each call was about, in order; none for a replay.
+    pub(crate) runs: Arc<Mutex<Vec<Option<RunId>>>>,
     /// Never answers, as a model that hangs.
     pub(crate) hangs: bool,
 }
@@ -201,9 +230,11 @@ impl GateModel for FakeGateModel {
     async fn pick(
         &self,
         _owner: &MacroUserIdStr<'static>,
+        run_id: Option<RunId>,
         question: &ModelQuestion,
     ) -> Result<ModelPick, FakeError> {
         self.asked.lock().expect("asked").push(question.clone());
+        self.runs.lock().expect("runs").push(run_id);
         if self.hangs {
             std::future::pending::<()>().await;
         }

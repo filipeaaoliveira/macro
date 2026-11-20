@@ -3,7 +3,10 @@ import { fireAndForget } from '@core/util/fireAndForget';
 import { type ResultError, throwOnErr } from '@core/util/result';
 import { useAgentRepositoriesQuery } from '@queries/agent-repositories/repositories';
 import { factoryClient, type StartRunErrorCode } from '@service-factory/client';
-import type { RunDetail } from '@service-factory/generated/schemas';
+import type {
+  GateModelReading as ApiGateModelReading,
+  RunDetail,
+} from '@service-factory/generated/schemas';
 import {
   type QueryClient,
   queryOptions,
@@ -18,7 +21,7 @@ import type {
   RunsSource,
   StartRunFailure,
 } from '../context/runs-context';
-import { type Run, runStatus } from '../core/run';
+import { type GateModelReading, type Run, runStatus } from '../core/run';
 import { factoryRunKeys } from './keys';
 
 /** How often an open Run, or a task with a Run going, is read again. */
@@ -39,17 +42,54 @@ function taskRunsPollMs(runs: Run[] | undefined): number | false {
   return running ? LIVE_POLL_MS : WAITING_POLL_MS;
 }
 
-function toRun(detail: RunDetail): Run {
+/** The Gate model's reading of a Gate, as the view keeps it. */
+function modelReading(
+  reading: ApiGateModelReading | null | undefined
+): GateModelReading | undefined {
+  if (!reading) return undefined;
+  return {
+    pick: reading.pick ?? undefined,
+    confidence: reading.confidence ?? undefined,
+    reason: reading.reason,
+  };
+}
+
+/** The agent that answered `seq`'s Gate under a Standing Role, if one did. */
+function standingAnswer(
+  detail: RunDetail,
+  seq: number
+): { agent: string; standingRole: string } | undefined {
+  const act = (detail.standingActs ?? []).find(
+    (standing) =>
+      standing.seq === seq &&
+      (standing.act === 'answer_plan' || standing.act === 'answer_blockers')
+  );
+  return act ? { agent: act.agent, standingRole: act.standingRole } : undefined;
+}
+
+export function toRun(detail: RunDetail): Run {
   const { run } = detail;
   return {
     id: run.id,
     request: run.request,
     createdAt: run.createdAt,
+    ownerId: run.userId,
+    flow: run.flow ?? undefined,
+    createdInPerson: run.createdInPerson,
     taskId: run.taskId ?? undefined,
+    projectId: run.projectId ?? undefined,
+    pullRequestUrl: run.pullRequestUrl ?? undefined,
     repository: run.repository ?? undefined,
     automation: run.automation ?? undefined,
+    definition: run.definition ?? undefined,
     controlFiles: run.controlFiles ?? undefined,
-    end: run.end ?? undefined,
+    end: run.end
+      ? {
+          outcome: run.end.outcome,
+          endedAt: run.end.endedAt,
+          flaw: run.end.flaw ?? undefined,
+        }
+      : undefined,
     steps: detail.steps.map((step) => ({
       seq: step.seq,
       entry: step.entry,
@@ -73,11 +113,20 @@ function toRun(detail: RunDetail): Run {
                     step.gate.answer.replyConfidence ?? undefined,
                   byStandIn: step.gate.answer.byStandIn,
                   byOrchestrator: step.gate.answer.agentSessionId != null,
+                  standing: standingAnswer(detail, step.seq),
                   answeredAt: step.gate.answer.answeredAt,
                 }
               : undefined,
-            askedBack: step.gate.askedBack ?? undefined,
+            askedBack: step.gate.askedBack
+              ? {
+                  reply: step.gate.askedBack.reply,
+                  at: step.gate.askedBack.at,
+                  reading: modelReading(step.gate.askedBack.reading),
+                  refusedTampered: step.gate.askedBack.refusedTampered,
+                }
+              : undefined,
             standIn: step.gate.standIn ?? undefined,
+            standInDeclined: modelReading(step.gate.standInDeclined),
           }
         : undefined,
       role: step.role ?? undefined,
@@ -122,6 +171,14 @@ function toRun(detail: RunDetail): Run {
         }
       : undefined,
     baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
+    // A service older than Standing Roles sends none.
+    standingActs: (detail.standingActs ?? []).map((standing) => ({
+      act: standing.act,
+      seq: standing.seq ?? undefined,
+      agent: standing.agent,
+      standingRole: standing.standingRole,
+      at: standing.at,
+    })),
     reviewRounds: detail.reviewRounds.map((round) => ({
       round: round.round,
       visit: round.visit,
@@ -234,7 +291,10 @@ function failure(
   return { ok: false, reason: conflict ? 'conflict' : 'failed' };
 }
 
-/** Why a Run didn't start: the repository cause the service named, if any. */
+/**
+ * Why a Run didn't start: the repository, Queue or Definition cause the
+ * service named, if any.
+ */
 function startFailure(
   errors: ResultError<FetchWithTokenErrorCode | StartRunErrorCode>[]
 ): StartRunFailure {
@@ -242,10 +302,14 @@ function startFailure(
   if (codes.includes('NO_PUSH_ACCESS')) return 'noPushAccess';
   if (codes.includes('UNREACHABLE_REPOSITORY')) return 'unreachableRepository';
   if (codes.includes('QUEUE_FULL')) return 'queueFull';
+  if (codes.includes('DEFINITION_UNREADABLE')) return 'definitionUnreadable';
   return 'failed';
 }
 
-/** Reads the Run, and its task's list, again; resolves once they are read. */
+/**
+ * Reads the Run, its task's list, the Queue, the board and the Runs of pull
+ * requests again; resolves once they are read.
+ */
 function refreshRun(
   client: QueryClient,
   runId: string,
@@ -254,6 +318,8 @@ function refreshRun(
   const reads = [
     client.invalidateQueries({ queryKey: factoryRunKeys.run(runId).queryKey }),
     client.invalidateQueries({ queryKey: factoryRunKeys.waiting.queryKey }),
+    client.invalidateQueries({ queryKey: factoryRunKeys.board._def }),
+    client.invalidateQueries({ queryKey: factoryRunKeys.pullRequests._def }),
   ];
   if (taskId) {
     reads.push(
@@ -269,7 +335,10 @@ function taskOfRun(client: QueryClient, runId: string) {
   return client.getQueryData<Run>(factoryRunKeys.run(runId).queryKey)?.taskId;
 }
 
-/** The Runs context on the factory service, cached in `client`. */
+/**
+ * The Runs context on the factory service, cached in `client`; the app's
+ * entry points add the signed-in person's id.
+ */
 export function createAppRunsContext(client: QueryClient): RunsContext {
   return {
     taskRuns: (taskId: Accessor<string>) =>
@@ -397,6 +466,29 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
         'factory-runs'
       );
       if (result.isErr()) return failure(result.error);
+      return { ok: true, value: undefined };
+    },
+
+    async markRunFlawed({ runId, reason }) {
+      const result = await factoryClient.flawRun(runId, { reason });
+      if (result.isErr()) {
+        const refused = failure(result.error);
+        // A Run that did not end in success has moved on from what this
+        // person saw: it resolves once the Run is read again.
+        const reads = refreshRun(client, runId, taskOfRun(client, runId));
+        if (refused.reason === 'conflict') await reads.catch(() => undefined);
+        else fireAndForget(reads, 'factory-runs');
+        return refused;
+      }
+      seedRun(client, toRun(result.value));
+      // A flawed Run counts apart in insights.
+      fireAndForget(
+        Promise.all([
+          refreshRun(client, runId, taskOfRun(client, runId)),
+          client.invalidateQueries({ queryKey: factoryRunKeys.insights._def }),
+        ]),
+        'factory-runs'
+      );
       return { ok: true, value: undefined };
     },
   };

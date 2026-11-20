@@ -9,7 +9,12 @@ import QuestionIcon from '@icon/system/regular/question.svg';
 import { Button, Checkbox, cn, Item, TextField, Card as UiCard } from '@ui';
 import { For, type JSX, Show } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
-import { type ControlFileChanges, type Gate, isTampered } from '../core/run';
+import {
+  type ControlFileChanges,
+  type Gate,
+  type GateModelReading,
+  isTampered,
+} from '../core/run';
 
 /**
  * The Gate's header and its question, in a block nested in the card. An
@@ -275,32 +280,83 @@ export function GateReply(props: {
   );
 }
 
+/** How the Gate model read the Gate, in one muted line, when it decided nothing. */
+function ModelReadingLine(props: { reading: GateModelReading }) {
+  const said = () => {
+    const { pick, confidence } = props.reading;
+    if (confidence === undefined) return t('factoryRuns.modelDidNotAnswer');
+    if (pick === undefined) return t('factoryRuns.modelCouldNotTell');
+    return t('factoryRuns.modelLeaned', {
+      answer: flowWordLabel(pick),
+      confidence,
+    });
+  };
+  return (
+    <p class="whitespace-pre-wrap text-ink-muted">
+      {said()}
+      <Show when={props.reading.reason}>{(reason) => <> {reason()}</>}</Show>
+    </p>
+  );
+}
+
 /**
  * What the factory did with the Gate so far, while it waits: the stand-in's
- * answer for the owner, which they may override until its window ends, or
- * words it couldn't read as an answer.
+ * answer for the owner, which they may override until its window ends; or
+ * why the stand-in left the Gate to them, and words it couldn't read as an
+ * answer (which end the stand-in's window), each with how the Gate model
+ * read them.
  */
 export function GateStatus(props: {
-  gate: Pick<Gate, 'askedBack' | 'standIn'>;
+  gate: Pick<Gate, 'askedBack' | 'standIn' | 'standInDeclined'>;
   /** A time, as the view shows it. */
   time: (value: string) => string;
 }) {
   return (
-    <Show when={props.gate.standIn ?? props.gate.askedBack}>
+    <Show
+      when={
+        props.gate.standIn ?? props.gate.askedBack ?? props.gate.standInDeclined
+      }
+    >
       <UiCard
         variant="filled"
         offset={1}
         role="status"
         class="flex flex-col gap-1 px-3 py-2.5 text-sm leading-5 [overflow-wrap:anywhere]"
       >
+        {/*
+          Words the factory asked back on in the stand-in's window ended it:
+          the Gate waits for the owner, so the window is no longer shown.
+        */}
         <Show
-          when={props.gate.standIn}
+          when={props.gate.askedBack ? undefined : props.gate.standIn}
           fallback={
-            <Show when={props.gate.askedBack}>
-              {(asked) => (
-                <p>{t('factoryRuns.askedBack', { reply: asked().reply })}</p>
-              )}
-            </Show>
+            <>
+              <Show when={props.gate.standInDeclined}>
+                {(declined) => (
+                  <>
+                    <p class="font-medium">
+                      {t('factoryRuns.standInDeclined')}
+                    </p>
+                    <ModelReadingLine reading={declined()} />
+                  </>
+                )}
+              </Show>
+              <Show when={props.gate.askedBack}>
+                {(asked) => (
+                  <>
+                    <p>
+                      {t('factoryRuns.askedBack', { reply: asked().reply })}
+                    </p>
+                    <Show when={asked().refusedTampered}>
+                      <p>{t('factoryRuns.askedBackTampered')}</p>
+                    </Show>
+                    <Show when={asked().reading}>
+                      {(reading) => <ModelReadingLine reading={reading()} />}
+                    </Show>
+                  </>
+                )}
+              </Show>
+            </>
           }
         >
           {(standIn) => (
@@ -358,7 +414,7 @@ export function GateCard(props: {
   asker?: string;
   answers: readonly string[];
   /** What the factory did with the Gate so far: asked back, or stood in. */
-  gate: Pick<Gate, 'askedBack' | 'standIn'>;
+  gate: Pick<Gate, 'askedBack' | 'standIn' | 'standInDeclined'>;
   time: (value: string) => string;
   /** The Control Files the Run's branch changed, if any. */
   controlFiles?: ControlFileChanges;

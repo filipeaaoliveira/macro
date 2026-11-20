@@ -13,6 +13,7 @@ use crate::domain::models::{
 use crate::domain::ports::RunRepository;
 
 mod control_files;
+mod definition;
 mod waiting;
 
 const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
@@ -47,12 +48,15 @@ pub(super) async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> 
             request,
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -368,12 +372,15 @@ async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool
             request: "Collapse dashes",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: Some(&repository),
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");
@@ -414,12 +421,15 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             request: "Fix the login bug",
             user_id: &julia(),
             task_id: Some(task(LOGIN_TASK)),
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");
@@ -430,12 +440,15 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             request: "Fix the login bug",
             user_id: &julia(),
             task_id: Some(Uuid::now_v7()),
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert for a missing task");
@@ -597,6 +610,79 @@ async fn a_retried_step_keeps_the_session_its_first_attempt_claimed(pool: PgPool
     assert_eq!((step.key, step.owner), (key(id, 1), julia()));
     assert_eq!(step.offered, offered);
     assert!(!step.ended);
+}
+
+/// A Step keeps how many setup commands passed in the session it works
+/// in: a session it went on to starts from none, and one it let go of
+/// records no more.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_step_keeps_the_setup_its_session_passed(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let first = repo
+        .claim_session(key(id, 1), session(), &planner(), &[outcome("done")])
+        .await
+        .expect("claim")
+        .session;
+
+    let before = repo
+        .setup_passed(key(id, 1), first.session_id)
+        .await
+        .expect("read");
+    let recorded = repo
+        .record_setup_passed(key(id, 1), first.session_id, 2)
+        .await
+        .expect("record");
+
+    assert_eq!(before, 0);
+    assert!(recorded);
+    assert_eq!(
+        repo.setup_passed(key(id, 1), first.session_id)
+            .await
+            .expect("read"),
+        2
+    );
+
+    let next = session_of("backup");
+    repo.pass_session(
+        key(id, 1),
+        first.session_id,
+        &planner(),
+        &passed("primary"),
+        Some(&next),
+    )
+    .await
+    .expect("pass");
+    assert_eq!(
+        repo.setup_passed(key(id, 1), next.session_id)
+            .await
+            .expect("read"),
+        0,
+        "the next session runs its own setup"
+    );
+    assert!(
+        !repo
+            .record_setup_passed(key(id, 1), first.session_id, 3)
+            .await
+            .expect("record"),
+        "the session handed on records no more"
+    );
+
+    repo.release_session(key(id, 1)).await.expect("release");
+    assert!(
+        !repo
+            .record_setup_passed(key(id, 1), next.session_id, 1)
+            .await
+            .expect("record"),
+        "a session let go of records no more"
+    );
 }
 
 /// A Step whose Agent could not start goes on in a session of the next
@@ -1201,12 +1287,15 @@ async fn insert_on_task(
             request,
             user_id,
             task_id: Some(task(task_id)),
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")

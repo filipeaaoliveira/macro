@@ -807,6 +807,27 @@ failing, Conflicts, and Ready to merge take no drops, and merged cards cannot be
 dragged. A refusal shows GitHub's message and the card returns. **Load more pull
 requests** fetches the next page.
 
+With factory runs on (`enable-factory-runs`), a PR a factory run opened, and
+that the person can see on their team's factory board, is marked on its board
+card: **Factory**, where the run is (its step, who it waits on, or **Held** by
+a Main Hold), its latest review round, its open blockers, and an
+**Open run** button that opens the run in a pane. Its columns stay GitHub's.
+While the run goes, the PR merges only through the run's merge gate: dropping
+it on **Merged**, or the PR's Merge button, opens the run's gate for its owner
+while the run waits there (with its Control Files and Main Hold, as in the
+run), and otherwise merges nothing and says why on a toast and on the card
+(**Only … can merge this**, the step or gate the run is at, or the held
+branch); the Merge button is disabled with the same reason. Until the factory
+has answered for a PR (its flag or code still loading, its lookup pending or
+failed with nothing read yet), no PR merges: **Checking for a factory run…**.
+The same holds for a PR's own page and block and its Merge button elsewhere.
+Once the run ended, the PR merges as any other; when it stopped for a person,
+the card says so and the merge confirmation warns that the merge skips the
+run's merge gate. The PR detail's side panel shows a **Factory run**
+section above Checks: the same mark, **Answer merge gate** for the owner while
+the run waits there, and the run's review rounds with each finding. PRs no run
+opened are unchanged.
+
 Pull requests can no longer be favorited. PRs favorited earlier still appear in
 a collapsible Favorites section below the views (hidden when there are none).
 Favorite rows open the PR in Reviews (Shift-click opens another split), and their
@@ -1476,7 +1497,28 @@ an agent on the person's own computer). The page reads at most the newest
 1,000 Runs of a period. Above them, **Waiting on you** lists the person's
 Runs stopped at a Gate no one answered yet, newest first (none shows when
 none waits); each opens the Run to answer it. `/app/factory/runs/<run id>`
-opens one Run over the page, as a Run's notification does.
+opens one Run as a pane of its own, as a Run's notification does.
+
+**Factory** in the sidebar (`/app/factory`, behind the same flag) is the
+factory's board: every Run the person can see, grouped by where it is
+(**Waiting on a person**, **Held** at its merge by a Main Hold, **Running**,
+**Stopped for a person**, **Finished**; a merged Run is finished). **Mine**
+lists their own Runs, **My team** their team members' too, on tasks the
+person can see. The state tabs, the filter popover (Flow, repository,
+Project) and the search by task narrow it; **Show more** reads the next 25,
+and while more follow a group's count reads as loaded (`25+`). Each row
+shows the task (or the request), its Step with the Role and Agent on it or
+who it waits on, the repository, Flow and who started it (the owner, the
+Orchestrator for them, or an Automation), how long it has been there, its
+open Blockers and a link to its pull request. A row opens the Run in a pane
+beside the board; a team member's Run opens without its Gate's answers,
+Cancel run or the Step Terminal, which stay its owner's. Above the list, the
+person's Queue (places held against its limit) and the Runs waiting on
+them. The board is read again every 15 seconds while a Run it shows goes,
+every minute otherwise. A team member's Runs on tasks the person can't see
+are left out; past some 250 of them in a row, a page stops there with no
+**Show more**, and the board says older runs may be missing. A Run whose
+task was trashed shows its request as its title.
 
 Team settings' **Standing rules** section also has **Send undecided gates
 to the run's owner** (off by default). With it on, a Gate no rule answers,

@@ -14,7 +14,7 @@ use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::{GateFacts, rule_answer};
-use crate::inbound::temporal::workflow::work::Work;
+use crate::inbound::temporal::workflow::work::{Work, WorkFailure};
 use crate::inbound::temporal::workflow::{Asking, Questions};
 
 /// An activity that failed.
@@ -27,10 +27,11 @@ struct Script {
     opened: Option<Result<bool, Failed>>,
     starts: VecDeque<StepStart>,
     /// What each reviewer's work comes to, by its place in the entry.
-    worked: Vec<Result<(), Failed>>,
+    worked: Vec<Result<(), WorkFailure>>,
     cancelled: bool,
     /// What the Step at a place ends with, when not `pass`: `question` for
-    /// a reviewer that asks the Run's owner.
+    /// a reviewer that asks the Run's owner, `fail` for work that fails for
+    /// good, or `no_result` for a reviewer that ends without a review.
     ends: BTreeMap<u16, &'static str>,
     closed: Option<Outcome>,
     /// The Run's Standing Rules; none for a Run created before Runs kept
@@ -79,14 +80,14 @@ impl Work for Script {
             .unwrap_or(StepStart::Started))
     }
 
-    async fn run(&self, request: &StepRequest) -> Result<StepReport, Failed> {
+    async fn run(&self, request: &StepRequest) -> Result<StepReport, WorkFailure> {
         self.run_all(std::slice::from_ref(request))
             .await
             .pop()
-            .unwrap_or(Err(Failed))
+            .unwrap_or(Err(WorkFailure::Work))
     }
 
-    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, Failed>> {
+    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, WorkFailure>> {
         let seqs: Vec<String> = requests.iter().map(|r| r.key.seq.to_string()).collect();
         self.note(format!("run {}", seqs.join(",")));
         requests
@@ -95,7 +96,12 @@ impl Work for Script {
             .map(|(index, request)| {
                 let ends = self.ends.get(&request.key.seq).copied();
                 match (self.worked.get(index), ends) {
-                    (Some(Err(_)), _) | (_, Some("fail")) => Err(Failed),
+                    (Some(Err(failure)), _) => Err(*failure),
+                    (_, Some("fail")) => Err(WorkFailure::Work),
+                    (_, Some("no_result")) => Ok(StepReport {
+                        outcome: Outcome::no_result(),
+                        output: "Stopped here.".to_string(),
+                    }),
                     (_, Some("question")) => Ok(StepReport {
                         outcome: Outcome::question(),
                         output: format!("Question of step {}?", request.key.seq),
@@ -197,6 +203,7 @@ async fn walk_entry(
         questions: Questions {
             may_ask: true,
             most: 2,
+            owner_answers: true,
         },
     };
     let mut held = Vec::new();
@@ -250,7 +257,7 @@ async fn a_round_runs_its_reviewers_at_once_and_routes_its_outcome() {
 #[tokio::test]
 async fn a_failed_reviewer_is_stopped_and_fails_the_round() {
     let script = Script {
-        worked: vec![Ok(()), Err(Failed), Ok(())],
+        worked: vec![Ok(()), Err(WorkFailure::Work), Ok(())],
         ..Script::default()
     };
 
@@ -264,12 +271,53 @@ async fn a_failed_reviewer_is_stopped_and_fails_the_round() {
     assert!(script.closings.borrow()[0].failed);
 }
 
+/// A round that failed only because its reviewers' work failed for
+/// infrastructure is routed as infrastructure's; one where a reviewer's
+/// work failed for itself too is routed as any failed round.
+#[tokio::test]
+async fn a_round_failed_by_infrastructure_alone_is_routed_as_such() {
+    let broke = Script {
+        worked: vec![Ok(()), Err(WorkFailure::Infrastructure), Ok(())],
+        closed: Some(Outcome::failed()),
+        ..Script::default()
+    };
+    let (round, _) = walk(&broke, 1).await;
+    assert_eq!(round, Ok(Round::FailedForInfrastructure));
+
+    let mixed = Script {
+        worked: vec![
+            Err(WorkFailure::Work),
+            Err(WorkFailure::Infrastructure),
+            Ok(()),
+        ],
+        closed: Some(Outcome::failed()),
+        ..Script::default()
+    };
+    let (round, _) = walk(&mixed, 1).await;
+    assert_eq!(round, Ok(Round::Routed(Outcome::failed())));
+
+    // A reviewer that ended without a review fails the round as its work's,
+    // beside one whose work failed for infrastructure.
+    let unreviewed = Script {
+        worked: vec![Ok(()), Err(WorkFailure::Infrastructure), Ok(())],
+        ends: [(5, "no_result")].into(),
+        closed: Some(Outcome::failed()),
+        ..Script::default()
+    };
+    let (round, _) = walk(&unreviewed, 1).await;
+    assert_eq!(round, Ok(Round::Routed(Outcome::failed())));
+}
+
 /// A Run cancelled while its reviewers work ends cancelled, every
 /// reviewer's agent still held for the workflow to stop.
 #[tokio::test]
 async fn a_round_cancelled_mid_work_holds_every_reviewer() {
     let script = Script {
-        worked: vec![Err(Failed), Err(Failed), Err(Failed)],
+        worked: vec![
+            Err(WorkFailure::Work),
+            Err(WorkFailure::Work),
+            Err(WorkFailure::Work),
+        ],
         cancelled: true,
         ..Script::default()
     };
@@ -436,6 +484,7 @@ async fn reviewers_of_a_flow_without_questions_never_ask() {
         questions: Questions {
             may_ask: false,
             most: 0,
+            owner_answers: true,
         },
     };
     let mut held = Vec::new();
@@ -516,6 +565,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: true,
     owner_gates: false,
+    quiet_gates: false,
     task_thread: false,
     queue_limit: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {

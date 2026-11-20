@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT a.experiment, a.arm, s.scorer,\n                   count(*) AS \"judged!\",\n                   avg(s.score) AS \"mean_score!\"\n            FROM factory_run_arm a\n            JOIN factory_run_score s ON s.run_id = a.run_id\n            WHERE a.run_id = ANY($1)\n            GROUP BY a.experiment, a.arm, s.scorer\n            ORDER BY a.experiment, a.arm, s.scorer\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "experiment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "arm",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "scorer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "judged!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "mean_score!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "0b54c891756e378df3134950a2e28d98067643524af520dd791e21def4f8bc08"
+}

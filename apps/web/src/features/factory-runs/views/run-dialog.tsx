@@ -4,6 +4,7 @@ import XIcon from '@icon/system/regular/x.svg';
 import { ActionDialogShell, Button, Dialog } from '@ui';
 import { createSignal, Match, Show, Switch } from 'solid-js';
 import { GateCard } from '../components/gate-card';
+import { MarkRunFlawed } from '../components/run-flaw';
 import { gateAsker, runTitle } from '../core/run';
 import { createFocusRescue } from '../primitives/focus-rescue';
 import type { RunController } from '../primitives/run-controller';
@@ -36,7 +37,7 @@ function RunDialogHeader(props: { title: string }) {
 }
 
 /** The Gate the Run waits on, pinned under the Steps. */
-function RunGate(props: { controller: RunController }) {
+export function RunGate(props: { controller: RunController }) {
   return (
     <Show when={props.controller.waiting()}>
       {(waiting) => (
@@ -126,16 +127,27 @@ export function RunDialog(props: {
                     }}
                   />
                 </ActionDialogShell.Body>
-                <Show when={props.controller.waiting()}>
+                <Show
+                  when={props.controller.owned() && props.controller.waiting()}
+                >
                   {/* Pinned; its question and note scroll inside past a few
                       lines, so the answers stay in reach. */}
                   <div class="shrink-0 border-t border-edge-divider px-5 pt-3">
                     <RunGate controller={props.controller} />
                   </div>
                 </Show>
-                <Show when={!run().end}>
+                <Show when={props.controller.owned() && !run().end}>
                   <ActionDialogShell.Footer>
                     <RunCancel controller={props.controller} />
+                  </ActionDialogShell.Footer>
+                </Show>
+                <Show
+                  when={
+                    props.controller.owned() && run().end?.outcome === 'success'
+                  }
+                >
+                  <ActionDialogShell.Footer>
+                    <MarkRunFlawed runId={run().id} />
                   </ActionDialogShell.Footer>
                 </Show>
               </>

@@ -25,7 +25,16 @@ worker that walks each Run's Flow, in one process.
   `FACTORY_GATE_REPLY_THRESHOLD` and `FACTORY_STAND_IN_THRESHOLD` (optional:
   how sure, in percent, the model must be before words answer a Gate, 85,
   and before the stand-in answers one, 90), `FACTORY_STAND_IN_WINDOW_SECS`
-  (optional: how long the owner may override the stand-in, 600).
+  (optional: how long the owner may override the stand-in, 600),
+  `FACTORY_EVALUATION` (optional: the Scorers, Experiments and Benchmarks,
+  as JSON, of teams that name no Factory Definition, whose own
+  `scorers.json` holds theirs; none when unset) and `FACTORY_SCORER_MODEL` (optional: the model
+  Scorers judge with, Claude Haiku 5.5 when unset; an id past 200 bytes
+  stops the service from starting).
+- `src/definition_check.rs`: the `factory_definition_check [folder]`
+  command, which reads a Factory Definition from a checkout of its
+  repository as a Run would, and prints the first problem it finds with
+  its file (exit 1). A Definition repository's checks run it.
 - `src/gate_replay.rs`: the `factory_gate_replay` command, which replays
   the Gate model over the Gates people answered in `DATABASE_URL`'s
   records (`FACTORY_GATE_REPLAY_LIMIT`, 500 by default) and prints how
@@ -34,7 +43,7 @@ worker that walks each Run's Flow, in one process.
 ## Scope
 
 - Owns: wiring `factory_engine` and `factory_records` into a process, and
-  the insights router beside the Run API (its OpenAPI merged into the Run
+  the insights and evaluation routers beside the Run API (its OpenAPI merged into the Run
   API's).
 - Not here: Flows, the workflow and the API's handlers → `crates/factory_engine`;
   the Run tables → `crates/factory_records`.
@@ -77,7 +86,8 @@ worker that walks each Run's Flow, in one process.
   turns the stand-in on for those kinds of Gate; left out, it is off), `{"definition": null}` goes back to the default, and `PUT
   /settings/standing-rules/projects/<initiative id>` sets or removes a
   Project's own, the same way; `"ownerGates": true` in a definition turns
-  its owner section on, `"taskThread": true` its task thread section
+  its owner section on, `"quietGates": true` stops the notification a Gate
+  waiting on the Run's owner sends them (left out: they are notified), `"taskThread": true` its task thread section
   (each Run on a task posts its updates to one comment thread on it), and
   `"queueLimit": 5` sets its Queue limit (1 to 1000, else 400; null or
   left out: none): the most places a person may hold. Once they hold that
@@ -86,6 +96,15 @@ worker that walks each Run's Flow, in one process.
   that has not reached one yet. `GET /runs/waiting` lists the caller's
   Runs waiting at a Gate (`runs`) and those yet to reach their first
   (`starting`): the places they hold.
+  `GET /runs` is the board: a page of the caller's Runs, or with
+  `scope=team` their team's on tasks they can see, newest first, each with
+  its `state` (`running`, `waiting`, `held`, `stopped`, `finished`);
+  `state`, `flow`, `repoUrl`, `projectId` and `search` narrow it, and
+  `afterCreatedAt` with `afterId` (the page's `next`) reads the next page.
+  `POST /runs/by-pull-requests` (`{"urls"}`, at most 100) finds the Run
+  that opened each pull request, among those the caller's team board
+  shows, with the merge Gate it waits on (`mergeGateSeq`); `unknown`
+  lists the pull requests whose own Runs it could not all read.
 
 ## Gotchas
 
@@ -126,6 +145,15 @@ worker that walks each Run's Flow, in one process.
   Role until the Runs started before have ended: a Step that opened its
   session before Steps recorded their Agent and bot is stopped, deleted or
   retried as the first Agent of its Role.
+
+  A team that names a Factory Definition (`crates/factory_engine`'s
+  `domain/definition.rs`) gives its Runs the Agents in its `agents.json`,
+  which each Run keeps: `FACTORY_AGENTS` is then the fallback for the Runs
+  of teams that name none. Only a Definition's `agents.json` holds Standing
+  Roles (a `standing` section, which says which agents' bots may start,
+  cancel or link a Run, or answer its plan or Blockers Gate, for its
+  owner): `FACTORY_AGENTS` with one stops the service from starting. The agent Steps still run on `LocalAgent` when it
+  is unset, Definition or not, so a deployment that runs agents sets it.
 
   Unset, the agent Steps run on `LocalAgent`, which does no work, unless the
   retired `FACTORY_AGENT_ID` is set: then the service refuses to start and
@@ -193,8 +221,8 @@ worker that walks each Run's Flow, in one process.
   through `POST /documents/{id}/comments/text`, as the Run's owner with the
   internal key, so the service needs that service's public routes reachable
   at `DocumentStorageServiceUrl`.
-- A Gate left for a person, on a Run whose owner section is on, notifies
-  its owner through the notification ingress queue
+- A Gate left for a person notifies the Run's owner, unless the Run's
+  definition is quiet (`quietGates`), through the notification ingress queue
   (`NotificationIngressQueue`, over SQS as every Macro producer), so the
   service needs `sqs:SendMessage` on it once it deploys. An answered Gate's
   notification is marked done through the notifications' reader over

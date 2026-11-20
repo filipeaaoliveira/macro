@@ -1,31 +1,10 @@
-use super::{DeploySignal, VerifyFile, VerifyFileError};
+use super::{VerifyFile, VerifyFileError};
 
-/// A repository with no verify file is verified, with nothing deployed to
-/// wait for.
+/// A repository with no verify file is checked before its merge.
 #[test]
-fn no_file_verifies_the_merged_commit() {
-    assert_eq!(
-        VerifyFile::read(None),
-        Ok(VerifyFile {
-            verify: true,
-            deploy: None,
-        })
-    );
+fn no_file_checks_the_change() {
+    assert_eq!(VerifyFile::read(None), Ok(VerifyFile { verify: true }));
     assert_eq!(VerifyFile::read(Some("{}")), Ok(VerifyFile::default()));
-}
-
-#[test]
-fn a_file_names_the_environment_a_merge_deploys_to() {
-    let file = VerifyFile::read(Some(r#"{"deploy": {"environment": "production"}}"#));
-    assert_eq!(
-        file,
-        Ok(VerifyFile {
-            verify: true,
-            deploy: Some(DeploySignal {
-                environment: "production".to_string(),
-            }),
-        })
-    );
 }
 
 #[test]
@@ -41,15 +20,26 @@ fn a_file_that_does_not_read_says_why() {
         Err(VerifyFileError::Unreadable(_))
     ));
     assert!(matches!(
-        VerifyFile::read(Some(r#"{"deploy": {"workflow": "deploy.yml"}}"#)),
+        VerifyFile::read(Some(r#"{"verify": false, "skip": true}"#)),
         Err(VerifyFileError::Unreadable(_))
     ));
     assert_eq!(
-        VerifyFile::read(Some(r#"{"deploy": {"environment": "  "}}"#)),
-        Err(VerifyFileError::Environment)
-    );
-    assert_eq!(
         VerifyFile::read(Some(&" ".repeat(5000))),
         Err(VerifyFileError::TooLarge)
+    );
+}
+
+/// The deploy an earlier factory waited for after the merge is read and
+/// ignored: a file that still names one keeps its `verify`.
+#[test]
+fn a_leftover_deploy_is_ignored() {
+    let off = r#"{"verify": false, "deploy": {"environment": "production"}}"#;
+    assert_eq!(
+        VerifyFile::read(Some(off)),
+        Ok(VerifyFile { verify: false })
+    );
+    assert_eq!(
+        VerifyFile::read(Some(r#"{"deploy": {"environment": "production"}}"#)),
+        Ok(VerifyFile::default())
     );
 }

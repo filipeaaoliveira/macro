@@ -30,7 +30,7 @@ use crate::domain::automations::{
 };
 use crate::domain::models::FactoryError;
 use crate::domain::ports::AutomationService;
-use crate::inbound::http::{RunErrorCode, RunErrorResponse, is_in_person};
+use crate::inbound::http::{RunErrorCode, RunErrorResponse, is_in_person, program_agent};
 
 /// Router state for Automations.
 pub struct AutomationsRouterState<S, Auth> {
@@ -273,7 +273,9 @@ where
 /// scheduler signed for the routine (403 for any other caller). It starts
 /// a Run as the Automation's creator, once per routine run, unless the
 /// Automation is switched off, the queue is full or a Run already runs on
-/// the task.
+/// the task. A routine run for an agent, or in an agent session, starts it
+/// as that agent: under a Definition with Standing Roles its bot must fill
+/// one that allows `start`, or the firing is skipped as `refused`.
 #[utoipa::path(
     post,
     tag = "factory",
@@ -304,10 +306,21 @@ where
     // read it; no other caller names one.
     let routine_id =
         agent_correlation::context::current_routine().ok_or(FactoryError::NotARoutine)?;
+    // A routine the scheduler runs as its creator acts as them; one run for
+    // an agent, or in an agent session, acts as that agent, which Standing
+    // Roles check as for `POST /runs`. The Automation's own routine is an
+    // `Agent` routine signed for the Macro routine bot, which acts as that
+    // bot.
+    let acting = program_agent(&caller.authorization);
     Ok(Json(
         state
             .service
-            .fire_from_routine(&caller.authorization.macro_user_id, routine_id, body)
+            .fire_from_routine(
+                &caller.authorization.macro_user_id,
+                routine_id,
+                body,
+                acting,
+            )
             .await?,
     ))
 }

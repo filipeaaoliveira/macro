@@ -5,7 +5,8 @@
 use chrono::Utc;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
-    ControlFileChanges, EntryId, NewRun, Outcome, Repository, Role, RunId, RunInsert, StepKey,
+    ControlFileChanges, EntryId, GateModelReading, MAX_NOTE_BYTES, NewRun, Outcome, Repository,
+    Role, RunId, RunInsert, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -16,8 +17,9 @@ use uuid::Uuid;
 
 use super::service::GateRepliesImpl;
 use super::{Decision, GateReplySettings, GateReplySettingsError, decide, percent};
-use crate::domain::fakes::{FakeGateModel, FakeRepo};
+use crate::domain::fakes::{FakeGateModel, FakeNotifier, FakeRepo};
 use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
+use crate::domain::gate_owner::{notice_id, stand_in_id};
 use crate::domain::ports::{GateReplyService, ModelPick};
 
 fn outcome(name: &str) -> Outcome {
@@ -39,6 +41,7 @@ const STAND_IN_ONLY: OrchestratorDefinition = OrchestratorDefinition {
     blockers: false,
     merge: false,
     owner_gates: false,
+    quiet_gates: false,
     task_thread: false,
     queue_limit: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -73,6 +76,7 @@ async fn run_at_plan_gate(
             request: "Fix the login bug",
             user_id: &julia(),
             task_id,
+            project_id: None,
             repository: Some(&base()),
             created_in_person: true,
             control_file_patterns: &[],
@@ -83,6 +87,8 @@ async fn run_at_plan_gate(
                 project_id: None,
             },
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -259,6 +265,62 @@ async fn a_reply_read_at_or_above_the_threshold_answers_the_gate() {
     assert!(asked[0].prompt.contains("Looks right, go ahead."));
 }
 
+/// On a Tampered Run, words the model cannot read, or reads as Approve
+/// below the threshold, are asked back as any others: not as an approval
+/// only the button gives.
+#[tokio::test]
+async fn unclear_words_on_a_tampered_run_are_not_refused_approvals() {
+    for (choice, confidence) in [(None, 0.95), (Some("approve"), 0.5)] {
+        let repo = FakeRepo::default();
+        let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
+        repo.control_file_changes.lock().expect("changes").insert(
+            key.run_id,
+            ControlFileChanges {
+                tampered: vec![".github/workflows/ci.yml".to_string()],
+                named: Vec::new(),
+                unlisted: false,
+            },
+        );
+        let model = FakeGateModel::picking(choice, confidence);
+
+        let read = gates(&repo, &model)
+            .read_reply(reading(key, "Hmm"))
+            .await
+            .expect("read");
+
+        assert_eq!(read, ReplyRead::AskedBack);
+        let asked = gate(&repo, key).await.asked_back.expect("asked back");
+        assert!(!asked.refused_tampered, "{choice:?} at {confidence}");
+    }
+}
+
+/// A pick the Gate does not offer is kept as no pick, as it decides
+/// nothing, whether the words are asked back or the stand-in declines.
+#[tokio::test]
+async fn a_pick_the_gate_does_not_offer_is_kept_as_none() {
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("merge"), 0.97);
+    model.then(Some("merge"), 0.97);
+    let service = gates(&repo, &model);
+
+    service.stand_in(plan_asking(key)).await.expect("stand in");
+    service
+        .read_reply(reading(key, "Ship it"))
+        .await
+        .expect("read");
+
+    let gate = gate(&repo, key).await;
+    let declined = gate.stand_in_declined.expect("declined");
+    assert_eq!(declined.pick, None);
+    assert_eq!(declined.confidence, Some(97));
+    let asked = gate
+        .asked_back
+        .and_then(|asked| asked.reading)
+        .expect("reading");
+    assert_eq!(asked.pick, None);
+}
+
 /// A reply the model is not sure enough of, or cannot tell, is asked back
 /// on the Gate, which still waits.
 #[tokio::test]
@@ -276,9 +338,16 @@ async fn a_reply_below_the_threshold_or_unclear_is_asked_back() {
         assert_eq!(read, ReplyRead::AskedBack);
         let gate = gate(&repo, key).await;
         assert_eq!(gate.answer, None);
+        let asked = gate.asked_back.expect("asked back");
+        assert_eq!(asked.reply, "Hmm, maybe?");
+        // How the model read the words is kept, so the owner can tell why.
         assert_eq!(
-            gate.asked_back.map(|asked| asked.reply),
-            Some("Hmm, maybe?".to_string())
+            asked.reading,
+            Some(GateModelReading {
+                pick: choice.map(outcome),
+                confidence: Some(percent(confidence)),
+                reason: "The owner approved every plan like this one.".to_string(),
+            })
         );
     }
 }
@@ -302,7 +371,17 @@ async fn a_failed_or_timed_out_call_asks_back() {
             .expect("read");
 
         assert_eq!(read, ReplyRead::AskedBack);
-        assert_eq!(gate(&repo, key).await.answer, None);
+        let gate = gate(&repo, key).await;
+        assert_eq!(gate.answer, None);
+        // A model that did not answer leaves no pick, confidence or reason.
+        assert_eq!(
+            gate.asked_back.and_then(|asked| asked.reading),
+            Some(GateModelReading {
+                pick: None,
+                confidence: None,
+                reason: String::new(),
+            })
+        );
     }
 }
 
@@ -328,6 +407,42 @@ async fn words_never_approve_a_tampered_run() {
         .expect("read");
 
     assert_eq!(read, ReplyRead::AskedBack);
+    // It is kept as refused for the Tampered Run, beside the model's own
+    // reading, whose reason stays as the model gave it, within the note's
+    // size, however long.
+    let asked = gate(&repo, key).await.asked_back.expect("asked back");
+    assert!(asked.refused_tampered);
+    let kept = asked.reading.expect("reading");
+    assert_eq!(kept.pick, Some(outcome("approve")));
+    assert_eq!(kept.reason, "The owner approved every plan like this one.");
+
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
+    repo.control_file_changes.lock().expect("changes").insert(
+        key.run_id,
+        ControlFileChanges {
+            tampered: vec![".github/workflows/ci.yml".to_string()],
+            named: Vec::new(),
+            unlisted: false,
+        },
+    );
+    let model = FakeGateModel::default();
+    model.picks.lock().expect("picks").push_back(Ok(ModelPick {
+        choice: Some(outcome("approve")),
+        confidence: 0.99,
+        reason: "y".repeat(5000),
+    }));
+    gates(&repo, &model)
+        .read_reply(reading(key, "Approve"))
+        .await
+        .expect("read");
+    let reason = gate(&repo, key)
+        .await
+        .asked_back
+        .and_then(|asked| asked.reading)
+        .expect("reading")
+        .reason;
+    assert_eq!(reason.len(), MAX_NOTE_BYTES);
 }
 
 /// An agent's question takes the words as its answer, with no model; a
@@ -414,6 +529,141 @@ async fn below_its_threshold_the_stand_in_leaves_the_gate_to_its_owner() {
         assert_eq!(standing, None);
         assert_eq!(gate(&repo, key).await.stand_in, None);
     }
+}
+
+/// A stand-in that leaves the Gate to its owner keeps on the Gate how the
+/// model read it: its pick, how sure it was and why, or that it did not
+/// answer; a stand-in never asked keeps none.
+#[tokio::test]
+async fn a_declining_stand_in_keeps_why_on_the_gate() {
+    let cases = [
+        (
+            FakeGateModel::picking(Some("approve"), 0.89),
+            Some(GateModelReading {
+                pick: Some(outcome("approve")),
+                confidence: Some(89),
+                reason: "The owner approved every plan like this one.".to_string(),
+            }),
+        ),
+        (
+            FakeGateModel::picking(None, 0.99),
+            Some(GateModelReading {
+                pick: None,
+                confidence: Some(99),
+                reason: "The owner approved every plan like this one.".to_string(),
+            }),
+        ),
+        (
+            FakeGateModel::failing(),
+            Some(GateModelReading {
+                pick: None,
+                confidence: None,
+                reason: String::new(),
+            }),
+        ),
+    ];
+    for (model, declined) in cases {
+        let repo = FakeRepo::default();
+        let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+
+        gates(&repo, &model)
+            .stand_in(plan_asking(key))
+            .await
+            .expect("stand in");
+
+        assert_eq!(gate(&repo, key).await.stand_in_declined, declined);
+    }
+
+    // Off by default: the stand-in is not asked, so it declined nothing.
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.5);
+    gates(&repo, &model)
+        .stand_in(plan_asking(key))
+        .await
+        .expect("stand in");
+    assert_eq!(gate(&repo, key).await.stand_in_declined, None);
+}
+
+/// The model is asked about the Run whose Gate it reads, so its usage
+/// names that Run.
+#[tokio::test]
+async fn the_model_is_billed_for_the_run_it_reads() {
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.5);
+    model.then(Some("approve"), 0.5);
+    let service = gates(&repo, &model);
+
+    service.stand_in(plan_asking(key)).await.expect("stand in");
+    service
+        .read_reply(reading(key, "Maybe"))
+        .await
+        .expect("read");
+
+    assert_eq!(
+        *model.runs.lock().expect("runs"),
+        vec![Some(key.run_id), Some(key.run_id)]
+    );
+}
+
+/// The owner is told, lightly, when the stand-in answers in their name:
+/// a notice on the Run's task, not pushed, once however often the answer
+/// is asked for, and done once the window closes. A Run with no task tells
+/// no one.
+#[tokio::test]
+async fn the_owner_is_told_quietly_while_the_stand_in_s_window_is_open() {
+    let repo = FakeRepo::default();
+    let task = Uuid::from_u128(0x7a5c);
+    repo.tasks.lock().expect("tasks").insert(task);
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), Some(task)).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+    let notifier = FakeNotifier::default();
+    let service = gates(&repo, &model).with_notifier(notifier.clone());
+
+    service.stand_in(plan_asking(key)).await.expect("stand in");
+    service.stand_in(plan_asking(key)).await.expect("retried");
+
+    let sent = notifier.sent.lock().expect("sent").clone();
+    assert_eq!(sent.len(), 2, "a retry sends the same notice again");
+    assert_eq!(sent[0], sent[1]);
+    let notice = &sent[0];
+    assert_eq!(notice.notification_id, stand_in_id(key.run_id, key.seq));
+    assert_ne!(notice.notification_id, notice_id(key.run_id, key.seq));
+    assert!(!notice.push);
+    assert!(notice.metadata.notify_only);
+    assert_eq!(notice.task_id, Some(task));
+    // The answer by its label; the Run view says when the window closes.
+    assert_eq!(
+        notice.metadata.question,
+        "The stand-in answered Approve for you; you can change it in the run until its \
+         window closes. Approve this plan?"
+    );
+    assert!(notifier.done.lock().expect("done").is_empty());
+
+    service
+        .keep_stand_in(plan_keeping(key))
+        .await
+        .expect("keep");
+    assert!(
+        notifier
+            .done
+            .lock()
+            .expect("done")
+            .contains(&stand_in_id(key.run_id, key.seq))
+    );
+
+    // No task, no notice.
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+    let notifier = FakeNotifier::default();
+    gates(&repo, &model)
+        .with_notifier(notifier.clone())
+        .stand_in(plan_asking(key))
+        .await
+        .expect("stand in");
+    assert!(notifier.sent.lock().expect("sent").is_empty());
 }
 
 /// The stand-in never answers a Gate kept for a person, a merge Gate, a
@@ -587,6 +837,38 @@ async fn an_override_in_the_window_replaces_the_stand_in_s_answer() {
     );
 }
 
+/// Words in the stand-in's window end it, whatever the factory reads in
+/// them: the notice that the stand-in answered is done once they are asked
+/// back, as once they answer the Gate.
+#[tokio::test]
+async fn words_in_the_window_close_the_stand_in_s_notice() {
+    for (choice, confidence) in [(None, 0.9), (Some("revise"), 0.95)] {
+        let repo = FakeRepo::default();
+        let task = Uuid::now_v7();
+        repo.tasks.lock().expect("tasks").insert(task);
+        let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), Some(task)).await;
+        let model = FakeGateModel::picking(Some("approve"), 0.95);
+        model.then(choice, confidence);
+        let notifier = FakeNotifier::default();
+        let service = gates(&repo, &model).with_notifier(notifier.clone());
+        service.stand_in(plan_asking(key)).await.expect("stand in");
+
+        service
+            .read_reply(reading(key, "Hmm, not that"))
+            .await
+            .expect("read");
+
+        assert!(
+            notifier
+                .done
+                .lock()
+                .expect("done")
+                .contains(&stand_in_id(key.run_id, key.seq)),
+            "{choice:?}"
+        );
+    }
+}
+
 /// A retried stand-in returns the answer it kept first, with what is left
 /// of its window, and asks the model nothing again.
 #[tokio::test]
@@ -737,6 +1019,7 @@ async fn the_stand_in_reads_past_answers_of_the_same_flow_and_kind() {
                 }),
                 asked_back: None,
                 stand_in: None,
+                stand_in_declined: None,
             });
         }
     }
@@ -752,4 +1035,25 @@ async fn the_stand_in_reads_past_answers_of_the_same_flow_and_kind() {
     assert!(prompt.contains("Same flow"));
     assert!(!prompt.contains("Other flow"));
     assert!(!prompt.contains("A question's answer"));
+}
+
+/// A Run without a task sent no notice that the stand-in answered, so
+/// words in its window close none: closing it would leave a withdrawal
+/// behind.
+#[tokio::test]
+async fn words_in_the_window_of_a_run_without_a_task_close_no_notice() {
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+    model.then(None, 0.9);
+    let notifier = FakeNotifier::default();
+    let service = gates(&repo, &model).with_notifier(notifier.clone());
+    service.stand_in(plan_asking(key)).await.expect("stand in");
+
+    service
+        .read_reply(reading(key, "Hmm, not that"))
+        .await
+        .expect("read");
+
+    assert!(notifier.done.lock().expect("done").is_empty());
 }

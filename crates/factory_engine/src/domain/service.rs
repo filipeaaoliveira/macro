@@ -1,25 +1,34 @@
 //! The factory's use cases: starting and reading Runs, and running their
 //! Steps.
 
+mod board;
+mod definition;
+mod standing;
 #[cfg(test)]
 mod test;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU8;
+use std::sync::Arc;
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::automations::{
     Automation, AutomationRepository, AutomationStart, RunAutomation,
 };
+use factory_records::domain::board::RunBoardRepository;
+use factory_records::domain::evaluation::{BENCHMARK_FLOW, EvaluationRepository, TrialKey};
+use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
-    EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
-    NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert, RunOutcome,
-    SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
+    EntryId, FlawMarker, HandBack, KeptFlow, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES,
+    MAX_REQUEST_BYTES, NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert,
+    RunOutcome, SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
+use factory_records::domain::self_improvement::{IMPROVE_FLOW, SelfImprovementRepository};
+use factory_records::domain::standing_acts::{StandingAct, StandingActRepository, StandingActor};
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind,
     RulesSource, RunRules, StandingRulesRepository,
@@ -27,23 +36,30 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
+use crate::domain::agents::AgentDefinition;
+use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
+use crate::domain::built_in_flows::{BUILT_IN_FLOWS, walked_flow};
 use crate::domain::control_files::ControlFiles;
+use crate::domain::definition::{DEFINITION_FILE_PATTERNS, DefinitionError};
+use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
+use crate::domain::flaws::mark_flawed;
+use crate::domain::flow::Flow;
 use crate::domain::gate::{
-    AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
+    AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate, StandingAnswer,
 };
 use crate::domain::gate_owner::{
-    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id, told_id,
+    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id,
+    notice_may_be_out, stand_in_id, stand_in_notice_may_be_out, told_entries, told_id,
 };
 use crate::domain::models::{
-    Answerer, CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly,
-    RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
-    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    ActingAgent, Answerer, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError,
+    FlowSummary, PersonOnly, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
+    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread, PullRequests,
-    Retryable, RunWorkflows, RunWorkflowsError, StepExecutor, StepService, TaskAccess,
-    TaskDirectory, TaskNotes, TaskThread, UserDirectory,
+    AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread,
+    PullRequests, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor, StepService,
+    TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
 use crate::domain::standing_rules::{
     GateFacts, RuleAnswer, kind_answers, offers_kind_answers, repeated_blockers, rule_answer,
@@ -54,6 +70,7 @@ use crate::domain::step_terminal::{
     resume_prompt,
 };
 use crate::domain::task_thread::{RunUpdate, post_update};
+use definition::PinnedDefinition;
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -92,6 +109,14 @@ pub const WAITING_RUNS_LISTED: u16 = 50;
 /// one whose workflow never started.
 const UNSTARTED_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
+/// How many times a cancel's standing act is tried before who sent the
+/// cancel is given up as lost.
+const CANCEL_RECORD_ATTEMPTS: u8 = 3;
+
+/// The wait before the second try of a cancel's standing act, and the
+/// step it grows by for each later one.
+const CANCEL_RECORD_BACKOFF: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// A Run to record and start: what [`FactoryService::create_run`] takes,
 /// and the Automation that starts it, if one does.
 struct RunOrder<'a> {
@@ -101,7 +126,26 @@ struct RunOrder<'a> {
     task_id: Option<Uuid>,
     repo_url: Option<String>,
     in_person: bool,
+    /// Who starts the Run for its owner, and whether Standing Roles were
+    /// checked for it already.
+    starter: Starter,
     automation: Option<AutomationStart<'a>>,
+    /// The Benchmark trial it is, if a suite starts it, and the commit its
+    /// write starts from.
+    trial: Option<(TrialKey, String)>,
+    /// The self-improvement Run it is, kept as starting, if the factory
+    /// starts it against its team's Definition.
+    improvement: Option<Uuid>,
+}
+
+/// Who starts a Run, for Standing Roles' `start`.
+enum Starter {
+    /// The agent that starts it for its owner, if one does: checked as
+    /// the Run starts.
+    Acting(Option<ActingAgent>),
+    /// The agent a suite's check let start its trials, if one did,
+    /// checked once for the suite before it kept anything.
+    Checked(Option<StandingActor>),
 }
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
@@ -117,6 +161,8 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     github: G,
     review_rounds: Option<NonZeroU8>,
     questions: u8,
+    task_views: board::TaskViews,
+    evaluation: Arc<EvaluationDefinition>,
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
@@ -125,7 +171,12 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + FlawRepository
+        + RunBoardRepository
+        + EvaluationRepository
+        + StandingActRepository
+        + SelfImprovementRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -143,7 +194,23 @@ where
             github,
             review_rounds: None,
             questions: DEFAULT_QUESTIONS,
+            task_views: board::TaskViews::default(),
+            evaluation: Arc::default(),
         }
+    }
+
+    /// Keep the board's task views for `kept` each, in place of 30 s.
+    #[cfg(test)]
+    pub(crate) fn with_task_views_kept(mut self, kept: std::time::Duration) -> Self {
+        self.task_views = board::TaskViews::kept_for(kept);
+        self
+    }
+
+    /// Assign the Runs it starts to the arms of `evaluation`'s
+    /// Experiments, in place of none.
+    pub fn with_evaluation(mut self, evaluation: Arc<EvaluationDefinition>) -> Self {
+        self.evaluation = evaluation;
+        self
     }
 
     /// Let each agent Step of the Runs it starts ask the Run's owner up to
@@ -228,46 +295,67 @@ where
         Ok((team, own))
     }
 
-    /// The Standing Rules a Run of `user_id`'s on the task `task_id` is
-    /// created with: the Project's own, when its owner's team set rules
-    /// for the Project the task is in, else the team's, else the
-    /// factory's default.
-    async fn run_rules(
+    /// The Project the task `task_id` is in, as `user_id` sees it: none
+    /// without a task, or when it cannot be read now, which leaves a Run
+    /// its team's rules rather than refusing it.
+    async fn run_project(
         &self,
         user_id: &MacroUserIdStr<'static>,
-        team: Option<TeamMembership>,
         task_id: Option<Uuid>,
+    ) -> Option<Uuid> {
+        let task_id = task_id?;
+        match self.tasks.task_project(user_id, task_id).await {
+            Ok(project) => project,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    %task_id,
+                    "the run task's project could not be read: the run takes its team's standing rules"
+                );
+                None
+            }
+        }
+    }
+
+    /// The Standing Rules a Run is created with, in the Project `project`
+    /// when its task is in one: its team's Factory Definition's when the
+    /// team names one; else the Project's own, when its owner's team set
+    /// rules for it, else the team's, else the factory's default.
+    async fn run_rules(
+        &self,
+        team: Option<TeamMembership>,
+        project: Option<Uuid>,
+        definition: Option<&PinnedDefinition>,
     ) -> Result<RunRules, FactoryError> {
+        // A team's Factory Definition holds its rules: neither the team's
+        // settings nor a Project's own apply, as they change without a
+        // pull request.
+        if let Some(pinned) = definition {
+            return Ok(RunRules {
+                definition: pinned
+                    .definition
+                    .rules
+                    .standing_rules
+                    .unwrap_or(OrchestratorDefinition::DEFAULT),
+                source: RulesSource::Definition,
+                project_id: None,
+            });
+        }
         let Some(team) = team else {
             return Ok(RunRules::DEFAULT);
         };
-        if let Some(task_id) = task_id {
-            // A Project that cannot be read now leaves the Run the team's
-            // rules, rather than refusing the Run.
-            let project = match self.tasks.task_project(user_id, task_id).await {
-                Ok(project) => project,
-                Err(error) => {
-                    tracing::warn!(
-                        ?error,
-                        %task_id,
-                        "the run task's project could not be read: the run takes its team's standing rules"
-                    );
-                    None
-                }
-            };
-            if let Some(project_id) = project
-                && let Some(definition) = self
-                    .repo
-                    .project_rules(team.team_id, project_id)
-                    .await
-                    .map_err(internal)?
-            {
-                return Ok(RunRules {
-                    definition,
-                    source: RulesSource::Project,
-                    project_id: Some(project_id),
-                });
-            }
+        if let Some(project_id) = project
+            && let Some(definition) = self
+                .repo
+                .project_rules(team.team_id, project_id)
+                .await
+                .map_err(internal)?
+        {
+            return Ok(RunRules {
+                definition,
+                source: RulesSource::Project,
+                project_id: Some(project_id),
+            });
         }
         let own = self.repo.team_rules(team.team_id).await.map_err(internal)?;
         Ok(match own {
@@ -330,35 +418,59 @@ where
             .ok_or(FactoryError::NotFound)
     }
 
+    /// The Run `id`, when `actor` may read it: their own, or a team
+    /// member's on a task they can see. Only its owner acts on it.
+    async fn readable_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+    ) -> Result<Run, FactoryError> {
+        let run = self
+            .repo
+            .get_run(id)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::NotFound)?;
+        if run.user_id == *actor || self.sees_teammates_run(actor, &run).await? {
+            return Ok(run);
+        }
+        Err(FactoryError::NotFound)
+    }
+
     /// Whether `steps`' latest Step is at a merge: its entry runs
-    /// `ready_to_merge` or `merge` in a built-in Flow.
-    fn at_merge(&self, steps: &[Step]) -> bool {
+    /// `ready_to_merge` or `merge` in `flow`, the Run's own.
+    fn at_merge(steps: &[Step], flow: &Flow) -> bool {
         let Some(latest) = steps.last() else {
             return false;
         };
-        BUILT_IN_FLOWS
-            .into_iter()
-            .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
-            .flat_map(|flow| flow.entries)
-            .any(|entry| {
-                entry.id == latest.entry
-                    && matches!(entry.step.as_str(), "ready_to_merge" | "merge")
-            })
+        flow.entries.iter().any(|entry| {
+            entry.id == latest.entry && matches!(entry.step.as_str(), "ready_to_merge" | "merge")
+        })
+    }
+
+    /// Whether `run` may be at its merge, so what it shows of its base
+    /// branch needs its Flow: it works on a repository, goes, and took a
+    /// Step.
+    fn may_be_at_merge(run: &Run, steps: &[Step]) -> bool {
+        run.repository.is_some() && run.end.is_none() && !steps.is_empty()
     }
 
     /// What the Run shows of the base branch it merges to: nothing unless
-    /// it goes and is at its merge, so only a Run about to merge shows a
-    /// hold. `known` keeps what was read of each base, for a list of Runs.
+    /// it goes and is at its merge in `flow`, its own, so only a Run about
+    /// to merge shows a hold. `known` keeps what was read of each base,
+    /// for a list of Runs.
     async fn base_shown(
         &self,
         run: &Run,
         steps: &[Step],
+        flow: Option<&Flow>,
         known: &mut BTreeMap<(String, String), BaseState>,
     ) -> Result<BaseState, FactoryError> {
         let Some(repository) = run.repository.as_ref() else {
             return Ok(BaseState::default());
         };
-        if run.end.is_some() || !self.at_merge(steps) {
+        let at_merge = flow.is_some_and(|flow| Self::at_merge(steps, flow));
+        if !Self::may_be_at_merge(run, steps) || !at_merge {
             return Ok(BaseState::default());
         }
         let base = (repository.url.clone(), repository.base_branch.clone());
@@ -377,13 +489,28 @@ where
         steps: Vec<Step>,
         review_rounds: Vec<ReviewRound>,
     ) -> Result<RunDetail, FactoryError> {
-        let base = self.base_shown(&run, &steps, &mut BTreeMap::new()).await?;
+        let flow = if Self::may_be_at_merge(&run, &steps) {
+            self.run_flow(run.id).await?
+        } else {
+            None
+        };
+        let base = self
+            .base_shown(&run, &steps, flow.as_ref(), &mut BTreeMap::new())
+            .await?;
+        let standing_acts = self
+            .repo
+            .runs_standing_acts(&[run.id])
+            .await
+            .map_err(internal)?
+            .remove(&run.id)
+            .unwrap_or_default();
         Ok(RunDetail {
             run,
             steps: with_pause_ends(steps),
             main_hold: base.hold,
             base_required_checks: base.required,
             review_rounds,
+            standing_acts,
         })
     }
 
@@ -393,19 +520,34 @@ where
         let ids: Vec<RunId> = runs.iter().map(|run| run.id).collect();
         let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
         let mut rounds = self.repo.runs_review_rounds(&ids).await.map_err(internal)?;
+        let mut standing_acts = self.repo.runs_standing_acts(&ids).await.map_err(internal)?;
+        // The Flows of the Runs that may be at their merge, in one read.
+        let at_merge_ids: Vec<RunId> = runs
+            .iter()
+            .filter(|run| {
+                let taken = steps.get(&run.id).map_or(&[][..], Vec::as_slice);
+                Self::may_be_at_merge(run, taken)
+            })
+            .map(|run| run.id)
+            .collect();
+        let flows = self.runs_flows(&at_merge_ids).await?;
         // Runs on one base share what was read of it.
         let mut known = BTreeMap::new();
         let mut details = Vec::with_capacity(runs.len());
         for run in runs {
             let steps = with_pause_ends(steps.remove(&run.id).unwrap_or_default());
             let review_rounds = rounds.remove(&run.id).unwrap_or_default();
-            let base = self.base_shown(&run, &steps, &mut known).await?;
+            let base = self
+                .base_shown(&run, &steps, flows.get(&run.id), &mut known)
+                .await?;
+            let standing_acts = standing_acts.remove(&run.id).unwrap_or_default();
             details.push(RunDetail {
                 run,
                 steps,
                 main_hold: base.hold,
                 base_required_checks: base.required,
                 review_rounds,
+                standing_acts,
             });
         }
         Ok(details)
@@ -425,37 +567,17 @@ where
             .collect()
     }
 
-    /// The kind of Gate the entry `entry` asks, by its Flow, when an agent
-    /// answering for the Run's owner may answer it, with the most visits
-    /// the entry runs: every built-in Flow that has the entry asks the same
-    /// kind of Gate there, not one kept for a person. A Run does not keep
-    /// its Flow's name, so the entry is looked up in each, as for a Run at
-    /// its merge, bound to the review rounds the Runs this service starts
-    /// are.
-    fn agent_answerable_entry(&self, entry: &EntryId) -> Option<(RuleGateKind, Option<NonZeroU8>)> {
-        let mut asked = BUILT_IN_FLOWS
-            .into_iter()
-            .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
-            .flat_map(|mut flow| {
-                if let Some(rounds) = self.review_rounds {
-                    flow.bound_review_rounds(rounds);
-                }
-                flow.entries
-            })
-            .filter(|asking| asking.id == *entry)
-            .map(|asking| match asking.gate {
-                Some(gate) if !gate.person_only => gate.kind.map(|kind| (kind, asking.max_visits)),
-                _ => None,
-            });
-        let (kind, mut max_visits) = asked.next()??;
-        for other in asked {
-            let (other_kind, other_visits) = other?;
-            if other_kind != kind {
-                return None;
-            }
-            max_visits = max_visits.min(other_visits);
-        }
-        Some((kind, max_visits))
+    /// The kind of Gate the entry `entry` asks in `flow`, the Run's own,
+    /// when an agent answering for the Run's owner may answer it, with the
+    /// most visits the entry runs: a Gate of a kind, not one kept for a
+    /// person.
+    fn agent_answerable_entry(
+        flow: &Flow,
+        entry: &EntryId,
+    ) -> Option<(RuleGateKind, Option<NonZeroU8>)> {
+        let asking = flow.entries.iter().find(|asking| asking.id == *entry)?;
+        let gate = asking.gate.as_ref().filter(|gate| !gate.person_only)?;
+        Some((gate.kind?, asking.max_visits))
     }
 
     /// Fails unless an agent answering for the Run's owner from the session
@@ -466,7 +588,8 @@ where
     /// `stop`). It gives the approving answer (`approve`, `fix`) only where
     /// the Run's Orchestrator Definition lets it, for that kind, never for
     /// a merge, never approving a Tampered Run, and never sending Blockers
-    /// to a fix the `fix_blockers` rule would leave to the owner.
+    /// to a fix the `fix_blockers` rule would leave to the owner. Gives
+    /// the kind of the Gate when it may answer it.
     async fn agent_may_answer(
         &self,
         run: &Run,
@@ -475,7 +598,7 @@ where
         answer: &Outcome,
         approved_control_files: bool,
         session_id: Uuid,
-    ) -> Result<(), FactoryError> {
+    ) -> Result<RuleGateKind, FactoryError> {
         // The agents doing a Run's Steps work as its owner too: one could
         // otherwise approve the plan it wrote.
         if self
@@ -512,8 +635,13 @@ where
         {
             return Err(PersonOnly::PersonsGate.into());
         }
-        let (kind, max_visits) = self
-            .agent_answerable_entry(&step.entry)
+        // The kind comes from the Run's own Flow, as the workflow and the
+        // Standing Rules read it: never from another Flow with an entry of
+        // the same id.
+        let flow = self.run_flow(run.id).await?;
+        let (kind, max_visits) = flow
+            .as_ref()
+            .and_then(|flow| Self::agent_answerable_entry(flow, &step.entry))
             .filter(|(kind, _)| offers_kind_answers(*kind, &gate.answers))
             .ok_or(PersonOnly::PersonsGate)?;
         if approved_control_files {
@@ -523,7 +651,7 @@ where
         // Sending work back changes nothing a person has not seen.
         let [approving, _] = kind_answers(kind);
         if answer.as_str() != approving {
-            return Ok(());
+            return Ok(kind);
         }
 
         let tampered = run
@@ -557,7 +685,76 @@ where
                 }
             }
         }
+        Ok(kind)
+    }
+
+    /// Cancel the workflow of the Run `id`, which has not ended: fails
+    /// when the workflow ended it before the cancel reached it.
+    async fn send_cancel(&self, id: RunId) -> Result<(), FactoryError> {
+        if self.workflows.cancel(id).await? {
+            return Ok(());
+        }
+        // Temporal had no running workflow for the Run. One may have
+        // started since, which a second cancel reaches; one that completed
+        // before its Run's end was recorded has ended the Run, though the
+        // records don't say so yet.
+        if self.workflows.exists(id).await? {
+            return if self.workflows.cancel(id).await? {
+                Ok(())
+            } else {
+                Err(FactoryError::RunEnded)
+            };
+        }
+        // A Run whose workflow never started has nothing to stop: it ends
+        // cancelled here. A workflow that starts late takes no Step of it,
+        // and is cancelled if it is there by now.
+        self.repo
+            .end_run(id, RunOutcome::Cancelled)
+            .await
+            .map_err(internal)?;
+        if self.workflows.exists(id).await? {
+            self.workflows.cancel(id).await?;
+        }
         Ok(())
+    }
+
+    /// Keep `actor` as who cancelled the Run `id`, once its cancel was
+    /// taken. The cancel cannot be taken back, and a caller's retry finds
+    /// the Run cancelled, which keeps no one, so a failed record is tried
+    /// again here, `CANCEL_RECORD_ATTEMPTS` times in all, and one that
+    /// still fails is logged as lost before its error is answered.
+    async fn record_cancel(&self, id: RunId, actor: &StandingActor) -> Result<(), FactoryError> {
+        let mut attempt: u8 = 1;
+        loop {
+            match self
+                .repo
+                .record_standing_act(id, StandingAct::Cancel, None, actor)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(error) if attempt < CANCEL_RECORD_ATTEMPTS => {
+                    tracing::warn!(
+                        ?error,
+                        run_id = %id,
+                        attempt,
+                        "recording who cancelled a run failed; trying again"
+                    );
+                    tokio::time::sleep(CANCEL_RECORD_BACKOFF * u32::from(attempt)).await;
+                    attempt += 1;
+                }
+                Err(error) => {
+                    tracing::error!(
+                        ?error,
+                        run_id = %id,
+                        bot_id = %actor.bot_id,
+                        session_id = ?actor.session_id,
+                        standing_role = %actor.standing_role,
+                        "a run's cancel was taken but who sent it was not recorded"
+                    );
+                    return Err(internal(error).into());
+                }
+            }
+        }
     }
 
     /// Record the Run `order` asks for and start it, as
@@ -572,14 +769,67 @@ where
             task_id,
             repo_url,
             in_person,
+            starter,
             automation,
+            trial,
+            improvement,
         } = order;
-        let built_in = BuiltInFlow::named(&flow).ok_or(FactoryError::UnknownFlow)?;
-        let mut flow = built_in.read(|step| self.executor.serves(step))?;
-        if let Some(rounds) = self.review_rounds {
-            flow.bound_review_rounds(rounds);
+        // A Benchmark's Flow runs only as a suite's trial, and a trial only
+        // on it; the improve Flow only as a self-improvement Run, and that
+        // only on it.
+        if (flow == BENCHMARK_FLOW) != trial.is_some()
+            || (flow == IMPROVE_FLOW) != improvement.is_some()
+        {
+            return Err(FactoryError::UnknownFlow);
         }
-        flow.allow_questions(self.questions);
+        // A team that names a Factory Definition starts its Runs of the
+        // Definition's Flows, read at its default branch's head now: the Run
+        // keeps that commit, and the Definition's Agents.
+        let team = self.repo.team_of(&actor).await.map_err(internal)?;
+        let definition = self.team_definition(&actor, team).await?;
+        let flow_name = flow;
+        // A Benchmark trial walks the built-in benchmark Flow whatever Flows
+        // the team's Definition holds, none of which takes its name; it
+        // still keeps the Definition, whose Agents its Steps take.
+        // So does a self-improvement Run walk the built-in improve Flow,
+        // on the Definition's own repository, whose Agents must fill it.
+        let flows_of = definition
+            .as_ref()
+            .filter(|_| trial.is_none() && improvement.is_none());
+        let flow = self.flow_named(&flow_name, flows_of)?;
+        if improvement.is_some() {
+            let Some(pinned) = &definition else {
+                return Err(FactoryError::UnknownFlow);
+            };
+            let on_definition = repo_url
+                .as_deref()
+                .is_some_and(|repo_url| pinned.repo_url.eq_ignore_ascii_case(repo_url));
+            if !on_definition {
+                return Err(FactoryError::InvalidRepository);
+            }
+            let roles: BTreeSet<_> = flow
+                .entries
+                .iter()
+                .flat_map(|entry| entry.role.iter().chain(&entry.reviewers))
+                .collect();
+            pinned.definition.agents.fills(roles).map_err(|error| {
+                FactoryError::InvalidDefinition(DefinitionError::ImprovementAgents(error))
+            })?;
+        }
+        // An agent starts a Run under a Definition with Standing Roles only
+        // when its bot fills one that allows it.
+        let started_by = match starter {
+            Starter::Acting(acting) => {
+                self.standing_actor(
+                    &actor,
+                    definition.as_ref().map(|pinned| &pinned.definition.agents),
+                    StandingAct::Start,
+                    acting,
+                )
+                .await?
+            }
+            Starter::Checked(started_by) => started_by,
+        };
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }
@@ -624,22 +874,53 @@ where
         // its owner's team has them now, so a change to the team's list,
         // whoever makes it, does not change a Run under way. An agent's
         // account is never its owner in person.
-        let (team, own) = self.team_control_files(&actor).await?;
+        let own = match (&definition, team) {
+            (Some(pinned), _) => pinned.definition.rules.control_files.clone(),
+            (None, Some(team)) => self
+                .repo
+                .team_control_files(team.team_id)
+                .await
+                .map_err(internal)?,
+            (None, None) => None,
+        };
         let control_files_team_id = team.filter(|_| own.is_some()).map(|team| team.team_id);
-        let control_file_patterns = own.unwrap_or_else(ControlFiles::default_patterns);
+        let mut control_file_patterns = own.unwrap_or_else(ControlFiles::default_patterns);
+        // A Run on its team's Definition repository changes the factory's
+        // own rules: those files are Control Files too, whatever the list.
+        let on_definition = definition.as_ref().zip(repository.as_ref());
+        // GitHub names a repository whatever the case of its owner and name.
+        let same = |(pinned, repository): (&PinnedDefinition, &Repository)| {
+            pinned.repo_url.eq_ignore_ascii_case(&repository.url)
+        };
+        if on_definition.is_some_and(same) {
+            for pattern in DEFINITION_FILE_PATTERNS {
+                if !control_file_patterns.iter().any(|kept| kept == pattern) {
+                    control_file_patterns.push(pattern.to_string());
+                }
+            }
+        }
         let created_in_person =
             in_person && !self.repo.is_agent_account(&actor).await.map_err(internal)?;
         // The Run keeps its Standing Rules the same way: a change to the
         // team's or the Project's rules, or a task linked later, does not
         // change which of its Gates a rule answers.
-        let standing_rules = self.run_rules(&actor, team, task_id).await?;
+        let project_id = self.run_project(&actor, task_id).await;
+        let standing_rules = self
+            .run_rules(team, project_id, definition.as_ref())
+            .await?;
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind. Once the owner holds
         // as many places as the Queue limit of the rules it would start
         // under, counted in the same write, no new Run starts, whoever
         // asks: the person, an agent for them, or an Automation; starts at
         // the same time are counted one after the other.
+        // The Run keeps the Flow it walks, and whether it asks before its
+        // first Gate: what its Gates are, and whether it holds a place in
+        // the Queue, are read from it, whatever its team's Definition says
+        // later. Runs kept before are counted by their Flow's name.
         let asking_flows = self.asking_flows();
+        let kept = serde_json::to_value(&flow).map_err(internal)?;
+        let asks = flow.entries.iter().any(|entry| entry.gate.is_some());
         let hold = QueueHold {
             limit: standing_rules.definition.queue_limit,
             asking_flows: &asking_flows,
@@ -652,16 +933,22 @@ where
             .insert_run_in_queue(
                 NewRun {
                     id: run_id,
-                    flow: built_in.name,
+                    flow: &flow_name,
                     request: &request,
                     user_id: &actor,
                     task_id,
+                    project_id,
                     repository: repository.as_ref(),
                     created_in_person,
                     control_file_patterns: &control_file_patterns,
                     control_files_team_id,
                     standing_rules,
                     automation,
+                    definition: definition.as_ref().map(PinnedDefinition::kept),
+                    kept_flow: Some(KeptFlow {
+                        definition: &kept,
+                        asks,
+                    }),
                 },
                 hold,
             )
@@ -681,6 +968,59 @@ where
                 });
             }
         };
+
+        // The Run keeps its trial, or the arms of its Flow's Experiments,
+        // before its workflow starts, so its first Step already runs on
+        // their Agents. A Run that cannot keep them does not start. A
+        // team's Definition holds its Experiments; a team with none takes
+        // the deployment's.
+        let kept = match (&trial, improvement) {
+            (Some((trial, base_commit)), _) => {
+                self.repo.insert_trial(trial, run_id, base_commit).await
+            }
+            // A self-improvement Run is kept as its improvement's before
+            // its workflow starts; one no longer starting does not start.
+            (None, Some(improvement)) => {
+                match self.repo.link_improvement_run(improvement, run_id).await {
+                    Ok(true) => Ok(()),
+                    Ok(false) => {
+                        self.forget_unstarted(run_id).await;
+                        return Err(FactoryError::Internal(rootcause::report!(
+                            "the self-improvement run is no longer starting"
+                        )));
+                    }
+                    Err(error) => {
+                        self.forget_unstarted(run_id).await;
+                        return Err(FactoryError::Internal(internal(error)));
+                    }
+                }
+            }
+            (None, None) => {
+                let evaluation = match &definition {
+                    Some(pinned) => &pinned.definition.evaluation,
+                    None => &*self.evaluation,
+                };
+                let arms = evaluation.assign_arms(&flow_name, task_id);
+                self.repo.record_arms(run_id, &arms).await
+            }
+        };
+        if let Err(error) = kept {
+            self.forget_unstarted(run_id).await;
+            return Err(FactoryError::Internal(internal(error)));
+        }
+
+        // The agent that started it is kept before its workflow starts: a
+        // Run whose start could not be kept is removed, as one whose
+        // workflow did not start.
+        if let Some(started_by) = &started_by
+            && let Err(error) = self
+                .repo
+                .record_standing_act(run_id, StandingAct::Start, None, started_by)
+                .await
+        {
+            self.forget_unstarted(run_id).await;
+            return Err(internal(error).into());
+        }
 
         // The Run is recorded before its workflow starts, so the workflow can
         // record its Steps against it.
@@ -720,18 +1060,39 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + FlawRepository
+        + RunBoardRepository
+        + EvaluationRepository
+        + StandingActRepository
+        + SelfImprovementRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
     T: TaskDirectory,
     G: PullRequests,
 {
-    fn list_flows(&self) -> Vec<FlowSummary> {
+    async fn list_flows(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<FlowSummary>, FactoryError> {
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        if let Some(pinned) = self.team_definition(actor, team).await? {
+            let flows = pinned.definition.flows.into_iter();
+            return Ok(flows
+                .map(|(name, flow)| FlowSummary {
+                    name,
+                    description: flow.description,
+                    repository: flow.repository,
+                })
+                .collect());
+        }
+
         // A Flow that names a Step the worker does not serve yet is not
         // offered: a Run of it would be refused.
-        BUILT_IN_FLOWS
+        Ok(BUILT_IN_FLOWS
             .into_iter()
+            .filter(|flow| flow.name != BENCHMARK_FLOW && flow.name != IMPROVE_FLOW)
             .filter_map(|flow| {
                 let read = flow.read(|step| self.executor.serves(step)).ok()?;
                 Some(FlowSummary {
@@ -740,7 +1101,7 @@ where
                     repository: read.repository,
                 })
             })
-            .collect()
+            .collect())
     }
 
     async fn create_run(
@@ -751,6 +1112,7 @@ where
         task_id: Option<Uuid>,
         repo_url: Option<String>,
         in_person: bool,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         self.start_run(RunOrder {
             actor,
@@ -759,7 +1121,94 @@ where
             task_id,
             repo_url,
             in_person,
+            starter: Starter::Acting(acting),
             automation: None,
+            trial: None,
+            improvement: None,
+        })
+        .await
+    }
+
+    async fn standing_start(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        agents: Option<&AgentDefinition>,
+        acting: Option<ActingAgent>,
+    ) -> Result<Option<StandingActor>, FactoryError> {
+        self.standing_actor(actor, agents, StandingAct::Start, acting)
+            .await
+    }
+
+    async fn benchmark_base(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> Result<String, FactoryError> {
+        self.known(actor).await?;
+        let repository = self.reachable_repository(actor, repo_url).await?;
+        let code = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
+        self.github
+            .branch_head(actor, &code, &repository.base_branch)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::UnreachableRepository)
+    }
+
+    async fn team_evaluation(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Option<TeamEvaluation>, FactoryError> {
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        let pinned = self.team_definition(actor, team).await?;
+        Ok(pinned.map(|pinned| TeamEvaluation {
+            evaluation: pinned.definition.evaluation,
+            agents: pinned.definition.agents,
+        }))
+    }
+
+    async fn create_trial_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        flow: String,
+        request: String,
+        repo_url: String,
+        trial: TrialKey,
+        base_commit: String,
+        started_by: Option<StandingActor>,
+    ) -> Result<RunDetail, FactoryError> {
+        self.start_run(RunOrder {
+            actor,
+            flow,
+            request,
+            task_id: None,
+            repo_url: Some(repo_url),
+            in_person: false,
+            starter: Starter::Checked(started_by),
+            automation: None,
+            trial: Some((trial, base_commit)),
+            improvement: None,
+        })
+        .await
+    }
+
+    async fn create_improvement_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        request: String,
+        repo_url: String,
+        improvement: Uuid,
+    ) -> Result<RunDetail, FactoryError> {
+        self.start_run(RunOrder {
+            actor,
+            flow: IMPROVE_FLOW.to_string(),
+            request,
+            task_id: None,
+            repo_url: Some(repo_url),
+            in_person: false,
+            starter: Starter::Acting(None),
+            automation: None,
+            trial: None,
+            improvement: Some(improvement),
         })
         .await
     }
@@ -770,8 +1219,12 @@ where
         flow: &str,
         repo_url: Option<&str>,
     ) -> Result<(), FactoryError> {
-        let built_in = BuiltInFlow::named(flow).ok_or(FactoryError::UnknownFlow)?;
-        let flow = built_in.read(|step| self.executor.serves(step))?;
+        if flow == BENCHMARK_FLOW || flow == IMPROVE_FLOW {
+            return Err(FactoryError::UnknownFlow);
+        }
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        let definition = self.team_definition(actor, team).await?;
+        let flow = self.flow_named(flow, definition.as_ref())?;
         match (flow.repository, repo_url) {
             (true, None) => return Err(FactoryError::RepositoryRequired),
             (false, Some(_)) => return Err(FactoryError::RepositoryNotUsed),
@@ -790,6 +1243,7 @@ where
         firing_key: &str,
         request: String,
         task_id: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         let started_by = RunAutomation {
             id: automation.id,
@@ -797,7 +1251,8 @@ where
             trigger: automation.trigger.kind(),
         };
         // An Automation acts as its creator, never in their signed-in
-        // session: its request names no Control File.
+        // session: its request names no Control File. An agent that fires
+        // it starts its Run as any Run it starts, under Standing Roles.
         self.start_run(RunOrder {
             actor: automation.created_by.clone(),
             flow: automation.flow.clone(),
@@ -805,10 +1260,13 @@ where
             task_id,
             repo_url: automation.repo_url.clone(),
             in_person: false,
+            starter: Starter::Acting(acting),
             automation: Some(AutomationStart {
                 automation: &started_by,
                 firing_key,
             }),
+            trial: None,
+            improvement: None,
         })
         .await
     }
@@ -819,21 +1277,24 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
     ) -> Result<RunDetail, FactoryError> {
-        let mut run = self.owned_run(actor, id).await?;
+        let mut run = self.readable_run(actor, id).await?;
         let steps = self.repo.list_steps(id).await.map_err(internal)?;
 
         // A Run kept when its workflow's start could not be checked, and
         // whose workflow never came, would wait forever: once it is old
         // enough that a started workflow would have taken a Step, and
-        // Temporal says it has no workflow, it ends failed.
+        // Temporal says it has no workflow, its owner's read ends it
+        // `infrastructure`, as nothing of its work ever ran. A team
+        // member's read changes nothing.
         let stale = Utc::now() - run.created_at > UNSTARTED_AFTER;
-        if run.end.is_none()
+        if run.user_id == *actor
+            && run.end.is_none()
             && steps.is_empty()
             && stale
             && let Ok(false) = self.workflows.exists(id).await
         {
             self.repo
-                .end_run(id, RunOutcome::Failed)
+                .end_run(id, RunOutcome::Infrastructure)
                 .await
                 .map_err(internal)?;
             run = self.owned_run(actor, id).await?;
@@ -883,6 +1344,24 @@ where
         self.details(runs).await
     }
 
+    #[tracing::instrument(skip(self, actor, filter), fields(scope = ?filter.scope, state = ?filter.state))]
+    async fn board(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        filter: BoardFilter,
+    ) -> Result<BoardPage, FactoryError> {
+        self.board_page(actor, filter).await
+    }
+
+    #[tracing::instrument(skip(self, actor, urls), fields(urls = urls.len()))]
+    async fn pull_request_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        urls: Vec<String>,
+    ) -> Result<PullRequestRuns, FactoryError> {
+        self.pull_request_runs_of(actor, urls).await
+    }
+
     async fn list_starting_runs(
         &self,
         actor: &MacroUserIdStr<'static>,
@@ -927,12 +1406,27 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         task_id: Uuid,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         self.owned_run(actor, id).await?;
+        let agents = self.acting_agents(id, acting).await?;
+        let linked_by = self
+            .standing_actor(actor, agents.as_ref(), StandingAct::Link, acting)
+            .await?;
         self.visible_task(actor, task_id).await?;
 
         match self.repo.link_task(id, task_id).await.map_err(internal)? {
-            TaskLink::Linked => self.get_run(actor, id).await,
+            TaskLink::Linked => {
+                // Linking again is safe: a failed record is kept by the
+                // caller's retry.
+                if let Some(linked_by) = &linked_by {
+                    self.repo
+                        .record_standing_act(id, StandingAct::Link, None, linked_by)
+                        .await
+                        .map_err(internal)?;
+                }
+                self.get_run(actor, id).await
+            }
             TaskLink::NoSuchRun => Err(FactoryError::NotFound),
             TaskLink::NoSuchTask => Err(FactoryError::UnknownTask),
         }
@@ -1064,6 +1558,7 @@ where
                 user_id: actor,
                 approved_control_files: None,
                 agent_session: None,
+                standing: None,
             };
             self.workflows.answer(id, &answer).await?
         } else {
@@ -1118,16 +1613,47 @@ where
                 offered: gate.answers.iter().map(|a| a.as_str().to_owned()).collect(),
             });
         }
+        let mut standing = None;
         if let Answerer::Agent { session_id } = answerer {
-            self.agent_may_answer(
-                &run,
-                &steps,
-                seq,
-                &answer,
-                approved_control_files.is_some(),
-                session_id,
-            )
-            .await?;
+            let kind = self
+                .agent_may_answer(
+                    &run,
+                    &steps,
+                    seq,
+                    &answer,
+                    approved_control_files.is_some(),
+                    session_id,
+                )
+                .await?;
+            // Under a Definition with Standing Roles, the agent's bot must
+            // fill one that allows answering this kind of Gate. No act
+            // answers a merge Gate, whatever the answer.
+            let agents = self.kept_agents(id).await?;
+            let act = match kind {
+                RuleGateKind::Plan => Some(StandingAct::AnswerPlan),
+                RuleGateKind::Blockers => Some(StandingAct::AnswerBlockers),
+                RuleGateKind::Merge => None,
+            };
+            match act {
+                Some(act) => {
+                    standing = self
+                        .standing_actor(
+                            &actor,
+                            agents.as_ref(),
+                            act,
+                            Some(ActingAgent::Session(session_id)),
+                        )
+                        .await?
+                        .map(|by| StandingAnswer { act, by });
+                }
+                None if agents
+                    .as_ref()
+                    .is_some_and(AgentDefinition::has_standing_roles) =>
+                {
+                    return Err(PersonOnly::Merge.into());
+                }
+                None => {}
+            }
         }
         // An agent's question is answered in the owner's own words: the
         // agent goes on with them.
@@ -1170,6 +1696,7 @@ where
                 Answerer::InPerson => None,
                 Answerer::Agent { session_id } => Some(session_id),
             },
+            standing,
         };
         match self.workflows.answer(id, &answer).await? {
             AnswerDelivery::Taken => Ok(()),
@@ -1238,11 +1765,15 @@ where
         actor: &MacroUserIdStr<'static>,
     ) -> Result<ControlFilesSettings, FactoryError> {
         let (team, own) = self.team_control_files(actor).await?;
+        // A team's Factory Definition holds its Control Files: these change
+        // nothing while it names one.
+        let named = self.named_definition(team).await?.is_some();
         Ok(ControlFilesSettings {
             is_default: own.is_none(),
             patterns: own.unwrap_or_else(ControlFiles::default_patterns),
             team_id: team.map(|team| team.team_id),
-            can_edit: team.is_some_and(|team| team.admin),
+            can_edit: !named && team.is_some_and(|team| team.admin),
+            definition_named: named,
         })
     }
 
@@ -1255,12 +1786,29 @@ where
         if let Some(patterns) = &patterns {
             ControlFiles::parse(patterns)?;
         }
-        let team = self.administered_team(&actor).await?;
+        let team = self.settings_team(&actor).await?;
         self.repo
             .set_team_control_files(team.team_id, patterns.as_deref())
             .await
             .map_err(internal)?;
         self.control_files(&actor).await
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        self.definition_settings(actor).await
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn set_definition(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        repo_url: Option<String>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        self.name_definition(actor, repo_url).await
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -1281,12 +1829,16 @@ where
             ),
             None => (None, Vec::new()),
         };
+        // A team's Factory Definition holds its rules: these change nothing
+        // while it names one.
+        let named = self.named_definition(team).await?.is_some();
         Ok(StandingRulesSettings {
             is_default: own.is_none(),
             definition: own.unwrap_or(OrchestratorDefinition::DEFAULT),
             projects,
             team_id: team.map(|team| team.team_id),
-            can_edit: !agent && team.is_some_and(|team| team.admin),
+            can_edit: !agent && !named && team.is_some_and(|team| team.admin),
+            definition_named: named,
         })
     }
 
@@ -1297,7 +1849,7 @@ where
         definition: Option<OrchestratorDefinition>,
     ) -> Result<StandingRulesSettings, FactoryError> {
         valid_queue_limit(definition.as_ref())?;
-        let team = self.administered_team(&actor).await?;
+        let team = self.settings_team(&actor).await?;
         self.repo
             .set_team_rules(team.team_id, definition)
             .await
@@ -1313,7 +1865,7 @@ where
         definition: Option<OrchestratorDefinition>,
     ) -> Result<StandingRulesSettings, FactoryError> {
         valid_queue_limit(definition.as_ref())?;
-        let team = self.administered_team(&actor).await?;
+        let team = self.settings_team(&actor).await?;
         // A Project the admin may not edit is not theirs to give rules: it
         // reads as one that does not exist.
         if !self
@@ -1340,33 +1892,33 @@ where
         &self,
         actor: &MacroUserIdStr<'static>,
         id: RunId,
+        acting: Option<ActingAgent>,
+        in_person: bool,
     ) -> Result<(), FactoryError> {
         let run = self.owned_run(actor, id).await?;
+        let agents = self.acting_agents(id, acting).await?;
+        let cancelled_by = self
+            .standing_actor(actor, agents.as_ref(), StandingAct::Cancel, acting)
+            .await?;
         match run.end.map(|end| end.outcome) {
             None => {
-                if self.workflows.cancel(id).await? {
-                    return Ok(());
-                }
-                // Temporal had no running workflow for the Run. One may have
-                // started since, which a second cancel reaches; one that
-                // completed before its Run's end was recorded has ended the
-                // Run, though the records don't say so yet.
-                if self.workflows.exists(id).await? {
-                    return if self.workflows.cancel(id).await? {
-                        Ok(())
-                    } else {
-                        Err(FactoryError::RunEnded)
-                    };
-                }
-                // A Run whose workflow never started has nothing to stop: it
-                // ends cancelled here. A workflow that starts late takes no
-                // Step of it, and is cancelled if it is there by now.
+                // Whether the owner cancelled it in person is kept before the
+                // cancel is sent, so its end, which may come at once, reads
+                // it: only a person's cancel rejects a self-improvement Run.
+                // An agent's account is never its owner in person.
+                let in_person = in_person
+                    && acting.is_none()
+                    && !self.repo.is_agent_account(actor).await.map_err(internal)?;
                 self.repo
-                    .end_run(id, RunOutcome::Cancelled)
+                    .record_cancel_sender(id, in_person)
                     .await
                     .map_err(internal)?;
-                if self.workflows.exists(id).await? {
-                    self.workflows.cancel(id).await?;
+                self.send_cancel(id).await?;
+                // The agent that asked for the cancel is kept once the
+                // cancel is accepted, so a refused or failed one names no
+                // one; a Run keeps the first cancel's.
+                if let Some(cancelled_by) = &cancelled_by {
+                    self.record_cancel(id, cancelled_by).await?;
                 }
                 Ok(())
             }
@@ -1374,6 +1926,26 @@ where
             Some(RunOutcome::Cancelled) => Ok(()),
             Some(_) => Err(FactoryError::RunEnded),
         }
+    }
+
+    #[tracing::instrument(skip(self, actor, reason))]
+    async fn mark_run_flawed(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        reason: &str,
+    ) -> Result<RunDetail, FactoryError> {
+        self.owned_run(actor, id).await?;
+        let by = FlawMarker::Person {
+            user_id: actor.clone(),
+        };
+        mark_flawed(&self.repo, id, by, reason).await?;
+        // The flaw is a failure the team's Definition may learn from; a
+        // failure to keep it is logged, and the mark stands.
+        if let Err(error) = crate::domain::self_improvement::collect(&self.repo, id).await {
+            tracing::warn!(?error, run_id = %id, "a flawed run's failure was not kept");
+        }
+        self.get_run(actor, id).await
     }
 }
 
@@ -1413,7 +1985,11 @@ pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates, P = NoTaskT
 
 impl<R, E> StepServiceImpl<R, E>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
 {
     /// Create the Step service, which tells no owner of a waiting Gate,
@@ -1432,7 +2008,11 @@ where
 
 impl<R, E, N, T, P> StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1440,7 +2020,8 @@ where
 {
     /// The service, telling Runs' owners of their waiting Gates through
     /// `notifier`, and reading their comments on the Runs' tasks through
-    /// `notes`, for the Runs whose owner section is on.
+    /// `notes`, for the Runs whose owner section is on. A Run whose
+    /// definition is quiet tells no one.
     pub fn with_owner_gates<N2: GateNotifier, T2: TaskNotes>(
         self,
         notifier: N2,
@@ -1499,6 +2080,41 @@ where
             .collect())
     }
 
+    /// Whether the Gate of `run`'s Step `seq` is one the Run's own Flow
+    /// keeps for a person (`person_only`): no Standing Rule answers it. A
+    /// self-improvement Run's Gates, and a Gate whose Step or Flow does not
+    /// read, are taken as kept for a person: a lost Flow never lets a rule
+    /// answer.
+    async fn kept_for_a_person(
+        &self,
+        run: &Run,
+        steps: &[Step],
+        seq: u16,
+    ) -> Result<bool, StepError> {
+        if run.flow.as_deref() == Some(IMPROVE_FLOW) {
+            return Ok(true);
+        }
+        let Some(entry) = steps
+            .iter()
+            .find(|step| step.seq == seq)
+            .map(|step| &step.entry)
+        else {
+            return Ok(true);
+        };
+        let Some(kept) = self.repo.run_flow(run.id).await.map_err(internal)? else {
+            return Ok(true);
+        };
+        let Some(flow) = walked_flow(run.id, kept) else {
+            return Ok(true);
+        };
+        Ok(flow
+            .entries
+            .iter()
+            .find(|asking| asking.id == *entry)
+            .and_then(|asking| asking.gate.as_ref())
+            .is_some_and(|gate| gate.person_only))
+    }
+
     async fn run_of(&self, request: &StepRequest) -> Result<Run, StepError> {
         self.repo
             .get_run(request.key.run_id)
@@ -1510,7 +2126,11 @@ where
 
 impl<R, E, N, T, P> StepService for StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1559,6 +2179,13 @@ where
             .map_err(internal)?;
         let review = review_of(&rounds, &request)?;
         let owner_notes = self.owner_notes(&run, &earlier).await?;
+        // A Benchmark trial's branch starts from the commit its suite
+        // pinned, so every trial of a task replays the same code.
+        let base_commit = self
+            .repo
+            .trial_base_commit(request.key.run_id)
+            .await
+            .map_err(internal)?;
         let input = StepInput {
             key: request.key,
             role: request.role.as_ref(),
@@ -1566,6 +2193,10 @@ where
             request: &run.request,
             created_in_person: run.created_in_person,
             control_file_patterns: run.control_file_patterns.as_deref(),
+            definition_repo: run
+                .definition
+                .as_ref()
+                .map(|definition| definition.repo_url.as_str()),
             task_id: run.task_id,
             repository: run.repository.as_ref(),
             earlier: &earlier,
@@ -1575,15 +2206,22 @@ where
             questions_left: request.questions_left,
             resumes: request.resumes,
             owner_notes: &owner_notes,
+            base_commit: base_commit.as_deref(),
         };
         let report = self
             .executor
             .run(&request.step, input)
             .await
             .map_err(|error| {
+                let out_of_quota = error.out_of_quota();
+                let overdue = error.overdue();
                 let final_failure = !error.retryable();
                 let report = internal(error);
-                if final_failure {
+                if out_of_quota {
+                    StepError::OutOfQuota(report)
+                } else if overdue {
+                    StepError::Overdue(report)
+                } else if final_failure {
                     StepError::Final(report)
                 } else {
                     StepError::Internal(report)
@@ -1675,20 +2313,49 @@ where
             )
             .await
             .map_err(internal)?;
+        // The agent and Standing Role that answered are kept beside the
+        // answer; a retry keeps the first.
+        if let Some(standing) = &answer.standing {
+            self.repo
+                .record_standing_act(
+                    answered.key.run_id,
+                    standing.act,
+                    Some(answered.key.seq),
+                    &standing.by,
+                )
+                .await
+                .map_err(internal)?;
+        }
 
         // A Gate its owner was told of is answered: its notification is
-        // done, whoever answered.
+        // done, whoever answered. One that never went out is left alone,
+        // as closing it would leave a withdrawal behind.
         let run = self
             .repo
             .get_run(answered.key.run_id)
             .await
             .map_err(internal)?
             .ok_or(StepError::NoSuchRun)?;
-        let owner_gates = run
-            .standing_rules
-            .is_some_and(|rules| rules.definition.owner_gates);
-        if owner_gates {
+        let gate = self
+            .repo
+            .list_steps(answered.key.run_id)
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .find(|step| step.seq == answered.key.seq)
+            .and_then(|step| step.gate);
+        if let Some(gate) = &gate
+            && notice_may_be_out(&run, gate)
+        {
             let id = notice_id(answered.key.run_id, answered.key.seq);
+            self.notifier.answered(&run.user_id, id).await;
+        }
+        // An answer in the stand-in's window closes it, and so the notice
+        // that the stand-in answered.
+        if let Some(gate) = &gate
+            && stand_in_notice_may_be_out(&run, gate)
+        {
+            let id = stand_in_id(answered.key.run_id, answered.key.seq);
             self.notifier.answered(&run.user_id, id).await;
         }
         let update = RunUpdate::GateAnswered {
@@ -1740,6 +2407,11 @@ where
         let Some(rules) = run.standing_rules else {
             return Ok(None);
         };
+        // A Gate the Run's own Flow keeps for a person (an improve Run's
+        // plan and merge) takes no Rule Answer, whatever the Run changes.
+        if self.kept_for_a_person(&run, &steps, key.seq).await? {
+            return Ok(None);
+        }
         let held = match (&run.repository, ruling.kind) {
             (Some(base), RuleGateKind::Merge) => {
                 self.repo.main_hold(base).await.map_err(internal)?.is_some()
@@ -1850,37 +2522,56 @@ where
 
         // A Gate left open when the Run ended (cancelled, or ended for a
         // person) waits on no one now: the notification its owner was told
-        // of it by is done, as an answer would make it. One never sent
-        // changes nothing, so a retry marks the same ones again.
+        // of it by is done, as an answer would make it. Only notices that
+        // may have gone out are closed, as closing one never sent leaves a
+        // withdrawal behind; a retry closes the same ones again.
         let run = self
             .repo
             .get_run(finish.run_id)
             .await
             .map_err(internal)?
             .ok_or(StepError::NoSuchRun)?;
-        let owner_gates = run
-            .standing_rules
-            .is_some_and(|rules| rules.definition.owner_gates);
         let steps = self
             .repo
             .list_steps(finish.run_id)
             .await
             .map_err(internal)?;
-        if owner_gates {
-            for step in &steps {
-                if step.gate.as_ref().is_some_and(|gate| gate.answer.is_none()) {
-                    let id = notice_id(finish.run_id, step.seq);
-                    self.notifier.answered(&run.user_id, id).await;
-                }
+        for step in &steps {
+            let open = step
+                .gate
+                .as_ref()
+                .is_some_and(|gate| gate.answer.is_none() && notice_may_be_out(&run, gate));
+            if open {
+                let id = notice_id(finish.run_id, step.seq);
+                self.notifier.answered(&run.user_id, id).await;
+            }
+        }
+
+        // A Run that ends in a stand-in's window closes it: the notice
+        // that the stand-in answered is done, as the window closing would
+        // make it.
+        for step in &steps {
+            let in_window = step.gate.as_ref().is_some_and(|gate| {
+                gate.answer.is_none() && stand_in_notice_may_be_out(&run, gate)
+            });
+            if in_window {
+                let id = stand_in_id(finish.run_id, step.seq);
+                self.notifier.answered(&run.user_id, id).await;
             }
         }
 
         // A notify-only Gate's notice is news of a Run under way: once the
-        // Run ends it is done. No record says which entries told, and
-        // marking a notice never sent changes nothing, so each entry's is
-        // marked, whatever the owner section says, as the notice was sent.
-        let entries: BTreeSet<_> = steps.iter().map(|step| &step.entry).collect();
-        for entry in entries {
+        // Run ends it is done. No record says which entries told, so each
+        // visited entry whose Gate is notify-only in the Run's Flow is
+        // closed, whatever the owner section says, as the notice was sent.
+        let flow = self
+            .repo
+            .run_flow(finish.run_id)
+            .await
+            .map_err(internal)?
+            .and_then(|kept| walked_flow(finish.run_id, kept));
+        let visited: BTreeSet<_> = steps.iter().map(|step| &step.entry).collect();
+        for entry in told_entries(&run, flow.as_ref(), visited) {
             let id = told_id(finish.run_id, entry);
             self.notifier.answered(&run.user_id, id).await;
         }

@@ -1,12 +1,18 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
 mod automations;
+mod board;
+mod evaluation;
+mod flaws;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
+pub(crate) mod self_improvement;
+mod standing_acts;
 mod steering;
 mod task_thread;
 
+pub(crate) use evaluation::{FakeEvaluation, FakeJudge};
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
 pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
@@ -21,9 +27,9 @@ use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun,
-    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunEnd, RunId, RunInsert,
-    RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession,
-    StepSteering, StoppingSession, TaskLink, TeamMembership,
+    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition, RunEnd,
+    RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd,
+    StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -33,11 +39,12 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, Deployment, HeadChecks, Merging,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
+    run_branch,
 };
 use crate::domain::ports::{
-    FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
+    FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
 };
 use crate::domain::review_rounds::ChangedFile;
 
@@ -58,6 +65,8 @@ pub(crate) struct FakeSession {
     /// When an attempt last asked for the session to be opened.
     pub(crate) prepared_at: Option<chrono::DateTime<Utc>>,
     pub(crate) opened: bool,
+    /// The session whose setup commands passed, and how many of them.
+    pub(crate) setup: Option<(Uuid, u16)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -72,6 +81,8 @@ pub(crate) enum FakeGithubError {
     Down,
     #[error("github refused the owner")]
     Refused,
+    #[error("the file is over 1 MB")]
+    TooLarge,
 }
 
 impl Retryable for FakeGithubError {
@@ -128,6 +139,8 @@ pub(crate) struct FakeRepo {
     pub(crate) documents: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The task documents a user cannot see: their id and the task's.
     pub(crate) hidden: Arc<Mutex<BTreeSet<(String, Uuid)>>>,
+    /// How many batch view checks were asked.
+    pub(crate) view_checks: Arc<Mutex<usize>>,
     /// The commit each Run last asked a person to merge.
     pub(crate) merge_heads: Arc<Mutex<BTreeMap<RunId, String>>>,
     /// Told each time a Gate opens.
@@ -147,6 +160,37 @@ pub(crate) struct FakeRepo {
     pub(crate) teams: Arc<Mutex<BTreeMap<String, TeamMembership>>>,
     /// The Control File patterns each team set.
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
+    /// The Factory Definition each team names, by its repository's URL.
+    pub(crate) team_definitions: Arc<Mutex<BTreeMap<Uuid, String>>>,
+    /// Who named each team's Definition, by team.
+    pub(crate) definition_namers: Arc<Mutex<BTreeMap<Uuid, String>>>,
+    /// Failures and self-improvement Runs.
+    pub(crate) improvement: Arc<Mutex<self_improvement::FakeImprovement>>,
+    /// How many times one Run's Flow was read on its own.
+    pub(crate) flow_reads: Arc<Mutex<usize>>,
+    /// The Runs each read of several Runs' Flows asked for, in order.
+    pub(crate) runs_flows_reads: Arc<Mutex<Vec<Vec<RunId>>>>,
+    /// The Flow each Run kept, and whether it asks, by Run.
+    pub(crate) kept_flows: Arc<Mutex<BTreeMap<RunId, (serde_json::Value, bool)>>>,
+    /// The Agents of the Definition each Run started under, as kept.
+    pub(crate) definition_agents: Arc<Mutex<BTreeMap<RunId, serde_json::Value>>>,
+    /// The Scorers, Experiments and Benchmarks of the Definition each Run
+    /// started under, as kept.
+    pub(crate) definition_evaluations: Arc<Mutex<BTreeMap<RunId, serde_json::Value>>>,
+    /// The bot of each agent session, with the session's owner, by the
+    /// session's id.
+    pub(crate) session_bots: Arc<Mutex<BTreeMap<Uuid, (String, Uuid)>>>,
+    /// Whether each Run's last cancel came from its owner in person.
+    pub(crate) cancelled_in_person: Arc<Mutex<BTreeMap<RunId, bool>>>,
+    /// The standing acts kept, in order.
+    pub(crate) standing_acts: Arc<
+        Mutex<
+            Vec<(
+                RunId,
+                factory_records::domain::standing_acts::StandingActRecord,
+            )>,
+        >,
+    >,
     /// The Standing Rules each team set.
     pub(crate) team_rules: Arc<Mutex<BTreeMap<Uuid, OrchestratorDefinition>>>,
     /// The Standing Rules each team set for a Project, by team and Project.
@@ -187,6 +231,8 @@ pub(crate) struct FakeRepo {
     /// Each Automation's firings, by its id and the firing's key, with what
     /// they came to.
     pub(crate) firings: Arc<Mutex<BTreeMap<FiringKey, Option<FiringEnd>>>>,
+    /// Experiment arms, Scorers' judgments and Benchmark suites.
+    pub(crate) evaluation: Arc<Mutex<FakeEvaluation>>,
 }
 
 /// A firing: its Automation and its key.
@@ -224,6 +270,22 @@ impl TaskDirectory for FakeRepo {
         } else {
             Ok(TaskAccess::NotFound)
         }
+    }
+
+    async fn viewable_documents(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        document_ids: &[Uuid],
+    ) -> Result<BTreeSet<Uuid>, FakeError> {
+        *self.view_checks.lock().expect("view checks") += 1;
+        // As entity access: whether the document is a task, or trashed, is
+        // not its to say.
+        let hidden = self.hidden.lock().expect("hidden");
+        Ok(document_ids
+            .iter()
+            .copied()
+            .filter(|id| !hidden.contains(&(user_id.as_ref().to_string(), *id)))
+            .collect())
     }
 
     async fn task_project(
@@ -359,7 +421,7 @@ impl FakeRepo {
             })
             .map(|(run, _)| *run)
             .collect();
-        let flows = self.flows.lock().expect("flows").clone();
+        let asks = self.asks(asking_flows);
         let mut places = QueuePlaces::default();
         for run in self.runs.lock().expect("runs").values() {
             if run.user_id != *user_id || run.end.is_some() || places.held() >= limit {
@@ -367,15 +429,27 @@ impl FakeRepo {
             }
             if waiting.contains(&run.id) {
                 places.waiting += 1;
-            } else if !gated.contains(&run.id)
-                && flows
-                    .get(&run.id)
-                    .is_some_and(|flow| asking_flows.contains(&flow.as_str()))
-            {
+            } else if !gated.contains(&run.id) && asks.contains(&run.id) {
                 places.starting += 1;
             }
         }
         places
+    }
+
+    /// As the database: the Runs whose Flow asks before their first Gate,
+    /// as each kept it, else by `asking_flows`, its Flow's name.
+    fn asks(&self, asking_flows: &[&str]) -> BTreeSet<RunId> {
+        let kept = self.kept_flows.lock().expect("kept flows").clone();
+        self.flows
+            .lock()
+            .expect("flows")
+            .iter()
+            .filter(|(run, flow)| match kept.get(run) {
+                Some((_, asks)) => *asks,
+                None => asking_flows.contains(&flow.as_str()),
+            })
+            .map(|(run, _)| *run)
+            .collect()
     }
 
     /// Fail the call `name` once, after `passing` calls of it pass.
@@ -436,13 +510,15 @@ impl RunRepository for FakeRepo {
             request,
             user_id,
             task_id,
+            project_id,
             repository,
             created_in_person,
             control_file_patterns,
             control_files_team_id,
             standing_rules,
             automation,
-            ..
+            definition,
+            kept_flow,
         } = new;
         if let Some(task_id) = task_id
             && !self.tasks.lock().expect("tasks").contains(&task_id)
@@ -469,17 +545,40 @@ impl RunRepository for FakeRepo {
             id,
             request: request.to_string(),
             user_id: user_id.clone(),
+            flow: Some(flow.to_string()),
             created_at: Utc::now(),
             task_id,
+            project_id,
             repository: repository.cloned(),
             created_in_person,
             control_file_patterns: Some(control_file_patterns.to_vec()),
             control_files_team_id,
             control_files: None,
+            pull_request_url: None,
             standing_rules: Some(standing_rules),
             automation: automation.map(|start| start.automation.clone()),
+            definition: definition.map(|definition| RunDefinition {
+                repo_url: definition.repo_url.to_string(),
+                commit: definition.commit.to_string(),
+            }),
             end: None,
         };
+        if let Some(kept) = kept_flow {
+            self.kept_flows
+                .lock()
+                .expect("kept flows")
+                .insert(id, (kept.definition.clone(), kept.asks));
+        }
+        if let Some(definition) = definition {
+            self.definition_agents
+                .lock()
+                .expect("definition agents")
+                .insert(id, definition.agents.clone());
+            self.definition_evaluations
+                .lock()
+                .expect("definition evaluations")
+                .insert(id, definition.evaluation.clone());
+        }
         self.runs.lock().expect("runs").insert(id, run.clone());
         self.flows
             .lock()
@@ -506,6 +605,16 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("merge heads")
             .insert(id, sha.to_string());
+        Ok(())
+    }
+
+    async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
+        if self.fails("set_pull_request_url") {
+            return Err(FakeError);
+        }
+        if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
+            run.pull_request_url = Some(url.to_string());
+        }
         Ok(())
     }
 
@@ -597,6 +706,88 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("control files")
             .get(&team_id)
+            .cloned())
+    }
+
+    async fn team_definition(&self, team_id: Uuid) -> Result<Option<String>, FakeError> {
+        Ok(self
+            .team_definitions
+            .lock()
+            .expect("team definitions")
+            .get(&team_id)
+            .cloned())
+    }
+
+    async fn set_team_definition(
+        &self,
+        team_id: Uuid,
+        repo_url: Option<&str>,
+        named_by: &MacroUserIdStr<'static>,
+    ) -> Result<(), FakeError> {
+        {
+            let mut kept = self.team_definitions.lock().expect("team definitions");
+            let mut namers = self.definition_namers.lock().expect("definition namers");
+            match repo_url {
+                Some(repo_url) => {
+                    kept.insert(team_id, repo_url.to_string());
+                    namers.insert(team_id, named_by.as_ref().to_string());
+                }
+                None => {
+                    kept.remove(&team_id);
+                    namers.remove(&team_id);
+                }
+            };
+        }
+        self.close_other_open(team_id, repo_url);
+        Ok(())
+    }
+
+    async fn runs_flows(&self, ids: &[RunId]) -> Result<BTreeMap<RunId, RunFlow>, FakeError> {
+        self.runs_flows_reads
+            .lock()
+            .expect("runs flows reads")
+            .push(ids.to_vec());
+        let names = self.flows.lock().expect("flows").clone();
+        let kept = self.kept_flows.lock().expect("kept flows").clone();
+        Ok(ids
+            .iter()
+            .filter_map(|id| {
+                let name = names.get(id)?.clone();
+                let flow = RunFlow {
+                    name: Some(name),
+                    definition: kept.get(id).map(|(flow, _)| flow.clone()),
+                };
+                Some((*id, flow))
+            })
+            .collect())
+    }
+
+    async fn run_flow(&self, id: RunId) -> Result<Option<RunFlow>, FakeError> {
+        *self.flow_reads.lock().expect("flow reads") += 1;
+        let Some(name) = self.flows.lock().expect("flows").get(&id).cloned() else {
+            return Ok(None);
+        };
+        let definition = self
+            .kept_flows
+            .lock()
+            .expect("kept flows")
+            .get(&id)
+            .map(|(flow, _)| flow.clone());
+        Ok(Some(RunFlow {
+            name: Some(name),
+            definition,
+        }))
+    }
+
+    async fn run_definition_agents(
+        &self,
+        id: RunId,
+    ) -> Result<Option<serde_json::Value>, FakeError> {
+        Ok(self
+            .definition_agents
+            .lock()
+            .expect("definition agents")
+            .get(&id)
             .cloned())
     }
 
@@ -700,7 +891,7 @@ impl RunRepository for FakeRepo {
         limit: u16,
     ) -> Result<Vec<Run>, FakeError> {
         let gated = self.gated_runs();
-        let flows = self.flows.lock().expect("flows").clone();
+        let asks = self.asks(asking_flows);
         let mut runs: Vec<Run> = self
             .runs
             .lock()
@@ -710,9 +901,7 @@ impl RunRepository for FakeRepo {
                 run.user_id == *user_id
                     && run.end.is_none()
                     && !gated.contains(&run.id)
-                    && flows
-                        .get(&run.id)
-                        .is_some_and(|flow| asking_flows.contains(&flow.as_str()))
+                    && asks.contains(&run.id)
             })
             .cloned()
             .collect();
@@ -787,6 +976,7 @@ impl RunRepository for FakeRepo {
             step.gate.get_or_insert_with(|| Gate {
                 asked_back: None,
                 stand_in: None,
+                stand_in_declined: None,
                 kind,
                 question: question.to_string(),
                 answers: answers.to_vec(),
@@ -890,6 +1080,7 @@ impl RunRepository for FakeRepo {
             released: false,
             prepared_at: None,
             opened: false,
+            setup: None,
         });
         Ok(ClaimedSession { session, new: true })
     }
@@ -992,6 +1183,33 @@ impl RunRepository for FakeRepo {
             claimed.opened = true;
         }
         Ok(())
+    }
+
+    async fn setup_passed(&self, key: StepKey, session_id: Uuid) -> Result<u16, FakeError> {
+        let sessions = self.sessions.lock().expect("sessions");
+        Ok(sessions
+            .iter()
+            .find(|claimed| claimed.key == key)
+            .and_then(|claimed| claimed.setup)
+            .filter(|(session, _)| *session == session_id)
+            .map_or(0, |(_, passed)| passed))
+    }
+
+    async fn record_setup_passed(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+        passed: u16,
+    ) -> Result<bool, FakeError> {
+        if !self.holds_session(key, session_id).await? {
+            return Ok(false);
+        }
+        let mut sessions = self.sessions.lock().expect("sessions");
+        let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) else {
+            return Ok(false);
+        };
+        claimed.setup = Some((session_id, passed));
+        Ok(true)
     }
 
     async fn stopping_session(
@@ -1188,6 +1406,7 @@ impl RunRepository for FakeRepo {
                     checks: start.checks.clone(),
                     commands: start.commands.clone(),
                     declared: start.declared.clone(),
+                    setup: start.setup.clone(),
                     started_at: Utc::now(),
                     end: None,
                     work_output: start.work_output.clone(),
@@ -1287,6 +1506,24 @@ impl RunRepository for FakeRepo {
         Ok(failed.map(|(_, kept)| *kept.fix_action_id.get_or_insert(fix_action_id)))
     }
 
+    async fn record_cancel_sender(&self, id: RunId, in_person: bool) -> Result<(), FakeError> {
+        let open = self
+            .runs
+            .lock()
+            .expect("runs")
+            .get(&id)
+            .is_some_and(|run| run.end.is_none());
+        if open {
+            *self
+                .cancelled_in_person
+                .lock()
+                .expect("cancelled in person")
+                .entry(id)
+                .or_default() |= in_person;
+        }
+        Ok(())
+    }
+
     async fn end_run(&self, id: RunId, outcome: RunOutcome) -> Result<(), FakeError> {
         if let Some(run) = self.runs.lock().expect("runs").get_mut(&id)
             && run.end.is_none()
@@ -1294,6 +1531,7 @@ impl RunRepository for FakeRepo {
             run.end = Some(RunEnd {
                 outcome,
                 ended_at: Utc::now(),
+                flaw: None,
             });
             // A cancelled Run's open Steps end with it.
             if outcome == RunOutcome::Cancelled {
@@ -1342,6 +1580,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) merge_refusal: Option<String>,
     /// The text of each file, by its branch and path.
     pub(crate) files: BTreeMap<(String, String), String>,
+    /// The files read, by their branch and path, in order.
+    pub(crate) file_reads: Vec<(String, String)>,
     /// The paths the Run's branch changed against its base; none when
     /// GitHub cannot list them all.
     pub(crate) changed: Option<Vec<String>>,
@@ -1364,15 +1604,40 @@ pub(crate) struct FakeGithubState {
     pub(crate) diffs: BTreeMap<(String, String), Vec<ChangedFile>>,
     /// The head commit of the Run's branch; none before it is pushed.
     pub(crate) head: Option<String>,
-    /// The deployments to the environment each read shows next, newest
-    /// first, in order; the last list stays once the others were read. A
-    /// read of one commit's sees only its own.
-    pub(crate) deployments: VecDeque<Vec<Deployment>>,
-    /// The commits (`any` for none) and environments whose deployments
-    /// were read, in order.
-    pub(crate) deployment_reads: Vec<(String, String)>,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub(crate) deletes_merged_branches: bool,
+    /// The branches deleted, in order.
+    pub(crate) deleted_branches: Vec<String>,
+    /// Whether deleting a branch fails, as GitHub down does.
+    pub(crate) delete_fails: bool,
+    /// Whether an open pull request is based on the Run's branch.
+    pub(crate) based_on_branch: bool,
+    /// Whether asking for pull requests based on a branch fails, as GitHub
+    /// down does.
+    pub(crate) onto_fails: bool,
+    /// The branches pull requests based on them were asked for, in order.
+    pub(crate) onto_asked: Vec<String>,
+    /// How many times what the owner may do with the repository was read.
+    pub(crate) access_reads: usize,
+    /// Whether reading what the owner may do with the repository fails.
+    pub(crate) access_fails: bool,
+    /// Whether reading the head of the Run's branch fails.
+    pub(crate) branch_head_fails: bool,
+    /// Whether finding a branch's pull request fails, as GitHub down does.
+    pub(crate) find_fails: bool,
+    /// When set, each deletion of a branch waits to be let go.
+    pub(crate) delete_gate: Option<Arc<tokio::sync::Semaphore>>,
+    /// Whether the default branch takes changes only through a pull
+    /// request; none when that cannot be told.
+    pub(crate) requires_pull_request: Option<bool>,
+    /// The `owner/name` GitHub answers a repository with, when it says.
+    pub(crate) full_name: Option<String>,
+    /// The paths of the files GitHub will not give, as one over 1 MB.
+    pub(crate) refused_files: BTreeSet<String>,
     /// The pairs of commits whose second contains the first.
     pub(crate) descendants: BTreeSet<(String, String)>,
+    /// The merge base of two commits neither contains the other of.
+    pub(crate) merge_bases: BTreeMap<(String, String), String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1390,13 +1655,6 @@ impl FakeGithub {
     /// The commit an opened pull request's head is at.
     pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
 
-    /// The commit merging the pull request makes on its base.
-    pub(crate) const MERGED: &str = "2222222222222222222222222222222222222222";
-
-    /// The base branch as it was before the merge: [`Self::MERGED`]'s
-    /// first parent.
-    pub(crate) const BASE: &str = "3333333333333333333333333333333333333333";
-
     /// GitHub's id of the CI app whose runs [`ci`] makes.
     pub(crate) const ACTIONS: u64 = 15368;
 
@@ -1413,7 +1671,6 @@ impl FakeGithub {
             url: "https://github.com/macro/app/pull/7".to_string(),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
-            merge_commit: None,
         });
         github.state().checks = [checks].into();
         github
@@ -1477,6 +1734,14 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
 }
 
 impl PullRequests for FakeGithub {
+    fn file_refusal(error: &FakeGithubError) -> Option<FileRefusal> {
+        match error {
+            FakeGithubError::TooLarge => Some(FileRefusal::TooLarge),
+            FakeGithubError::Refused => Some(FileRefusal::Refused),
+            FakeGithubError::Down => None,
+        }
+    }
+
     type Err = FakeGithubError;
 
     async fn repository_access(
@@ -1484,10 +1749,16 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
     ) -> Result<Option<RepositoryAccess>, FakeGithubError> {
-        let state = self.state();
+        let mut state = self.state();
+        state.access_reads += 1;
+        if state.access_fails {
+            return Err(FakeGithubError::Down);
+        }
         Ok((!state.unreachable).then(|| RepositoryAccess {
+            full_name: state.full_name.clone(),
             default_branch: "main".to_string(),
             can_push: !state.read_only,
+            deletes_merged_branches: state.deletes_merged_branches,
         }))
     }
 
@@ -1497,6 +1768,9 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _branch: &str,
     ) -> Result<Option<PullRequest>, FakeGithubError> {
+        if self.state().find_fails {
+            return Err(FakeGithubError::Down);
+        }
         Ok(self.read().map(|(pull_request, _)| pull_request))
     }
 
@@ -1545,6 +1819,15 @@ impl PullRequests for FakeGithub {
         Ok(state.required.clone())
     }
 
+    async fn requires_pull_request(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+    ) -> Result<Option<bool>, FakeGithubError> {
+        Ok(self.state().requires_pull_request)
+    }
+
     async fn file_text(
         &self,
         _owner: &MacroUserIdStr<'static>,
@@ -1553,7 +1836,12 @@ impl PullRequests for FakeGithub {
         path: &str,
     ) -> Result<Option<String>, FakeGithubError> {
         let file = (branch.to_string(), path.to_string());
-        Ok(self.state().files.get(&file).cloned())
+        let mut state = self.state();
+        state.file_reads.push(file.clone());
+        if state.refused_files.contains(path) {
+            return Err(FakeGithubError::TooLarge);
+        }
+        Ok(state.files.get(&file).cloned())
     }
 
     async fn changed_paths(
@@ -1583,6 +1871,9 @@ impl PullRequests for FakeGithub {
         _branch: &str,
     ) -> Result<Option<String>, FakeGithubError> {
         let mut state = self.state();
+        if state.branch_head_fails {
+            return Err(FakeGithubError::Down);
+        }
         if state.branch_heads.is_empty() {
             return Ok(state.head.clone());
         }
@@ -1622,7 +1913,6 @@ impl PullRequests for FakeGithub {
             url: format!("{}/pull/7", repository.url()),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
-            merge_commit: None,
         });
         Ok(Opening::Opened)
     }
@@ -1646,57 +1936,70 @@ impl PullRequests for FakeGithub {
             return Ok(Merging::HeadChanged);
         }
         pull_request.state = PullRequestState::Merged;
-        pull_request.merge_commit = Some(Self::MERGED.to_string());
         Ok(Merging::Merged)
     }
 
-    async fn deployments(
+    async fn has_open_pull_request_onto(
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
-        sha: Option<&str>,
-        environment: &str,
-        count: u8,
-    ) -> Result<Vec<Deployment>, FakeGithubError> {
-        let mut state = self.state();
-        state.deployment_reads.push((
-            sha.map_or_else(|| "any".to_string(), str::to_string),
-            environment.to_string(),
-        ));
-        let listed = if state.deployments.len() > 1 {
-            state.deployments.pop_front()
-        } else {
-            state.deployments.front().cloned()
-        };
-        Ok(listed
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|deployment| sha.is_none_or(|sha| deployment.commit == sha))
-            .take(usize::from(count))
-            .collect())
-    }
-
-    async fn first_parent(
-        &self,
-        _owner: &MacroUserIdStr<'static>,
-        _repository: &CodeRepository,
-        _sha: &str,
-    ) -> Result<Option<String>, FakeGithubError> {
-        Ok(Some(Self::BASE.to_string()))
-    }
-
-    async fn contains(
-        &self,
-        _owner: &MacroUserIdStr<'static>,
-        _repository: &CodeRepository,
-        ancestor: &str,
-        head: &str,
+        branch: &str,
     ) -> Result<bool, FakeGithubError> {
+        let mut state = self.state();
+        state.onto_asked.push(branch.to_string());
+        if state.onto_fails {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(state.based_on_branch)
+    }
+
+    /// Deleting the Run's branch leaves it not there for later reads.
+    async fn delete_run_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        run_id: RunId,
+    ) -> Result<BranchDeletion, FakeGithubError> {
+        let gate = self.state().delete_gate.clone();
+        if let Some(gate) = gate {
+            gate.acquire().await.expect("gate").forget();
+        }
+        let mut state = self.state();
+        if state.delete_fails {
+            return Err(FakeGithubError::Down);
+        }
+        let there = state.head.is_some() || state.branch_heads.iter().any(Option::is_some);
+        state.head = None;
+        state.branch_heads = [None].into();
+        if !there {
+            return Ok(BranchDeletion::Missing);
+        }
+        state.deleted_branches.push(run_branch(run_id));
+        Ok(BranchDeletion::Deleted)
+    }
+
+    async fn merge_base(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<String>, FakeGithubError> {
         let state = self.state();
-        Ok(ancestor == head
-            || state
-                .descendants
-                .contains(&(ancestor.to_string(), head.to_string())))
+        let (base, head) = (base.to_string(), head.to_string());
+        if base == head || state.descendants.contains(&(base.clone(), head.clone())) {
+            return Ok(Some(base));
+        }
+        if state.descendants.contains(&(head.clone(), base.clone())) {
+            return Ok(Some(head));
+        }
+        // Commits neither of which contains the other share only the base
+        // registered for them, or no history.
+        Ok(state
+            .merge_bases
+            .get(&(base.clone(), head.clone()))
+            .or_else(|| state.merge_bases.get(&(head, base)))
+            .cloned())
     }
 }
 

@@ -31,6 +31,63 @@ export type AnswerGateRequest = {
 };
 
 /**
+ * How one arm's Runs did.
+ */
+export type ArmInsight = {
+    /**
+     * The Agents it gives Roles, by Role; empty for the arm that keeps the
+     * agent definition's.
+     */
+    agents: {
+        [key: string]: string;
+    };
+    /**
+     * How many of them ended, but for those that ended `infrastructure`:
+     * their work never ran.
+     */
+    ended: number;
+    /**
+     * How many had a Step the arm's Agent could not start, which another
+     * Agent of its Role took: their results are not the arm's alone.
+     */
+    fellBack: number;
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * How many of the period's Runs took it.
+     */
+    runs: number;
+    /**
+     * The Scorers' judgments of its Runs.
+     */
+    scores: Array<ArmScoreInsight>;
+    /**
+     * How many ended `success`.
+     */
+    succeeded: number;
+};
+
+/**
+ * One Scorer's judgments of one arm's Runs.
+ */
+export type ArmScoreInsight = {
+    /**
+     * How many of the arm's Runs it judged.
+     */
+    judged: number;
+    /**
+     * Their mean score, from 0 to 1.
+     */
+    meanScore: number;
+    /**
+     * The Scorer.
+     */
+    scorer: string;
+};
+
+/**
  * A reply the factory could not read as one of a Gate's answers, so it
  * asked the person back.
  */
@@ -39,6 +96,12 @@ export type AskedBack = {
      * When the factory asked back.
      */
     at: string;
+    reading?: null | GateModelReading;
+    /**
+     * Whether the words approved a Tampered Run, which only the Approve
+     * button approves, since it lists the Run's changed Control Files.
+     */
+    refusedTampered: boolean;
     /**
      * The person's words.
      */
@@ -187,6 +250,86 @@ export type AutomationsSettings = {
 };
 
 /**
+ * A Benchmark one may start a suite of.
+ */
+export type BenchmarkSummary = {
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * The Scorers that judge each trial.
+     */
+    scorers: Array<string>;
+    /**
+     * Its frozen tasks, by name.
+     */
+    tasks: Array<string>;
+};
+
+/**
+ * Where the board's next page starts: past this Run, in the board's order
+ * (newest first).
+ */
+export type BoardNext = {
+    /**
+     * When the last Run the page listed was created.
+     */
+    createdAt: string;
+    /**
+     * Its id.
+     */
+    id: RunId;
+};
+
+/**
+ * A page of the board.
+ */
+export type BoardPage = {
+    next?: null | BoardNext;
+    /**
+     * The Runs, newest first: never a team member's Run on a task the
+     * caller cannot see.
+     */
+    runs: Array<BoardRun>;
+    /**
+     * Whether the board stopped reading past Runs the caller cannot see
+     * before the Runs ran out (some 250 of them in a row): older Runs they
+     * see may be there, which no next page reaches. Only on a board no
+     * filter or search narrows.
+     */
+    stoppedEarly: boolean;
+};
+
+/**
+ * One Run on the board, with where it is.
+ */
+export type BoardRun = {
+    /**
+     * The Run and its Steps.
+     */
+    detail: RunDetail;
+    /**
+     * Where it is.
+     */
+    state: BoardState;
+    /**
+     * The name of the task it works on; none without a task.
+     */
+    taskName?: string | null;
+};
+
+/**
+ * Whose Runs the board lists.
+ */
+export type BoardScope = 'mine' | 'team';
+
+/**
+ * Where a Run is, as the board groups it.
+ */
+export type BoardState = 'running' | 'waiting' | 'held' | 'stopped' | 'finished';
+
+/**
  * How one check of a verified round ran.
  */
 export type CheckResult = {
@@ -300,6 +443,11 @@ export type ControlFilesSettings = {
      */
     canEdit: boolean;
     /**
+     * Whether the team names a Factory Definition, whose `rules.json`
+     * sets its Runs' Control Files in place of these.
+     */
+    definitionNamed: boolean;
+    /**
      * Whether they are the factory's default: the team set none, or the
      * person is on no team.
      */
@@ -355,6 +503,46 @@ export type CreatedAutomation = {
      * never shows it again.
      */
     webhookSecret?: string | null;
+};
+
+/**
+ * The Factory Definition a person's team names: the repository whose
+ * files its Runs take their Flows, Agents and rules from.
+ */
+export type DefinitionSettings = {
+    /**
+     * Whether the person may change it: they administer the team.
+     */
+    canEdit: boolean;
+    /**
+     * The commit of its default branch a Run started now would read,
+     * when the Definition reads there as the person reaches it.
+     */
+    commit?: string | null;
+    /**
+     * Why it does not read now, when it does not: the person cannot reach
+     * it, or a file of it is wrong.
+     */
+    problem?: string | null;
+    /**
+     * The repository's `https://github.com/owner/name` URL; none when the
+     * team names none, so its Runs take the team's settings and the
+     * factory's built-in Flows and Agents.
+     */
+    repoUrl?: string | null;
+    /**
+     * Whether a ruleset or the branch protection of its default branch
+     * asks for a pull request; none when that cannot be told, as when the
+     * person does not administer it. Without one, a push changes the
+     * factory's rules unreviewed. With one, whoever may bypass the rules
+     * (a ruleset's bypass list, admins when protection does not include
+     * them) still can: GitHub does not tell the factory who.
+     */
+    requiresPullRequest?: boolean | null;
+    /**
+     * The team; none when the person is on no team.
+     */
+    teamId?: string | null;
 };
 
 /**
@@ -435,6 +623,67 @@ export type ErrorResponse = {
 };
 
 /**
+ * The evaluation insights of a period.
+ */
+export type EvaluationInsights = {
+    /**
+     * The Benchmarks one may start a suite of.
+     */
+    benchmarks: Array<BenchmarkSummary>;
+    /**
+     * Each Experiment, defined or with Runs in the period.
+     */
+    experiments: Array<ExperimentInsight>;
+    /**
+     * The Flow the Runs were read for; none for every Flow.
+     */
+    flow?: string | null;
+    /**
+     * The period's first day.
+     */
+    from: string;
+    /**
+     * Each Scorer, defined or with judgments in the period.
+     */
+    scorers: Array<ScorerInsight>;
+    selfImprovement?: null | SelfImprovementInsight;
+    /**
+     * The suites started in the period, newest first.
+     */
+    suites: Array<SuiteInsight>;
+    /**
+     * The time zone its days are in.
+     */
+    timeZone: string;
+    /**
+     * Its last day, included.
+     */
+    to: string;
+};
+
+/**
+ * An Experiment and how its arms did over the period.
+ */
+export type ExperimentInsight = {
+    /**
+     * Its arms, as defined, then any no longer defined that took Runs.
+     */
+    arms: Array<ArmInsight>;
+    /**
+     * The Flow whose Runs it splits; none for one no longer defined.
+     */
+    flow?: string | null;
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * Whether it still assigns new Runs.
+     */
+    running: boolean;
+};
+
+/**
  * What a finding turned out to be once its round ended.
  */
 export type FindingKind = 'blocker' | 'follow_up';
@@ -456,6 +705,33 @@ export type FiringResult = {
  * Why a firing started no Run.
  */
 export type FiringSkip = 'disabled' | 'task_busy' | 'queue_full' | 'refused' | 'own_branch' | 'creator_left_team' | 'agent_account';
+
+/**
+ * Who marked a Run flawed.
+ */
+export type FlawMarker = {
+    kind: 'person';
+    /**
+     * Their user id.
+     */
+    userId: MacroUserIdStr;
+} | {
+    kind: 'scorer';
+    /**
+     * The Scorer's name.
+     */
+    name: string;
+};
+
+/**
+ * Request body for marking a Run flawed.
+ */
+export type FlawRunRequest = {
+    /**
+     * Why its result is wrong: 1 to 4096 bytes once trimmed.
+     */
+    reason: string;
+};
 
 /**
  * The Runs of one Flow.
@@ -523,6 +799,7 @@ export type Gate = {
      */
     question: string;
     standIn?: null | StandInAnswer;
+    standInDeclined?: null | GateModelReading;
 };
 
 /**
@@ -594,6 +871,24 @@ export type GateInsight = {
 export type GateKind = 'flow' | 'question';
 
 /**
+ * How the Gate model read a Gate when what it said decided nothing: its
+ * pick, how sure it was and why, so the owner can tell why the factory
+ * asked back or the stand-in left the Gate to them.
+ */
+export type GateModelReading = {
+    /**
+     * How sure it was, in percent; none when it did not answer: its call
+     * failed or took too long.
+     */
+    confidence?: number | null;
+    pick?: null | Outcome;
+    /**
+     * Why, in its words; empty when it did not answer.
+     */
+    reason: string;
+};
+
+/**
  * The GitHub delivery that fired a repository event's Automation.
  */
 export type GithubFiring = {
@@ -625,6 +920,38 @@ export type HandBackRequest = {
      */
     text: string;
 };
+
+/**
+ * A team's latest self-improvement Run.
+ */
+export type ImprovementInsight = {
+    /**
+     * When it began.
+     */
+    createdAt: string;
+    /**
+     * How many failures it groups.
+     */
+    failures: number;
+    /**
+     * Why its Run could not start, when refused.
+     */
+    refusal?: string | null;
+    runId?: null | RunId;
+    /**
+     * When it was settled.
+     */
+    settledAt?: string | null;
+    /**
+     * Where it is.
+     */
+    state: ImprovementState;
+};
+
+/**
+ * Where a self-improvement Run is.
+ */
+export type ImprovementState = 'starting' | 'open' | 'merged' | 'closed' | 'refused';
 
 /**
  * The Runs created on one day of the period.
@@ -706,6 +1033,12 @@ export type NamedCount = {
 };
 
 /**
+ * Whether a self-improvement Run may be started as the Definition's
+ * namer, and why not.
+ */
+export type NamerStanding = 'admin' | 'none' | 'left_team' | 'not_admin';
+
+/**
  * Request body for a note to a running Step's agent.
  */
 export type NoteStepRequest = {
@@ -745,13 +1078,12 @@ export type OrchestratorDefinition = {
      */
     orchestrator?: OrchestratorKinds;
     /**
-     * The owner section: a Gate no rule answers goes to the Run's owner.
-     * They are notified, and the Gate is listed as waiting on them; a
-     * review round whose Blockers are the round before's, unchanged after
-     * a rule sent those to a fix, waits for them rather than another fix;
-     * and what they comment on the Run's task once a Gate opened reaches
-     * the next agent Step. Off, the factory leaves those Gates waiting as
-     * before. A definition sent without it has it off.
+     * The owner section: a review round whose Blockers are the round
+     * before's, unchanged after a rule sent those to a fix, waits for the
+     * Run's owner rather than another fix; and what they comment on the
+     * Run's task once a Gate opened reaches the next agent Step. Off, the
+     * factory fixes those Blockers again, and the Steps read no comment. A
+     * definition sent without it has it off.
      */
     ownerGates?: boolean;
     /**
@@ -769,6 +1101,16 @@ export type OrchestratorDefinition = {
      * whether a Run starts, so a Run's rules read with none.
      */
     queueLimit?: number | null;
+    /**
+     * Whether the Run's owner is left unnotified when a Gate waits on
+     * them: off, as when a definition is sent without it, every Gate no
+     * rule or stand-in answers (a Flow's Gate or an agent's question)
+     * notifies them, pushed to their phone, whether or not the Run has a
+     * task. On, they are not notified; the Gate still waits on them and
+     * is listed as waiting. A notify-only Gate's notice and the
+     * stand-in's are sent either way.
+     */
+    quietGates?: boolean;
     /**
      * The kinds of Gate the stand-in answers for the Run's owner, after
      * the rules and before the person; off for every kind when left out.
@@ -818,9 +1160,19 @@ export type OutcomeCounts = {
      */
     cancelled: number;
     /**
-     * Runs that ended failed.
+     * Runs that ended failed for their work.
      */
     failed: number;
+    /**
+     * Runs that succeeded, and whose result a Scorer or a person found
+     * wrong afterwards.
+     */
+    flawed: number;
+    /**
+     * Runs that failed for a machine, quota or network reason: the
+     * factory's plumbing, not its work.
+     */
+    infrastructure: number;
     /**
      * Runs that ended for a person to take over.
      */
@@ -851,6 +1203,20 @@ export type PassedOver = {
 };
 
 /**
+ * How many of a team's pending failures come from one source.
+ */
+export type PendingSource = {
+    /**
+     * How many.
+     */
+    count: number;
+    /**
+     * The Scorer's name, or `flawed` for the Runs marked flawed.
+     */
+    source: string;
+};
+
+/**
  * A Project's own Standing Rules, which its team set.
  */
 export type ProjectRules = {
@@ -862,6 +1228,70 @@ export type ProjectRules = {
      * The Project: an initiative's id.
      */
     projectId: string;
+};
+
+/**
+ * The Run that opened a pull request, as the board shows it.
+ */
+export type PullRequestRun = {
+    /**
+     * The Run, where it is, and its task's name.
+     */
+    listed: BoardRun;
+    /**
+     * The Step whose merge Gate the Run waits on, by its place among the
+     * Run's Steps: approving it is how the pull request merges. None while
+     * the Run is anywhere else.
+     */
+    mergeGateSeq?: number | null;
+    /**
+     * The pull request's page, as the lookup named it.
+     */
+    url: string;
+};
+
+/**
+ * The Runs that opened some pull requests.
+ */
+export type PullRequestRuns = {
+    /**
+     * One for each pull request a Run the caller can see opened, its
+     * newest such Run, in the lookup's order; none for a pull request no
+     * such Run opened.
+     */
+    runs: Array<PullRequestRun>;
+    /**
+     * The pull requests, as the lookup named them, whose Runs were not all
+     * read, as more of its own Runs matched than a lookup reads for one
+     * pull request: whether a Run the caller sees opened one is not known,
+     * so it must not read as none.
+     */
+    unknown: Array<string>;
+};
+
+/**
+ * GitHub pull requests, by their pages.
+ */
+export type PullRequestUrls = {
+    /**
+     * The pull requests' pages, such as
+     * `https://github.com/owner/repo/pull/12`: at most 100.
+     */
+    urls: Array<string>;
+};
+
+/**
+ * A trial whose Run was refused.
+ */
+export type RefusedTrial = {
+    /**
+     * Why its Run was refused.
+     */
+    reason: string;
+    /**
+     * The frozen task.
+     */
+    task: string;
 };
 
 /**
@@ -1045,7 +1475,7 @@ export type RoutineFiring = {
 /**
  * Where a Run's Standing Rules came from.
  */
-export type RulesSource = 'default' | 'team' | 'project';
+export type RulesSource = 'default' | 'team' | 'project' | 'definition';
 
 /**
  * One Run of a Flow.
@@ -1063,11 +1493,28 @@ export type Run = {
      * the Control Files it names.
      */
     createdInPerson: boolean;
+    definition?: null | RunDefinition;
     end?: null | RunEnd;
+    /**
+     * The built-in Flow it walks, by name; none only for a Run recorded
+     * before Runs kept it.
+     */
+    flow?: string | null;
     /**
      * The Run's id, also its Temporal workflow id.
      */
     id: RunId;
+    /**
+     * The Project (an initiative) its task was in when it was created,
+     * kept as a record: none without a task or Project, and for a Run
+     * created before Runs kept it.
+     */
+    projectId?: string | null;
+    /**
+     * The page of the pull request its branch proposes its change in, as
+     * the pull request Steps last found it; none until one is found.
+     */
+    pullRequestUrl?: string | null;
     repository?: null | Repository;
     /**
      * What the Run was asked to do.
@@ -1104,6 +1551,21 @@ export type RunAutomation = {
 };
 
 /**
+ * The Factory Definition a Run started under: the repository its owner's
+ * team named, at the commit its default branch was at then.
+ */
+export type RunDefinition = {
+    /**
+     * The commit the Run read the Definition at.
+     */
+    commit: string;
+    /**
+     * The repository's `https://github.com/owner/name` URL.
+     */
+    repoUrl: string;
+};
+
+/**
  * A Run and the Steps it took.
  */
 export type RunDetail = {
@@ -1118,6 +1580,12 @@ export type RunDetail = {
      */
     run: Run;
     /**
+     * What agents did to it under its Factory Definition's Standing
+     * Roles, in order: who started, cancelled or linked it, and answered
+     * its Gates.
+     */
+    standingActs: Array<StandingActRecord>;
+    /**
      * Its Steps, in the order they started.
      */
     steps: Array<Step>;
@@ -1131,6 +1599,7 @@ export type RunEnd = {
      * When it ended.
      */
     endedAt: string;
+    flaw?: null | RunFlaw;
     /**
      * How the Run ended.
      */
@@ -1140,7 +1609,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson' | 'notInStandingRole' | 'unreachableDefinition' | 'invalidDefinition' | 'definitionNamed';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -1152,6 +1621,24 @@ export type RunErrorResponse = {
      * What went wrong, in words.
      */
     message: string;
+};
+
+/**
+ * Why a Run's result was found wrong, by whom, and when.
+ */
+export type RunFlaw = {
+    /**
+     * Who marked the Run flawed.
+     */
+    by: FlawMarker;
+    /**
+     * When they marked it.
+     */
+    markedAt: string;
+    /**
+     * Why, in their words.
+     */
+    reason: string;
 };
 
 /**
@@ -1233,7 +1720,7 @@ export type RunLink = {
 /**
  * How a Run ended.
  */
-export type RunOutcome = 'success' | 'manual' | 'blocked' | 'failed' | 'cancelled';
+export type RunOutcome = 'success' | 'manual' | 'blocked' | 'failed' | 'cancelled' | 'infrastructure' | 'flawed';
 
 /**
  * The Standing Rules a Run keeps from when it was created.
@@ -1266,6 +1753,84 @@ export type RunTokens = {
      * What its agents used.
      */
     tokens: TokenCounts;
+};
+
+/**
+ * A Scorer and its live judgments of the period's Runs.
+ */
+export type ScorerInsight = {
+    /**
+     * The Flows whose Runs it judges; every Flow when empty.
+     */
+    flows: Array<string>;
+    /**
+     * What it judges; none for a Scorer no longer defined whose
+     * judgments remain.
+     */
+    instructions?: string | null;
+    /**
+     * How many of the period's Runs it judged.
+     */
+    judged: number;
+    /**
+     * Their mean score, from 0 to 1; none when it judged none.
+     */
+    meanScore?: number | null;
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * How many of them scored half or more.
+     */
+    passed: number;
+    /**
+     * The percentage of those Runs it judges; none when no longer defined.
+     */
+    samplePercent?: number | null;
+};
+
+/**
+ * A team's self-improvement against its Factory Definition: the failures
+ * waiting for a Run, what starts one, and the latest one.
+ */
+export type SelfImprovementInsight = {
+    /**
+     * Whether the Definition improves itself.
+     */
+    enabled: boolean;
+    /**
+     * How many pending failures start a Run.
+     */
+    failuresThreshold: number;
+    last?: null | ImprovementInsight;
+    /**
+     * Where the admin who named the Definition stands: its
+     * self-improvement Runs are theirs, and none starts unless they are
+     * still an admin of the team.
+     */
+    namer: NamerStanding;
+    /**
+     * How many days old the oldest pending failure is before a Run starts
+     * with fewer.
+     */
+    oldestDays: number;
+    /**
+     * When the oldest was kept.
+     */
+    oldestPendingAt?: string | null;
+    /**
+     * How many failures wait.
+     */
+    pending: number;
+    /**
+     * How many wait from each source, most first.
+     */
+    pendingBySource: Array<PendingSource>;
+    /**
+     * The Definition's repository.
+     */
+    repoUrl: string;
 };
 
 /**
@@ -1303,6 +1868,18 @@ export type SetControlFilesRequest = {
      * factory's default; an empty list checks no file.
      */
     patterns?: Array<string> | null;
+};
+
+/**
+ * Request body for naming the team's Factory Definition.
+ */
+export type SetDefinitionRequest = {
+    /**
+     * The repository's `https://github.com/owner/name` URL. Null names
+     * none: the team's Runs go back to its settings and the factory's
+     * built-in Flows and Agents.
+     */
+    repoUrl?: string | null;
 };
 
 /**
@@ -1353,6 +1930,53 @@ export type StandInKinds = {
 };
 
 /**
+ * An act a Standing Role may allow. The set is fixed: none merges, and a
+ * Factory Definition cannot add one.
+ */
+export type StandingAct = 'start' | 'cancel' | 'link' | 'answer_plan' | 'answer_blockers';
+
+/**
+ * A standing act a Run keeps, as the Run API shows it.
+ */
+export type StandingActRecord = {
+    /**
+     * What was done.
+     */
+    act: StandingAct;
+    /**
+     * The Agent the Run's Definition names for that bot.
+     */
+    agent: AgentName;
+    /**
+     * When it was recorded.
+     */
+    at: string;
+    /**
+     * The bot that did it.
+     */
+    botId: string;
+    /**
+     * The Step whose Gate was answered, for an answer; none otherwise.
+     */
+    seq?: number | null;
+    /**
+     * The agent session it came from; none for a bot's code that ran in
+     * no agent session.
+     */
+    sessionId?: string | null;
+    /**
+     * The Standing Role that allowed it.
+     */
+    standingRole: StandingRoleName;
+};
+
+/**
+ * The name a Factory Definition gives a Standing Role, such as `intake`,
+ * `gatekeeper` or `operator`.
+ */
+export type StandingRoleName = string;
+
+/**
  * A Standing Rule: the answer the factory gives a Gate of one kind on its
  * own, when what the rule requires holds.
  */
@@ -1373,6 +1997,11 @@ export type StandingRulesSettings = {
      */
     definition: OrchestratorDefinition;
     /**
+     * Whether the team names a Factory Definition, whose `rules.json`
+     * sets its Runs' Standing Rules in place of these and the Projects'.
+     */
+    definitionNamed: boolean;
+    /**
      * Whether it is the factory's default: the team set none, or the
      * person is on no team.
      */
@@ -1385,6 +2014,19 @@ export type StandingRulesSettings = {
      * The team whose rules they are; none when the person is on no team.
      */
     teamId?: string | null;
+};
+
+/**
+ * The configuration a suite's trials run on.
+ */
+export type StartSuiteRequest = {
+    /**
+     * The Agent of the agent definition each Role takes in place of its
+     * first, by Role; a Role left out takes the definition's.
+     */
+    agents?: {
+        [key: string]: string;
+    };
 };
 
 /**
@@ -1516,6 +2158,70 @@ export type StepTerminal = {
 };
 
 /**
+ * One suite: a Benchmark replayed on one configuration.
+ */
+export type SuiteInsight = {
+    /**
+     * The Agents its configuration gave Roles, by Role.
+     */
+    agents: {
+        [key: string]: string;
+    };
+    /**
+     * The Benchmark it replayed.
+     */
+    benchmark: string;
+    /**
+     * When it started.
+     */
+    createdAt: string;
+    /**
+     * The suite.
+     */
+    id: string;
+    /**
+     * How many trials' Runs ended `infrastructure`: left out of the
+     * suite's score and tokens rather than counted against its
+     * configuration.
+     */
+    infrastructure: number;
+    /**
+     * Their mean score; none until one has.
+     */
+    meanScore?: number | null;
+    /**
+     * How many trials have their result. A trial whose Run ended
+     * `infrastructure` never had its work run, so it is never among them.
+     */
+    scored: number;
+    /**
+     * The tokens of the trials that have their result.
+     */
+    tokens: TokenCounts;
+    /**
+     * Its trials, by task.
+     */
+    trials: Array<TrialInsight>;
+};
+
+/**
+ * A suite that started.
+ */
+export type SuiteStarted = {
+    /**
+     * The suite.
+     */
+    id: string;
+    refused?: null | RefusedTrial;
+    /**
+     * Its trials' Runs, by task.
+     */
+    runs: {
+        [key: string]: RunId;
+    };
+};
+
+/**
  * A task's Runs, as the caller sees them.
  */
 export type TaskRunsResponse = {
@@ -1545,6 +2251,46 @@ export type TokenCounts = {
      * Output tokens.
      */
     output: number;
+};
+
+/**
+ * One trial of a suite.
+ */
+export type TrialInsight = {
+    /**
+     * Its Run.
+     */
+    runId: RunId;
+    runOutcome?: null | RunOutcome;
+    /**
+     * Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5
+     * when they stayed red, 0 otherwise; none until its Run ended, and
+     * none for a Run that ended `infrastructure`, whose work never ran.
+     */
+    score?: number | null;
+    /**
+     * Its Benchmark's Scorers' judgments.
+     */
+    scores: Array<TrialScore>;
+    /**
+     * The frozen task.
+     */
+    task: string;
+    tokens?: null | TokenCounts;
+};
+
+/**
+ * A Scorer's judgment of one trial.
+ */
+export type TrialScore = {
+    /**
+     * From 0 to 1.
+     */
+    score: number;
+    /**
+     * The Scorer.
+     */
+    scorer: string;
 };
 
 /**
@@ -1778,6 +2524,37 @@ export type CallFactoryAutomationWebhookResponses = {
 
 export type CallFactoryAutomationWebhookResponse = CallFactoryAutomationWebhookResponses[keyof CallFactoryAutomationWebhookResponses];
 
+export type StartFactoryBenchmarkSuiteData = {
+    body: StartSuiteRequest;
+    path: {
+        /**
+         * The Benchmark's name.
+         */
+        benchmark: string;
+    };
+    query?: never;
+    url: '/benchmarks/{benchmark}/suites';
+};
+
+export type StartFactoryBenchmarkSuiteErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+    503: ErrorResponse;
+};
+
+export type StartFactoryBenchmarkSuiteError = StartFactoryBenchmarkSuiteErrors[keyof StartFactoryBenchmarkSuiteErrors];
+
+export type StartFactoryBenchmarkSuiteResponses = {
+    201: SuiteStarted;
+};
+
+export type StartFactoryBenchmarkSuiteResponse = StartFactoryBenchmarkSuiteResponses[keyof StartFactoryBenchmarkSuiteResponses];
+
 export type ListFactoryFlowsData = {
     body?: never;
     path?: never;
@@ -1786,8 +2563,10 @@ export type ListFactoryFlowsData = {
 };
 
 export type ListFactoryFlowsErrors = {
+    400: RunErrorResponse;
     401: ErrorResponse;
     403: ErrorResponse;
+    500: ErrorResponse;
 };
 
 export type ListFactoryFlowsError = ListFactoryFlowsErrors[keyof ListFactoryFlowsErrors];
@@ -1860,6 +2639,109 @@ export type GetFactoryInsightsResponses = {
 
 export type GetFactoryInsightsResponse = GetFactoryInsightsResponses[keyof GetFactoryInsightsResponses];
 
+export type GetFactoryEvaluationData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * The period's first day, `YYYY-MM-DD`.
+         */
+        from: string;
+        /**
+         * Its last day, included. The period lasts at most 366 days.
+         */
+        to: string;
+        /**
+         * The IANA time zone the days are in, such as `Europe/Lisbon`.
+         */
+        timeZone: string;
+        /**
+         * A built-in Flow's name, to read only its Runs.
+         */
+        flow?: string;
+    };
+    url: '/insights/evaluation';
+};
+
+export type GetFactoryEvaluationErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryEvaluationError = GetFactoryEvaluationErrors[keyof GetFactoryEvaluationErrors];
+
+export type GetFactoryEvaluationResponses = {
+    200: EvaluationInsights;
+};
+
+export type GetFactoryEvaluationResponse = GetFactoryEvaluationResponses[keyof GetFactoryEvaluationResponses];
+
+export type ListFactoryBoardData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Whose Runs: the caller's (`mine`, when left out), or their team's
+         * (`team`), which lists the members' Runs on tasks the caller can see.
+         */
+        scope?: BoardScope;
+        /**
+         * Only Runs there.
+         */
+        state?: BoardState;
+        /**
+         * Only Runs of this built-in Flow, by name.
+         */
+        flow?: string;
+        /**
+         * Only Runs on this repository, by its `https://github.com/owner/name`
+         * URL.
+         */
+        repoUrl?: string;
+        /**
+         * Only Runs whose task was in this Project (an initiative) when they
+         * started.
+         */
+        projectId?: string;
+        /**
+         * Only Runs whose request, or whose task's name, has these words in
+         * it, in any case: at most 200 characters are read.
+         */
+        search?: string;
+        /**
+         * Where the page starts: the `next.createdAt` of the page before.
+         */
+        afterCreatedAt?: string;
+        /**
+         * The `next.id` of the page before: given with `afterCreatedAt` or
+         * not at all (400 otherwise).
+         */
+        afterId?: RunId;
+        /**
+         * The most Runs the page lists: 25 when left out, at most 50.
+         */
+        limit?: number;
+    };
+    url: '/runs';
+};
+
+export type ListFactoryBoardErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type ListFactoryBoardError = ListFactoryBoardErrors[keyof ListFactoryBoardErrors];
+
+export type ListFactoryBoardResponses = {
+    200: BoardPage;
+};
+
+export type ListFactoryBoardResponse = ListFactoryBoardResponses[keyof ListFactoryBoardResponses];
+
 export type CreateFactoryRunData = {
     body: CreateRunRequest;
     path?: never;
@@ -1884,6 +2766,28 @@ export type CreateFactoryRunResponses = {
 };
 
 export type CreateFactoryRunResponse = CreateFactoryRunResponses[keyof CreateFactoryRunResponses];
+
+export type FindPullRequestRunsData = {
+    body: PullRequestUrls;
+    path?: never;
+    query?: never;
+    url: '/runs/by-pull-requests';
+};
+
+export type FindPullRequestRunsErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type FindPullRequestRunsError = FindPullRequestRunsErrors[keyof FindPullRequestRunsErrors];
+
+export type FindPullRequestRunsResponses = {
+    200: PullRequestRuns;
+};
+
+export type FindPullRequestRunsResponse = FindPullRequestRunsResponses[keyof FindPullRequestRunsResponses];
 
 export type ListFactoryWaitingRunsData = {
     body?: never;
@@ -1963,6 +2867,35 @@ export type CancelFactoryRunError = CancelFactoryRunErrors[keyof CancelFactoryRu
 export type CancelFactoryRunResponses = {
     202: unknown;
 };
+
+export type FlawFactoryRunData = {
+    body: FlawRunRequest;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+    };
+    query?: never;
+    url: '/runs/{id}/flaw';
+};
+
+export type FlawFactoryRunErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type FlawFactoryRunError = FlawFactoryRunErrors[keyof FlawFactoryRunErrors];
+
+export type FlawFactoryRunResponses = {
+    200: RunDetail;
+};
+
+export type FlawFactoryRunResponse = FlawFactoryRunResponses[keyof FlawFactoryRunResponses];
 
 export type AnswerFactoryGateData = {
     body: AnswerGateRequest;
@@ -2253,6 +3186,49 @@ export type SetFactoryControlFilesResponses = {
 };
 
 export type SetFactoryControlFilesResponse = SetFactoryControlFilesResponses[keyof SetFactoryControlFilesResponses];
+
+export type GetFactoryDefinitionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/settings/definition';
+};
+
+export type GetFactoryDefinitionErrors = {
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryDefinitionError = GetFactoryDefinitionErrors[keyof GetFactoryDefinitionErrors];
+
+export type GetFactoryDefinitionResponses = {
+    200: DefinitionSettings;
+};
+
+export type GetFactoryDefinitionResponse = GetFactoryDefinitionResponses[keyof GetFactoryDefinitionResponses];
+
+export type SetFactoryDefinitionData = {
+    body: SetDefinitionRequest;
+    path?: never;
+    query?: never;
+    url: '/settings/definition';
+};
+
+export type SetFactoryDefinitionErrors = {
+    400: RunErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type SetFactoryDefinitionError = SetFactoryDefinitionErrors[keyof SetFactoryDefinitionErrors];
+
+export type SetFactoryDefinitionResponses = {
+    200: DefinitionSettings;
+};
+
+export type SetFactoryDefinitionResponse = SetFactoryDefinitionResponses[keyof SetFactoryDefinitionResponses];
 
 export type GetFactoryStandingRulesData = {
     body?: never;

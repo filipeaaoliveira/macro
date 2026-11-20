@@ -6,6 +6,7 @@
 //! test runs its own worker on a task queue of its own, so the stack's
 //! factory worker never takes its work.
 
+mod answered_once;
 mod gate_owner;
 mod gate_replies;
 mod questions;
@@ -29,8 +30,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
 use temporalio_client::errors::WorkflowGetResultError;
 use temporalio_client::{
-    Client, ClientOptions, ConnectionOptions, Url, WorkflowCancelOptions, WorkflowGetResultOptions,
-    WorkflowStartOptions,
+    Client, ClientOptions, ConnectionOptions, Url, WorkflowCancelOptions,
+    WorkflowFetchHistoryOptions, WorkflowGetResultOptions, WorkflowStartOptions,
 };
 use temporalio_sdk::Runtime;
 use tokio::sync::Notify;
@@ -39,8 +40,9 @@ use uuid::Uuid;
 use super::{WorkerServices, worker_on};
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
+use crate::domain::evaluation::service::ScoringServiceImpl;
 use crate::domain::fakes::{
-    FakeGateModel, FakeGithub, FakeHoldTasks, FakeNotifier, FakeRepo, FakeTaskNotes,
+    FakeGateModel, FakeGithub, FakeHoldTasks, FakeJudge, FakeNotifier, FakeRepo, FakeTaskNotes,
     FakeTaskThread, FakeWatches, ci,
 };
 use crate::domain::flow::Flow;
@@ -50,7 +52,9 @@ use crate::domain::gate_replies::service::GateRepliesImpl;
 use crate::domain::main_hold::{MainWatch, MainWatchServiceImpl};
 use crate::domain::models::{
     AgentAnswer, AgentTask, AgentTurn, PullRequestState, RequiredCheck, RequiredChecks, RunStart,
+    run_branch,
 };
+use crate::domain::ports::ScoringService;
 use crate::domain::ports::{
     AgentFailure, AnswerDelivery, MainWatches, Retryable, RunWorkflows, StepAgent,
 };
@@ -81,6 +85,8 @@ enum Work {
     Ends,
     /// Fails in a way asking again would repeat.
     FailsForGood,
+    /// Fails as its quota ran out, with no other Agent to pass the Step to.
+    OutOfQuota,
     /// Works until stopped.
     Works,
     /// Works until stopped the first given number of times it is asked,
@@ -89,8 +95,12 @@ enum Work {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("the agent failed for good")]
-struct AgentFailed;
+enum AgentFailed {
+    #[error("the agent failed for good")]
+    ForGood,
+    #[error("the agent's quota ran out")]
+    OutOfQuota,
+}
 
 impl Retryable for AgentFailed {
     fn retryable(&self) -> bool {
@@ -98,7 +108,11 @@ impl Retryable for AgentFailed {
     }
 }
 
-impl AgentFailure for AgentFailed {}
+impl AgentFailure for AgentFailed {
+    fn out_of_quota(&self) -> bool {
+        matches!(self, AgentFailed::OutOfQuota)
+    }
+}
 
 /// An agent that does `work`, says when a task reaches it, and counts the
 /// times it was asked, stopped and let go, and the Steps it was asked for.
@@ -141,7 +155,8 @@ impl StepAgent for Agent {
         };
         match self.work {
             Work::Ends => Ok(ends),
-            Work::FailsForGood => Err(AgentFailed),
+            Work::FailsForGood => Err(AgentFailed::ForGood),
+            Work::OutOfQuota => Err(AgentFailed::OutOfQuota),
             Work::Works => std::future::pending().await,
             Work::WorksThenEnds(works) if asked <= works => std::future::pending().await,
             Work::WorksThenEnds(_) => Ok(ends),
@@ -150,7 +165,7 @@ impl StepAgent for Agent {
 
     /// The Runs here work on no repository, so no Step runs checks.
     async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
-        Err(AgentFailed)
+        Err(AgentFailed::ForGood)
     }
 
     async fn run_check(
@@ -206,6 +221,21 @@ fn watches(repo: &FakeRepo) -> MainWatchServiceImpl<FakeRepo, FakeGithub, FakeHo
     )
 }
 
+/// Scoring with no Scorer and no Benchmark: the Runs' ends are scored, and
+/// nothing is judged.
+fn scoring(
+    repo: &FakeRepo,
+) -> ScoringServiceImpl<FakeRepo, FakeJudge, crate::domain::insights::fakes::FakeUsage, FakeGithub>
+{
+    ScoringServiceImpl::new(
+        repo.clone(),
+        FakeJudge::default(),
+        crate::domain::insights::fakes::FakeUsage::new(Vec::new()),
+        FakeGithub::default(),
+        std::sync::Arc::default(),
+    )
+}
+
 /// A client of the Temporal at `TEMPORAL_ADDRESS`, the stack's by default.
 async fn client() -> Client {
     let address = macro_env_var::maybe_read_env("TEMPORAL_ADDRESS")
@@ -230,12 +260,15 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
             request: "Add a dark mode toggle",
             user_id: &julia,
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -270,7 +303,7 @@ async fn walk<F>(
 where
     F: Future<Output = ()>,
 {
-    walk_with(agent, None, drive).await
+    walk_with(agent, None, scoring, drive).await
 }
 
 /// [`walk`] a Run that ended `outcome` before its workflow started.
@@ -282,12 +315,15 @@ async fn walk_after<F>(
 where
     F: Future<Output = ()>,
 {
-    walk_with(agent, Some(outcome), drive).await
+    walk_with(agent, Some(outcome), scoring, drive).await
 }
 
-async fn walk_with<F>(
+/// [`walk`] a Run, scored by the scoring service `scored` makes over its
+/// records once it ends.
+async fn walk_with<F, S: ScoringService>(
     agent: &Agent,
     ended_before: Option<RunOutcome>,
+    scored: impl FnOnce(&FakeRepo) -> S,
     drive: impl FnOnce(Client, RunId) -> F,
 ) -> (Result<RunOutcome, WorkflowGetResultError>, FakeRepo, RunId)
 where
@@ -311,6 +347,7 @@ where
             reviews: ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
             gates: gates(&repo),
             watches: watches(&repo),
+            scoring: scored(&repo),
         },
     )
     .expect("worker");
@@ -338,6 +375,61 @@ where
     let (worked, ended) = tokio::join!(worker.run_until(done.notified()), walked);
     worked.expect("the worker ran");
     (ended, repo, run_id)
+}
+
+/// Keep the history of `run_id`'s workflow as `name`, for the replay
+/// tests, when `FACTORY_RECORD_HISTORY` names the folder to keep it in.
+async fn record_history(run_id: RunId, name: &str) {
+    let Some(folder) = macro_env_var::maybe_read_env("FACTORY_RECORD_HISTORY") else {
+        return;
+    };
+    let history = client()
+        .await
+        .get_workflow_handle::<FlowWorkflowDefinition>(run_id.to_string())
+        .fetch_history(WorkflowFetchHistoryOptions::default())
+        .to_json()
+        .await
+        .expect("the history reads");
+    std::fs::write(format!("{folder}/{name}.json"), history).expect("the history is written");
+}
+
+/// A Run a sampled Scorer judges, whose judge fails on every attempt, ends
+/// as it would have without it: scoring decides nothing the Run does, and
+/// gives up after its attempts. Its history, which passed the
+/// `factory-scoring` marker, is kept for the replay tests.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_run_whose_scorer_s_judge_fails_ends_as_it_would_have() {
+    let agent = Agent::doing(Work::Ends);
+    let definition: crate::domain::evaluation::EvaluationDefinition =
+        serde_json::from_value(json!({ "scorers": [{
+            "name": "correctness",
+            "instructions": "Does the change do what the request asks?",
+            "samplePercent": 100
+        }]}))
+        .expect("a definition");
+    let definition = Arc::new(definition);
+    let judged = |repo: &FakeRepo| {
+        ScoringServiceImpl::new(
+            repo.clone(),
+            FakeJudge::down(),
+            crate::domain::insights::fakes::FakeUsage::new(Vec::new()),
+            FakeGithub::default(),
+            definition,
+        )
+    };
+
+    let (ended, repo, run_id) = walk_with(&agent, None, judged, |_, _| async {}).await;
+
+    assert_eq!(ended.expect("the workflow ends"), RunOutcome::Success);
+    assert!(
+        repo.evaluation
+            .lock()
+            .expect("evaluation")
+            .run_scores
+            .is_empty()
+    );
+    record_history(run_id, "plan_scored_judge_failed").await;
 }
 
 /// Wait until a task reached `agent`.
@@ -448,6 +540,28 @@ async fn a_step_that_fails_for_good_has_its_agent_stopped() {
     assert!(!end.output.contains("agent failed"));
 }
 
+/// A Step that fails as its agents' quota ran out fails the Run for
+/// infrastructure, not for its work: the Run ends `infrastructure`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_step_out_of_quota_ends_the_run_infrastructure() {
+    let agent = Agent::doing(Work::OutOfQuota);
+
+    let (ended, repo, run_id) = walk(&agent, |_, _| async {}).await;
+    record_history(run_id, "plan_infrastructure_after_marker").await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Infrastructure)), "{ended:?}");
+    assert_eq!(agent.stops.load(Ordering::SeqCst), 1);
+    let run = repo.get_run(run_id).await.expect("read").expect("kept");
+    assert_eq!(
+        run.end.map(|end| end.outcome),
+        Some(RunOutcome::Infrastructure)
+    );
+    let steps = repo.list_steps(run_id).await.expect("read");
+    let end = steps[0].end.as_ref().expect("ended");
+    assert_eq!(end.outcome, Outcome::failed());
+}
+
 /// A Step that ended has its agent let go once its end is recorded, and is
 /// never stopped.
 #[tokio::test(flavor = "multi_thread")]
@@ -510,6 +624,7 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
                 reviews: reviews(),
                 gates: gates(&repo),
                 watches: watches(&repo),
+                scoring: scoring(&repo),
             },
         )
         .expect("worker");
@@ -536,6 +651,7 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
             reviews: reviews(),
             gates: gates(&repo),
             watches: watches(&repo),
+            scoring: scoring(&repo),
         },
     )
     .expect("worker");
@@ -656,7 +772,7 @@ impl StepAgent for CodeAgent {
                 "done"
             }
             // The verifier ends with its next verdict.
-            "accept" | "verify" => {
+            "accept" => {
                 let mut verdicts = self.verdicts.lock().expect("verdicts");
                 if verdicts.is_empty() {
                     "pass"
@@ -674,7 +790,7 @@ impl StepAgent for CodeAgent {
 
     /// Its repository declares no checks, so no Step asks.
     async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
-        Err(AgentFailed)
+        Err(AgentFailed::ForGood)
     }
 
     async fn run_check(
@@ -756,6 +872,7 @@ impl CodeRun {
             user_id: julia(),
             approved_control_files: None,
             agent_session: None,
+            standing: None,
         };
         for _ in 0..100 {
             let delivery = workflows
@@ -936,12 +1053,15 @@ where
             request: "Collapse repeated dashes in slugs",
             user_id: &julia(),
             task_id,
+            project_id: None,
             repository: Some(&repository),
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: walk.rules,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -1001,6 +1121,7 @@ where
                 .with_notifier(notifier)
                 .with_task_thread(thread),
             watches: watches(&repo),
+            scoring: scoring(&repo),
         },
     )
     .expect("worker");
@@ -1043,10 +1164,13 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
     let github = FakeGithub::default();
     github.state().checks = [ci(Some("success"))].into();
     let agent = CodeAgent::new(&github);
+    let walked = Arc::new(Mutex::new(None));
 
     let ended = walk_code(&agent, &github, |run| {
         let github = github.clone();
+        let walked = walked.clone();
         async move {
+            *walked.lock().expect("run") = Some(run.run_id);
             run.answer_next_gate("approve").await;
             let merge_question = run.next_gate().await;
             // The person is asked; nothing merged yet.
@@ -1057,13 +1181,11 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
-    // The verifier checks the change before the pull request, and the
-    // merged change once its deploy is not needed.
+    // The verifier checks the change before the pull request; the Run
+    // ends at its merge.
     assert_eq!(
         agent.steps(),
-        [
-            "plan", "write", "review", "review", "review", "accept", "verify"
-        ]
+        ["plan", "write", "review", "review", "review", "accept"]
     );
     let github = github.state();
     assert_eq!(github.opened, 1);
@@ -1074,6 +1196,64 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
             .as_ref()
             .map(|pull_request| pull_request.state),
         Some(PullRequestState::Merged)
+    );
+    // Its branch is deleted once merged.
+    let run_id = walked.lock().expect("run").expect("walked");
+    assert_eq!(github.deleted_branches, [run_branch(run_id)]);
+}
+
+/// A Run started on a `code` Flow that went on past its merge, to `deploy`
+/// and `verify`, ends at its merge on this worker: `deploy` ends `off` at
+/// once, which that Flow routes to the Run's `success`, and no verifier
+/// checks the merged change.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_run_on_a_flow_past_its_merge_ends_at_its_merge() {
+    let github = FakeGithub::default();
+    github.state().checks = [ci(Some("success"))].into();
+    let agent = CodeAgent::new(&github);
+    let repo = FakeRepo::default();
+    let flow = Flow::parse(
+        serde_json::from_str(include_str!(
+            "../../domain/interpreter/deploy_verify_code.json"
+        ))
+        .expect("the flow is JSON"),
+        |_| Some(crate::domain::flow::StepUse::Work),
+    )
+    .expect("valid flow");
+    let run_id = Arc::new(Mutex::new(None));
+
+    let ended = walk_code_with(
+        &agent,
+        &github,
+        &repo,
+        CodeWalk {
+            flow: Some(flow),
+            ..CodeWalk::default()
+        },
+        |run| {
+            let run_id = run_id.clone();
+            async move {
+                *run_id.lock().expect("run") = Some(run.run_id);
+                run.answer_next_gate("approve").await;
+                run.answer_next_gate("approve").await;
+            }
+        },
+    )
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    assert_eq!(
+        agent.steps(),
+        ["plan", "write", "review", "review", "review", "accept"]
+    );
+    let run_id = run_id.lock().expect("run").expect("the run started");
+    let steps = repo.list_steps(run_id).await.expect("read");
+    let last = steps.last().expect("a step");
+    assert_eq!(last.entry.as_str(), "deploy");
+    assert_eq!(
+        last.end.as_ref().map(|end| end.outcome.as_str()),
+        Some("off")
     );
 }
 
@@ -1097,7 +1277,7 @@ async fn red_ci_is_fixed_and_the_fixed_commit_merges() {
         agent.steps(),
         [
             "plan", "write", "review", "review", "review", "accept", "ci_fix", "review", "review",
-            "review", "accept", "verify"
+            "review", "accept"
         ]
     );
     let github = github.state();
@@ -1136,6 +1316,8 @@ async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
     let github = github.state();
     assert!(github.merges.is_empty());
     assert_eq!(github.opened, 1);
+    // A cancelled Run keeps its branch, for a person to look at.
+    assert!(github.deleted_branches.is_empty());
 }
 
 /// Review rounds that keep finding Blockers stop after three: the Run ends
@@ -1206,6 +1388,7 @@ async fn failed_acceptance_goes_to_the_blockers_rule_and_is_fixed() {
             blockers: true,
             merge: true,
             owner_gates: false,
+            quiet_gates: false,
             task_thread: false,
             queue_limit: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -1234,7 +1417,7 @@ async fn failed_acceptance_goes_to_the_blockers_rule_and_is_fixed() {
         agent.steps(),
         [
             "plan", "write", "review", "review", "review", "accept", "fix", "review", "review",
-            "review", "accept", "verify"
+            "review", "accept"
         ]
     );
     let ruled: Vec<StandingRule> = repo
@@ -1275,6 +1458,7 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
             blockers: true,
             merge: true,
             owner_gates: false,
+            quiet_gates: false,
             task_thread: false,
             queue_limit: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -1336,6 +1520,7 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
             blockers: true,
             merge: true,
             owner_gates: false,
+            quiet_gates: false,
             task_thread: false,
             queue_limit: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -1448,6 +1633,7 @@ async fn cancelling_while_ci_waits_ends_the_run_with_nothing_merged() {
         "{ended:?}"
     );
     assert!(github.state().merges.is_empty());
+    assert!(github.state().deleted_branches.is_empty());
 }
 
 /// A head that moves after the person agreed to merge is not merged: the
@@ -1495,12 +1681,15 @@ async fn watching(repo: &FakeRepo) -> (MainWatch, Repository) {
         request: "Add dark mode",
         user_id: &julia,
         task_id: None,
+        project_id: None,
         repository: Some(&repository),
         created_in_person: false,
         control_file_patterns: &[],
         control_files_team_id: None,
         standing_rules: RunRules::DEFAULT,
         automation: None,
+        definition: None,
+        kept_flow: None,
     })
     .await
     .expect("insert");
@@ -1527,6 +1716,7 @@ async fn with_watch_worker<T>(
             reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
             gates: gates(repo),
             watches: MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone()),
+            scoring: scoring(repo),
         },
     )
     .expect("worker");

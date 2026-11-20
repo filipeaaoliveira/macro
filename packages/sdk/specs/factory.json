@@ -128,7 +128,7 @@
     "/automations/fire": {
       "post": {
         "tags": ["factory"],
-        "summary": "Fire the Automation whose routine this run is: only the code step of a\nrun of an Automation's routine calls it, with the credential the\nscheduler signed for the routine (403 for any other caller). It starts\na Run as the Automation's creator, once per routine run, unless the\nAutomation is switched off, the queue is full or a Run already runs on\nthe task.",
+        "summary": "Fire the Automation whose routine this run is: only the code step of a\nrun of an Automation's routine calls it, with the credential the\nscheduler signed for the routine (403 for any other caller). It starts\na Run as the Automation's creator, once per routine run, unless the\nAutomation is switched off, the queue is full or a Run already runs on\nthe task. A routine run for an agent, or in an agent session, starts it\nas that agent: under a Definition with Standing Roles its bot must fill\none that allows `start`, or the firing is skipped as `refused`.",
         "operationId": "fire_factory_automation",
         "requestBody": {
           "content": {
@@ -496,18 +496,49 @@
         }
       }
     },
-    "/flows": {
-      "get": {
+    "/benchmarks/{benchmark}/suites": {
+      "post": {
         "tags": ["factory"],
-        "summary": "List the built-in Flows a Run can be started of, by name.",
-        "operationId": "list_factory_flows",
+        "summary": "Start a suite of a Benchmark: one trial Run, owned by the caller, of\neach of its frozen tasks, on the configuration the body gives, each from\nthe commit its task pins or the default branch's head as the suite\nstarts. Each trial keeps a score and the tokens its agents used once its\nRun ends, and its branch is then deleted. A suite of the same Benchmark\nof the caller's that still runs, or more running trials than the caller\nmay have, refuse it (409). A trial whose Run is refused stops the suite:\nthe trials before it go on, and `refused` names it; when none started,\nthe error is returned and nothing is kept. An agent acting for the\ncaller, under a Definition with Standing Roles, must fill one that\nallows `start` (403 `notInStandingRole` otherwise, before anything is\nkept); each trial keeps it as its start.",
+        "operationId": "start_factory_benchmark_suite",
+        "parameters": [
+          {
+            "name": "benchmark",
+            "in": "path",
+            "description": "The Benchmark's name.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartSuiteRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FlowsResponse"
+                  "$ref": "#/components/schemas/SuiteStarted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -523,6 +554,115 @@
             }
           },
           "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/flows": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "List the Flows the caller can start a Run of, by name: their team's\nFactory Definition's, read at its default branch's head, when the team\nnames one (400 `unreachableDefinition` or `invalidDefinition` when it\ndoes not read), else the built-in Flows.",
+        "operationId": "list_factory_flows",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
             "description": "",
             "content": {
               "application/json": {
@@ -706,7 +846,250 @@
         }
       }
     },
+    "/insights/evaluation": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "How the caller's own Runs were judged and compared over a period: each\nScorer's judgments of a sample of them, each Experiment's arms with\ntheir Runs' outcomes and scores, the Benchmarks one may replay, and the\nsuites the caller started, with each trial's score and tokens. Benchmark\ntrials are never counted with the live Runs.",
+        "operationId": "get_factory_evaluation",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "The period's first day, `YYYY-MM-DD`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Its last day, included. The period lasts at most 366 days.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "description": "The IANA time zone the days are in, such as `Europe/Lisbon`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "flow",
+            "in": "query",
+            "description": "A built-in Flow's name, to read only its Runs.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationInsights"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "List a page of the factory's board: the Runs the caller can see,\ntheirs or their team's, newest first, each with its Steps and where it\nis (`running`, `waiting` on its owner at a Gate, `held` by a Main Hold,\n`stopped` for a person, or `finished`). Read the next page with `next`.",
+        "operationId": "list_factory_board",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "Whose Runs: the caller's (`mine`, when left out), or their team's\n(`team`), which lists the members' Runs on tasks the caller can see.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/BoardScope"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Only Runs there.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/BoardState"
+            }
+          },
+          {
+            "name": "flow",
+            "in": "query",
+            "description": "Only Runs of this built-in Flow, by name.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repoUrl",
+            "in": "query",
+            "description": "Only Runs on this repository, by its `https://github.com/owner/name`\nURL.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Only Runs whose task was in this Project (an initiative) when they\nstarted.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Only Runs whose request, or whose task's name, has these words in\nit, in any case: at most 200 characters are read.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterCreatedAt",
+            "in": "query",
+            "description": "Where the page starts: the `next.createdAt` of the page before.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "description": "The `next.id` of the page before: given with `afterCreatedAt` or\nnot at all (400 otherwise).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "The most Runs the page lists: 25 when left out, at most 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": ["factory"],
         "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow. At the Queue limit of the Project it would start in, it is\nrefused (409 `queueFull`, its message counting both): the caller holds\nas many places in their Queue as the limit, a place being a Run waiting\non them at a Gate or a question, or a Run of a Flow with a Gate that has\nnot reached one yet (`GET /runs/waiting` lists both). The Runs under\nway go on.",
@@ -793,6 +1176,75 @@
             }
           },
           "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/by-pull-requests": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Find the Runs that opened some pull requests: for each one, the newest\nRun the caller can see on their team's board (theirs, or a team\nmember's on a task they can see), with its Steps, where it is, and the\nmerge Gate it waits on. A pull request no such Run opened is left out,\nwhether no Run opened it or one the caller cannot see did.",
+        "operationId": "find_pull_request_runs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestUrls"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestRuns"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
             "description": "",
             "content": {
               "application/json": {
@@ -1035,6 +1487,106 @@
             }
           },
           "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/flaw": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Mark one of the caller's Runs flawed: it ended `success`, and they\nfound its result wrong. The Run then reads `flawed`, with who marked it,\nwhy and when. Marking a flawed Run again keeps its first mark. Only the\nRun's owner marks it, in their own signed-in session: an agent's code,\nan API key or token and an internal caller are refused (403).",
+        "operationId": "flaw_factory_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlawRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
             "description": "",
             "content": {
               "application/json": {
@@ -1988,6 +2540,122 @@
         }
       }
     },
+    "/settings/definition": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "The Factory Definition the caller's team names, and whether it reads at\nits default branch's head as the caller reaches it on GitHub.",
+        "operationId": "get_factory_definition",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["factory"],
+        "summary": "Name the repository whose files the caller's team's Runs take their\nFlows, Agents, rules and Scorers from, or name none. The Definition must\nread at its default branch's head as the caller reaches it (400\n`unreachableDefinition` or `invalidDefinition`, naming the file and the\nproblem). Only an admin or the owner of the team names it, in their own\nsigned-in session (403 otherwise). While one is named, the team's\nControl File and Standing Rules settings are refused (409\n`definitionNamed`): the Definition's pull requests change them.",
+        "operationId": "set_factory_definition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/settings/standing-rules": {
       "get": {
         "tags": ["factory"],
@@ -2295,15 +2963,112 @@
           }
         }
       },
+      "ArmInsight": {
+        "type": "object",
+        "description": "How one arm's Runs did.",
+        "required": [
+          "name",
+          "agents",
+          "runs",
+          "ended",
+          "succeeded",
+          "fellBack",
+          "scores"
+        ],
+        "properties": {
+          "agents": {
+            "type": "object",
+            "description": "The Agents it gives Roles, by Role; empty for the arm that keeps the\nagent definition's.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "ended": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of them ended, but for those that ended `infrastructure`:\ntheir work never ran.",
+            "minimum": 0
+          },
+          "fellBack": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many had a Step the arm's Agent could not start, which another\nAgent of its Role took: their results are not the arm's alone.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of the period's Runs took it.",
+            "minimum": 0
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArmScoreInsight"
+            },
+            "description": "The Scorers' judgments of its Runs."
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many ended `success`.",
+            "minimum": 0
+          }
+        }
+      },
+      "ArmScoreInsight": {
+        "type": "object",
+        "description": "One Scorer's judgments of one arm's Runs.",
+        "required": ["scorer", "judged", "meanScore"],
+        "properties": {
+          "judged": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of the arm's Runs it judged.",
+            "minimum": 0
+          },
+          "meanScore": {
+            "type": "number",
+            "format": "double",
+            "description": "Their mean score, from 0 to 1."
+          },
+          "scorer": {
+            "type": "string",
+            "description": "The Scorer."
+          }
+        }
+      },
       "AskedBack": {
         "type": "object",
         "description": "A reply the factory could not read as one of a Gate's answers, so it\nasked the person back.",
-        "required": ["reply", "at"],
+        "required": ["reply", "at", "refusedTampered"],
         "properties": {
           "at": {
             "type": "string",
             "format": "date-time",
             "description": "When the factory asked back."
+          },
+          "reading": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GateModelReading",
+                "description": "How the Gate model read the words; none for a reply asked back\nbefore the factory kept it."
+              }
+            ]
+          },
+          "refusedTampered": {
+            "type": "boolean",
+            "description": "Whether the words approved a Tampered Run, which only the Approve\nbutton approves, since it lists the Run's changed Control Files."
           },
           "reply": {
             "type": "string",
@@ -2510,6 +3275,105 @@
           }
         }
       },
+      "BenchmarkSummary": {
+        "type": "object",
+        "description": "A Benchmark one may start a suite of.",
+        "required": ["name", "tasks", "scorers"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "scorers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Scorers that judge each trial."
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its frozen tasks, by name."
+          }
+        }
+      },
+      "BoardNext": {
+        "type": "object",
+        "description": "Where the board's next page starts: past this Run, in the board's order\n(newest first).",
+        "required": ["createdAt", "id"],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the last Run the page listed was created."
+          },
+          "id": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "Its id."
+          }
+        }
+      },
+      "BoardPage": {
+        "type": "object",
+        "description": "A page of the board.",
+        "required": ["runs", "stoppedEarly"],
+        "properties": {
+          "next": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BoardNext",
+                "description": "Where the next page starts, past the last Run listed; none on the\nlast."
+              }
+            ]
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BoardRun"
+            },
+            "description": "The Runs, newest first: never a team member's Run on a task the\ncaller cannot see."
+          },
+          "stoppedEarly": {
+            "type": "boolean",
+            "description": "Whether the board stopped reading past Runs the caller cannot see\nbefore the Runs ran out (some 250 of them in a row): older Runs they\nsee may be there, which no next page reaches. Only on a board no\nfilter or search narrows."
+          }
+        }
+      },
+      "BoardRun": {
+        "type": "object",
+        "description": "One Run on the board, with where it is.",
+        "required": ["state", "detail"],
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/RunDetail",
+            "description": "The Run and its Steps."
+          },
+          "state": {
+            "$ref": "#/components/schemas/BoardState",
+            "description": "Where it is."
+          },
+          "taskName": {
+            "type": ["string", "null"],
+            "description": "The name of the task it works on; none without a task."
+          }
+        }
+      },
+      "BoardScope": {
+        "type": "string",
+        "description": "Whose Runs the board lists.",
+        "enum": ["mine", "team"]
+      },
+      "BoardState": {
+        "type": "string",
+        "description": "Where a Run is, as the board groups it.",
+        "enum": ["running", "waiting", "held", "stopped", "finished"]
+      },
       "CheckResult": {
         "type": "object",
         "description": "How one check of a verified round ran.",
@@ -2634,11 +3498,15 @@
       "ControlFilesSettings": {
         "type": "object",
         "description": "The Control File patterns a person's Runs are checked against: their\nteam's, or the factory's default.",
-        "required": ["patterns", "isDefault", "canEdit"],
+        "required": ["patterns", "isDefault", "canEdit", "definitionNamed"],
         "properties": {
           "canEdit": {
             "type": "boolean",
             "description": "Whether the person may change them: they administer the team."
+          },
+          "definitionNamed": {
+            "type": "boolean",
+            "description": "Whether the team names a Factory Definition, whose `rules.json`\nsets its Runs' Control Files in place of these."
           },
           "isDefault": {
             "type": "boolean",
@@ -2694,6 +3562,38 @@
           "webhookSecret": {
             "type": ["string", "null"],
             "description": "For a webhook, the secret its calls are signed with: the factory\nnever shows it again."
+          }
+        }
+      },
+      "DefinitionSettings": {
+        "type": "object",
+        "description": "The Factory Definition a person's team names: the repository whose\nfiles its Runs take their Flows, Agents and rules from.",
+        "required": ["canEdit"],
+        "properties": {
+          "canEdit": {
+            "type": "boolean",
+            "description": "Whether the person may change it: they administer the team."
+          },
+          "commit": {
+            "type": ["string", "null"],
+            "description": "The commit of its default branch a Run started now would read,\nwhen the Definition reads there as the person reaches it."
+          },
+          "problem": {
+            "type": ["string", "null"],
+            "description": "Why it does not read now, when it does not: the person cannot reach\nit, or a file of it is wrong."
+          },
+          "repoUrl": {
+            "type": ["string", "null"],
+            "description": "The repository's `https://github.com/owner/name` URL; none when the\nteam names none, so its Runs take the team's settings and the\nfactory's built-in Flows and Agents."
+          },
+          "requiresPullRequest": {
+            "type": ["boolean", "null"],
+            "description": "Whether a ruleset or the branch protection of its default branch\nasks for a pull request; none when that cannot be told, as when the\nperson does not administer it. Without one, a push changes the\nfactory's rules unreviewed. With one, whoever may bypass the rules\n(a ruleset's bypass list, admins when protection does not include\nthem) still can: GitHub does not tell the factory who."
+          },
+          "teamId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The team; none when the person is on no team."
           }
         }
       },
@@ -2832,6 +3732,104 @@
           }
         }
       },
+      "EvaluationInsights": {
+        "type": "object",
+        "description": "The evaluation insights of a period.",
+        "required": [
+          "from",
+          "to",
+          "timeZone",
+          "scorers",
+          "experiments",
+          "benchmarks",
+          "suites"
+        ],
+        "properties": {
+          "benchmarks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkSummary"
+            },
+            "description": "The Benchmarks one may start a suite of."
+          },
+          "experiments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExperimentInsight"
+            },
+            "description": "Each Experiment, defined or with Runs in the period."
+          },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The Flow the Runs were read for; none for every Flow."
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "The period's first day."
+          },
+          "scorers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScorerInsight"
+            },
+            "description": "Each Scorer, defined or with judgments in the period."
+          },
+          "selfImprovement": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SelfImprovementInsight",
+                "description": "The caller's team's self-improvement: its pending failures and its\nlatest self-improvement Run; none when the team names no Factory\nDefinition."
+              }
+            ]
+          },
+          "suites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SuiteInsight"
+            },
+            "description": "The suites started in the period, newest first."
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "The time zone its days are in."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Its last day, included."
+          }
+        }
+      },
+      "ExperimentInsight": {
+        "type": "object",
+        "description": "An Experiment and how its arms did over the period.",
+        "required": ["name", "running", "arms"],
+        "properties": {
+          "arms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArmInsight"
+            },
+            "description": "Its arms, as defined, then any no longer defined that took Runs."
+          },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The Flow whose Runs it splits; none for one no longer defined."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "running": {
+            "type": "boolean",
+            "description": "Whether it still assigns new Runs."
+          }
+        }
+      },
       "FindingKind": {
         "type": "string",
         "description": "What a finding turned out to be once its round ended.",
@@ -2882,6 +3880,52 @@
           "creator_left_team",
           "agent_account"
         ]
+      },
+      "FlawMarker": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A person: the Run's owner.",
+            "required": ["userId", "kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["person"]
+              },
+              "userId": {
+                "$ref": "#/components/schemas/MacroUserIdStr",
+                "description": "Their user id."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A Scorer, by its name.",
+            "required": ["name", "kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["scorer"]
+              },
+              "name": {
+                "type": "string",
+                "description": "The Scorer's name."
+              }
+            }
+          }
+        ],
+        "description": "Who marked a Run flawed."
+      },
+      "FlawRunRequest": {
+        "type": "object",
+        "description": "Request body for marking a Run flawed.",
+        "required": ["reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why its result is wrong: 1 to 4096 bytes once trimmed."
+          }
+        }
       },
       "FlowInsight": {
         "type": "object",
@@ -2986,6 +4030,17 @@
               {
                 "$ref": "#/components/schemas/StandInAnswer",
                 "description": "The stand-in's answer for the Run's owner, while the owner may\noverride it and after; none when the stand-in did not answer."
+              }
+            ]
+          },
+          "standInDeclined": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GateModelReading",
+                "description": "How the Gate model read the Gate when the stand-in, asked, left it\nto the owner; none when it was not asked, or answered."
               }
             ]
           }
@@ -3097,6 +4152,34 @@
         "description": "Who asks a Gate's question, which says how it is answered.",
         "enum": ["flow", "question"]
       },
+      "GateModelReading": {
+        "type": "object",
+        "description": "How the Gate model read a Gate when what it said decided nothing: its\npick, how sure it was and why, so the owner can tell why the factory\nasked back or the stand-in left the Gate to them.",
+        "required": ["reason"],
+        "properties": {
+          "confidence": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "How sure it was, in percent; none when it did not answer: its call\nfailed or took too long.",
+            "minimum": 0
+          },
+          "pick": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Outcome",
+                "description": "The answer it picked; none when it could not tell (`unclear`), or\ndid not answer."
+              }
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why, in its words; empty when it did not answer."
+          }
+        }
+      },
       "GithubFiring": {
         "type": "object",
         "description": "The GitHub delivery that fired a repository event's Automation.",
@@ -3131,6 +4214,53 @@
             "description": "What the agent produced, for the Run's later Steps and for people."
           }
         }
+      },
+      "ImprovementInsight": {
+        "type": "object",
+        "description": "A team's latest self-improvement Run.",
+        "required": ["state", "failures", "createdAt"],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it began."
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many failures it groups.",
+            "minimum": 0
+          },
+          "refusal": {
+            "type": ["string", "null"],
+            "description": "Why its Run could not start, when refused."
+          },
+          "runId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunId",
+                "description": "Its Run; none while it starts, when it was refused, or once the\nRun is gone. Only its owner reads it."
+              }
+            ]
+          },
+          "settledAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it was settled."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ImprovementState",
+            "description": "Where it is."
+          }
+        }
+      },
+      "ImprovementState": {
+        "type": "string",
+        "description": "Where a self-improvement Run is.",
+        "enum": ["starting", "open", "merged", "closed", "refused"]
       },
       "InsightDay": {
         "type": "object",
@@ -3224,6 +4354,11 @@
           }
         }
       },
+      "NamerStanding": {
+        "type": "string",
+        "description": "Whether a self-improvement Run may be started as the Definition's\nnamer, and why not.",
+        "enum": ["admin", "none", "left_team", "not_admin"]
+      },
       "NoteStepRequest": {
         "type": "object",
         "description": "Request body for a note to a running Step's agent.",
@@ -3254,7 +4389,7 @@
           },
           "ownerGates": {
             "type": "boolean",
-            "description": "The owner section: a Gate no rule answers goes to the Run's owner.\nThey are notified, and the Gate is listed as waiting on them; a\nreview round whose Blockers are the round before's, unchanged after\na rule sent those to a fix, waits for them rather than another fix;\nand what they comment on the Run's task once a Gate opened reaches\nthe next agent Step. Off, the factory leaves those Gates waiting as\nbefore. A definition sent without it has it off."
+            "description": "The owner section: a review round whose Blockers are the round\nbefore's, unchanged after a rule sent those to a fix, waits for the\nRun's owner rather than another fix; and what they comment on the\nRun's task once a Gate opened reaches the next agent Step. Off, the\nfactory fixes those Blockers again, and the Steps read no comment. A\ndefinition sent without it has it off."
           },
           "plan": {
             "type": "boolean",
@@ -3266,6 +4401,10 @@
             "description": "The Queue limit: the most places a person may hold in their Queue\nunder this definition. A place is a Run of theirs waiting on them at\na Gate or a question, or a Run of a Flow with a Gate that has not\nreached one yet. A new Run of theirs starts only while they hold\nfewer places than the limit; Runs already going go on. None, and a\ndefinition sent without it, sets no limit. From [`MIN_QUEUE_LIMIT`]\nto [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
             "maximum": 1000,
             "minimum": 1
+          },
+          "quietGates": {
+            "type": "boolean",
+            "description": "Whether the Run's owner is left unnotified when a Gate waits on\nthem: off, as when a definition is sent without it, every Gate no\nrule or stand-in answers (a Flow's Gate or an agent's question)\nnotifies them, pushed to their phone, whether or not the Run has a\ntask. On, they are not notified; the Gate still waits on them and\nis listed as waiting. A notify-only Gate's notice and the\nstand-in's are sent either way."
           },
           "standIn": {
             "$ref": "#/components/schemas/StandInKinds",
@@ -3307,7 +4446,9 @@
           "manual",
           "blocked",
           "failed",
-          "cancelled"
+          "cancelled",
+          "infrastructure",
+          "flawed"
         ],
         "properties": {
           "blocked": {
@@ -3325,7 +4466,19 @@
           "failed": {
             "type": "integer",
             "format": "int32",
-            "description": "Runs that ended failed.",
+            "description": "Runs that ended failed for their work.",
+            "minimum": 0
+          },
+          "flawed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that succeeded, and whose result a Scorer or a person found\nwrong afterwards.",
+            "minimum": 0
+          },
+          "infrastructure": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that failed for a machine, quota or network reason: the\nfactory's plumbing, not its work.",
             "minimum": 0
           },
           "manual": {
@@ -3363,6 +4516,23 @@
           }
         }
       },
+      "PendingSource": {
+        "type": "object",
+        "description": "How many of a team's pending failures come from one source.",
+        "required": ["source", "count"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many.",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string",
+            "description": "The Scorer's name, or `flawed` for the Runs marked flawed."
+          }
+        }
+      },
       "ProjectRules": {
         "type": "object",
         "description": "A Project's own Standing Rules, which its team set.",
@@ -3376,6 +4546,77 @@
             "type": "string",
             "format": "uuid",
             "description": "The Project: an initiative's id."
+          }
+        }
+      },
+      "PullRequestRun": {
+        "type": "object",
+        "description": "The Run that opened a pull request, as the board shows it.",
+        "required": ["url", "listed"],
+        "properties": {
+          "listed": {
+            "$ref": "#/components/schemas/BoardRun",
+            "description": "The Run, where it is, and its task's name."
+          },
+          "mergeGateSeq": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "The Step whose merge Gate the Run waits on, by its place among the\nRun's Steps: approving it is how the pull request merges. None while\nthe Run is anywhere else.",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "The pull request's page, as the lookup named it."
+          }
+        }
+      },
+      "PullRequestRuns": {
+        "type": "object",
+        "description": "The Runs that opened some pull requests.",
+        "required": ["runs", "unknown"],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PullRequestRun"
+            },
+            "description": "One for each pull request a Run the caller can see opened, its\nnewest such Run, in the lookup's order; none for a pull request no\nsuch Run opened."
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The pull requests, as the lookup named them, whose Runs were not all\nread, as more of its own Runs matched than a lookup reads for one\npull request: whether a Run the caller sees opened one is not known,\nso it must not read as none."
+          }
+        }
+      },
+      "PullRequestUrls": {
+        "type": "object",
+        "description": "GitHub pull requests, by their pages.",
+        "required": ["urls"],
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The pull requests' pages, such as\n`https://github.com/owner/repo/pull/12`: at most 100."
+          }
+        }
+      },
+      "RefusedTrial": {
+        "type": "object",
+        "description": "A trial whose Run was refused.",
+        "required": ["task", "reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why its Run was refused."
+          },
+          "task": {
+            "type": "string",
+            "description": "The frozen task."
           }
         }
       },
@@ -3634,7 +4875,7 @@
       "RulesSource": {
         "type": "string",
         "description": "Where a Run's Standing Rules came from.",
-        "enum": ["default", "team", "project"]
+        "enum": ["default", "team", "project", "definition"]
       },
       "Run": {
         "type": "object",
@@ -3672,6 +4913,17 @@
             "type": "boolean",
             "description": "Whether its owner created it in their own signed-in session, from an\naccount that is not an agent's: only then does its request ask for\nthe Control Files it names."
           },
+          "definition": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunDefinition",
+                "description": "The Factory Definition it started under; none when its owner's team\nnamed none, so it took the factory's built-in Flows and Agents."
+              }
+            ]
+          },
           "end": {
             "oneOf": [
               {
@@ -3683,9 +4935,22 @@
               }
             ]
           },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The built-in Flow it walks, by name; none only for a Run recorded\nbefore Runs kept it."
+          },
           "id": {
             "$ref": "#/components/schemas/RunId",
             "description": "The Run's id, also its Temporal workflow id."
+          },
+          "projectId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The Project (an initiative) its task was in when it was created,\nkept as a record: none without a task or Project, and for a Run\ncreated before Runs kept it."
+          },
+          "pullRequestUrl": {
+            "type": ["string", "null"],
+            "description": "The page of the pull request its branch proposes its change in, as\nthe pull request Steps last found it; none until one is found."
           },
           "repository": {
             "oneOf": [
@@ -3744,10 +5009,25 @@
           }
         }
       },
+      "RunDefinition": {
+        "type": "object",
+        "description": "The Factory Definition a Run started under: the repository its owner's\nteam named, at the commit its default branch was at then.",
+        "required": ["repoUrl", "commit"],
+        "properties": {
+          "commit": {
+            "type": "string",
+            "description": "The commit the Run read the Definition at."
+          },
+          "repoUrl": {
+            "type": "string",
+            "description": "The repository's `https://github.com/owner/name` URL."
+          }
+        }
+      },
       "RunDetail": {
         "type": "object",
         "description": "A Run and the Steps it took.",
-        "required": ["run", "steps", "reviewRounds"],
+        "required": ["run", "steps", "reviewRounds", "standingActs"],
         "properties": {
           "baseRequiredChecks": {
             "oneOf": [
@@ -3782,6 +5062,13 @@
             "$ref": "#/components/schemas/Run",
             "description": "The Run."
           },
+          "standingActs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StandingActRecord"
+            },
+            "description": "What agents did to it under its Factory Definition's Standing\nRoles, in order: who started, cancelled or linked it, and answered\nits Gates."
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -3801,6 +5088,17 @@
             "format": "date-time",
             "description": "When it ended."
           },
+          "flaw": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunFlaw",
+                "description": "Who found its result wrong, and why: only for a `flawed` Run."
+              }
+            ]
+          },
           "outcome": {
             "$ref": "#/components/schemas/RunOutcome",
             "description": "How the Run ended."
@@ -3815,7 +5113,11 @@
           "noPushAccess",
           "controlFilesNotApproved",
           "queueFull",
-          "reservedForAPerson"
+          "reservedForAPerson",
+          "notInStandingRole",
+          "unreachableDefinition",
+          "invalidDefinition",
+          "definitionNamed"
         ]
       },
       "RunErrorResponse": {
@@ -3837,6 +5139,26 @@
           "message": {
             "type": "string",
             "description": "What went wrong, in words."
+          }
+        }
+      },
+      "RunFlaw": {
+        "type": "object",
+        "description": "Why a Run's result was found wrong, by whom, and when.",
+        "required": ["by", "reason", "markedAt"],
+        "properties": {
+          "by": {
+            "$ref": "#/components/schemas/FlawMarker",
+            "description": "Who marked the Run flawed."
+          },
+          "markedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When they marked it."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why, in their words."
           }
         }
       },
@@ -3965,7 +5287,15 @@
       "RunOutcome": {
         "type": "string",
         "description": "How a Run ended.",
-        "enum": ["success", "manual", "blocked", "failed", "cancelled"]
+        "enum": [
+          "success",
+          "manual",
+          "blocked",
+          "failed",
+          "cancelled",
+          "infrastructure",
+          "flawed"
+        ]
       },
       "RunRules": {
         "type": "object",
@@ -3999,6 +5329,119 @@
           "tokens": {
             "$ref": "#/components/schemas/TokenCounts",
             "description": "What its agents used."
+          }
+        }
+      },
+      "ScorerInsight": {
+        "type": "object",
+        "description": "A Scorer and its live judgments of the period's Runs.",
+        "required": ["name", "flows", "judged", "passed"],
+        "properties": {
+          "flows": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Flows whose Runs it judges; every Flow when empty."
+          },
+          "instructions": {
+            "type": ["string", "null"],
+            "description": "What it judges; none for a Scorer no longer defined whose\njudgments remain."
+          },
+          "judged": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of the period's Runs it judged.",
+            "minimum": 0
+          },
+          "meanScore": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "Their mean score, from 0 to 1; none when it judged none."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "passed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of them scored half or more.",
+            "minimum": 0
+          },
+          "samplePercent": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "The percentage of those Runs it judges; none when no longer defined.",
+            "minimum": 0
+          }
+        }
+      },
+      "SelfImprovementInsight": {
+        "type": "object",
+        "description": "A team's self-improvement against its Factory Definition: the failures\nwaiting for a Run, what starts one, and the latest one.",
+        "required": [
+          "repoUrl",
+          "enabled",
+          "failuresThreshold",
+          "oldestDays",
+          "namer",
+          "pending",
+          "pendingBySource"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the Definition improves itself."
+          },
+          "failuresThreshold": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many pending failures start a Run.",
+            "minimum": 0
+          },
+          "last": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImprovementInsight",
+                "description": "The latest self-improvement Run, open or not."
+              }
+            ]
+          },
+          "namer": {
+            "$ref": "#/components/schemas/NamerStanding",
+            "description": "Where the admin who named the Definition stands: its\nself-improvement Runs are theirs, and none starts unless they are\nstill an admin of the team."
+          },
+          "oldestDays": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many days old the oldest pending failure is before a Run starts\nwith fewer.",
+            "minimum": 0
+          },
+          "oldestPendingAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the oldest was kept."
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many failures wait.",
+            "minimum": 0
+          },
+          "pendingBySource": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingSource"
+            },
+            "description": "How many wait from each source, most first."
+          },
+          "repoUrl": {
+            "type": "string",
+            "description": "The Definition's repository."
           }
         }
       },
@@ -4040,6 +5483,16 @@
               "type": "string"
             },
             "description": "The glob patterns, matched against each changed path from the\nrepository's root: `*` stays within one folder, `**` spans any\nnumber. At most 200, each at most 256 bytes. Null goes back to the\nfactory's default; an empty list checks no file."
+          }
+        }
+      },
+      "SetDefinitionRequest": {
+        "type": "object",
+        "description": "Request body for naming the team's Factory Definition.",
+        "properties": {
+          "repoUrl": {
+            "type": ["string", "null"],
+            "description": "The repository's `https://github.com/owner/name` URL. Null names\nnone: the team's Runs go back to its settings and the factory's\nbuilt-in Flows and Agents."
           }
         }
       },
@@ -4102,6 +5555,55 @@
         },
         "additionalProperties": false
       },
+      "StandingAct": {
+        "type": "string",
+        "description": "An act a Standing Role may allow. The set is fixed: none merges, and a\nFactory Definition cannot add one.",
+        "enum": ["start", "cancel", "link", "answer_plan", "answer_blockers"]
+      },
+      "StandingActRecord": {
+        "type": "object",
+        "description": "A standing act a Run keeps, as the Run API shows it.",
+        "required": ["act", "botId", "agent", "standingRole", "at"],
+        "properties": {
+          "act": {
+            "$ref": "#/components/schemas/StandingAct",
+            "description": "What was done."
+          },
+          "agent": {
+            "$ref": "#/components/schemas/AgentName",
+            "description": "The Agent the Run's Definition names for that bot."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was recorded."
+          },
+          "botId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The bot that did it."
+          },
+          "seq": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "The Step whose Gate was answered, for an answer; none otherwise.",
+            "minimum": 0
+          },
+          "sessionId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The agent session it came from; none for a bot's code that ran in\nno agent session."
+          },
+          "standingRole": {
+            "$ref": "#/components/schemas/StandingRoleName",
+            "description": "The Standing Role that allowed it."
+          }
+        }
+      },
+      "StandingRoleName": {
+        "type": "string",
+        "description": "The name a Factory Definition gives a Standing Role, such as `intake`,\n`gatekeeper` or `operator`."
+      },
       "StandingRule": {
         "type": "string",
         "description": "A Standing Rule: the answer the factory gives a Gate of one kind on its\nown, when what the rule requires holds.",
@@ -4110,7 +5612,13 @@
       "StandingRulesSettings": {
         "type": "object",
         "description": "The Standing Rules a person's Runs are created with: their team's\nOrchestrator Definition, or the factory's default, and the team's\nProjects' own, which replace it for a Run whose task is in one.",
-        "required": ["definition", "isDefault", "projects", "canEdit"],
+        "required": [
+          "definition",
+          "isDefault",
+          "projects",
+          "canEdit",
+          "definitionNamed"
+        ],
         "properties": {
           "canEdit": {
             "type": "boolean",
@@ -4119,6 +5627,10 @@
           "definition": {
             "$ref": "#/components/schemas/OrchestratorDefinition",
             "description": "Which kinds of Gate the factory answers on its own."
+          },
+          "definitionNamed": {
+            "type": "boolean",
+            "description": "Whether the team names a Factory Definition, whose `rules.json`\nsets its Runs' Standing Rules in place of these and the Projects'."
           },
           "isDefault": {
             "type": "boolean",
@@ -4137,6 +5649,23 @@
             "description": "The team whose rules they are; none when the person is on no team."
           }
         }
+      },
+      "StartSuiteRequest": {
+        "type": "object",
+        "description": "The configuration a suite's trials run on.",
+        "properties": {
+          "agents": {
+            "type": "object",
+            "description": "The Agent of the agent definition each Role takes in place of its\nfirst, by Role; a Role left out takes the definition's.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "Steer": {
         "type": "object",
@@ -4328,6 +5857,107 @@
           }
         }
       },
+      "SuiteInsight": {
+        "type": "object",
+        "description": "One suite: a Benchmark replayed on one configuration.",
+        "required": [
+          "id",
+          "benchmark",
+          "agents",
+          "createdAt",
+          "trials",
+          "scored",
+          "infrastructure",
+          "tokens"
+        ],
+        "properties": {
+          "agents": {
+            "type": "object",
+            "description": "The Agents its configuration gave Roles, by Role.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "benchmark": {
+            "type": "string",
+            "description": "The Benchmark it replayed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it started."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The suite."
+          },
+          "infrastructure": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many trials' Runs ended `infrastructure`: left out of the\nsuite's score and tokens rather than counted against its\nconfiguration.",
+            "minimum": 0
+          },
+          "meanScore": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "Their mean score; none until one has."
+          },
+          "scored": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many trials have their result. A trial whose Run ended\n`infrastructure` never had its work run, so it is never among them.",
+            "minimum": 0
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenCounts",
+            "description": "The tokens of the trials that have their result."
+          },
+          "trials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrialInsight"
+            },
+            "description": "Its trials, by task."
+          }
+        }
+      },
+      "SuiteStarted": {
+        "type": "object",
+        "description": "A suite that started.",
+        "required": ["id", "runs"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The suite."
+          },
+          "refused": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RefusedTrial",
+                "description": "The task whose Run was refused, and why: the suite stopped there,\nand the trials before it go on. None when every trial started."
+              }
+            ]
+          },
+          "runs": {
+            "type": "object",
+            "description": "Its trials' Runs, by task.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RunId"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "TaskRunsResponse": {
         "type": "object",
         "description": "A task's Runs, as the caller sees them.",
@@ -4370,6 +6000,71 @@
             "format": "int64",
             "description": "Output tokens.",
             "minimum": 0
+          }
+        }
+      },
+      "TrialInsight": {
+        "type": "object",
+        "description": "One trial of a suite.",
+        "required": ["task", "runId", "scores"],
+        "properties": {
+          "runId": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "Its Run."
+          },
+          "runOutcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunOutcome",
+                "description": "How its Run ended; none while it goes."
+              }
+            ]
+          },
+          "score": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5\nwhen they stayed red, 0 otherwise; none until its Run ended, and\nnone for a Run that ended `infrastructure`, whose work never ran."
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrialScore"
+            },
+            "description": "Its Benchmark's Scorers' judgments."
+          },
+          "task": {
+            "type": "string",
+            "description": "The frozen task."
+          },
+          "tokens": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TokenCounts",
+                "description": "The tokens its agents used; none until its Run ended, and none for a\nRun that ended `infrastructure`."
+              }
+            ]
+          }
+        }
+      },
+      "TrialScore": {
+        "type": "object",
+        "description": "A Scorer's judgment of one trial.",
+        "required": ["scorer", "score"],
+        "properties": {
+          "score": {
+            "type": "number",
+            "format": "double",
+            "description": "From 0 to 1."
+          },
+          "scorer": {
+            "type": "string",
+            "description": "The Scorer."
           }
         }
       },

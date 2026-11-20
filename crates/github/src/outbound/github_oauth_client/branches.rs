@@ -5,10 +5,21 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
 use super::GithubOauthImpl;
+use super::pull_requests::is_repository_part;
 use crate::domain::models::GithubError;
 
 #[cfg(test)]
 mod test;
+
+/// A file GitHub's contents API gives no content for: one over 1 MB. It
+/// is the source of the [`GithubError::Internal`] that answers it, so a
+/// caller can tell it apart.
+#[derive(Debug, thiserror::Error)]
+#[error("the file {path} is over the 1 MB GitHub's contents API gives")]
+pub struct FileTooLarge {
+    /// The file.
+    pub path: String,
+}
 
 /// The most files GitHub lists when it compares two commits.
 const COMPARE_FILES_LISTED: usize = 300;
@@ -17,6 +28,10 @@ const COMPARE_FILES_LISTED: usize = 300;
 struct ContentResponse {
     #[serde(rename = "type")]
     kind: String,
+    /// The path of what GitHub answers with: a symlink's target's, when
+    /// GitHub follows it to a file.
+    #[serde(default)]
+    path: Option<String>,
     #[serde(default)]
     encoding: Option<String>,
     #[serde(default)]
@@ -33,19 +48,14 @@ struct BranchCommit {
     sha: String,
 }
 
-#[derive(serde::Deserialize)]
-struct CommitResponse {
-    parents: Vec<BranchCommit>,
-}
-
-#[derive(serde::Deserialize)]
-struct CompareStatus {
-    status: String,
-}
-
 /// Whether `text` is a commit's full id: 40 hexadecimal digits.
 fn is_commit_id(text: &str) -> bool {
     text.len() == 40 && text.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+#[derive(serde::Deserialize)]
+struct CompareMergeBase {
+    merge_base_commit: BranchCommit,
 }
 
 #[derive(serde::Deserialize)]
@@ -157,12 +167,22 @@ impl GithubOauthImpl {
         if content.kind != "file" {
             return Ok(None);
         }
+        // GitHub follows a symlink to the file it points at and answers with
+        // that file: what is at `path` is a symlink, not a file.
+        if content
+            .path
+            .as_deref()
+            .is_some_and(|answered| answered != path)
+        {
+            return Ok(None);
+        }
 
-        // GitHub gives a file's content in base64, wrapped over lines.
+        // GitHub gives a file's content in base64, wrapped over lines; a file
+        // over the 1 MB its contents API gives comes with none (`none`).
         let (Some("base64"), Some(encoded)) = (content.encoding.as_deref(), content.content) else {
-            return Err(GithubError::Internal(anyhow::anyhow!(
-                "GitHub gave the file {path} with no base64 content"
-            )));
+            return Err(GithubError::Internal(anyhow::Error::new(FileTooLarge {
+                path: path.to_string(),
+            })));
         };
         let encoded: String = encoded.split_whitespace().collect();
         let bytes = STANDARD
@@ -245,51 +265,40 @@ impl GithubOauthImpl {
         Ok(Some(paths))
     }
 
-    /// The parents of the commit `sha`, its first the branch it was made
-    /// on; a commit or repository the user cannot reach is
-    /// [`GithubError::RepositoryUnavailable`].
+    /// The best common ancestor of the commits `base` and `head`, both full
+    /// commit ids: the newest commit both contain. `None` when they share
+    /// no history, or one is not in the repository (GitHub answers 404),
+    /// and for an id that is not a full commit id. An owner or repository
+    /// name GitHub would not take is refused before any request.
     #[tracing::instrument(skip(self, access_token), err)]
-    pub async fn get_commit_parents(
+    pub async fn merge_base(
         &self,
         access_token: &str,
         owner: &str,
         repo: &str,
-        sha: &str,
-    ) -> Result<Vec<String>, GithubError> {
-        let commit: CommitResponse = self
-            .read(
-                access_token,
-                &format!("/repos/{owner}/{repo}/commits/{sha}"),
-                &[],
-                "failed to read a commit",
-            )
-            .await?;
-        Ok(commit
-            .parents
-            .into_iter()
-            .map(|parent| parent.sha)
-            .collect())
-    }
-
-    /// Whether the commit `head` contains the commit `ancestor`: it is that
-    /// commit, or comes after it.
-    #[tracing::instrument(skip(self, access_token), err)]
-    pub async fn commit_contains(
-        &self,
-        access_token: &str,
-        owner: &str,
-        repo: &str,
-        ancestor: &str,
+        base: &str,
         head: &str,
-    ) -> Result<bool, GithubError> {
-        let compared: CompareStatus = self
+    ) -> Result<Option<String>, GithubError> {
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+        if !is_commit_id(base) || !is_commit_id(head) {
+            return Ok(None);
+        }
+        let compared: Result<CompareMergeBase, GithubError> = self
             .read(
                 access_token,
-                &format!("/repos/{owner}/{repo}/compare/{ancestor}...{head}"),
+                &format!("/repos/{owner}/{repo}/compare/{base}...{head}"),
                 &[("per_page", "1")],
                 "failed to compare commits",
             )
-            .await?;
-        Ok(matches!(compared.status.as_str(), "ahead" | "identical"))
+            .await;
+        match compared {
+            Ok(compared) => Ok(Some(compared.merge_base_commit.sha)),
+            Err(GithubError::RepositoryUnavailable) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 }

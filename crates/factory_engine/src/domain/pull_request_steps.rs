@@ -17,11 +17,9 @@
 //! While a Main Hold holds the Run's base, `merge` merges nothing: it waits
 //! for the hold to clear, then ends `held`, which goes back to the merge Gate.
 //!
-//! Once merged, `deploy` waits for the deploy the repository declares
-//! (`deploy`).
+//! Once its pull request merged, the Run's branch is deleted, as GitHub's
+//! "delete branch after merge" does; a Run that ends unmerged keeps it.
 
-mod deploy;
-pub(crate) use deploy::DeployState;
 #[cfg(test)]
 mod test;
 
@@ -35,13 +33,16 @@ use github::domain::models::MacroTaskId;
 
 use crate::domain::checks::CHECKS_FILE;
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
+use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
-    CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
+    BranchDeletion, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest,
+    Opening, PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
     run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
+use crate::domain::setup::SETUP_FILE;
+use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a
 /// Step attempt's 30 minutes, so the Step ends `timeout` rather than failing.
@@ -91,18 +92,6 @@ pub enum PullRequestStepError {
     /// The Run asked no person to merge a commit.
     #[error("the run asked no one to merge a commit")]
     NoMergeHead,
-    /// The Run's pull request is not merged, and a Step after its merge
-    /// runs.
-    #[error("the run's pull request is not merged")]
-    NotMerged,
-    /// GitHub lists the Run's pull request as merged, yet names no commit
-    /// its merge made.
-    #[error("github names no merge commit for the run's merged pull request yet")]
-    NoMergeCommit,
-    /// GitHub names no parent of the Run's merge commit, so the base as it
-    /// was before the merge cannot be read.
-    #[error("github names no parent of the run's merge commit")]
-    NoMergeParent,
     /// GitHub could not be asked.
     #[error("github failed: {report:?}")]
     Github {
@@ -154,18 +143,30 @@ impl Retryable for PullRequestStepError {
     /// failed read or write of the records is the database's.
     fn retryable(&self) -> bool {
         match self {
-            Self::NotListed | Self::NoMergeCommit | Self::Records(_) => true,
+            Self::NotListed | Self::Records(_) => true,
             Self::Github { retryable, .. } | Self::Watch { retryable, .. } => *retryable,
             Self::NoRepository
             | Self::InvalidRepository(_)
             | Self::NoPullRequest
             | Self::NoMergeHead
-            | Self::NotMerged
-            | Self::NoMergeParent
             | Self::ControlFiles(_) => false,
         }
     }
 }
+
+/// Who merged a Run's pull request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Merger {
+    /// The Run's `merge` Step.
+    Run,
+    /// Someone outside the Run, as a person on GitHub; or the Run, on a
+    /// retry whose merge GitHub took though its answer was lost.
+    Outside,
+}
+
+/// How long deleting a merged Run's branch may take, its reads included: a
+/// slow GitHub keeps the branch rather than the merge Step's time.
+const BRANCH_DELETION_WAIT: Duration = Duration::from_secs(60);
 
 /// What a pull request's checks on its head say.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -453,6 +454,19 @@ where
             .map_err(PullRequestStepError::github)
     }
 
+    /// The text of [`SETUP_FILE`] on the Run's base branch, which the
+    /// agent's branch cannot change; none when the base declares no setup.
+    pub(crate) async fn declared_setup(
+        &self,
+        input: &StepInput<'_>,
+    ) -> Result<Option<String>, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        self.github
+            .file_text(input.owner, &repository, &recorded.base_branch, SETUP_FILE)
+            .await
+            .map_err(PullRequestStepError::github)
+    }
+
     /// The commit at the head of the Run's branch on GitHub; none when it
     /// is not there.
     pub(crate) async fn branch_head(
@@ -504,7 +518,24 @@ where
                 .changed_paths(input.owner, repository, &recorded.base_branch, head)
                 .await
                 .map_err(PullRequestStepError::github)?;
-            control_files.changes(changed.as_deref(), input.request, input.created_in_person)
+            // On its team's Definition repository, a change to the
+            // Definition's own files is never one the request asks for: it
+            // changes the rules the factory merges under.
+            let on_definition = input.definition_repo.zip(input.repository).is_some_and(
+                |(definition, repository)| definition.eq_ignore_ascii_case(&repository.url),
+            );
+            let guarded = if on_definition {
+                let patterns = DEFINITION_FILE_PATTERNS.map(str::to_string);
+                Some(ControlFiles::parse(&patterns)?)
+            } else {
+                None
+            };
+            control_files.changes_guarding(
+                changed.as_deref(),
+                input.request,
+                input.created_in_person,
+                guarded.as_ref(),
+            )
         };
         self.repo
             .set_control_file_changes(input.key.run_id, changes.as_ref())
@@ -538,8 +569,107 @@ where
         pull_request: &PullRequest,
     ) -> Result<StepReport, PullRequestStepError> {
         self.merged(input, recorded, pull_request).await?;
+        self.delete_merged_branch(input, &pull_request.head_sha, Merger::Outside)
+            .await;
         let note = self.kept_note(input).await?;
         Ok(report("merged", format!("{}{note}", named(pull_request))))
+    }
+
+    /// Delete the Run's branch once its pull request merged at
+    /// `merged_head`, as GitHub's "delete branch after merge" does. It is
+    /// best effort: the pull request is merged either way, so a failure is
+    /// logged, never the Step's.
+    ///
+    /// Only the Run's own branch is deleted, and only while it is at the
+    /// commit merged, so one pushed to since is kept, and while no open
+    /// pull request is based on it, as deleting it through the API would
+    /// close that pull request, where GitHub's own deletion moves it to the
+    /// base. GitHub deletes a branch on no condition, so both checks race
+    /// the deletion: a push, or a pull request based on the branch, made
+    /// between the reads and the deletion is lost with it, or closed.
+    ///
+    /// A pull request a person merged leaves its branch to GitHub when the
+    /// repository deletes merged branches itself, or when the repository
+    /// can no longer be read.
+    ///
+    /// It takes at most [`BRANCH_DELETION_WAIT`], all its reads included.
+    #[tracing::instrument(
+        name = "factory.delete_run_branch",
+        skip_all,
+        fields(run_id = %input.key.run_id)
+    )]
+    async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
+        let branch = run_branch(input.key.run_id);
+        let deleting = self.delete_branch_at(input, &branch, merged_head, merger);
+        match tokio::time::timeout(BRANCH_DELETION_WAIT, deleting).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::warn!(?error, %branch, "the merged run's branch was not deleted");
+            }
+            Err(_) => {
+                tracing::warn!(%branch, "the merged run's branch was not deleted in time");
+            }
+        }
+    }
+
+    /// [`Self::delete_merged_branch`], with its failure.
+    async fn delete_branch_at(
+        &self,
+        input: &StepInput<'_>,
+        branch: &str,
+        merged_head: &str,
+        merger: Merger,
+    ) -> Result<(), PullRequestStepError> {
+        let (repository, _) = Self::repository(input)?;
+
+        if merger == Merger::Outside {
+            let access = self
+                .github
+                .repository_access(input.owner, &repository)
+                .await
+                .map_err(PullRequestStepError::github)?;
+            let Some(access) = access else {
+                tracing::info!(%branch, "kept the merged run's branch: no access to its repository");
+                return Ok(());
+            };
+            if access.deletes_merged_branches {
+                return Ok(());
+            }
+        }
+
+        // A branch already gone has nothing to delete; one that moved since
+        // the merge holds commits no one merged.
+        let head = self
+            .github
+            .branch_head(input.owner, &repository, branch)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        if head.as_deref() != Some(merged_head) {
+            if head.is_some() {
+                tracing::info!(%branch, "kept the merged run's branch: it moved since");
+            }
+            return Ok(());
+        }
+
+        let based_on = self
+            .github
+            .has_open_pull_request_onto(input.owner, &repository, branch)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        if based_on {
+            tracing::info!(%branch, "kept the merged run's branch: a pull request is based on it");
+            return Ok(());
+        }
+
+        let deletion = self
+            .github
+            .delete_run_branch(input.owner, &repository, input.key.run_id)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        if deletion == BranchDeletion::Deleted {
+            tracing::info!(%branch, "deleted the merged run's branch");
+        }
+        Ok(())
     }
 
     /// The repository the Run works on, and its record.
@@ -552,16 +682,65 @@ where
         Ok((repository, recorded))
     }
 
-    /// The pull request from the Run's branch, if there is one.
+    /// The verify file the Run's base branch holds now, before the Run
+    /// merged: the agent's branch changes it only as a Control File. The
+    /// default when the base has none.
+    pub(crate) async fn base_verify_file(
+        &self,
+        input: &StepInput<'_>,
+    ) -> Result<Result<VerifyFile, VerifyFileError>, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        let text = self
+            .github
+            .file_text(input.owner, &repository, &recorded.base_branch, VERIFY_FILE)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        Ok(VerifyFile::read(text.as_deref()))
+    }
+
+    /// The pull request from the Run's branch, if there is one. The Run
+    /// keeps its page, which the board links to.
     async fn find(
         &self,
         input: &StepInput<'_>,
         repository: &CodeRepository,
     ) -> Result<Option<PullRequest>, PullRequestStepError> {
-        self.github
+        let found = self
+            .github
             .find(input.owner, repository, &run_branch(input.key.run_id))
             .await
-            .map_err(PullRequestStepError::github)
+            .map_err(PullRequestStepError::github)?;
+        if let Some(pull_request) = &found {
+            self.keep_page(input, pull_request, &mut None).await?;
+        }
+        Ok(found)
+    }
+
+    /// Keep `pull_request`'s page on the Run, when GitHub names one. The
+    /// page is how Macro's merge guard finds the Run that opened a pull
+    /// request: without it the pull request reads as no Run's and merges on
+    /// GitHub past the Run's merge Gate. So a write that fails fails the
+    /// Step with a records error, which is retried; the write is idempotent.
+    /// `kept` is the page this Step already kept, if any: a Step that reads
+    /// the pull request again and again, as `ci` does, writes only when the
+    /// page changes, so a records blip mid-wait does not start it over.
+    async fn keep_page(
+        &self,
+        input: &StepInput<'_>,
+        pull_request: &PullRequest,
+        kept: &mut Option<String>,
+    ) -> Result<(), PullRequestStepError> {
+        if !pull_request.url.starts_with("https://")
+            || kept.as_deref() == Some(pull_request.url.as_str())
+        {
+            return Ok(());
+        }
+        self.repo
+            .set_pull_request_url(input.key.run_id, &pull_request.url)
+            .await
+            .map_err(PullRequestStepError::records)?;
+        *kept = Some(pull_request.url.clone());
+        Ok(())
     }
 
     /// Open the Run's pull request, or find the one it opened: `published`,
@@ -622,15 +801,18 @@ where
     }
 
     /// The pull request from the Run's branch with the checks on its head,
-    /// read with one token; all its runs when `required` names any.
+    /// read with one token; all its runs when `required` names any. Its
+    /// page is kept unless `kept` already holds it.
     async fn find_with_checks(
         &self,
         input: &StepInput<'_>,
         repository: &CodeRepository,
         required: Option<&RequiredChecks>,
+        kept: &mut Option<String>,
     ) -> Result<(PullRequest, HeadChecks), PullRequestStepError> {
         let all_runs = required.is_some_and(|required| !required.checks.is_empty());
-        self.github
+        let (pull_request, checks) = self
+            .github
             .find_with_checks(
                 input.owner,
                 repository,
@@ -639,7 +821,9 @@ where
             )
             .await
             .map_err(PullRequestStepError::github)?
-            .ok_or(PullRequestStepError::NoPullRequest)
+            .ok_or(PullRequestStepError::NoPullRequest)?;
+        self.keep_page(input, &pull_request, kept).await?;
+        Ok((pull_request, checks))
     }
 
     /// The checks the base branch requires, as far as they can be read.
@@ -675,9 +859,11 @@ where
         let mut last_green: Option<(String, Vec<String>)> = None;
         // Whether a read could not see the head's Actions runs.
         let mut actions_unread = false;
+        // The page kept by an earlier read of this wait.
+        let mut kept = None;
         loop {
             let (pull_request, checks) = self
-                .find_with_checks(&input, &repository, required.as_ref())
+                .find_with_checks(&input, &repository, required.as_ref(), &mut kept)
                 .await?;
             let head = pull_request.head_sha.clone();
             actions_unread |= checks.actions_unread;
@@ -764,7 +950,7 @@ where
             .map_err(PullRequestStepError::records)?;
         let required = self.required_checks(&input, &repository, recorded).await?;
         let (pull_request, checks) = self
-            .find_with_checks(&input, &repository, required.as_ref())
+            .find_with_checks(&input, &repository, required.as_ref(), &mut None)
             .await?;
 
         match pull_request.state {
@@ -955,6 +1141,7 @@ where
             .map_err(PullRequestStepError::github)?;
         if merging == Merging::Merged {
             self.merged(&input, recorded, &pull_request).await?;
+            self.delete_merged_branch(&input, &head, Merger::Run).await;
         }
         Ok(match merging {
             Merging::Merged => report(

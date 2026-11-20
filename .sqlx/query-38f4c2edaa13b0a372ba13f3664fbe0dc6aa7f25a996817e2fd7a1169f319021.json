@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                left(split_part(btrim(request), E'\\n', 1), $6) AS \"title!\",\n                flow,\n                created_at,\n                outcome,\n                ended_at\n            FROM factory_run\n            WHERE user_id = $1\n              AND created_at >= $2\n              AND created_at < $3\n              AND ($4::text IS NULL OR flow = $4)\n              AND flow IS DISTINCT FROM $7\n            ORDER BY created_at DESC, id DESC\n            LIMIT $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Int8",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "38f4c2edaa13b0a372ba13f3664fbe0dc6aa7f25a996817e2fd7a1169f319021"
+}

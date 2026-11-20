@@ -5,6 +5,7 @@
 //! in the same order, so a replay walks it the same way.
 
 use factory_records::domain::models::Outcome;
+use temporalio_common::error::{ActivityExecutionError, IncomingError, TimeoutError, TimeoutType};
 use temporalio_sdk::workflows::join_all;
 use temporalio_sdk::{
     ActivityCloseTimeouts, ActivityOptions, WorkflowContext, WorkflowTermination,
@@ -18,7 +19,67 @@ use super::{
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
-use crate::inbound::temporal::activities::FactoryActivities;
+use crate::inbound::temporal::activities::{FactoryActivities, INFRASTRUCTURE_FAILURE};
+
+/// Why a Step's work failed for good, as the workflow reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WorkFailure {
+    /// For a machine, quota or network reason: its agents' quota ran out,
+    /// or its attempts ran out of time as their worker was lost.
+    Infrastructure,
+    /// For the work itself, as an agent that ended the Step with an
+    /// outcome it does not offer.
+    Work,
+}
+
+/// Why the activity of a Step's work failed for good, read from its
+/// failure, which the workflow's history keeps, so a replay reads it the
+/// same way. Only what is surely the factory's counts as infrastructure;
+/// when unsure, the failure is the work's. Infrastructure's are: agents out
+/// of quota (`FactoryInfrastructure`), and timeouts no slow agent explains
+/// ([`timeout_failure`]). Attempts whose time ran out after a failure
+/// Temporal retried come back as that last failure, not as a timeout: one
+/// of no known kind, as an agent still at work (`FactoryAgentOverdue`) or a
+/// round of checks that could not go on, is the work's. This decides
+/// whether the workflow asks for the `factory-infrastructure-outcome`
+/// marker, so changing it changes how recorded histories replay.
+pub(super) fn work_failure(error: &ActivityExecutionError) -> WorkFailure {
+    if let Some(timeout) = error.as_timeout() {
+        return timeout_failure(timeout);
+    }
+    match error.cause() {
+        Some(cause) if out_of_quota(cause) => WorkFailure::Infrastructure,
+        _ => WorkFailure::Work,
+    }
+}
+
+/// Whether `failure` is agents out of quota.
+fn out_of_quota(failure: &IncomingError) -> bool {
+    match failure {
+        IncomingError::Application(failure) => failure.type_name() == Some(INFRASTRUCTURE_FAILURE),
+        _ => false,
+    }
+}
+
+/// Why a Step's work timed out. Its worker went quiet (`Heartbeat`), or no
+/// worker took it (`ScheduleToStart`): infrastructure's. An attempt that
+/// ran past its own time (`StartToClose`) may be an agent slower than its
+/// deadline: the work's. A Step whose whole time ran out (`ScheduleToClose`)
+/// reads as its last attempt did, and as infrastructure's when none left a
+/// failure.
+fn timeout_failure(timeout: &TimeoutError) -> WorkFailure {
+    match timeout.timeout_type() {
+        TimeoutType::Heartbeat | TimeoutType::ScheduleToStart => WorkFailure::Infrastructure,
+        TimeoutType::ScheduleToClose => match timeout.cause() {
+            None => WorkFailure::Infrastructure,
+            Some(IncomingError::Timeout(last)) => timeout_failure(last),
+            Some(last) if out_of_quota(last) => WorkFailure::Infrastructure,
+            Some(_) => WorkFailure::Work,
+        },
+        // `StartToClose`, and any kind this code does not know: unsure.
+        _ => WorkFailure::Work,
+    }
+}
 
 /// What a Step's walk and a review round ask of Temporal: their
 /// activities, the Run's Gates, and whether the Run was cancelled.
@@ -40,12 +101,12 @@ pub(super) trait Work {
     /// Record that a Step started.
     async fn start(&self, request: StepRequest) -> Result<StepStart, Self::Failure>;
 
-    /// Run one Step's work.
-    async fn run(&self, request: &StepRequest) -> Result<StepReport, Self::Failure>;
+    /// Run one Step's work, or say why it failed for good.
+    async fn run(&self, request: &StepRequest) -> Result<StepReport, WorkFailure>;
 
     /// Run the reviewers' work at once, and return each one's result in
     /// the order of `requests`.
-    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, Self::Failure>>;
+    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, WorkFailure>>;
 
     /// Record how a Step ended.
     async fn end(&self, ending: StepEnding) -> Result<(), Self::Failure>;
@@ -114,18 +175,18 @@ impl Work for TemporalWork<'_> {
             .await?)
     }
 
-    async fn run(&self, request: &StepRequest) -> Result<StepReport, Self::Failure> {
-        Ok(self
-            .ctx
+    async fn run(&self, request: &StepRequest) -> Result<StepReport, WorkFailure> {
+        self.ctx
             .execute_activity(
                 FactoryActivities::run_step,
                 request.clone(),
                 self.work_options.clone(),
             )
-            .await?)
+            .await
+            .map_err(|error| work_failure(&error))
     }
 
-    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, Self::Failure>> {
+    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, WorkFailure>> {
         // The activities are scheduled in the entry's order and their
         // results read in it, so a replay walks the same way.
         join_all(requests.iter().map(|request| {
@@ -137,7 +198,7 @@ impl Work for TemporalWork<'_> {
         }))
         .await
         .into_iter()
-        .map(|worked| worked.map_err(Into::into))
+        .map(|worked| worked.map_err(|error| work_failure(&error)))
         .collect()
     }
 
@@ -203,3 +264,6 @@ impl Work for TemporalWork<'_> {
             .await?)
     }
 }
+
+#[cfg(test)]
+mod test;

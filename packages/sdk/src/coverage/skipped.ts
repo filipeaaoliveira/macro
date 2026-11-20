@@ -507,8 +507,15 @@ export const factoryExcluded = [
   // The factory's settings are the person's: only their own session
   // changes them, and the web app reads them.
   'getFactoryControlFiles',
+  'getFactoryDefinition',
   'getFactoryInsights',
   'getFactoryStandingRules',
+  // The board is the web app's page of Runs across tasks; an agent reads a
+  // task's Runs and those waiting on the person.
+  'listFactoryBoard',
+  // The Reviews page's lookup of the Runs behind its pull requests; an agent
+  // reads a Run by its task.
+  'findPullRequestRuns',
   // Only the person in their own session makes an Automation, which starts
   // Runs as them later, or switches one on; a webhook's calls come from
   // outside Macro, signed with its secret.
@@ -523,6 +530,9 @@ export const factoryExcluded = [
   // Only the person in their own session sets the Control Files an agent's
   // changes are checked against.
   'setFactoryControlFiles',
+  // Only the person in their own session names the Factory Definition
+  // whose Flows, Agents and rules their team's Runs take.
+  'setFactoryDefinition',
   // Only the person in their own session sets the Standing Rules that
   // answer Gates in a person's place.
   'setFactoryProjectStandingRules',

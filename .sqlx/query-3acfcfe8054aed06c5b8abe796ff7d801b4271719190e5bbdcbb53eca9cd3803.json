@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_improvement_failure f\n            SET improvement_id = $1\n            FROM (\n                SELECT run_id, kind, scorer\n                FROM factory_improvement_failure\n                WHERE team_id = $2 AND improvement_id IS NULL AND lower(repo_url) = lower($3)\n                ORDER BY failed_at, run_id, kind, scorer\n                LIMIT $4\n                FOR UPDATE\n            ) pending\n            WHERE f.run_id = pending.run_id AND f.kind = pending.kind\n                AND f.scorer = pending.scorer\n            RETURNING f.run_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3acfcfe8054aed06c5b8abe796ff7d801b4271719190e5bbdcbb53eca9cd3803"
+}

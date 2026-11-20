@@ -1,11 +1,16 @@
 //! PostgreSQL implementation of the [`RunRepository`] port.
 
 mod automations;
+mod board;
 mod check_rounds;
+mod evaluation;
+mod flaws;
 mod gate_replies;
 mod insights;
 mod main_hold;
 mod review_rounds;
+mod self_improvement;
+mod standing_acts;
 mod standing_rules;
 mod steering;
 #[cfg(test)]
@@ -21,14 +26,15 @@ use uuid::Uuid;
 use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
     AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
-    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
-    InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Repository, Role,
-    Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered,
-    Step, StepEnd, StepKey, StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink,
-    TeamMembership,
+    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, GateModelReading,
+    HandBack, HandedBack, InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold,
+    QueuePlaces, Repository, Role, Run, RunDefinition, RunEnd, RunFlow, RunId, RunInsert,
+    RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered, Step, StepEnd, StepKey,
+    StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
+use flaws::run_flaw;
 
 /// The foreign key from a Run to its task document.
 const TASK_FOREIGN_KEY: &str = "factory_run_task_id_fkey";
@@ -133,6 +139,9 @@ pub enum PgRunRepositoryErr {
     /// A stored Run outcome is not one this code knows.
     #[error("unknown run outcome {0:?}")]
     UnknownRunOutcome(String),
+    /// The board read a place for a Run that this code does not know.
+    #[error("unknown board state {0:?}")]
+    UnknownBoardState(String),
     /// A stored round of checks ended with an outcome this code does not
     /// know.
     #[error("unknown check round outcome {0:?}")]
@@ -151,6 +160,10 @@ pub enum PgRunRepositoryErr {
     /// A stored Run or Step has only part of its end.
     #[error("a stored end has an outcome but no time, or the other way round")]
     PartialEnd,
+    /// A stored Run's flaw lacks its reason or who marked it, or names
+    /// more than one marker.
+    #[error("a stored flaw has only part of its mark")]
+    PartialFlaw,
     /// A verified round's results do not read as each check's name, exit
     /// code and output.
     #[error("a round's check results do not read")]
@@ -175,9 +188,15 @@ pub enum PgRunRepositoryErr {
     /// A stored Automation's trigger kind is not one this code knows.
     #[error("unknown automation trigger kind {0:?}")]
     UnknownTriggerKind(String),
+    /// A stored standing act is not one this code knows.
+    #[error("unknown standing act {0:?}")]
+    UnknownStandingAct(String),
     /// A stored Automation's trigger does not read.
     #[error("a stored automation's trigger does not read: {0}")]
     UnreadableTrigger(serde_json::Error),
+    /// Stored Agents of an arm or a suite do not read as Roles and Agents.
+    #[error("stored agents do not read: {0}")]
+    UnreadableAgents(serde_json::Error),
     /// A stored firing has neither a Run nor a reason it started none, or
     /// a reason this code does not know.
     #[error("a stored automation firing ended without a run or a known reason")]
@@ -197,6 +216,9 @@ pub enum PgRunRepositoryErr {
     /// A stored user id does not read as one.
     #[error("stored user id {0:?} does not read as one")]
     InvalidUserId(String),
+    /// A stored self-improvement Run's state is not one this code knows.
+    #[error("unknown self-improvement state {0:?}")]
+    UnknownImprovementState(String),
     /// A stored Step has passed over a different number of Agents than it
     /// has reasons for.
     #[error("a stored step's passed over agents and their reasons do not pair up")]
@@ -210,14 +232,19 @@ pub enum PgRunRepositoryErr {
     /// A pull request number does not fit its column or its type.
     #[error("a pull request number is out of range")]
     NumberOutOfRange,
+    /// A stored Run has only part of its Factory Definition.
+    #[error("a stored run has only part of its factory definition")]
+    PartialDefinition,
 }
 
 struct RunRow {
     id: Uuid,
     request: String,
     user_id: String,
+    flow: Option<String>,
     created_at: DateTime<Utc>,
     task_id: Option<String>,
+    project_id: Option<Uuid>,
     repo_url: Option<String>,
     base_branch: Option<String>,
     created_in_person: bool,
@@ -232,20 +259,34 @@ struct RunRow {
     automation_id: Option<Uuid>,
     automation_name: Option<String>,
     automation_trigger: Option<String>,
+    definition_repo_url: Option<String>,
+    definition_commit: Option<String>,
+    pull_request_url: Option<String>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
+    flawed_at: Option<DateTime<Utc>>,
+    flawed_by_user_id: Option<String>,
+    flawed_by_scorer: Option<String>,
+    flaw_reason: Option<String>,
 }
 
 impl TryFrom<RunRow> for Run {
     type Error = PgRunRepositoryErr;
 
     fn try_from(row: RunRow) -> Result<Self, Self::Error> {
+        let flaw = run_flaw(
+            row.flawed_at,
+            row.flawed_by_user_id,
+            row.flawed_by_scorer,
+            row.flaw_reason,
+        )?;
         let end = match (row.outcome, row.ended_at) {
             (Some(outcome), Some(ended_at)) => Some(RunEnd {
                 outcome: outcome
                     .parse::<RunOutcome>()
                     .map_err(|_| PgRunRepositoryErr::UnknownRunOutcome(outcome))?,
                 ended_at,
+                flaw,
             }),
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialEnd),
@@ -287,11 +328,13 @@ impl TryFrom<RunRow> for Run {
             request: row.request,
             user_id: MacroUserIdStr::try_from(row.user_id.clone())
                 .map_err(|_| PgRunRepositoryErr::InvalidUserId(row.user_id))?,
+            flow: row.flow,
             created_at: row.created_at,
             task_id: row
                 .task_id
                 .map(|id| Uuid::parse_str(&id).map_err(|_| PgRunRepositoryErr::InvalidTaskId(id)))
                 .transpose()?,
+            project_id: row.project_id,
             repository,
             created_in_person: row.created_in_person,
             control_file_patterns: row.control_file_patterns,
@@ -305,8 +348,14 @@ impl TryFrom<RunRow> for Run {
                 (None, None) => None,
                 _ => return Err(PgRunRepositoryErr::PartialControlFiles),
             },
+            pull_request_url: row.pull_request_url,
             standing_rules,
             automation,
+            definition: match (row.definition_repo_url, row.definition_commit) {
+                (Some(repo_url), Some(commit)) => Some(RunDefinition { repo_url, commit }),
+                (None, None) => None,
+                _ => return Err(PgRunRepositoryErr::PartialDefinition),
+            },
             end,
         })
     }
@@ -338,6 +387,13 @@ struct StepRow {
     stand_in_reason: Option<String>,
     stand_in_confidence: Option<i16>,
     stand_in_until: Option<DateTime<Utc>>,
+    stand_in_declined_pick: Option<String>,
+    stand_in_declined_confidence: Option<i16>,
+    stand_in_declined_reason: Option<String>,
+    asked_back_pick: Option<String>,
+    asked_back_confidence: Option<i16>,
+    asked_back_reason: Option<String>,
+    asked_back_refused_tampered: Option<bool>,
     answered_at: Option<DateTime<Utc>>,
     role: Option<String>,
     agent: Option<String>,
@@ -382,8 +438,18 @@ impl StepRow {
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialGate),
         };
+        let asked_back_reading = reading(
+            self.asked_back_pick.take(),
+            self.asked_back_confidence,
+            self.asked_back_reason.take(),
+        )?;
         let asked_back = match (self.asked_back_reply.take(), self.asked_back_at) {
-            (Some(reply), Some(at)) => Some(AskedBack { reply, at }),
+            (Some(reply), Some(at)) => Some(AskedBack {
+                reply,
+                at,
+                reading: asked_back_reading,
+                refused_tampered: self.asked_back_refused_tampered.unwrap_or(false),
+            }),
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialGate),
         };
@@ -402,6 +468,11 @@ impl StepRow {
             (None, None, None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialGate),
         };
+        let stand_in_declined = reading(
+            self.stand_in_declined_pick.take(),
+            self.stand_in_declined_confidence,
+            self.stand_in_declined_reason.take(),
+        )?;
 
         match (self.question.take(), self.answers.take(), self.opened_at) {
             (Some(question), Some(answers), Some(opened_at)) => Ok(Some(Gate {
@@ -421,6 +492,7 @@ impl StepRow {
                 answer,
                 asked_back,
                 stand_in,
+                stand_in_declined,
             })),
             (None, None, None) if answer.is_none() => Ok(None),
             _ => Err(PgRunRepositoryErr::PartialGate),
@@ -472,7 +544,7 @@ async fn queue_places(
                             AND g.stand_in_answer IS NULL
                     )
                     OR (
-                        r.flow = ANY($2)
+                        COALESCE(r.flow_asks, r.flow = ANY($2))
                         AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)
                     )
                 )
@@ -498,6 +570,24 @@ async fn queue_places(
 /// A stored confidence, which the schema keeps between 0 and 100 percent.
 fn percent(stored: i16) -> Result<u8, PgRunRepositoryErr> {
     u8::try_from(stored).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::from(stored)))
+}
+
+/// The Gate model's stored reading of a Gate: kept when it has a reason,
+/// which is empty when the model did not answer.
+fn reading(
+    pick: Option<String>,
+    confidence: Option<i16>,
+    reason: Option<String>,
+) -> Result<Option<GateModelReading>, PgRunRepositoryErr> {
+    match (pick, confidence, reason) {
+        (pick, confidence, Some(reason)) => Ok(Some(GateModelReading {
+            pick: pick.map(Outcome::try_from).transpose()?,
+            confidence: confidence.map(percent).transpose()?,
+            reason,
+        })),
+        (None, None, None) => Ok(None),
+        _ => Err(PgRunRepositoryErr::PartialGate),
+    }
 }
 
 /// A stored visit or place, which the schema keeps between 1 and 65535.
@@ -600,16 +690,19 @@ impl RunRepository for PgRunRepository {
                 id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
                 standing_rules_project_id, automation_id, automation_name, automation_trigger,
-            automation_firing_key
+                automation_firing_key, definition_repo_url, definition_commit, definition_agents,
+                definition_evaluation, flow_definition, flow_asks, project_id
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                $19, $20, $21, $22, $23, $24
             )
             RETURNING
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -629,6 +722,13 @@ impl RunRepository for PgRunRepository {
             run.automation.map(|start| start.automation.name.as_str()),
             run.automation.map(|start| start.automation.trigger.as_ref()),
             run.automation.map(|start| start.firing_key),
+            run.definition.map(|definition| definition.repo_url),
+            run.definition.map(|definition| definition.commit),
+            run.definition.map(|definition| definition.agents),
+            run.definition.map(|definition| definition.evaluation),
+            run.kept_flow.map(|flow| flow.definition),
+            run.kept_flow.map(|flow| flow.asks),
+            run.project_id,
         )
         .fetch_one(&mut *transaction)
         .await;
@@ -682,6 +782,18 @@ impl RunRepository for PgRunRepository {
             "UPDATE factory_run SET merge_head_sha = $2 WHERE id = $1",
             id.as_uuid(),
             sha,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), Self::Err> {
+        sqlx::query!(
+            "UPDATE factory_run SET pull_request_url = $2 WHERE id = $1",
+            id.as_uuid(),
+            url,
         )
         .execute(&self.pool)
         .await?;
@@ -776,6 +888,101 @@ impl RunRepository for PgRunRepository {
         Ok(patterns.flatten())
     }
 
+    async fn team_definition(&self, team_id: Uuid) -> Result<Option<String>, Self::Err> {
+        let repo_url = sqlx::query_scalar!(
+            "SELECT repo_url FROM factory_team_definition WHERE team_id = $1",
+            team_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(repo_url)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn set_team_definition(
+        &self,
+        team_id: Uuid,
+        repo_url: Option<&str>,
+        named_by: &MacroUserIdStr<'static>,
+    ) -> Result<(), Self::Err> {
+        let mut tx = self.pool.begin().await?;
+        match repo_url {
+            Some(repo_url) => {
+                sqlx::query!(
+                    r#"
+                    INSERT INTO factory_team_definition (team_id, repo_url, named_by_user_id)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (team_id)
+                    DO UPDATE SET repo_url = EXCLUDED.repo_url,
+                        named_by_user_id = EXCLUDED.named_by_user_id, updated_at = now()
+                    "#,
+                    team_id,
+                    repo_url,
+                    named_by.as_ref(),
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            None => {
+                sqlx::query!(
+                    "DELETE FROM factory_team_definition WHERE team_id = $1",
+                    team_id,
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        self::self_improvement::close_other_open(&mut tx, team_id, repo_url).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn run_flow(&self, id: RunId) -> Result<Option<RunFlow>, Self::Err> {
+        let row = sqlx::query!(
+            "SELECT flow, flow_definition FROM factory_run WHERE id = $1",
+            id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| RunFlow {
+            name: row.flow,
+            definition: row.flow_definition,
+        }))
+    }
+
+    async fn runs_flows(&self, ids: &[RunId]) -> Result<BTreeMap<RunId, RunFlow>, Self::Err> {
+        let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let rows = sqlx::query!(
+            "SELECT id, flow, flow_definition FROM factory_run WHERE id = ANY($1)",
+            &ids,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let flow = RunFlow {
+                    name: row.flow,
+                    definition: row.flow_definition,
+                };
+                (RunId::from_uuid(row.id), flow)
+            })
+            .collect())
+    }
+
+    async fn run_definition_agents(
+        &self,
+        id: RunId,
+    ) -> Result<Option<serde_json::Value>, Self::Err> {
+        let agents = sqlx::query_scalar!(
+            "SELECT definition_agents FROM factory_run WHERE id = $1",
+            id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(agents.flatten())
+    }
+
     // The row also keeps the team's Standing Rules: going back to the
     // default patterns clears them from it, and removes a row left with
     // neither setting.
@@ -836,10 +1043,11 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             FROM factory_run
             WHERE id = $1
             "#,
@@ -881,6 +1089,13 @@ impl RunRepository for PgRunRepository {
                 g.stand_in_reason,
                 g.stand_in_confidence,
                 g.stand_in_until,
+                g.stand_in_declined_pick,
+                g.stand_in_declined_confidence,
+                g.stand_in_declined_reason,
+                g.asked_back_pick,
+                g.asked_back_confidence,
+                g.asked_back_reason,
+                g.asked_back_refused_tampered AS "asked_back_refused_tampered?",
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -932,10 +1147,11 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -969,10 +1185,11 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1014,14 +1231,15 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
-                AND r.flow = ANY($2)
+                AND COALESCE(r.flow_asks, r.flow = ANY($2))
                 AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)
             ORDER BY r.created_at DESC, r.id DESC
             LIMIT $3
@@ -1071,6 +1289,13 @@ impl RunRepository for PgRunRepository {
                 g.stand_in_reason,
                 g.stand_in_confidence,
                 g.stand_in_until,
+                g.stand_in_declined_pick,
+                g.stand_in_declined_confidence,
+                g.stand_in_declined_reason,
+                g.asked_back_pick,
+                g.asked_back_confidence,
+                g.asked_back_reason,
+                g.asked_back_refused_tampered AS "asked_back_refused_tampered?",
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -1446,6 +1671,54 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn setup_passed(&self, key: StepKey, session_id: Uuid) -> Result<u16, Self::Err> {
+        let passed = sqlx::query_scalar!(
+            r#"
+            SELECT setup_passed AS "setup_passed!"
+            FROM factory_step
+            WHERE run_id = $1 AND seq = $2 AND setup_session_id = $3
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            session_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        passed
+            .map(|passed| {
+                u16::try_from(passed).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::from(passed)))
+            })
+            .transpose()
+            .map(Option::unwrap_or_default)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_setup_passed(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+        passed: u16,
+    ) -> Result<bool, Self::Err> {
+        // Kept only while the Step holds the session; a session the Step
+        // went on to starts from none, as its setup is its own.
+        let recorded = sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET setup_session_id = $3, setup_passed = $4
+            WHERE run_id = $1 AND seq = $2
+                AND session_id = $3 AND session_released_at IS NULL AND ended_at IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            session_id,
+            i16::try_from(passed).unwrap_or(i16::MAX),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(recorded.rows_affected() == 1)
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn stopping_session(
         &self,
         key: StepKey,
@@ -1722,6 +1995,22 @@ impl RunRepository for PgRunRepository {
         fix_action_id: Uuid,
     ) -> Result<Option<Uuid>, Self::Err> {
         self.fix_check_round(key, round, fix_action_id).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_cancel_sender(&self, id: RunId, in_person: bool) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_run
+            SET cancelled_in_person = cancelled_in_person OR $2
+            WHERE id = $1 AND outcome IS NULL
+            "#,
+            id.as_uuid(),
+            in_person,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self))]

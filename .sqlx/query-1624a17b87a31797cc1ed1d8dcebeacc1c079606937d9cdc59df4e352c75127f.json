@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT user_id, flow, repo_url, definition_repo_url, definition_evaluation, outcome,\n                cancelled_in_person, flaw_reason\n            FROM factory_run\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "definition_repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "definition_evaluation",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "cancelled_in_person",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "flaw_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "1624a17b87a31797cc1ed1d8dcebeacc1c079606937d9cdc59df4e352c75127f"
+}

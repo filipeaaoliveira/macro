@@ -23,13 +23,15 @@ export type RunActionResult<T = undefined> =
 /**
  * Why a Run didn't start. `unreachableRepository` and `noPushAccess` mean the
  * person's linked GitHub account can't reach the repository, or can't push to
- * it.
+ * it; `definitionUnreadable`, that their team's Factory Definition doesn't
+ * read, or they can't reach it.
  */
 export type StartRunFailure =
   | 'failed'
   | 'unreachableRepository'
   | 'noPushAccess'
-  | 'queueFull';
+  | 'queueFull'
+  | 'definitionUnreadable';
 
 /**
  * The person's Runs that hold a place in their Queue, newest first: those
@@ -69,6 +71,12 @@ export type ReplyToGateInput = {
   reply: string;
 };
 
+export type MarkRunFlawedInput = {
+  runId: string;
+  /** Why the Run's result is wrong, in the person's words. */
+  reason: string;
+};
+
 /** What the Run's owner does to a running Step from its Step Terminal. */
 export type SteerStepInput = {
   runId: string;
@@ -85,6 +93,11 @@ export type RunsContext = {
   taskRuns: (taskId: Accessor<string>) => RunsSource<Run[]>;
   /** One Run; kept current until it ends. */
   run: (runId: Accessor<string>) => RunsSource<Run>;
+  /**
+   * The signed-in person's user id: a Run of someone else's, a team
+   * member's they can read, opens without its owner's controls.
+   */
+  viewerId?: Accessor<string | undefined>;
   /** The person's Runs that hold a place in their Queue. */
   waitingRuns: () => RunsSource<RunsQueue>;
   flows: () => RunsSource<Flow[]>;
@@ -101,6 +114,11 @@ export type RunsContext = {
    */
   replyToGate: (input: ReplyToGateInput) => Promise<RunActionResult>;
   cancelRun: (runId: string) => Promise<RunActionResult>;
+  /**
+   * Marks a Run that ended in success flawed, with why, in the person's
+   * name. `conflict` means it did not end in success.
+   */
+  markRunFlawed: (input: MarkRunFlawedInput) => Promise<RunActionResult>;
   /**
    * Sends a running Step's agent a note, pauses, resumes or stops the Step.
    * `conflict` means the Step takes no such steering now: it ended, is

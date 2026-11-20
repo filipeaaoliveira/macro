@@ -50,6 +50,7 @@ function Modal() {
         showActivity: true,
         showPasswords: false,
         showExternal: true,
+        showFactory: true,
         get prefs() {
           return prefs();
         },

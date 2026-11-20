@@ -27,12 +27,15 @@ async fn writing(repo: &PgRunRepository) -> (StepKey, StepSession) {
             request: "Add dark mode",
             user_id: &julia,
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")

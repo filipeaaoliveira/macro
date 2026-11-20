@@ -79,7 +79,7 @@ impl FromStr for RunId {
 
 /// A name a Flow gives something: lowercase letters, digits, `-` and `_`, at
 /// most 64 of them.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 #[error("{kind} {value:?} must be 1 to 64 lowercase letters, digits, - or _")]
 pub struct InvalidName {
     kind: &'static str,
@@ -144,6 +144,12 @@ impl Outcome {
     /// The outcome of a Step that did its work.
     pub fn done() -> Self {
         Self("done".to_string())
+    }
+
+    /// The outcome of a write or fix Step whose repository's checks never
+    /// passed.
+    pub fn red() -> Self {
+        Self("red".to_string())
     }
 
     /// The outcome of a Step that found nothing to change.
@@ -317,6 +323,12 @@ pub enum RunOutcome {
     Failed,
     /// A person cancelled the Run.
     Cancelled,
+    /// A Step's work failed for a machine, quota or network reason, not
+    /// for the work itself, with nowhere to go.
+    Infrastructure,
+    /// The Run ended `success`, and a Scorer or a person found its result
+    /// wrong afterwards.
+    Flawed,
 }
 
 /// A Run that has ended: how, and when.
@@ -327,6 +339,37 @@ pub struct RunEnd {
     pub outcome: RunOutcome,
     /// When it ended.
     pub ended_at: DateTime<Utc>,
+    /// Who found its result wrong, and why: only for a `flawed` Run.
+    pub flaw: Option<RunFlaw>,
+}
+
+/// Who marked a Run flawed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FlawMarker {
+    /// A person: the Run's owner.
+    #[serde(rename_all = "camelCase")]
+    Person {
+        /// Their user id.
+        user_id: MacroUserIdStr<'static>,
+    },
+    /// A Scorer, by its name.
+    Scorer {
+        /// The Scorer's name.
+        name: String,
+    },
+}
+
+/// Why a Run's result was found wrong, by whom, and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunFlaw {
+    /// Who marked the Run flawed.
+    pub by: FlawMarker,
+    /// Why, in their words.
+    pub reason: String,
+    /// When they marked it.
+    pub marked_at: DateTime<Utc>,
 }
 
 /// One Run of a Flow.
@@ -339,11 +382,18 @@ pub struct Run {
     pub request: String,
     /// Who started the Run: its agent Steps run as them.
     pub user_id: MacroUserIdStr<'static>,
+    /// The built-in Flow it walks, by name; none only for a Run recorded
+    /// before Runs kept it.
+    pub flow: Option<String>,
     /// When the Run was created.
     pub created_at: DateTime<Utc>,
     /// The Macro task the Run works on: its task document's id. None when
     /// the Run has no task, or its task was deleted.
     pub task_id: Option<Uuid>,
+    /// The Project (an initiative) its task was in when it was created,
+    /// kept as a record: none without a task or Project, and for a Run
+    /// created before Runs kept it.
+    pub project_id: Option<Uuid>,
     /// The GitHub repository the Run works on; none for a Run that works on
     /// no code.
     pub repository: Option<Repository>,
@@ -362,6 +412,9 @@ pub struct Run {
     /// The Control Files its branch changed, as the pull request Steps last
     /// read them. None when it changed none.
     pub control_files: Option<ControlFileChanges>,
+    /// The page of the pull request its branch proposes its change in, as
+    /// the pull request Steps last found it; none until one is found.
+    pub pull_request_url: Option<String>,
     /// The Standing Rules that answer its Gates, as they were when it was
     /// created; none for a Run created before Runs kept them, whose Gates
     /// all wait for a person.
@@ -369,8 +422,22 @@ pub struct Run {
     /// The Automation that started it, as it was then; none for a Run a
     /// person started.
     pub automation: Option<RunAutomation>,
+    /// The Factory Definition it started under; none when its owner's team
+    /// named none, so it took the factory's built-in Flows and Agents.
+    pub definition: Option<RunDefinition>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
+}
+
+/// The Factory Definition a Run started under: the repository its owner's
+/// team named, at the commit its default branch was at then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunDefinition {
+    /// The repository's `https://github.com/owner/name` URL.
+    pub repo_url: String,
+    /// The commit the Run read the Definition at.
+    pub commit: String,
 }
 
 /// The Control Files a Run's branch changed: files that decide whether the
@@ -439,7 +506,8 @@ pub struct Repository {
 pub struct NewRun<'a> {
     /// Its id, also its Temporal workflow id.
     pub id: RunId,
-    /// The built-in Flow it walks, by name.
+    /// The Flow it walks, by name: a built-in Flow's, or its Factory
+    /// Definition's.
     pub flow: &'a str,
     /// What it is asked to do.
     pub request: &'a str,
@@ -447,6 +515,8 @@ pub struct NewRun<'a> {
     pub user_id: &'a MacroUserIdStr<'static>,
     /// The task document it works on, if any.
     pub task_id: Option<Uuid>,
+    /// The Project its task is in, if any.
+    pub project_id: Option<Uuid>,
     /// The repository it works in, if any.
     pub repository: Option<&'a Repository>,
     /// Whether its owner created it in their own signed-in session.
@@ -461,6 +531,46 @@ pub struct NewRun<'a> {
     /// The Automation that starts it, if one does: then no other Run an
     /// Automation started may be running on its task.
     pub automation: Option<AutomationStart<'a>>,
+    /// The Factory Definition it starts under, if its owner's team names
+    /// one.
+    pub definition: Option<NewRunDefinition<'a>>,
+    /// The Flow it walks, as it starts, kept so what the Run's Gates are is
+    /// read from its own Flow; none only for records written before.
+    pub kept_flow: Option<KeptFlow<'a>>,
+}
+
+/// The Flow a new Run walks, as the Run keeps it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeptFlow<'a> {
+    /// The Flow, as it starts.
+    pub definition: &'a serde_json::Value,
+    /// Whether it has a Gate of its own, so the Run holds a place in its
+    /// owner's Queue before its first Gate.
+    pub asks: bool,
+}
+
+/// The Flow a Run walks, as it keeps it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunFlow {
+    /// The Flow's name; none for a Run of an early local build.
+    pub name: Option<String>,
+    /// The Flow as the Run started it; none for a Run created before Runs
+    /// kept it, which is looked up by its name.
+    pub definition: Option<serde_json::Value>,
+}
+
+/// The Factory Definition a new Run keeps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NewRunDefinition<'a> {
+    /// The repository's `https://github.com/owner/name` URL.
+    pub repo_url: &'a str,
+    /// The commit the Run reads it at.
+    pub commit: &'a str,
+    /// The Agents it holds, as written, which the Run's agent Steps take.
+    pub agents: &'a serde_json::Value,
+    /// Its Scorers, Experiments and Benchmarks, as written, which judge the
+    /// Run once it ends.
+    pub evaluation: &'a serde_json::Value,
 }
 
 /// What keeping a new Run came to.
@@ -587,6 +697,28 @@ pub struct AskedBack {
     pub reply: String,
     /// When the factory asked back.
     pub at: DateTime<Utc>,
+    /// How the Gate model read the words; none for a reply asked back
+    /// before the factory kept it.
+    pub reading: Option<GateModelReading>,
+    /// Whether the words approved a Tampered Run, which only the Approve
+    /// button approves, since it lists the Run's changed Control Files.
+    pub refused_tampered: bool,
+}
+
+/// How the Gate model read a Gate when what it said decided nothing: its
+/// pick, how sure it was and why, so the owner can tell why the factory
+/// asked back or the stand-in left the Gate to them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GateModelReading {
+    /// The answer it picked; none when it could not tell (`unclear`), or
+    /// did not answer.
+    pub pick: Option<Outcome>,
+    /// How sure it was, in percent; none when it did not answer: its call
+    /// failed or took too long.
+    pub confidence: Option<u8>,
+    /// Why, in its words; empty when it did not answer.
+    pub reason: String,
 }
 
 /// The stand-in's answer to a Gate, for the Run's owner: the answer it
@@ -657,6 +789,9 @@ pub struct Gate {
     /// The stand-in's answer for the Run's owner, while the owner may
     /// override it and after; none when the stand-in did not answer.
     pub stand_in: Option<StandInAnswer>,
+    /// How the Gate model read the Gate when the stand-in, asked, left it
+    /// to the owner; none when it was not asked, or answered.
+    pub stand_in_declined: Option<GateModelReading>,
 }
 
 /// The most Steps a Run takes; past it the Run ends `blocked`, so a Flow
@@ -969,6 +1104,11 @@ pub struct CheckRound {
     /// which every round goes by.
     #[serde(skip)]
     pub declared: String,
+    /// The repository's setup file as the Step's first round read it,
+    /// which every round runs in its worktree before the checks; none when
+    /// the base declared no setup.
+    #[serde(skip)]
+    pub setup: Option<String>,
     /// The prompt that asks the agent to run the checks.
     #[serde(skip)]
     pub check_action_id: Uuid,
@@ -995,6 +1135,9 @@ pub struct CheckRoundStart {
     pub commands: Vec<String>,
     /// The repository's checks file as the Step's first round read it.
     pub declared: String,
+    /// The repository's setup file as the Step's first round read it, if
+    /// the base declared one.
+    pub setup: Option<String>,
     /// The prompt, a UUIDv7, that asks the agent to run them.
     pub check_action_id: Uuid,
 }

@@ -15,4 +15,5 @@ export const RulesSource = {
   default: 'default',
   team: 'team',
   project: 'project',
+  definition: 'definition',
 } as const;

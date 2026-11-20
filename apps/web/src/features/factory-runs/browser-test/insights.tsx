@@ -31,6 +31,9 @@ import { RunInsightsView } from '../insights-view';
 document.documentElement.dataset.touchDevice = String(isTouchDevice());
 
 // `?error` fails the first read; `?empty` has no Runs in any period.
+
+/** The person the fixture shows, who owns its Runs. */
+const FIXTURE_OWNER = 'macro|owner@example.com';
 const search = new URLSearchParams(location.search);
 const FAIL_FIRST = search.has('error');
 const EMPTY = search.has('empty');
@@ -44,6 +47,8 @@ const counts = (changes: Partial<OutcomeCounts> = {}): OutcomeCounts => ({
   blocked: 0,
   failed: 0,
   cancelled: 0,
+  infrastructure: 0,
+  flawed: 0,
   ...changes,
 });
 
@@ -54,12 +59,15 @@ const add = (a: OutcomeCounts, b: OutcomeCounts): OutcomeCounts => ({
   blocked: a.blocked + b.blocked,
   failed: a.failed + b.failed,
   cancelled: a.cancelled + b.cancelled,
+  infrastructure: a.infrastructure + b.infrastructure,
+  flawed: a.flawed + b.flawed,
 });
 
 const RUNS: Run[] = [
   {
     id: 'run-ci',
     request: 'Add a due date column to the task list',
+    ownerId: FIXTURE_OWNER,
     createdAt: new Date(+NOW - 2 * DAY).toISOString(),
     end: {
       outcome: 'manual',
@@ -82,6 +90,7 @@ const RUNS: Run[] = [
   {
     id: 'run-review',
     request: 'Fix the empty state of the board',
+    ownerId: FIXTURE_OWNER,
     createdAt: new Date(+NOW - 5 * DAY).toISOString(),
     end: {
       outcome: 'success',
@@ -92,6 +101,7 @@ const RUNS: Run[] = [
   {
     id: 'run-failed',
     request: 'Plan the CSV import',
+    ownerId: FIXTURE_OWNER,
     createdAt: new Date(+NOW - 9 * DAY).toISOString(),
     end: {
       outcome: 'failed',
@@ -118,6 +128,8 @@ function dayCounts(index: number, flow: string): OutcomeCounts {
     blocked: seed === 7 ? 1 : 0,
     failed: seed % 6 === 1 ? 1 : 0,
     cancelled: seed === 9 ? 1 : 0,
+    infrastructure: seed === 10 ? 1 : 0,
+    flawed: flow === 'code' && seed === 2 ? 1 : 0,
     running: index > 27 && seed % 2 === 0 ? 1 : 0,
   });
 }
@@ -371,6 +383,21 @@ function createFixtureInsights(): InsightsContext {
       createEffect(() => read(params()));
       return source;
     },
+    // No Scorer, Experiment or Benchmark is set up in the fixture.
+    evaluation: (params) => ({
+      state: () => 'ready',
+      data: () => ({
+        from: params().from,
+        to: params().to,
+        timeZone: params().timeZone,
+        scorers: [],
+        experiments: [],
+        benchmarks: [],
+        suites: [],
+      }),
+      updating: () => false,
+      retry: () => {},
+    }),
     flowNames: () => ({
       state: () => 'ready',
       data: () => ['plan', 'reply'],
@@ -386,6 +413,7 @@ function createFixtureRuns(): RunsContext {
     retry: () => {},
   });
   return {
+    viewerId: () => FIXTURE_OWNER,
     taskRuns: () => ready(() => RUNS),
     waitingRuns: () => ready(() => ({ waiting: [], starting: [] })),
     run: (runId) => ready(() => RUNS.find((run) => run.id === runId())),
@@ -395,6 +423,7 @@ function createFixtureRuns(): RunsContext {
     answerGate: async () => ({ ok: false, reason: 'failed' }),
     replyToGate: async () => ({ ok: false, reason: 'failed' }),
     cancelRun: async () => ({ ok: false, reason: 'failed' }),
+    markRunFlawed: async () => ({ ok: false, reason: 'failed' }),
     steerStep: async () => ({ ok: false, reason: 'failed' }),
   };
 }

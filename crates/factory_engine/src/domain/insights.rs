@@ -90,6 +90,47 @@ impl InsightsQuery {
         })
     }
 
+    /// The Runs of `actor`'s these insights read: those created from the
+    /// start of the first day to the end of the last, in the time zone.
+    pub(crate) fn scope(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<InsightsScope, InsightsError> {
+        let next_day = self
+            .to
+            .checked_add_days(Days::new(1))
+            .ok_or(InsightsError::InvalidPeriod)?;
+        let from = start_of_day(self.time_zone, self.from).ok_or(InsightsError::InvalidPeriod)?;
+        let to = start_of_day(self.time_zone, next_day).ok_or(InsightsError::InvalidPeriod)?;
+        Ok(InsightsScope {
+            user_id: actor.clone(),
+            from,
+            to,
+            flow: self.flow.clone(),
+            cap: INSIGHTS_RUN_CAP,
+        })
+    }
+
+    /// The period's first day.
+    pub fn from(&self) -> NaiveDate {
+        self.from
+    }
+
+    /// Its last day.
+    pub fn to(&self) -> NaiveDate {
+        self.to
+    }
+
+    /// The time zone its days are in.
+    pub fn time_zone(&self) -> &str {
+        self.time_zone.name()
+    }
+
+    /// The Flow it reads; none for every Flow.
+    pub fn flow(&self) -> Option<&str> {
+        self.flow.as_deref()
+    }
+
     /// Every day of the period, in order.
     fn days(&self) -> impl Iterator<Item = NaiveDate> {
         self.from.iter_days().take_while(|day| *day <= self.to)
@@ -118,10 +159,16 @@ pub struct OutcomeCounts {
     pub manual: u32,
     /// Runs that ran out of visits, or of Steps, with nowhere to go.
     pub blocked: u32,
-    /// Runs that ended failed.
+    /// Runs that ended failed for their work.
     pub failed: u32,
     /// Runs a person cancelled.
     pub cancelled: u32,
+    /// Runs that failed for a machine, quota or network reason: the
+    /// factory's plumbing, not its work.
+    pub infrastructure: u32,
+    /// Runs that succeeded, and whose result a Scorer or a person found
+    /// wrong afterwards.
+    pub flawed: u32,
 }
 
 impl OutcomeCounts {
@@ -133,6 +180,8 @@ impl OutcomeCounts {
             Some(RunOutcome::Blocked) => &mut self.blocked,
             Some(RunOutcome::Failed) => &mut self.failed,
             Some(RunOutcome::Cancelled) => &mut self.cancelled,
+            Some(RunOutcome::Infrastructure) => &mut self.infrastructure,
+            Some(RunOutcome::Flawed) => &mut self.flawed,
         };
         *count += 1;
     }
@@ -391,19 +440,7 @@ where
         actor: &MacroUserIdStr<'static>,
         query: InsightsQuery,
     ) -> Result<RunInsights, InsightsError> {
-        let next_day = query
-            .to
-            .checked_add_days(Days::new(1))
-            .ok_or(InsightsError::InvalidPeriod)?;
-        let from = start_of_day(query.time_zone, query.from).ok_or(InsightsError::InvalidPeriod)?;
-        let to = start_of_day(query.time_zone, next_day).ok_or(InsightsError::InvalidPeriod)?;
-        let scope = InsightsScope {
-            user_id: actor.clone(),
-            from,
-            to,
-            flow: query.flow.clone(),
-            cap: INSIGHTS_RUN_CAP,
-        };
+        let scope = query.scope(actor)?;
         let records = self.repo.read_insights(&scope).await.map_err(internal)?;
 
         let session_ids: Vec<_> = records
@@ -652,4 +689,6 @@ fn total(counts: &OutcomeCounts) -> u32 {
         + counts.blocked
         + counts.failed
         + counts.cancelled
+        + counts.infrastructure
+        + counts.flawed
 }

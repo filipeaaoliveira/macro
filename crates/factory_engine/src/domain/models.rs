@@ -3,20 +3,25 @@
 #[cfg(test)]
 mod test;
 
+use bot_id::BotId;
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
-    EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step, StepKey,
+    EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step,
+    StepKey,
 };
 use factory_records::domain::review_rounds::ReviewRound;
+use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::control_files::ControlFilesError;
+use crate::domain::definition::DefinitionError;
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 use crate::domain::gate_owner::OwnerNote;
+use crate::domain::setup::RepositorySetup;
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
@@ -143,6 +148,9 @@ pub struct StepInput<'a> {
     /// The Control File patterns the Run keeps from its creation; none for
     /// a Run created before Runs kept them, which the default checks.
     pub control_file_patterns: Option<&'a [String]>,
+    /// The repository of the Factory Definition the Run started under, by
+    /// its URL; none when it started under none.
+    pub definition_repo: Option<&'a str>,
     /// The Macro task the Run works on: its task document's id.
     pub task_id: Option<Uuid>,
     /// The repository the Run works on, if it works on one.
@@ -166,6 +174,9 @@ pub struct StepInput<'a> {
     /// Gate opened, oldest first: none unless the Run's owner section is
     /// on.
     pub owner_notes: &'a [OwnerNote],
+    /// The commit the Run's branch starts from, when the Run is a Benchmark
+    /// trial pinned to one; otherwise the branch starts from its base.
+    pub base_commit: Option<&'a str>,
 }
 
 /// What an agent is asked to do for one Step.
@@ -197,6 +208,10 @@ pub struct AgentTask {
     /// owner's answers in it: what a new session is prompted with when the
     /// asking Step's cannot be resumed.
     pub afresh: Option<String>,
+    /// The repository's setup, read from the Run's base, which each new
+    /// session of the Step runs before its first prompt; none when the Run
+    /// works on no repository or its base declares no setup.
+    pub setup: Option<RepositorySetup>,
 }
 
 /// What the Run's owner's Step Terminal asks of the agent session a Step
@@ -318,20 +333,29 @@ pub fn run_branch(run_id: RunId) -> String {
 /// What every Run's branch starts with, before its Run's id.
 pub const RUN_BRANCH_PREFIX: &str = "factory/";
 
-/// Whether `branch` is a Run's branch: the prefix, then a Run's id.
+/// Whether `branch` is a Run's branch: the prefix, then a Run's id written
+/// as [`run_branch`] writes it, hyphenated and in lower case. An id written
+/// another way (upper case, no hyphens, braces, a `urn:uuid:` prefix) is
+/// another branch.
 pub fn is_run_branch(branch: &str) -> bool {
     branch
         .strip_prefix(RUN_BRANCH_PREFIX)
-        .is_some_and(|id| Uuid::parse_str(id).is_ok())
+        .is_some_and(|id| Uuid::parse_str(id).is_ok_and(|uuid| uuid.hyphenated().to_string() == id))
 }
 
 /// What a Run's owner may do with a repository on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositoryAccess {
+    /// Its `owner/name` as GitHub names it now, when GitHub says: another
+    /// than the one asked for when it followed a renamed or transferred
+    /// repository.
+    pub full_name: Option<String>,
     /// The branch it checks out by default.
     pub default_branch: String,
     /// Whether the owner may push to it.
     pub can_push: bool,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub deletes_merged_branches: bool,
 }
 
 /// A pull request as the Run's owner sees it on GitHub.
@@ -345,8 +369,6 @@ pub struct PullRequest {
     pub state: PullRequestState,
     /// The commit its head branch is at.
     pub head_sha: String,
-    /// The commit its merge made on its base; none until it is merged.
-    pub merge_commit: Option<String>,
 }
 
 /// Whether a pull request is open, closed, or merged.
@@ -505,43 +527,13 @@ pub enum Opening {
     Refused(String),
 }
 
-/// A deployment of a commit to an environment, as GitHub has it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Deployment {
-    /// The commit it deploys.
-    pub commit: String,
-    /// How it went, by its newest status.
-    pub state: DeploymentState,
-    /// Where it is reached, as the newest of its statuses that says so
-    /// names it.
-    pub url: Option<String>,
-}
-
-/// How a deployment went, by its newest status.
+/// What asking GitHub to delete a branch came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeploymentState {
-    /// It has no status yet, or is queued, pending or in progress.
-    Waiting,
-    /// It succeeded.
-    Succeeded,
-    /// It succeeded, and a later deployment to its environment has since
-    /// replaced it.
-    Replaced,
-    /// It failed, or ended in error.
-    Failed,
-}
-
-impl DeploymentState {
-    /// The state GitHub's newest status `state` names; none, or a state
-    /// GitHub adds later, is still waiting.
-    pub fn of_status(state: Option<&str>) -> Self {
-        match state {
-            Some("success") => Self::Succeeded,
-            Some("inactive") => Self::Replaced,
-            Some("failure" | "error") => Self::Failed,
-            _ => Self::Waiting,
-        }
-    }
+pub enum BranchDeletion {
+    /// The branch was deleted.
+    Deleted,
+    /// The repository has no such branch, as when it was deleted already.
+    Missing,
 }
 
 /// What asking GitHub to merge a pull request came to.
@@ -621,6 +613,10 @@ pub struct RunDetail {
     pub base_required_checks: Option<RequiredChecksState>,
     /// Its review rounds, in order, each with what its reviewers found.
     pub review_rounds: Vec<ReviewRound>,
+    /// What agents did to it under its Factory Definition's Standing
+    /// Roles, in order: who started, cancelled or linked it, and answered
+    /// its Gates.
+    pub standing_acts: Vec<StandingActRecord>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their
@@ -638,6 +634,37 @@ pub struct ControlFilesSettings {
     /// team.
     pub team_id: Option<Uuid>,
     /// Whether the person may change them: they administer the team.
+    pub can_edit: bool,
+    /// Whether the team names a Factory Definition, whose `rules.json`
+    /// sets its Runs' Control Files in place of these.
+    pub definition_named: bool,
+}
+
+/// The Factory Definition a person's team names: the repository whose
+/// files its Runs take their Flows, Agents and rules from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionSettings {
+    /// The repository's `https://github.com/owner/name` URL; none when the
+    /// team names none, so its Runs take the team's settings and the
+    /// factory's built-in Flows and Agents.
+    pub repo_url: Option<String>,
+    /// The commit of its default branch a Run started now would read,
+    /// when the Definition reads there as the person reaches it.
+    pub commit: Option<String>,
+    /// Why it does not read now, when it does not: the person cannot reach
+    /// it, or a file of it is wrong.
+    pub problem: Option<String>,
+    /// Whether a ruleset or the branch protection of its default branch
+    /// asks for a pull request; none when that cannot be told, as when the
+    /// person does not administer it. Without one, a push changes the
+    /// factory's rules unreviewed. With one, whoever may bypass the rules
+    /// (a ruleset's bypass list, admins when protection does not include
+    /// them) still can: GitHub does not tell the factory who.
+    pub requires_pull_request: Option<bool>,
+    /// The team; none when the person is on no team.
+    pub team_id: Option<Uuid>,
+    /// Whether the person may change it: they administer the team.
     pub can_edit: bool,
 }
 
@@ -658,6 +685,9 @@ pub struct StandingRulesSettings {
     pub team_id: Option<Uuid>,
     /// Whether the person may change them: they administer the team.
     pub can_edit: bool,
+    /// Whether the team names a Factory Definition, whose `rules.json`
+    /// sets its Runs' Standing Rules in place of these and the Projects'.
+    pub definition_named: bool,
 }
 
 /// A Flow a person can start a Run of.
@@ -686,6 +716,24 @@ pub enum Answerer {
         /// The agent session the call came from.
         session_id: Uuid,
     },
+}
+
+/// The agent a program acts as when it starts, cancels or links one of
+/// its owner's Runs: what Standing Roles check. None acts for a person in
+/// their own signed-in session, an internal caller, or a program signed
+/// only for the person (their own API key or token, a routine running as
+/// them with no agent): that is the person acting, which Standing Roles do
+/// not govern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActingAgent {
+    /// Code in an agent session, as the correlation layer validated it
+    /// against the call's credential: its bot acts, when the owner owns
+    /// the session.
+    Session(Uuid),
+    /// Code signed for a bot that runs in no agent session, such as a
+    /// self-hosted agent's code-mode call or a routine's run for an agent:
+    /// the bot its credential is signed for acts.
+    Bot(BotId),
 }
 
 /// What the factory keeps for the Run's owner in person, which an agent
@@ -728,10 +776,25 @@ pub enum PersonOnly {
     OwnersBlockers,
 }
 
+/// Why an agent may not do `act`, naming the Standing Roles that allow it.
+fn standing_refusal(act: StandingAct, allowing: &[StandingRoleName]) -> String {
+    if allowing.is_empty() {
+        return format!(
+            "no standing role of the run's factory definition allows {act}: the run's owner does it"
+        );
+    }
+    let roles: Vec<&str> = allowing.iter().map(StandingRoleName::as_str).collect();
+    format!(
+        "this agent fills no standing role that allows {act}; the standing roles that allow it: {}",
+        roles.join(", ")
+    )
+}
+
 /// Who set a Queue limit, in words.
 fn queue_limit_source(source: RulesSource) -> &'static str {
     match source {
         RulesSource::Project => "the project's standing rules",
+        RulesSource::Definition => "your team's factory definition",
         RulesSource::Team | RulesSource::Default => "your team's standing rules",
     }
 }
@@ -754,6 +817,15 @@ pub enum FactoryError {
     /// No Run has this id.
     #[error("run not found")]
     NotFound,
+    /// A page of the board names half of where it starts.
+    #[error("afterCreatedAt and afterId go together")]
+    HalfCursor,
+    /// A lookup by pull request names more of them than it reads.
+    #[error("at most {max} pull requests are looked up at once")]
+    TooManyPullRequests {
+        /// The most pull requests one lookup names.
+        max: usize,
+    },
     /// No task the Run's owner can see has this id.
     #[error("no task the run's owner can see has this id")]
     UnknownTask,
@@ -781,6 +853,23 @@ pub enum FactoryError {
     /// The Run's owner may read the repository, but not push to it.
     #[error("the run's owner must be able to push to the repository")]
     NoPushAccess,
+    /// The team names a Factory Definition whose repository the caller
+    /// cannot read with their GitHub account, has not connected one for, or
+    /// that has no branch yet.
+    #[error(
+        "the team's factory definition must be in a repository the caller reaches with the GitHub account they connected to Macro"
+    )]
+    UnreachableDefinition,
+    /// The team's Factory Definition does not read at its default branch's
+    /// head.
+    #[error("the team's factory definition does not read: {0}")]
+    InvalidDefinition(DefinitionError),
+    /// The team names a Factory Definition, which sets what was to be
+    /// changed: it changes by pull request to its repository.
+    #[error(
+        "the team's factory definition sets this: change it by a pull request to the definition's repository"
+    )]
+    DefinitionNamed,
     /// The Gate does not offer the answer.
     #[error("the gate offers {offered:?}")]
     AnswerNotOffered {
@@ -858,6 +947,19 @@ pub enum FactoryError {
     /// A note to a Step's agent carries no words.
     #[error("a note must not be empty")]
     EmptyNote,
+    /// Why a Run is flawed is empty, or larger than a Run keeps.
+    #[error("why the run is flawed must not be empty, and must be at most {max} bytes")]
+    FlawReasonSize {
+        /// The most bytes a reason may hold.
+        max: usize,
+    },
+    /// The Scorer marking a Run flawed is not named as a Flow names things.
+    #[error(transparent)]
+    InvalidScorer(InvalidName),
+    /// The Run did not end `success`, so it cannot be flawed: it still
+    /// runs, or ended another way.
+    #[error("only a run that ended in success can be marked flawed")]
+    NotSucceeded,
     /// The Step takes no steering now, and says why.
     #[error("the step takes no steering now: {}", steer_refusal_message(*.0))]
     NotSteerable(SteerRefusal),
@@ -875,6 +977,16 @@ pub enum FactoryError {
     /// for the owner in person.
     #[error(transparent)]
     ReservedForAPerson(#[from] PersonOnly),
+    /// An agent acting for the Run's owner tried an act no Standing Role
+    /// its bot fills allows, under a Factory Definition with Standing
+    /// Roles.
+    #[error("{}", standing_refusal(*act, allowing))]
+    NotInStandingRole {
+        /// The act it tried.
+        act: StandingAct,
+        /// The Standing Roles that allow the act.
+        allowing: Vec<StandingRoleName>,
+    },
     /// The person holds as many places in their Queue as the Queue limit of
     /// the rules a new Run of theirs would start under: Runs waiting on
     /// them at a Gate or a question, and Runs of a Flow with a Gate that
@@ -986,6 +1098,15 @@ pub enum StepError {
     /// The Step's work failed in a way trying again would repeat.
     #[error("the step's work failed for good: {0:?}")]
     Final(rootcause::Report),
+    /// The Step's agent was still at work on its turn when the wait for it
+    /// ended: a retry waits on the same turn. Past the Step's time it is the
+    /// work's failure, not the factory's.
+    #[error("the step's agent was still at work when the wait ended: {0:?}")]
+    Overdue(rootcause::Report),
+    /// The quota of the Agents that fill the Step's Role ran out: trying
+    /// again would repeat the refusal, and the work never started.
+    #[error("the step's agents are out of quota: {0:?}")]
+    OutOfQuota(rootcause::Report),
     /// Any other internal error.
     #[error("internal step error: {0:?}")]
     Internal(rootcause::Report),

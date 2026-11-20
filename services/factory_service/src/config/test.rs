@@ -46,4 +46,22 @@ fn the_review_rounds_and_questions_are_read() {
     assert_eq!(gates.factory_stand_in_threshold, Some(95));
     assert_eq!(gates.factory_stand_in_window_secs, Some(300));
     assert_eq!(unset.factory_gate_model, "anthropic/claude-haiku-5-5");
+
+    let evaluation = read(
+        r#","FACTORY_SCORER_MODEL":"anthropic/claude-haiku-4-5","FACTORY_EVALUATION":"{\"scorers\":[{\"name\":\"correctness\",\"instructions\":\"Does it do what was asked?\",\"samplePercent\":10}]}""#,
+    )
+    .expect("reads");
+    assert_eq!(
+        evaluation.factory_scorer_model,
+        "anthropic/claude-haiku-4-5"
+    );
+    let scorers = evaluation.factory_evaluation.expect("a definition");
+    assert_eq!(scorers.scorers()[0].name, "correctness");
+    assert_eq!(scorers.scorers()[0].sample_percent, 10);
+    assert!(unset.factory_evaluation.is_none());
+    assert_eq!(unset.factory_scorer_model, "anthropic/claude-haiku-5-5");
+    let unsampled = read(
+        r#","FACTORY_EVALUATION":"{\"scorers\":[{\"name\":\"correctness\",\"instructions\":\"x\",\"samplePercent\":101}]}""#,
+    );
+    assert!(unsampled.is_err());
 }

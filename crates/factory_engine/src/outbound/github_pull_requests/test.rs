@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use factory_records::domain::models::RunId;
 use github::domain::models::GithubError;
 use github::outbound::github_oauth_client::GithubOauthImpl;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -10,7 +11,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{GithubPullRequests, GithubPullRequestsErr, OwnerTokens};
-use crate::domain::models::{CodeRepository, HeadChecks};
+use crate::domain::models::{BranchDeletion, CodeRepository, HeadChecks};
 use crate::domain::ports::{PullRequests, Retryable};
 
 /// An owner's linked token, or none, counting the reads of it.
@@ -62,6 +63,37 @@ async fn an_owner_with_no_link_fails_for_good() {
     assert!(!error.retryable());
     assert!(matches!(checked, Err(GithubPullRequestsErr::NotLinked)));
     assert_eq!(tokens.reads.load(Ordering::SeqCst), 3);
+}
+
+/// The branch deleted is the Run's, named from its id: no other name
+/// reaches GitHub.
+#[tokio::test]
+async fn a_run_s_branch_is_deleted_by_its_id() {
+    let run_id = RunId::generate();
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path(format!(
+            "/repos/macro/app/git/refs/heads/factory/{run_id}"
+        )))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let github = GithubPullRequests::with_client(
+        Tokens {
+            linked: Some("token"),
+            ..Tokens::default()
+        },
+        GithubOauthImpl::with_api_base_url(server.uri()),
+    );
+
+    let deletion = github
+        .delete_run_branch(&julia(), &repository(), run_id)
+        .await
+        .expect("deleted");
+
+    assert_eq!(deletion, BranchDeletion::Deleted);
+    server.verify().await;
 }
 
 /// GitHub failing or throttling, and a token that could not be read, are

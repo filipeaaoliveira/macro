@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   durationIn,
   type EntryInsight,
+  flawedRate,
+  infrastructureRate,
   insightsParams,
   type OutcomeCounts,
   successRate,
@@ -15,6 +17,8 @@ const counts = (changes: Partial<OutcomeCounts>): OutcomeCounts => ({
   blocked: 0,
   failed: 0,
   cancelled: 0,
+  infrastructure: 0,
+  flawed: 0,
   ...changes,
 });
 
@@ -47,6 +51,32 @@ describe('successRate', () => {
 
   it('has no rate while no run ended on its own', () => {
     expect(successRate(counts({ running: 2, cancelled: 1 }))).toBeUndefined();
+  });
+
+  it('leaves infrastructure failures out, and counts flawed runs against it', () => {
+    // Two failed for infrastructure are left out; one flawed counts: 3 of 5.
+    const rate = successRate(
+      counts({ success: 3, flawed: 1, failed: 1, infrastructure: 2 })
+    );
+
+    expect(rate).toBe(0.6);
+  });
+});
+
+describe('outcome kinds', () => {
+  it('measures flawed runs among those that reached their end', () => {
+    expect(flawedRate(counts({ success: 3, flawed: 1, failed: 4 }))).toBe(0.25);
+    expect(flawedRate(counts({ failed: 2 }))).toBeUndefined();
+  });
+
+  it('measures infrastructure failures among runs that ended on their own', () => {
+    // The cancelled run is left out: 1 of 4.
+    const rate = infrastructureRate(
+      counts({ success: 2, failed: 1, infrastructure: 1, cancelled: 1 })
+    );
+
+    expect(rate).toBe(0.25);
+    expect(infrastructureRate(counts({ running: 1 }))).toBeUndefined();
   });
 });
 

@@ -245,46 +245,104 @@ async fn a_missing_file_at_a_commit_is_none() {
     );
 }
 
+/// A symlink GitHub follows to a file answers with that file's path: what
+/// is at the path asked for is no file. A file over the 1 MB GitHub's
+/// contents API gives comes with no content, which reads as too large.
 #[tokio::test]
-async fn a_commit_s_parents_are_read_first_first() {
-    let (server, client) = answering(
+async fn a_followed_symlink_is_no_file_and_a_large_one_is_too_large() {
+    let (linked, client) = answering(
         "200 OK",
-        r#"{"sha":"m","parents":[{"sha":"base"},{"sha":"branch"}]}"#,
+        r#"{"type":"file","path":"elsewhere/rules.json","encoding":"base64","content":"e30="}"#,
     );
-
-    let parents = client
-        .get_commit_parents("token", "macro", "app", "m")
+    let followed = client
+        .get_file_text("token", "macro", "definition", "main", "rules.json")
         .await
         .unwrap();
+    linked.finish();
 
-    assert_eq!(parents, ["base", "branch"]);
+    let (large, client) = answering(
+        "200 OK",
+        r#"{"type":"file","path":"agents.json","encoding":"none","content":""}"#,
+    );
+    let too_large = client
+        .get_file_text("token", "macro", "definition", "main", "agents.json")
+        .await;
+    large.finish();
+
+    assert_eq!(followed, None);
+    let Err(GithubError::Internal(error)) = too_large else {
+        panic!("a large file is an error: {too_large:?}");
+    };
     assert!(
-        server
-            .finish()
-            .starts_with("GET /repos/macro/app/commits/m HTTP/1.1")
+        error.downcast_ref::<super::FileTooLarge>().is_some(),
+        "{error}"
     );
 }
 
-/// A commit contains another when it is that commit or comes after it,
-/// never when it is behind or beside it.
 #[tokio::test]
-async fn a_commit_contains_those_it_comes_after() {
-    for (status, contains) in [
-        ("ahead", true),
-        ("identical", true),
-        ("behind", false),
-        ("diverged", false),
-    ] {
-        let (server, client) = answering("200 OK", &format!(r#"{{"status":"{status}"}}"#));
-        let read = client
-            .commit_contains("token", "macro", "app", "merged", "later")
+async fn two_commits_merge_base_is_read_from_their_comparison() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"status":"diverged","merge_base_commit":{"sha":"3333333333333333333333333333333333333333"}}"#,
+    );
+    let main_head = "1111111111111111111111111111111111111111";
+    let trial_head = "2222222222222222222222222222222222222222";
+    let base = client
+        .merge_base("token", "macro", "app", main_head, trial_head)
+        .await
+        .unwrap();
+    assert_eq!(
+        base.as_deref(),
+        Some("3333333333333333333333333333333333333333")
+    );
+    assert!(server.finish().starts_with(&format!(
+        "GET /repos/macro/app/compare/{main_head}...{trial_head}?per_page=1 HTTP/1.1"
+    )));
+
+    // Commits sharing no history, or one GitHub does not have: no base.
+    let (unrelated, client) = answering("404 Not Found", r#"{"message":"No common ancestor"}"#);
+    assert_eq!(
+        client
+            .merge_base("token", "macro", "app", main_head, trial_head)
             .await
-            .unwrap();
-        assert_eq!(read, contains, "{status}");
+            .unwrap(),
+        None
+    );
+    unrelated.finish();
+
+    // An id that is not a full commit id is never sent.
+    let (_unused, client) = answering("200 OK", "{}");
+    assert_eq!(
+        client
+            .merge_base("token", "macro", "app", "main", trial_head)
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+/// An owner or repository name GitHub would not take is refused before any
+/// request, as `..` would move the comparison off the repository.
+#[tokio::test]
+async fn merge_base_refuses_an_owner_or_repository_github_would_not_take() {
+    // Nothing listens here: a request sent would fail as an outage.
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+    let main_head = "1111111111111111111111111111111111111111";
+    let trial_head = "2222222222222222222222222222222222222222";
+
+    for (owner, repo) in [
+        ("..", "app"),
+        ("macro", "."),
+        ("", "app"),
+        ("macro/x", "app"),
+        ("macro", "app?x"),
+    ] {
+        let refused = client
+            .merge_base("token", owner, repo, main_head, trial_head)
+            .await;
         assert!(
-            server
-                .finish()
-                .starts_with("GET /repos/macro/app/compare/merged...later?per_page=1 HTTP/1.1")
+            matches!(refused, Err(GithubError::Internal(_))),
+            "{owner:?}/{repo:?}: {refused:?}"
         );
     }
 }

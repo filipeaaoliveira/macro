@@ -4,7 +4,19 @@ export type RunOutcome =
   | 'manual'
   | 'blocked'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'infrastructure'
+  | 'flawed';
+
+/**
+ * Why a Run that succeeded was found wrong afterwards: who marked it (its
+ * owner, or a Scorer by its name), why, and when.
+ */
+export type RunFlaw = {
+  by: { kind: 'person'; userId: string } | { kind: 'scorer'; name: string };
+  reason: string;
+  markedAt: string;
+};
 
 /** A Standing Rule: an answer the factory gives a kind of Gate on its own. */
 export type StandingRule = 'approve_plan' | 'fix_blockers' | 'merge_when_green';
@@ -29,6 +41,11 @@ export type GateAnswer = {
   byStandIn?: boolean;
   /** Whether the Orchestrator, the owner's agent in chat, gave it. */
   byOrchestrator?: boolean;
+  /**
+   * The Agent that gave it and the Standing Role that let it, under a
+   * Factory Definition with Standing Roles.
+   */
+  standing?: { agent: string; standingRole: string };
   answeredAt: string;
 };
 
@@ -42,6 +59,17 @@ export type StandInAnswer = {
   /** In percent. */
   confidence: number;
   until: string;
+};
+
+/**
+ * How the Gate model read a Gate when what it said decided nothing: the
+ * answer it picked (none when it couldn't tell), how sure it was, in
+ * percent, and why. Without a confidence the model didn't answer.
+ */
+export type GateModelReading = {
+  pick?: string;
+  confidence?: number;
+  reason: string;
 };
 
 /**
@@ -59,10 +87,21 @@ export type Gate = {
   answers: string[];
   openedAt: string;
   answer?: GateAnswer;
-  /** The person's latest words the factory couldn't read as an answer. */
-  askedBack?: { reply: string; at: string };
+  /**
+   * The person's latest words the factory couldn't read as an answer, how
+   * the Gate model read them, and whether they approved a Tampered Run,
+   * which only the Approve button does.
+   */
+  askedBack?: {
+    reply: string;
+    at: string;
+    reading?: GateModelReading;
+    refusedTampered: boolean;
+  };
   /** The stand-in's answer, while the owner may override it and after. */
   standIn?: StandInAnswer;
+  /** How the Gate model read the Gate when the stand-in left it to the owner. */
+  standInDeclined?: GateModelReading;
 };
 
 /**
@@ -277,6 +316,36 @@ export type AutomationTriggerKind =
   | 'webhook'
   | 'task_event';
 
+/**
+ * The Factory Definition a Run started under: its repository, and the
+ * commit of its default branch the Run read.
+ */
+export type RunDefinition = {
+  repoUrl: string;
+  commit: string;
+};
+
+/** An act a Standing Role allows an agent to do for a Run's owner. */
+export type StandingAct =
+  | 'start'
+  | 'cancel'
+  | 'link'
+  | 'answer_plan'
+  | 'answer_blockers';
+
+/**
+ * What an agent did to a Run under a Standing Role of its Factory
+ * Definition: the act, the Gate's Step for an answer, the Agent and the
+ * Standing Role, and when.
+ */
+export type RunStandingAct = {
+  act: StandingAct;
+  seq?: number;
+  agent: string;
+  standingRole: string;
+  at: string;
+};
+
 /** The Automation that started a Run, as it was then. */
 export type RunAutomation = {
   id: string;
@@ -288,13 +357,26 @@ export type Run = {
   id: string;
   request: string;
   createdAt: string;
+  /** Its owner, by user id: the person its agent Steps run as. */
+  ownerId?: string;
+  /** The built-in Flow it walks, by name. */
+  flow?: string;
+  /** Whether its owner started it in their own signed-in session. */
+  createdInPerson?: boolean;
   taskId?: string;
+  /** The Project its task was in when it started. */
+  projectId?: string;
+  /** The page of the pull request its branch proposes its change in. */
+  pullRequestUrl?: string;
   repository?: RunRepository;
   /** The Automation that started it; none for a Run a person started. */
   automation?: RunAutomation;
+  /** The Factory Definition it started under; none for the built-in Flows. */
+  definition?: RunDefinition;
   /** The Control Files its branch changed, if any. */
   controlFiles?: ControlFileChanges;
-  end?: { outcome: RunOutcome; endedAt: string };
+  /** How and when it ended, and for a flawed Run, why. */
+  end?: { outcome: RunOutcome; endedAt: string; flaw?: RunFlaw };
   steps: RunStep[];
   /** While the Run is at its merge and its base branch is red. */
   mainHold?: MainHold;
@@ -305,6 +387,8 @@ export type Run = {
   baseRequiredChecks?: BaseRequiredChecks;
   /** Its review rounds, in order; none for a Run with no review panel. */
   reviewRounds?: ReviewRound[];
+  /** What agents did to it under its Definition's Standing Roles, in order. */
+  standingActs?: RunStandingAct[];
 };
 
 /** A Flow a person can start a Run of. */

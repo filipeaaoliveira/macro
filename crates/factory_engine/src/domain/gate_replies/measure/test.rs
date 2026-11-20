@@ -20,6 +20,7 @@ fn plan_gate(answer: &str, note: Option<&str>, kind: GateKind) -> AnsweredGate {
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
         owner: MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid"),
         flow: Some("code".to_string()),
+        flow_definition: None,
         request: "Fix the login bug".to_string(),
         kind,
         question: "Approve this plan?".to_string(),
@@ -120,6 +121,10 @@ async fn the_threshold_is_the_lowest_with_no_wrong_pick() {
     assert_eq!(report.replies.threshold(), Some(80));
     assert_eq!(report.stand_in.failed, ENOUGH_GATES);
     assert_eq!(report.stand_in.threshold(), None);
+    // A replay's usage is no Run's: every call names none.
+    let runs = model.runs.lock().expect("runs").clone();
+    assert_eq!(runs.len(), 2 * ENOUGH_GATES);
+    assert!(runs.iter().all(Option::is_none), "{runs:?}");
 }
 
 /// Only a built-in Flow's plan and Blockers Gates are measured for the
@@ -142,6 +147,26 @@ fn the_stand_in_is_measured_on_routine_gates_only() {
     );
     assert_eq!(super::stand_in_kind(&merge), None);
     assert_eq!(super::stand_in_kind(&unknown), None);
+}
+
+/// A Gate's kind is its Run's own Flow's, as the Run kept it: an entry
+/// `plan` that asks to merge is never measured for the stand-in.
+#[test]
+fn the_stand_in_reads_the_kind_of_the_run_s_own_flow() {
+    let kept = serde_json::json!({
+        "entries": [{
+            "id": "plan",
+            "step": "ready_to_merge",
+            "gate": { "kind": "merge", "question": "Merge?", "answers": ["approve", "revise"] },
+            "on": {}
+        }]
+    });
+    let merging = AnsweredGate {
+        flow_definition: Some(kept),
+        ..plan_gate("approve", None, GateKind::Flow)
+    };
+
+    assert_eq!(super::stand_in_kind(&merging), None);
 }
 
 /// A threshold with no wrong pick is set only from enough Gates the model

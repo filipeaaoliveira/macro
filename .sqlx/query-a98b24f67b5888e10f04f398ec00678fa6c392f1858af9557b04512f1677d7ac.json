@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_improvement_failure SET dismissed_at = now()\n            WHERE improvement_id = $1 AND addressed_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a98b24f67b5888e10f04f398ec00678fa6c392f1858af9557b04512f1677d7ac"
+}

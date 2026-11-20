@@ -7,7 +7,9 @@ use std::num::NonZeroU8;
 
 use database_env_vars::DatabaseUrl;
 use factory_engine::domain::agents::AgentDefinition;
+use factory_engine::domain::evaluation::EvaluationDefinition;
 use factory_engine::outbound::fast_gate_model::DEFAULT_GATE_MODEL;
+use factory_engine::outbound::model_run_judge::DEFAULT_SCORER_MODEL;
 use macro_auth::InternalApiKey;
 use macro_env::Environment;
 use macro_env_var::env_vars;
@@ -67,6 +69,14 @@ pub struct Config {
     /// How long, in seconds, the owner may override the stand-in's answer
     /// (`FACTORY_STAND_IN_WINDOW_SECS`); ten minutes when unset.
     pub factory_stand_in_window_secs: Option<u64>,
+    /// The workspace's Scorers, Experiments and Benchmarks, as JSON
+    /// (`FACTORY_EVALUATION`). Unset, no Run is judged, split or replayed.
+    pub factory_evaluation: Option<EvaluationDefinition>,
+    /// The model the Scorers judge with (`FACTORY_SCORER_MODEL`), a model id
+    /// Macro's model router knows; Claude Haiku 5.5
+    /// ([`DEFAULT_SCORER_MODEL`]) when unset.
+    #[macro_config_default(String::from(DEFAULT_SCORER_MODEL))]
+    pub factory_scorer_model: String,
     /// The retired `FACTORY_AGENT_ID`, read only to refuse it: set without
     /// `FACTORY_AGENTS`, the service does not start, and its error names
     /// `FACTORY_AGENTS`.

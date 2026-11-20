@@ -1,19 +1,28 @@
 //! Ports (trait contracts) of the factory's use cases.
 
+use std::collections::BTreeSet;
+
+mod evaluation;
 mod gate_replies;
 
+pub use evaluation::{JudgeQuestion, JudgeVerdict, RunJudge, ScoringService};
 pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::Automation;
+use factory_records::domain::evaluation::TrialKey;
 use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey, StepSession};
+use factory_records::domain::standing_acts::StandingActor;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::agents::AgentDefinition;
 use crate::domain::automations::{
     AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
 };
+use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
+use crate::domain::evaluation::TeamEvaluation;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
@@ -21,11 +30,11 @@ use crate::domain::gate::{
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
-    AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
-    ControlFilesSettings, Deployment, FactoryError, FlowSummary, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
-    RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError,
-    StepInput, StepReport, StepRequest, StepStart,
+    ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
+    CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
+    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks,
+    RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
+    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -104,9 +113,22 @@ pub trait AgentFailure: Retryable {
         false
     }
 
+    /// Whether the agent was still at work on its turn when the wait for it
+    /// ended: its own slowness, which a retry waits on, not the factory's.
+    fn overdue(&self) -> bool {
+        false
+    }
+
     /// The agent's last message, when it stopped without handing back a
     /// result even once reminded: the Step then waits for its Run's owner.
     fn stopped_without_result(&self) -> Option<&str> {
+        None
+    }
+
+    /// What the Run's owner is shown when the repository's setup failed, or
+    /// could not run, in a new session before its first prompt: the Step
+    /// then ends `failed` with it.
+    fn setup_failed(&self) -> Option<&str> {
         None
     }
 }
@@ -114,7 +136,7 @@ pub trait AgentFailure: Retryable {
 /// Does the work of a Flow's Steps.
 pub trait StepExecutor: Send + Sync + 'static {
     /// The error type returned when a Step's work fails.
-    type Err: std::error::Error + Retryable + Send + Sync + 'static;
+    type Err: std::error::Error + AgentFailure + Send + Sync + 'static;
 
     /// How it does `step`'s work, if it does.
     fn serves(&self, step: &StepName) -> Option<StepUse>;
@@ -233,11 +255,24 @@ pub trait StepAgent: Send + Sync + 'static {
     }
 }
 
+/// Why GitHub will not give a file, however often it is asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileRefusal {
+    /// It is over the 1 MB GitHub's contents API gives.
+    TooLarge,
+    /// GitHub refuses the owner the file.
+    Refused,
+}
+
 /// Pull requests on GitHub, read and changed as a Run's owner, with the
 /// GitHub account they connected to Macro.
 pub trait PullRequests: Send + Sync + 'static {
     /// The error type returned when GitHub cannot be asked.
     type Err: std::error::Error + Retryable + Send + Sync + 'static;
+
+    /// Why `error`, from [`Self::file_text`], is GitHub refusing that file
+    /// for good; none when it is any other failure.
+    fn file_refusal(error: &Self::Err) -> Option<FileRefusal>;
 
     /// What `owner` may do with `repository`: none when they cannot reach
     /// it, have connected no GitHub account, or it has no branch yet.
@@ -290,6 +325,16 @@ pub trait PullRequests: Send + Sync + 'static {
         base: &str,
     ) -> impl Future<Output = Result<Option<RequiredChecks>, Self::Err>> + Send;
 
+    /// Whether a change reaches `branch` of `repository` only through a
+    /// pull request, by its rulesets or branch protection; none when
+    /// `owner` cannot tell.
+    fn requires_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<Option<bool>, Self::Err>> + Send;
+
     /// The text of the file at `path` on `branch` of `repository`; none
     /// when the branch holds no file there.
     fn file_text(
@@ -330,36 +375,15 @@ pub trait PullRequests: Send + Sync + 'static {
         head: &str,
     ) -> impl Future<Output = Result<Option<Vec<ChangedFile>>, Self::Err>> + Send;
 
-    /// The newest `count` deployments of `repository` to `environment`,
-    /// newest first: of the commit `sha` only, when given.
-    fn deployments(
+    /// The newest commit both `base` and `head` of `repository` contain;
+    /// none when they share no history or one is not in the repository.
+    fn merge_base(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
-        sha: Option<&str>,
-        environment: &str,
-        count: u8,
-    ) -> impl Future<Output = Result<Vec<Deployment>, Self::Err>> + Send;
-
-    /// The first parent of the commit `sha` of `repository`: for a merge
-    /// commit, the base branch as it was before the merge. None for a
-    /// commit with no parent.
-    fn first_parent(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        repository: &CodeRepository,
-        sha: &str,
-    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
-
-    /// Whether the commit `head` of `repository` contains the commit
-    /// `ancestor`: it is that commit, or comes after it.
-    fn contains(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        repository: &CodeRepository,
-        ancestor: &str,
+        base: &str,
         head: &str,
-    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(
@@ -378,6 +402,25 @@ pub trait PullRequests: Send + Sync + 'static {
         number: u64,
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
+
+    /// Whether an open pull request of `repository` is based on `branch`.
+    fn has_open_pull_request_onto(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Ask GitHub to delete the branch of the Run `run_id` in
+    /// `repository` ([`run_branch`](crate::domain::models::run_branch)), or
+    /// find it missing. It takes a Run, not a name, so no other branch can
+    /// be deleted through it.
+    fn delete_run_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<BranchDeletion, Self::Err>> + Send;
 }
 
 /// Asks the watch of a base branch's checks, which sets and clears its
@@ -428,8 +471,9 @@ pub trait GateNotifier: Send + Sync + 'static {
     fn notify(&self, notice: GateNotice) -> impl Future<Output = ()> + Send;
 
     /// Mark the notification `notification_id` of `owner` done: its Gate
-    /// was answered. One never sent changes nothing; one that cannot be
-    /// marked is logged and left.
+    /// was answered. One not created yet is withdrawn, so it never is,
+    /// which leaves a withdrawal behind: call it only for a notice that may
+    /// have gone out. One that cannot be marked is logged and left.
     fn answered(
         &self,
         owner: &MacroUserIdStr<'static>,
@@ -603,6 +647,14 @@ pub trait TaskDirectory: Send + Sync + 'static {
         task: &TaskDocumentId,
     ) -> impl Future<Output = Result<TaskAccess, Self::Err>> + Send;
 
+    /// Which of the documents `document_ids` `user_id` may view, asked in
+    /// one check; whether each is a task the caller reads elsewhere.
+    fn viewable_documents(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        document_ids: &[Uuid],
+    ) -> impl Future<Output = Result<BTreeSet<Uuid>, Self::Err>> + Send;
+
     /// The Project (an initiative) the task document `task_id` is in, as
     /// its Project property names it and `user_id` sees it; none when it is
     /// in none, or `user_id` no longer sees it.
@@ -669,16 +721,25 @@ pub struct FollowUpTask {
 /// Inbound service port: the Run API used by drivers (HTTP). Every call but
 /// a hand back is made for an acting user, and reaches only that user's Runs.
 pub trait FactoryService: Send + Sync + 'static {
-    /// The built-in Flows a Run can be started of: those that name only
-    /// Steps the worker serves.
-    fn list_flows(&self) -> Vec<FlowSummary>;
+    /// The Flows `actor` can start a Run of: their team's Factory
+    /// Definition's, read at its default branch's head, when the team names
+    /// one; else the built-in Flows that name only Steps the worker serves.
+    fn list_flows(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Vec<FlowSummary>, FactoryError>> + Send;
 
-    /// Record `actor`'s new Run of the built-in Flow named `flow` for
+    /// Record `actor`'s new Run of the Flow named `flow` (their team's
+    /// Factory Definition's when it names one, else a built-in Flow) for
     /// `request`, working on the task document `task_id` if one is given,
     /// and on the GitHub repository `repo_url` if the Flow works on one,
     /// and start it. The actor must have an account, see the task, and
     /// reach the repository with their GitHub account. `in_person` says
     /// whether they create it in their own signed-in session.
+    /// `acting` is the agent that creates it for them, when one does
+    /// ([`ActingAgent`]): under a Definition with Standing Roles, its bot
+    /// must fill one that allows `start`.
+    #[expect(clippy::too_many_arguments, reason = "each is a part of one start")]
     fn create_run(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -687,9 +748,11 @@ pub trait FactoryService: Send + Sync + 'static {
         task_id: Option<Uuid>,
         repo_url: Option<String>,
         in_person: bool,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
-    /// `actor`'s Run and the Steps it took. Reading a Run whose workflow
+    /// `actor`'s Run and the Steps it took, or a team member's on a task
+    /// `actor` can see, which only its owner acts on. Reading a Run whose workflow
     /// never started, once it is old enough that a started one would have
     /// taken a Step, ends it `failed`: the one read that writes.
     fn get_run(
@@ -731,13 +794,37 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<Vec<RunDetail>, FactoryError>> + Send;
 
+    /// A page of the board: the Runs `filter` names that `actor` can see,
+    /// newest first, each with its Steps and where it is. A team's board
+    /// lists the members' Runs only on tasks `actor` can see.
+    fn board(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        filter: BoardFilter,
+    ) -> impl Future<Output = Result<BoardPage, FactoryError>> + Send;
+
+    /// The Runs that opened the pull requests at `urls`, as the board shows
+    /// them: for each pull request, the newest such Run `actor` can see on
+    /// their team's board, in `urls`' order. A Run `actor` cannot see reads
+    /// as no Run. At most [`PULL_REQUESTS_MAX`] pull requests.
+    ///
+    /// [`PULL_REQUESTS_MAX`]: crate::domain::board::PULL_REQUESTS_MAX
+    fn pull_request_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        urls: Vec<String>,
+    ) -> impl Future<Output = Result<PullRequestRuns, FactoryError>> + Send;
+
     /// Link `actor`'s Run to the task document `task_id`, replacing any task
-    /// it had. The actor must see the task.
+    /// it had. The actor must see the task. For the agent `acting`, on a
+    /// Run whose Definition has Standing Roles, its bot must fill one that
+    /// allows `link`.
     fn link_task(
         &self,
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         task_id: Uuid,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// The Step of one of `actor`'s Runs that works, or worked, in the agent
@@ -779,7 +866,9 @@ pub trait FactoryService: Send + Sync + 'static {
     /// `answerer` says who gives it: the actor in person, or an agent
     /// session answering for them, which may answer only what a Standing
     /// Rule could and never what the factory keeps for a person
-    /// ([`PersonOnly`](crate::domain::models::PersonOnly)).
+    /// ([`PersonOnly`](crate::domain::models::PersonOnly)), and, on a Run
+    /// whose Definition has Standing Roles, only a plan or Blockers Gate
+    /// its bot fills a Standing Role for.
     #[expect(clippy::too_many_arguments, reason = "each is a part of one answer")]
     fn answer_gate(
         &self,
@@ -806,6 +895,22 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: MacroUserIdStr<'static>,
         patterns: Option<Vec<String>>,
     ) -> impl Future<Output = Result<ControlFilesSettings, FactoryError>> + Send;
+
+    /// The Factory Definition `actor`'s team names, and whether it reads at
+    /// its default branch's head as `actor` reaches it.
+    fn definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<DefinitionSettings, FactoryError>> + Send;
+
+    /// Name `repo_url` as the Factory Definition of `actor`'s team, once it
+    /// reads at its default branch's head as `actor` reaches it; none names
+    /// none. The actor must administer the team.
+    fn set_definition(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        repo_url: Option<String>,
+    ) -> impl Future<Output = Result<DefinitionSettings, FactoryError>> + Send;
 
     /// The Standing Rules `actor`'s Runs are created with: their team's
     /// Orchestrator Definition, or the factory's default, and the team's
@@ -853,12 +958,28 @@ pub trait FactoryService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<bool, FactoryError>> + Send;
 
     /// Cancel `actor`'s Run. Cancelling a Run that ended cancelled changes
-    /// nothing.
+    /// nothing. For the agent `acting`, on a Run whose Definition has
+    /// Standing Roles, its bot must fill one that allows `cancel`. The Run
+    /// keeps whether its cancel came from its owner `in_person` (and from
+    /// an account that is not an agent's): only theirs rejects a
+    /// self-improvement Run.
     fn cancel_run(
         &self,
         actor: &MacroUserIdStr<'static>,
         id: RunId,
+        acting: Option<ActingAgent>,
+        in_person: bool,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Mark `actor`'s Run flawed, for `reason`, in their own name: it
+    /// ended `success`, and its result was found wrong afterwards. Marking
+    /// a flawed Run again keeps its first mark.
+    fn mark_run_flawed(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        reason: &str,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// Check that `actor` could start a Run of the built-in Flow named
     /// `flow` on the repository `repo_url`, as [`Self::create_run`] checks:
@@ -877,12 +998,83 @@ pub trait FactoryService: Send + Sync + 'static {
     /// keeping which Automation started it. `TaskBusy` when a Run another
     /// Automation started runs on the task, `FiringRepeated` when the
     /// firing started one already.
+    ///
+    /// The agent `acting`, when one fires it (a routine run for an agent),
+    /// starts it as for [`Self::create_run`]: under a Definition with
+    /// Standing Roles, its bot must fill one that allows `start`. The
+    /// schedule, an event and a webhook fire it as its creator.
     fn create_automation_run(
         &self,
         automation: &Automation,
         firing_key: &str,
         request: String,
         task_id: Option<Uuid>,
+        acting: Option<ActingAgent>,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// The commit a Benchmark's trials on `repo_url` start from unless a
+    /// task pins one: the head of its default branch, read as `actor`, who
+    /// must reach the repository and may push to it, as each trial's Run
+    /// checks again.
+    fn benchmark_base(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> impl Future<Output = Result<String, FactoryError>> + Send;
+
+    /// The Scorers, Experiments and Benchmarks of `actor`'s team's Factory
+    /// Definition, with the Agents it holds, read at its head as `actor`;
+    /// none when the team names no Definition, so the deployment's apply.
+    fn team_evaluation(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Option<TeamEvaluation>, FactoryError>> + Send;
+
+    /// Who starts Runs for `actor` as the agent `acting`, under the Agents
+    /// `agents` of `actor`'s team's Definition, by its Standing Roles, as
+    /// [`Self::create_run`] checks its `start`: none for the person, an
+    /// internal caller, or a Definition with no Standing Roles. Fails with
+    /// `NotInStandingRole` when no Standing Role the agent's bot fills
+    /// allows `start`. A suite checks it once, before it keeps anything.
+    fn standing_start(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        agents: Option<&AgentDefinition>,
+        acting: Option<ActingAgent>,
+    ) -> impl Future<Output = Result<Option<StandingActor>, FactoryError>> + Send;
+
+    /// Record and start a Benchmark trial's Run of the built-in Flow
+    /// `flow`, owned by `actor`, who started its suite: as
+    /// [`Self::create_run`] for a Run on no task, kept as `trial` before
+    /// its workflow starts, so its Steps run on the suite's configuration
+    /// and its write starts from `base_commit`. `started_by`, the agent
+    /// [`Self::standing_start`] let start the suite, is kept as the
+    /// trial's start; its Standing Roles are not checked again.
+    #[expect(clippy::too_many_arguments, reason = "each is a part of one trial")]
+    fn create_trial_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        flow: String,
+        request: String,
+        repo_url: String,
+        trial: TrialKey,
+        base_commit: String,
+        started_by: Option<StandingActor>,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// Record and start the self-improvement Run `improvement`, kept as
+    /// starting, of the built-in `improve` Flow on the team's Definition
+    /// repository `repo_url`, owned by `actor`, for `request`: as
+    /// [`Self::create_run`] for a Run on no task that its owner did not
+    /// start in person, kept as the improvement's Run before its workflow
+    /// starts. The repository must be the Definition `actor`'s team names,
+    /// and its Agents must fill the Flow's Roles.
+    fn create_improvement_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        request: String,
+        repo_url: String,
+        improvement: Uuid,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 }
 
@@ -963,12 +1155,14 @@ pub trait AutomationService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// Fire the Automation the routine `routine_id` fires, from one of its
-    /// runs, which acts as `actor`.
+    /// runs, which acts as `actor`, or as the agent `acting` for them when
+    /// the run is an agent's.
     fn fire_from_routine(
         &self,
         actor: &MacroUserIdStr<'static>,
         routine_id: Uuid,
         firing: RoutineFiring,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<FiringResult, FactoryError>> + Send;
 
     /// Fire the webhook Automation `id` from a call whose `body` is signed
@@ -1053,12 +1247,12 @@ pub trait StepService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<RuleAnswer>, StepError>> + Send;
 
     /// Tell the Run's owner that the Gate of the Step `key` waits on them,
-    /// when the Run's owner section is on and nothing answered it yet.
+    /// unless the Run's definition is quiet or something answered it.
     /// Telling them again is the same notification.
     fn notify_gate(&self, key: StepKey) -> impl Future<Output = Result<(), StepError>> + Send;
 
-    /// Tell the Run's owner what a notify-only Gate says, when the Run's
-    /// owner section is on, and post it to the task's thread, when its
+    /// Tell the Run's owner what a notify-only Gate says, when the Run
+    /// works on a task, and post it to the task's thread, when its
     /// task thread section is on; the Run goes on either way. Telling them
     /// again is the same notification and the same comment.
     fn tell_gate(&self, telling: GateTelling)

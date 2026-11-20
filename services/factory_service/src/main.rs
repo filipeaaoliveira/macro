@@ -21,6 +21,9 @@ use entity_access::outbound::PgAccessRepository;
 use factory_engine::domain::agents::AgentDefinition;
 use factory_engine::domain::automations::service::AutomationServiceImpl;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
+use factory_engine::domain::evaluation::EvaluationDefinition;
+use factory_engine::domain::evaluation::insights::EvaluationServiceImpl;
+use factory_engine::domain::evaluation::service::ScoringServiceImpl;
 use factory_engine::domain::gate_replies::GateReplySettings;
 use factory_engine::domain::gate_replies::service::GateRepliesImpl;
 use factory_engine::domain::insights::InsightsServiceImpl;
@@ -28,10 +31,14 @@ use factory_engine::domain::main_hold::MainWatchServiceImpl;
 use factory_engine::domain::ports::StepAgent;
 use factory_engine::domain::pull_request_steps::PullRequestSteps;
 use factory_engine::domain::review_rounds::ReviewRoundsImpl;
+use factory_engine::domain::self_improvement::{ImprovingScoring, SelfImprovementServiceImpl};
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::domain::session_agent::SessionAgent;
 use factory_engine::inbound::automations::{
     AutomationsApiDoc, AutomationsRouterState, automations_router,
+};
+use factory_engine::inbound::evaluation::{
+    EvaluationApiDoc, EvaluationRouterState, evaluation_router,
 };
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
 use factory_engine::inbound::insights::{InsightsApiDoc, InsightsRouterState, insights_router};
@@ -45,6 +52,7 @@ use factory_engine::outbound::fast_gate_model::FastGateModel;
 use factory_engine::outbound::github_pull_requests::GithubPullRequests;
 use factory_engine::outbound::ingress_gate_notifier::IngressGateNotifier;
 use factory_engine::outbound::local_agent::LocalAgent;
+use factory_engine::outbound::model_run_judge::{ModelRunJudge, checked_scorer_model};
 use factory_engine::outbound::routine_automation_triggers::RoutineAutomationTriggers;
 use factory_engine::outbound::temporal_main_watches::TemporalMainWatches;
 use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
@@ -68,6 +76,7 @@ use notification::domain::service::{
 use notification::outbound::queue::SqsQueue;
 use notification::outbound::repository::DbNotificationRepository;
 use notification::outbound::sns_endpoint::SnsEndpointManagerAdapter;
+use notification::outbound::withdrawal::PgNotificationWithdrawal;
 use sqlx::postgres::PgPoolOptions;
 use temporalio_client::{Client, ClientOptions, ConnectionOptions};
 use temporalio_sdk::Runtime;
@@ -156,12 +165,30 @@ async fn run() -> Result<(), rootcause::Report> {
     )?;
     let gates = GateRepliesImpl::new(
         repo.clone(),
-        FastGateModel::new(config.factory_gate_model.clone(), recorder),
+        FastGateModel::new(config.factory_gate_model.clone(), recorder.clone()),
         gate_settings,
     );
+    // The agent Steps run as the Run's owner in sessions of the Agents each
+    // Role takes, which must fill every Role a built-in Flow names. Without
+    // them, they run on the local stand-in, which does no work. An
+    // Experiment's arms, and a suite's configuration, name only its Agents.
+    let agents =
+        AgentDefinition::configured(config.factory_agents, config.factory_agent_id.as_deref())?;
+    let evaluation = Arc::new(EvaluationDefinition::configured(
+        config.factory_evaluation,
+        agents.as_ref(),
+    )?);
     let parts = Parts {
         port: config.port,
         gates,
+        // Scorers judge with a small model on Macro's model router, as the
+        // Gate model does, billed to no one.
+        judge: ModelRunJudge::new(
+            checked_scorer_model(config.factory_scorer_model.clone())?,
+            recorder,
+        ),
+        evaluation,
+        agents: agents.clone(),
         review_rounds: config.factory_review_rounds,
         questions: config.factory_questions,
         repo: repo.clone(),
@@ -177,10 +204,13 @@ async fn run() -> Result<(), rootcause::Report> {
         // A Run whose task thread section is on posts its updates to its
         // task as its owner.
         task_thread: DocumentTaskThread::new(documents, AppServiceUrl::new()?.as_ref()),
+        // A self-improvement Run's request links the failing Runs there.
+        app_url: AppServiceUrl::new()?.as_ref().to_string(),
         // A Gate left for a person tells the Run's owner through the
         // notification ingress, as every Macro producer notifies; once it
         // is answered, the notifications' reader marks it done and clears
-        // its push, as the owner marking it done would.
+        // its push, as the owner marking it done would, and one the ingress
+        // has not created yet is withdrawn, so it never is.
         gate_notifier: IngressGateNotifier::new(
             Arc::new(SqsNotificationIngress {
                 queue: SqsQueue::new(
@@ -203,6 +233,7 @@ async fn run() -> Result<(), rootcause::Report> {
                 },
                 realtime: NoopNotificationRealtimePublisher,
             }),
+            Arc::new(PgNotificationWithdrawal(db.clone())),
         ),
         // A schedule's, a repository event's and a Task event's Automation
         // is a routine of its creator's, made through the scheduler with
@@ -222,11 +253,6 @@ async fn run() -> Result<(), rootcause::Report> {
         TemporalMainWatches::new(parts.client.clone()),
     );
 
-    // The agent Steps run as the Run's owner in sessions of the Agents each
-    // Role takes, which must fill every Role a built-in Flow names. Without
-    // them, they run on the local stand-in, which does no work.
-    let agents =
-        AgentDefinition::configured(config.factory_agents, config.factory_agent_id.as_deref())?;
     match agents {
         Some(agents) => {
             let sessions = AgentSessionClient::new(
@@ -248,6 +274,9 @@ async fn run() -> Result<(), rootcause::Report> {
 struct Parts {
     port: u16,
     gates: GateRepliesImpl<PgRunRepository, FastGateModel>,
+    judge: ModelRunJudge,
+    evaluation: Arc<EvaluationDefinition>,
+    agents: Option<AgentDefinition>,
     review_rounds: Option<std::num::NonZeroU8>,
     questions: Option<u8>,
     repo: PgRunRepository,
@@ -258,8 +287,13 @@ struct Parts {
     hold_tasks: DocumentHoldTasks,
     task_notes: DocumentTaskNotes,
     task_thread: DocumentTaskThread,
-    gate_notifier: IngressGateNotifier<SqsNotificationIngress<SqsQueue>, NotificationReader>,
+    gate_notifier: IngressGateNotifier<
+        SqsNotificationIngress<SqsQueue>,
+        NotificationReader,
+        PgNotificationWithdrawal,
+    >,
     automation_triggers: RoutineAutomationTriggers,
+    app_url: String,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
     correlation: CorrelationState,
@@ -289,6 +323,30 @@ async fn serve<A: StepAgent + Clone>(
     >,
 ) -> Result<(), rootcause::Report> {
     let runtime = Runtime::from_current_tokio(Default::default())?;
+    let mut service = FactoryServiceImpl::new(
+        parts.repo.clone(),
+        TemporalRunWorkflows::new(parts.client.clone()),
+        steps.clone(),
+        parts.users,
+        parts.tasks.clone(),
+        parts.github.clone(),
+    );
+    if let Some(rounds) = parts.review_rounds {
+        service = service.with_review_rounds(rounds);
+    }
+    if let Some(questions) = parts.questions {
+        service = service.with_questions(questions);
+    }
+    let service = Arc::new(service.with_evaluation(parts.evaluation.clone()));
+    // Once a Run ended and was scored, its team's failures under its
+    // Definition may start a self-improvement Run, through the Run API as
+    // the Definition's namer.
+    let self_improvement = SelfImprovementServiceImpl::new(
+        parts.repo.clone(),
+        service.clone(),
+        parts.github.clone(),
+        &parts.app_url,
+    );
     // A review round reads the Run's branch on GitHub, and makes a task of
     // each finding outside the diff it reviewed.
     let reviews = ReviewRoundsImpl::new(
@@ -314,25 +372,30 @@ async fn serve<A: StepAgent + Clone>(
                 parts.github.clone(),
                 parts.hold_tasks,
             ),
+            scoring: ImprovingScoring::new(
+                ScoringServiceImpl::new(
+                    parts.repo.clone(),
+                    parts.judge,
+                    parts.usage.clone(),
+                    parts.github.clone(),
+                    parts.evaluation.clone(),
+                ),
+                self_improvement,
+            ),
         },
     )?;
 
     let insights = Arc::new(InsightsServiceImpl::new(parts.repo.clone(), parts.usage));
-    let mut service = FactoryServiceImpl::new(
+    // A Benchmark suite starts its trials through the Run API, as their
+    // starter. A trial's Flow has no Gate, so the Queue holds no place for
+    // it: a suite is held instead by the records, to one running suite of
+    // a Benchmark and `MAX_OPEN_TRIALS` running trials per person.
+    let evaluation = Arc::new(EvaluationServiceImpl::new(
         parts.repo.clone(),
-        TemporalRunWorkflows::new(parts.client),
-        steps,
-        parts.users,
-        parts.tasks,
-        parts.github,
-    );
-    if let Some(rounds) = parts.review_rounds {
-        service = service.with_review_rounds(rounds);
-    }
-    if let Some(questions) = parts.questions {
-        service = service.with_questions(questions);
-    }
-    let service = Arc::new(service);
+        service.clone(),
+        parts.evaluation,
+        parts.agents,
+    ));
     // Automations start their Runs through the Run API, as their creators,
     // which holds each creator's Queue to its limit.
     let automations = Arc::new(AutomationServiceImpl::new(
@@ -350,12 +413,17 @@ async fn serve<A: StepAgent + Clone>(
     )))
     .merge(automations_router(AutomationsRouterState::new(
         automations,
+        parts.authorization_state.clone(),
+    )))
+    .merge(evaluation_router(EvaluationRouterState::new(
+        evaluation,
         parts.authorization_state,
     )))
     .merge(health::router());
     let mut openapi = ApiDoc::openapi();
     openapi.merge(InsightsApiDoc::openapi());
     openapi.merge(AutomationsApiDoc::openapi());
+    openapi.merge(EvaluationApiDoc::openapi());
     // The correlation layer finds the agent session behind a code-mode
     // credential, and holds a scoped session to its scope.
     let app = traced(mount_at_root_and_prefix(api))

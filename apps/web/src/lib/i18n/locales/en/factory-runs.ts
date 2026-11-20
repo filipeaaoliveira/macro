@@ -16,6 +16,21 @@ export default {
   outcomeBlocked: 'Blocked',
   outcomeFailed: 'Failed',
   outcomeCancelled: 'Cancelled',
+  outcomeInfrastructure: 'Infrastructure failure',
+  outcomeFlawed: 'Flawed',
+  // Marking a run flawed.
+  markFlawed: 'Mark flawed',
+  markFlawedTitle: 'Mark this run flawed?',
+  markFlawedBody:
+    'Its result is wrong even though it ended done. Insights count it as flawed. A flawed mark can’t be taken back.',
+  flawReasonTooLong: 'The reason must be at most {{max}} bytes.',
+  flawReason: 'What’s wrong with the result',
+  keepDone: 'Keep as done',
+  markFlawedFailed: 'Couldn’t mark the run flawed',
+  markFlawedConflict: 'Only a run that ended done can be marked flawed',
+  flawed: 'Why it’s flawed',
+  flawedByPerson: 'Marked flawed by its owner, {{time}}',
+  flawedByScorer: 'Marked flawed by the {{scorer}} scorer, {{time}}',
   startedAt: 'Started {{time}}',
   endedAt: 'Ended {{time}}',
   // Starting a Run.
@@ -46,6 +61,8 @@ export default {
   queueFull:
     'Your queue is full: as many of your runs wait on you, or have yet to ask you anything, as this project’s queue limit allows. Answer some in Waiting on you, or cancel one listed there that you no longer need, then start the run.',
   openWaitingOnYou: 'Open Waiting on you',
+  definitionUnreadable:
+    'Your team’s factory definition doesn’t read, or your linked GitHub account can’t reach its repository. Team settings say why.',
   // A Run.
   runDetails: 'Run details',
   closeRun: 'Close run',
@@ -53,6 +70,8 @@ export default {
   request: 'Request',
   repository: 'Repository',
   repositoryFrom: '{{repository}}, from {{branch}}',
+  definition: 'Factory definition',
+  definitionAt: '{{repository}} at {{commit}}',
   steps: 'Steps',
   noSteps: 'No steps yet',
   stepVisit: '{{entry}} · visit {{visit}}',
@@ -95,6 +114,7 @@ export default {
   checksVerifiedOn: 'Run on pushed commit {{commit}}',
   checksReported: 'Reported by the agent',
   checkExited: '{{check}} exited {{code}}',
+  setupExited: 'setup {{command}} exited {{code}}',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:
@@ -115,6 +135,8 @@ export default {
   answeredByRule: 'Answered by the standing rule “{{rule}}”: {{answer}}',
   answeredByStandIn: 'Answered for you by the stand-in: {{answer}}',
   answeredByOrchestrator: 'Answered by your Orchestrator: {{answer}}',
+  answeredByStandingAgent:
+    'Answered by agent {{agent}} as {{role}}: {{answer}}',
   answeredFromReply:
     'Answered from your reply ({{confidence}}% sure): {{answer}}',
   sendReply: 'Send as reply',
@@ -125,6 +147,12 @@ export default {
     'The stand-in answered {{answer}} for you ({{confidence}}% sure)',
   standInWindow:
     'The run goes on with it at {{time}}, unless you answer first.',
+  standInDeclined: 'The stand-in left this one to you.',
+  modelLeaned: 'It leaned toward {{answer}} ({{confidence}}% sure).',
+  modelCouldNotTell: 'It couldn’t tell which answer fits.',
+  askedBackTampered:
+    'This run changed its Control Files, so approving it needs the Approve button, which lists them.',
+  modelDidNotAnswer: 'It didn’t answer.',
   ruleApprovePlan: 'Approve plans',
   ruleFixBlockers: 'Fix review blockers',
   ruleMergeWhenGreen: 'Merge when CI is green',
@@ -160,6 +188,32 @@ export default {
     'An empty list checks no file: a run may then change its tests or CI unseen.',
   controlFilesSaved: 'Control files saved',
   controlFilesSaveFailed: 'Couldn’t save the control files',
+  // A team's Factory Definition, in team settings.
+  definitionRepository: 'Definition repository',
+  definitionPlaceholder: 'https://github.com/owner/name',
+  definitionLoading: 'Loading the factory definition…',
+  definitionLoadFailed: 'The factory definition couldn’t be loaded',
+  definitionNone:
+    'Your team names no definition: runs use Macro’s built-in flows and agents, and the settings below.',
+  definitionReads: 'Runs started now read it at {{commit}}.',
+  definitionProblem: 'It doesn’t read: {{problem}}',
+  definitionHowTo:
+    'Runs take their flows, agents, rules and control files from this repository’s default branch, and keep the commit they read. Change it by pull request; the settings below no longer apply.',
+  definitionNoPullRequest:
+    'Its default branch doesn’t require a pull request: a push changes your factory’s rules unreviewed. Protect the branch on GitHub.',
+  definitionPullRequestRequired:
+    'GitHub asks for a pull request on its default branch. Anyone allowed to bypass that rule can still push to it.',
+  definitionPullRequestUnknown:
+    'Couldn’t tell whether its default branch requires a pull request: only its admins can read that. Make sure it does.',
+  definitionAdminsOnly: 'Only team admins can change it.',
+  definitionSave: 'Save',
+  definitionRemove: 'Stop using it',
+  definitionSaved: 'Factory definition saved',
+  definitionSaveFailed: 'Couldn’t save the factory definition',
+  controlFilesFromDefinition:
+    'Your team’s factory definition sets the control files its runs are checked against, in its rules.json. Change them by pull request there.',
+  standingRulesFromDefinition:
+    'Your team’s factory definition sets the standing rules its runs start with, in its rules.json. Change them by pull request there.',
   // A team's Standing Rules, in team settings.
   standingRulesLoading: 'Loading standing rules…',
   standingRulesLoadFailed: 'Standing rules couldn’t be loaded',
@@ -187,9 +241,12 @@ export default {
   holdingAPlace: 'Yet to ask you anything',
   holdingAPlaceHint:
     'Each holds the place it will ask for. Cancel one you no longer need to free its place.',
+  standingRulesGateNotices: 'Notify the run’s owner when a gate waits on them',
+  standingRulesGateNoticesHint:
+    'On by default, for runs started from now on. Each gate that no rule or stand-in answers, and each question an agent asks, sends the run’s owner a notification that opens the run. Off, the gate still waits for them. A project’s own rules, or the rules.json of your team’s factory definition, replace this setting.',
   standingRulesOwnerGates: 'Send undecided gates to the run’s owner',
   standingRulesOwnerGatesHint:
-    'Notify the run’s owner when a gate waits on them, ask them instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',
+    'Ask the run’s owner instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',
   standingRulesTaskThread: 'Post run updates to the task',
   standingRulesTaskThreadHint:
     'Each run posts one thread on its task, as the run’s owner: its start, each step’s end, its gates and who answered them, its pull request, the merge and how it ended.',
@@ -215,6 +272,10 @@ export default {
   // A Run an Automation started.
   startedBy: 'Started by',
   startedByAutomation: 'The automation “{{name}}”, {{trigger}}',
+  standingActs: 'Done by agents',
+  standingActStart: 'Started by agent {{agent}} as {{role}}, {{time}}',
+  standingActCancel: 'Cancelled by agent {{agent}} as {{role}}, {{time}}',
+  standingActLink: 'Linked to a task by agent {{agent}} as {{role}}, {{time}}',
   automationTriggerSchedule: 'on its schedule',
   automationTriggerRepositoryEvent: 'on a repository event',
   automationTriggerWebhook: 'on a call to its webhook',

@@ -1,0 +1,18 @@
+{
+  "agents": {
+    "primary": {
+      "bot": "00000000-0000-0000-0000-000000000001",
+      "instructions": "Work in small commits, and say in each commit message what changed and why."
+    },
+    "backup": {
+      "bot": "00000000-0000-0000-0000-000000000002"
+    }
+  },
+  "roles": {
+    "planner": ["primary", "backup"],
+    "writer": ["primary", "backup"],
+    "fixer": ["primary", "backup"],
+    "reviewer": ["backup", "primary"],
+    "verifier": ["backup", "primary"]
+  }
+}

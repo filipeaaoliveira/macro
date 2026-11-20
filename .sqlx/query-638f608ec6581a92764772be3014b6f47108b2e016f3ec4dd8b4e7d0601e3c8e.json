@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT t.suite_id, t.task, t.run_id, r.outcome, t.score,\n                   t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_write_tokens\n            FROM factory_benchmark_trial t\n            JOIN factory_run r ON r.id = t.run_id\n            WHERE t.suite_id = ANY($1)\n            ORDER BY t.suite_id, t.task\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "suite_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "score",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "input_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "output_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_read_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "cache_write_tokens",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "638f608ec6581a92764772be3014b6f47108b2e016f3ec4dd8b4e7d0601e3c8e"
+}

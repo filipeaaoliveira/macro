@@ -88,10 +88,16 @@ export function StandingRulesSettings() {
           </Button>
         </div>
       </Match>
+      <Match when={query.data?.definitionNamed}>
+        <p class="p-3 text-sm text-ink-muted">
+          {t('factoryRuns.standingRulesFromDefinition')}
+        </p>
+      </Match>
       <Match when={query.data}>
         {(settings) => {
           const locked = () => !settings().canEdit || mutation.isPending;
-          // A definition read without the owner section has it off.
+          // A definition read without the owner section has it off, and
+          // one read without `quietGates` notifies the run's owner.
           const definition = (): OrchestratorDefinition => ({
             ...settings().definition,
             ownerGates: settings().definition.ownerGates ?? false,
@@ -169,6 +175,22 @@ export function StandingRulesSettings() {
                   </Checkbox>
                 )}
               </For>
+              <Checkbox
+                size="sm"
+                checked={!(definition().quietGates ?? false)}
+                onChange={(on: boolean) => toggle('quietGates', !on)}
+                disabled={locked()}
+              >
+                <Checkbox.Control />
+                <div class="flex flex-col gap-0.5">
+                  <Checkbox.Label class="text-sm">
+                    {t('factoryRuns.standingRulesGateNotices')}
+                  </Checkbox.Label>
+                  <Checkbox.Description class="text-xs text-ink-muted">
+                    {t('factoryRuns.standingRulesGateNoticesHint')}
+                  </Checkbox.Description>
+                </div>
+              </Checkbox>
               <Checkbox
                 size="sm"
                 checked={definition().ownerGates}

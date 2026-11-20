@@ -9,17 +9,25 @@ import type {
   Automation,
   AutomationRequest,
   AutomationsSettings,
+  BoardPage,
   CallFactoryAutomationWebhookBody,
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionSettings,
   ErrorResponse,
+  EvaluationInsights,
   FiringResult,
+  FlawRunRequest,
   FlowsResponse,
+  GetFactoryEvaluationParams,
   GetFactoryInsightsParams,
   HandBackRequest,
   LinkTaskRequest,
+  ListFactoryBoardParams,
   NoteStepRequest,
+  PullRequestRuns,
+  PullRequestUrls,
   ReplyToGateRequest,
   ResumeStepRequest,
   RoutineFiring,
@@ -30,8 +38,11 @@ import type {
   SessionStepRef,
   SetAutomationEnabledRequest,
   SetControlFilesRequest,
+  SetDefinitionRequest,
   SetStandingRulesRequest,
   StandingRulesSettings,
+  StartSuiteRequest,
+  SuiteStarted,
   TaskRunsResponse,
   WaitingRunsResponse,
 } from './schemas';
@@ -184,7 +195,9 @@ run of an Automation's routine calls it, with the credential the
 scheduler signed for the routine (403 for any other caller). It starts
 a Run as the Automation's creator, once per routine run, unless the
 Automation is switched off, the queue is full or a Run already runs on
-the task.
+the task. A routine run for an agent, or in an agent session, starts it
+as that agent: under a Definition with Standing Roles its bot must fill
+one that allows `start`, or the firing is skipped as `refused`.
  */
 export type fireFactoryAutomationResponse200 = {
   data: FiringResult;
@@ -525,11 +538,127 @@ export const callFactoryAutomationWebhook = async (
 };
 
 /**
- * @summary List the built-in Flows a Run can be started of, by name.
+ * @summary Start a suite of a Benchmark: one trial Run, owned by the caller, of
+each of its frozen tasks, on the configuration the body gives, each from
+the commit its task pins or the default branch's head as the suite
+starts. Each trial keeps a score and the tokens its agents used once its
+Run ends, and its branch is then deleted. A suite of the same Benchmark
+of the caller's that still runs, or more running trials than the caller
+may have, refuse it (409). A trial whose Run is refused stops the suite:
+the trials before it go on, and `refused` names it; when none started,
+the error is returned and nothing is kept. An agent acting for the
+caller, under a Definition with Standing Roles, must fill one that
+allows `start` (403 `notInStandingRole` otherwise, before anything is
+kept); each trial keeps it as its start.
+ */
+export type startFactoryBenchmarkSuiteResponse201 = {
+  data: SuiteStarted;
+  status: 201;
+};
+
+export type startFactoryBenchmarkSuiteResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type startFactoryBenchmarkSuiteResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type startFactoryBenchmarkSuiteResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type startFactoryBenchmarkSuiteResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type startFactoryBenchmarkSuiteResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type startFactoryBenchmarkSuiteResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type startFactoryBenchmarkSuiteResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type startFactoryBenchmarkSuiteResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
+export type startFactoryBenchmarkSuiteResponseSuccess =
+  startFactoryBenchmarkSuiteResponse201 & {
+    headers: Headers;
+  };
+export type startFactoryBenchmarkSuiteResponseError = (
+  | startFactoryBenchmarkSuiteResponse400
+  | startFactoryBenchmarkSuiteResponse401
+  | startFactoryBenchmarkSuiteResponse403
+  | startFactoryBenchmarkSuiteResponse404
+  | startFactoryBenchmarkSuiteResponse409
+  | startFactoryBenchmarkSuiteResponse500
+  | startFactoryBenchmarkSuiteResponse502
+  | startFactoryBenchmarkSuiteResponse503
+) & {
+  headers: Headers;
+};
+
+export type startFactoryBenchmarkSuiteResponse =
+  | startFactoryBenchmarkSuiteResponseSuccess
+  | startFactoryBenchmarkSuiteResponseError;
+
+export const getStartFactoryBenchmarkSuiteUrl = (benchmark: string) => {
+  return `/benchmarks/${benchmark}/suites`;
+};
+
+export const startFactoryBenchmarkSuite = async (
+  benchmark: string,
+  startSuiteRequest: StartSuiteRequest,
+  options?: RequestInit
+): Promise<startFactoryBenchmarkSuiteResponse> => {
+  const res = await fetch(getStartFactoryBenchmarkSuiteUrl(benchmark), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(startSuiteRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: startFactoryBenchmarkSuiteResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as startFactoryBenchmarkSuiteResponse;
+};
+
+/**
+ * @summary List the Flows the caller can start a Run of, by name: their team's
+Factory Definition's, read at its default branch's head, when the team
+names one (400 `unreachableDefinition` or `invalidDefinition` when it
+does not read), else the built-in Flows.
  */
 export type listFactoryFlowsResponse200 = {
   data: FlowsResponse;
   status: 200;
+};
+
+export type listFactoryFlowsResponse400 = {
+  data: RunErrorResponse;
+  status: 400;
 };
 
 export type listFactoryFlowsResponse401 = {
@@ -542,12 +671,19 @@ export type listFactoryFlowsResponse403 = {
   status: 403;
 };
 
+export type listFactoryFlowsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
 export type listFactoryFlowsResponseSuccess = listFactoryFlowsResponse200 & {
   headers: Headers;
 };
 export type listFactoryFlowsResponseError = (
+  | listFactoryFlowsResponse400
   | listFactoryFlowsResponse401
   | listFactoryFlowsResponse403
+  | listFactoryFlowsResponse500
 ) & {
   headers: Headers;
 };
@@ -742,6 +878,174 @@ export const getFactoryInsights = async (
 };
 
 /**
+ * @summary How the caller's own Runs were judged and compared over a period: each
+Scorer's judgments of a sample of them, each Experiment's arms with
+their Runs' outcomes and scores, the Benchmarks one may replay, and the
+suites the caller started, with each trial's score and tokens. Benchmark
+trials are never counted with the live Runs.
+ */
+export type getFactoryEvaluationResponse200 = {
+  data: EvaluationInsights;
+  status: 200;
+};
+
+export type getFactoryEvaluationResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type getFactoryEvaluationResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryEvaluationResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactoryEvaluationResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryEvaluationResponseSuccess =
+  getFactoryEvaluationResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryEvaluationResponseError = (
+  | getFactoryEvaluationResponse400
+  | getFactoryEvaluationResponse401
+  | getFactoryEvaluationResponse403
+  | getFactoryEvaluationResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryEvaluationResponse =
+  | getFactoryEvaluationResponseSuccess
+  | getFactoryEvaluationResponseError;
+
+export const getGetFactoryEvaluationUrl = (
+  params: GetFactoryEvaluationParams
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/insights/evaluation?${stringifiedParams}`
+    : `/insights/evaluation`;
+};
+
+export const getFactoryEvaluation = async (
+  params: GetFactoryEvaluationParams,
+  options?: RequestInit
+): Promise<getFactoryEvaluationResponse> => {
+  const res = await fetch(getGetFactoryEvaluationUrl(params), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryEvaluationResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryEvaluationResponse;
+};
+
+/**
+ * @summary List a page of the factory's board: the Runs the caller can see,
+theirs or their team's, newest first, each with its Steps and where it
+is (`running`, `waiting` on its owner at a Gate, `held` by a Main Hold,
+`stopped` for a person, or `finished`). Read the next page with `next`.
+ */
+export type listFactoryBoardResponse200 = {
+  data: BoardPage;
+  status: 200;
+};
+
+export type listFactoryBoardResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type listFactoryBoardResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type listFactoryBoardResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type listFactoryBoardResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type listFactoryBoardResponseSuccess = listFactoryBoardResponse200 & {
+  headers: Headers;
+};
+export type listFactoryBoardResponseError = (
+  | listFactoryBoardResponse400
+  | listFactoryBoardResponse401
+  | listFactoryBoardResponse403
+  | listFactoryBoardResponse500
+) & {
+  headers: Headers;
+};
+
+export type listFactoryBoardResponse =
+  | listFactoryBoardResponseSuccess
+  | listFactoryBoardResponseError;
+
+export const getListFactoryBoardUrl = (params?: ListFactoryBoardParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/runs?${stringifiedParams}` : `/runs`;
+};
+
+export const listFactoryBoard = async (
+  params?: ListFactoryBoardParams,
+  options?: RequestInit
+): Promise<listFactoryBoardResponse> => {
+  const res = await fetch(getListFactoryBoardUrl(params), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listFactoryBoardResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listFactoryBoardResponse;
+};
+
+/**
  * @summary Create a Run of a built-in Flow, owned by the caller, and start its
 workflow. At the Queue limit of the Project it would start in, it is
 refused (409 `queueFull`, its message counting both): the caller holds
@@ -832,6 +1136,82 @@ export const createFactoryRun = async (
     status: res.status,
     headers: res.headers,
   } as createFactoryRunResponse;
+};
+
+/**
+ * @summary Find the Runs that opened some pull requests: for each one, the newest
+Run the caller can see on their team's board (theirs, or a team
+member's on a task they can see), with its Steps, where it is, and the
+merge Gate it waits on. A pull request no such Run opened is left out,
+whether no Run opened it or one the caller cannot see did.
+ */
+export type findPullRequestRunsResponse200 = {
+  data: PullRequestRuns;
+  status: 200;
+};
+
+export type findPullRequestRunsResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type findPullRequestRunsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type findPullRequestRunsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type findPullRequestRunsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type findPullRequestRunsResponseSuccess =
+  findPullRequestRunsResponse200 & {
+    headers: Headers;
+  };
+export type findPullRequestRunsResponseError = (
+  | findPullRequestRunsResponse400
+  | findPullRequestRunsResponse401
+  | findPullRequestRunsResponse403
+  | findPullRequestRunsResponse500
+) & {
+  headers: Headers;
+};
+
+export type findPullRequestRunsResponse =
+  | findPullRequestRunsResponseSuccess
+  | findPullRequestRunsResponseError;
+
+export const getFindPullRequestRunsUrl = () => {
+  return `/runs/by-pull-requests`;
+};
+
+export const findPullRequestRuns = async (
+  pullRequestUrls: PullRequestUrls,
+  options?: RequestInit
+): Promise<findPullRequestRunsResponse> => {
+  const res = await fetch(getFindPullRequestRunsUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(pullRequestUrls),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: findPullRequestRunsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as findPullRequestRunsResponse;
 };
 
 /**
@@ -1070,6 +1450,92 @@ export const cancelFactoryRun = async (
     status: res.status,
     headers: res.headers,
   } as cancelFactoryRunResponse;
+};
+
+/**
+ * @summary Mark one of the caller's Runs flawed: it ended `success`, and they
+found its result wrong. The Run then reads `flawed`, with who marked it,
+why and when. Marking a flawed Run again keeps its first mark. Only the
+Run's owner marks it, in their own signed-in session: an agent's code,
+an API key or token and an internal caller are refused (403).
+ */
+export type flawFactoryRunResponse200 = {
+  data: RunDetail;
+  status: 200;
+};
+
+export type flawFactoryRunResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type flawFactoryRunResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type flawFactoryRunResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type flawFactoryRunResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type flawFactoryRunResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type flawFactoryRunResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type flawFactoryRunResponseSuccess = flawFactoryRunResponse200 & {
+  headers: Headers;
+};
+export type flawFactoryRunResponseError = (
+  | flawFactoryRunResponse400
+  | flawFactoryRunResponse401
+  | flawFactoryRunResponse403
+  | flawFactoryRunResponse404
+  | flawFactoryRunResponse409
+  | flawFactoryRunResponse500
+) & {
+  headers: Headers;
+};
+
+export type flawFactoryRunResponse =
+  | flawFactoryRunResponseSuccess
+  | flawFactoryRunResponseError;
+
+export const getFlawFactoryRunUrl = (id: RunId) => {
+  return `/runs/${id}/flaw`;
+};
+
+export const flawFactoryRun = async (
+  id: RunId,
+  flawRunRequest: FlawRunRequest,
+  options?: RequestInit
+): Promise<flawFactoryRunResponse> => {
+  const res = await fetch(getFlawFactoryRunUrl(id), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(flawRunRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: flawFactoryRunResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as flawFactoryRunResponse;
 };
 
 /**
@@ -1924,6 +2390,149 @@ export const setFactoryControlFiles = async (
     status: res.status,
     headers: res.headers,
   } as setFactoryControlFilesResponse;
+};
+
+/**
+ * @summary The Factory Definition the caller's team names, and whether it reads at
+its default branch's head as the caller reaches it on GitHub.
+ */
+export type getFactoryDefinitionResponse200 = {
+  data: DefinitionSettings;
+  status: 200;
+};
+
+export type getFactoryDefinitionResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryDefinitionResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactoryDefinitionResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryDefinitionResponseSuccess =
+  getFactoryDefinitionResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryDefinitionResponseError = (
+  | getFactoryDefinitionResponse401
+  | getFactoryDefinitionResponse403
+  | getFactoryDefinitionResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryDefinitionResponse =
+  | getFactoryDefinitionResponseSuccess
+  | getFactoryDefinitionResponseError;
+
+export const getGetFactoryDefinitionUrl = () => {
+  return `/settings/definition`;
+};
+
+export const getFactoryDefinition = async (
+  options?: RequestInit
+): Promise<getFactoryDefinitionResponse> => {
+  const res = await fetch(getGetFactoryDefinitionUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryDefinitionResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryDefinitionResponse;
+};
+
+/**
+ * @summary Name the repository whose files the caller's team's Runs take their
+Flows, Agents, rules and Scorers from, or name none. The Definition must
+read at its default branch's head as the caller reaches it (400
+`unreachableDefinition` or `invalidDefinition`, naming the file and the
+problem). Only an admin or the owner of the team names it, in their own
+signed-in session (403 otherwise). While one is named, the team's
+Control File and Standing Rules settings are refused (409
+`definitionNamed`): the Definition's pull requests change them.
+ */
+export type setFactoryDefinitionResponse200 = {
+  data: DefinitionSettings;
+  status: 200;
+};
+
+export type setFactoryDefinitionResponse400 = {
+  data: RunErrorResponse;
+  status: 400;
+};
+
+export type setFactoryDefinitionResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type setFactoryDefinitionResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type setFactoryDefinitionResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type setFactoryDefinitionResponseSuccess =
+  setFactoryDefinitionResponse200 & {
+    headers: Headers;
+  };
+export type setFactoryDefinitionResponseError = (
+  | setFactoryDefinitionResponse400
+  | setFactoryDefinitionResponse401
+  | setFactoryDefinitionResponse403
+  | setFactoryDefinitionResponse500
+) & {
+  headers: Headers;
+};
+
+export type setFactoryDefinitionResponse =
+  | setFactoryDefinitionResponseSuccess
+  | setFactoryDefinitionResponseError;
+
+export const getSetFactoryDefinitionUrl = () => {
+  return `/settings/definition`;
+};
+
+export const setFactoryDefinition = async (
+  setDefinitionRequest: SetDefinitionRequest,
+  options?: RequestInit
+): Promise<setFactoryDefinitionResponse> => {
+  const res = await fetch(getSetFactoryDefinitionUrl(), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setDefinitionRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: setFactoryDefinitionResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as setFactoryDefinitionResponse;
 };
 
 /**

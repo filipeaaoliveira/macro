@@ -8,8 +8,9 @@ use uuid::Uuid;
 use crate::domain::models::{
     CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, NewSteer, Outcome,
-    PassedOver, QueueHold, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal,
-    Steered, Step, StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
+    PassedOver, QueueHold, Role, Run, RunFlow, RunId, RunInsert, RunOutcome, SessionStep,
+    SteerRefusal, Steered, Step, StepKey, StepSession, StepSteering, StoppingSession, TaskLink,
+    TeamMembership,
 };
 use crate::domain::standing_rules::StandingRule;
 
@@ -205,6 +206,25 @@ pub trait RunRepository: Send + Sync + 'static {
         session_id: Uuid,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// How many of its repository's setup commands passed, in order, in
+    /// the Step `key`'s session `session_id`: none for a session that ran
+    /// none, as one the Step went on to.
+    fn setup_passed(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+    ) -> impl Future<Output = Result<u16, Self::Err>> + Send;
+
+    /// Record that the first `passed` of its repository's setup commands
+    /// passed in the Step `key`'s session `session_id`, while the Step
+    /// holds it. False when it no longer does.
+    fn record_setup_passed(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+        passed: u16,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// The session the Step `key` claimed, as a stop sees it: whether it
     /// opened, and whether a prepare sent less than `lands_within` ago may
     /// still open it.
@@ -396,6 +416,15 @@ pub trait RunRepository: Send + Sync + 'static {
         sha: &str,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// Keep `url` as the page of the pull request the Run's branch proposes
+    /// its change in, replacing the one kept before. Keeping it again
+    /// changes nothing.
+    fn set_pull_request_url(
+        &self,
+        id: RunId,
+        url: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
     /// Keep the Control Files the Run's branch changed, as last read,
     /// replacing what was kept before: none clears it. Keeping it again
     /// changes nothing.
@@ -441,6 +470,48 @@ pub trait RunRepository: Send + Sync + 'static {
         patterns: Option<&[String]>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// The repository the team `team_id` names as its Factory Definition,
+    /// by its `https://github.com/owner/name` URL; none when it names none.
+    fn team_definition(
+        &self,
+        team_id: Uuid,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// Name `repo_url` as the team `team_id`'s Factory Definition, kept as
+    /// named by `named_by`, whose self-improvement Runs are theirs; none
+    /// names none, so its Runs go back to the team's settings. In the same
+    /// write, the team's open self-improvement Run on another Definition
+    /// (repository names compared in any case) is settled as closed, its
+    /// failures back to pending: it would hold them until the team named
+    /// that Definition again. Its Run, if any, goes on for its owner.
+    fn set_team_definition(
+        &self,
+        team_id: Uuid,
+        repo_url: Option<&str>,
+        named_by: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The Agents of the Factory Definition the Run `id` started under, as
+    /// it kept them; none when it started under none.
+    fn run_definition_agents(
+        &self,
+        id: RunId,
+    ) -> impl Future<Output = Result<Option<serde_json::Value>, Self::Err>> + Send;
+
+    /// The Flow the Run `id` walks, as it keeps it; none when there is no
+    /// such Run.
+    fn run_flow(
+        &self,
+        id: RunId,
+    ) -> impl Future<Output = Result<Option<RunFlow>, Self::Err>> + Send;
+
+    /// The Flows the Runs `ids` walk, as each keeps it, by Run; a Run that
+    /// is not there is left out.
+    fn runs_flows(
+        &self,
+        ids: &[RunId],
+    ) -> impl Future<Output = Result<BTreeMap<RunId, RunFlow>, Self::Err>> + Send;
+
     /// The commit the Run last asked a person to merge, if any.
     fn merge_head(
         &self,
@@ -453,5 +524,14 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         id: RunId,
         outcome: RunOutcome,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Keep that the cancel about to be sent to the Run `id` comes from its
+    /// owner in person, while the Run has not ended. Once kept it stays: a
+    /// later cancel by an agent does not undo the person's rejection.
+    fn record_cancel_sender(
+        &self,
+        id: RunId,
+        in_person: bool,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }

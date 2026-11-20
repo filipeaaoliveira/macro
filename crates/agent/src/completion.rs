@@ -108,12 +108,49 @@ pub async fn complete_with_history<M: ToString>(
 /// Callers may supply structured-output or reasoning settings supported by the
 /// selected provider. Routing, financial authorization, tracing and usage
 /// recording follow the same path as [`complete_with_history`].
-#[tracing::instrument(skip_all, err)]
+#[tracing::instrument(skip_all)]
 pub async fn complete_with_history_and_params<M: ToString>(
     model: M,
     system_prompt: &str,
     messages: Vec<Message>,
     additional_params: Option<serde_json::Value>,
+    recorder: &dyn UsageRecorder,
+    ctx: UsageContext,
+) -> anyhow::Result<String> {
+    complete_with_history_params_and_cache(
+        model,
+        system_prompt,
+        messages,
+        additional_params,
+        PromptCache::Write,
+        recorder,
+        ctx,
+    )
+    .await
+}
+
+/// Whether a one-shot completion writes its prompt to the provider's prompt
+/// cache. Only Anthropic's cache is written on request, at more than plain
+/// input costs; the other providers cache on their own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PromptCache {
+    /// Mark the prompt for caching, for later calls that share its prefix.
+    #[default]
+    Write,
+    /// Mark nothing: no later call shares the prompt's prefix, so a write
+    /// would only cost.
+    Skip,
+}
+
+/// [`complete_with_history_and_params`], writing the prompt to the prompt
+/// cache as `cache` says.
+#[tracing::instrument(skip_all, fields(cache = ?cache), err)]
+pub async fn complete_with_history_params_and_cache<M: ToString>(
+    model: M,
+    system_prompt: &str,
+    messages: Vec<Message>,
+    additional_params: Option<serde_json::Value>,
+    cache: PromptCache,
     recorder: &dyn UsageRecorder,
     ctx: UsageContext,
 ) -> anyhow::Result<String> {
@@ -127,7 +164,7 @@ pub async fn complete_with_history_and_params<M: ToString>(
         let response = match routed {
             RoutedModel::Anthropic(m) => {
                 prompt_with_history(
-                    TracedModel::new(m.completion(), telemetry.clone()),
+                    TracedModel::new(m.completion_for(cache), telemetry.clone()),
                     system_prompt,
                     messages,
                     telemetry,

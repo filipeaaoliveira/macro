@@ -9,6 +9,8 @@
 //! answers than its kind's, is never answered by a rule.
 //!
 //! What no rule ever does, whatever a definition says:
+//! - answer a Gate the Run's own Flow keeps for a person (`person_only`),
+//!   such as a self-improvement Run's plan and merge;
 //! - approve a Tampered Run's plan or merge: its Control Files are a
 //!   person's to approve, and a Rule Answer approves none. Its Blockers
 //!   may still go to a fix, which approves nothing, and `merge` reads the

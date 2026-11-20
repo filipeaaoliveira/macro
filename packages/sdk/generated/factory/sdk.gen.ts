@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactorySessionStepData, GetFactorySessionStepErrors, GetFactorySessionStepResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FindPullRequestRunsData, FindPullRequestRunsErrors, FindPullRequestRunsResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, FlawFactoryRunData, FlawFactoryRunErrors, FlawFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryDefinitionData, GetFactoryDefinitionErrors, GetFactoryDefinitionResponses, GetFactoryEvaluationData, GetFactoryEvaluationErrors, GetFactoryEvaluationResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactorySessionStepData, GetFactorySessionStepErrors, GetFactorySessionStepResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryBoardData, ListFactoryBoardErrors, ListFactoryBoardResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryDefinitionData, SetFactoryDefinitionErrors, SetFactoryDefinitionResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StartFactoryBenchmarkSuiteData, StartFactoryBenchmarkSuiteErrors, StartFactoryBenchmarkSuiteResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -91,7 +91,9 @@ export class Sdk extends HeyApiClient {
      * scheduler signed for the routine (403 for any other caller). It starts
      * a Run as the Automation's creator, once per routine run, unless the
      * Automation is switched off, the queue is full or a Run already runs on
-     * the task.
+     * the task. A routine run for an agent, or in an agent session, starts it
+     * as that agent: under a Definition with Standing Roles its bot must fill
+     * one that allows `start`, or the firing is skipped as `refused`.
      */
     public fireFactoryAutomation<ThrowOnError extends boolean = false>(options: Options<FireFactoryAutomationData, ThrowOnError>): RequestResult<FireFactoryAutomationResponses, FireFactoryAutomationErrors, ThrowOnError> {
         return (options.client ?? this.client).post<FireFactoryAutomationResponses, FireFactoryAutomationErrors, ThrowOnError>({
@@ -151,7 +153,35 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
-     * List the built-in Flows a Run can be started of, by name.
+     * Start a suite of a Benchmark: one trial Run, owned by the caller, of
+     * each of its frozen tasks, on the configuration the body gives, each from
+     * the commit its task pins or the default branch's head as the suite
+     * starts. Each trial keeps a score and the tokens its agents used once its
+     * Run ends, and its branch is then deleted. A suite of the same Benchmark
+     * of the caller's that still runs, or more running trials than the caller
+     * may have, refuse it (409). A trial whose Run is refused stops the suite:
+     * the trials before it go on, and `refused` names it; when none started,
+     * the error is returned and nothing is kept. An agent acting for the
+     * caller, under a Definition with Standing Roles, must fill one that
+     * allows `start` (403 `notInStandingRole` otherwise, before anything is
+     * kept); each trial keeps it as its start.
+     */
+    public startFactoryBenchmarkSuite<ThrowOnError extends boolean = false>(options: Options<StartFactoryBenchmarkSuiteData, ThrowOnError>): RequestResult<StartFactoryBenchmarkSuiteResponses, StartFactoryBenchmarkSuiteErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<StartFactoryBenchmarkSuiteResponses, StartFactoryBenchmarkSuiteErrors, ThrowOnError>({
+            url: '/benchmarks/{benchmark}/suites',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * List the Flows the caller can start a Run of, by name: their team's
+     * Factory Definition's, read at its default branch's head, when the team
+     * names one (400 `unreachableDefinition` or `invalidDefinition` when it
+     * does not read), else the built-in Flows.
      */
     public listFactoryFlows<ThrowOnError extends boolean = false>(options?: Options<ListFactoryFlowsData, ThrowOnError>): RequestResult<ListFactoryFlowsResponses, ListFactoryFlowsErrors, ThrowOnError> {
         return (options?.client ?? this.client).get<ListFactoryFlowsResponses, ListFactoryFlowsErrors, ThrowOnError>({ url: '/flows', ...options });
@@ -184,6 +214,27 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
+     * How the caller's own Runs were judged and compared over a period: each
+     * Scorer's judgments of a sample of them, each Experiment's arms with
+     * their Runs' outcomes and scores, the Benchmarks one may replay, and the
+     * suites the caller started, with each trial's score and tokens. Benchmark
+     * trials are never counted with the live Runs.
+     */
+    public getFactoryEvaluation<ThrowOnError extends boolean = false>(options: Options<GetFactoryEvaluationData, ThrowOnError>): RequestResult<GetFactoryEvaluationResponses, GetFactoryEvaluationErrors, ThrowOnError> {
+        return (options.client ?? this.client).get<GetFactoryEvaluationResponses, GetFactoryEvaluationErrors, ThrowOnError>({ url: '/insights/evaluation', ...options });
+    }
+
+    /**
+     * List a page of the factory's board: the Runs the caller can see,
+     * theirs or their team's, newest first, each with its Steps and where it
+     * is (`running`, `waiting` on its owner at a Gate, `held` by a Main Hold,
+     * `stopped` for a person, or `finished`). Read the next page with `next`.
+     */
+    public listFactoryBoard<ThrowOnError extends boolean = false>(options?: Options<ListFactoryBoardData, ThrowOnError>): RequestResult<ListFactoryBoardResponses, ListFactoryBoardErrors, ThrowOnError> {
+        return (options?.client ?? this.client).get<ListFactoryBoardResponses, ListFactoryBoardErrors, ThrowOnError>({ url: '/runs', ...options });
+    }
+
+    /**
      * Create a Run of a built-in Flow, owned by the caller, and start its
      * workflow. At the Queue limit of the Project it would start in, it is
      * refused (409 `queueFull`, its message counting both): the caller holds
@@ -195,6 +246,24 @@ export class Sdk extends HeyApiClient {
     public createFactoryRun<ThrowOnError extends boolean = false>(options: Options<CreateFactoryRunData, ThrowOnError>): RequestResult<CreateFactoryRunResponses, CreateFactoryRunErrors, ThrowOnError> {
         return (options.client ?? this.client).post<CreateFactoryRunResponses, CreateFactoryRunErrors, ThrowOnError>({
             url: '/runs',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Find the Runs that opened some pull requests: for each one, the newest
+     * Run the caller can see on their team's board (theirs, or a team
+     * member's on a task they can see), with its Steps, where it is, and the
+     * merge Gate it waits on. A pull request no such Run opened is left out,
+     * whether no Run opened it or one the caller cannot see did.
+     */
+    public findPullRequestRuns<ThrowOnError extends boolean = false>(options: Options<FindPullRequestRunsData, ThrowOnError>): RequestResult<FindPullRequestRunsResponses, FindPullRequestRunsErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<FindPullRequestRunsResponses, FindPullRequestRunsErrors, ThrowOnError>({
+            url: '/runs/by-pull-requests',
             ...options,
             headers: {
                 'Content-Type': 'application/json',
@@ -227,6 +296,24 @@ export class Sdk extends HeyApiClient {
      */
     public cancelFactoryRun<ThrowOnError extends boolean = false>(options: Options<CancelFactoryRunData, ThrowOnError>): RequestResult<CancelFactoryRunResponses, CancelFactoryRunErrors, ThrowOnError> {
         return (options.client ?? this.client).post<CancelFactoryRunResponses, CancelFactoryRunErrors, ThrowOnError>({ url: '/runs/{id}/cancel', ...options });
+    }
+
+    /**
+     * Mark one of the caller's Runs flawed: it ended `success`, and they
+     * found its result wrong. The Run then reads `flawed`, with who marked it,
+     * why and when. Marking a flawed Run again keeps its first mark. Only the
+     * Run's owner marks it, in their own signed-in session: an agent's code,
+     * an API key or token and an internal caller are refused (403).
+     */
+    public flawFactoryRun<ThrowOnError extends boolean = false>(options: Options<FlawFactoryRunData, ThrowOnError>): RequestResult<FlawFactoryRunResponses, FlawFactoryRunErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<FlawFactoryRunResponses, FlawFactoryRunErrors, ThrowOnError>({
+            url: '/runs/{id}/flaw',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
     }
 
     /**
@@ -376,6 +463,35 @@ export class Sdk extends HeyApiClient {
     public setFactoryControlFiles<ThrowOnError extends boolean = false>(options: Options<SetFactoryControlFilesData, ThrowOnError>): RequestResult<SetFactoryControlFilesResponses, SetFactoryControlFilesErrors, ThrowOnError> {
         return (options.client ?? this.client).put<SetFactoryControlFilesResponses, SetFactoryControlFilesErrors, ThrowOnError>({
             url: '/settings/control-files',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * The Factory Definition the caller's team names, and whether it reads at
+     * its default branch's head as the caller reaches it on GitHub.
+     */
+    public getFactoryDefinition<ThrowOnError extends boolean = false>(options?: Options<GetFactoryDefinitionData, ThrowOnError>): RequestResult<GetFactoryDefinitionResponses, GetFactoryDefinitionErrors, ThrowOnError> {
+        return (options?.client ?? this.client).get<GetFactoryDefinitionResponses, GetFactoryDefinitionErrors, ThrowOnError>({ url: '/settings/definition', ...options });
+    }
+
+    /**
+     * Name the repository whose files the caller's team's Runs take their
+     * Flows, Agents, rules and Scorers from, or name none. The Definition must
+     * read at its default branch's head as the caller reaches it (400
+     * `unreachableDefinition` or `invalidDefinition`, naming the file and the
+     * problem). Only an admin or the owner of the team names it, in their own
+     * signed-in session (403 otherwise). While one is named, the team's
+     * Control File and Standing Rules settings are refused (409
+     * `definitionNamed`): the Definition's pull requests change them.
+     */
+    public setFactoryDefinition<ThrowOnError extends boolean = false>(options: Options<SetFactoryDefinitionData, ThrowOnError>): RequestResult<SetFactoryDefinitionResponses, SetFactoryDefinitionErrors, ThrowOnError> {
+        return (options.client ?? this.client).put<SetFactoryDefinitionResponses, SetFactoryDefinitionErrors, ThrowOnError>({
+            url: '/settings/definition',
             ...options,
             headers: {
                 'Content-Type': 'application/json',

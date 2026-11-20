@@ -492,8 +492,7 @@ function getSupportedHandler(
           };
         }
       )
-      // The Run, over the person's factory insights, where its Gate is
-      // answered.
+      // The Run, as a pane of its own, where its Gate is answered.
       .with('factory_gate_waiting', () => {
         const meta = notification.notification_metadata;
         if (meta.tag !== 'factory_gate_waiting') return null;

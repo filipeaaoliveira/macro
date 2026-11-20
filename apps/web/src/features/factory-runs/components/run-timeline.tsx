@@ -246,6 +246,15 @@ function TimelineStep(props: {
                       answer: flowWordLabel(answer().answer),
                     })}
                   >
+                    <Match when={answer().standing}>
+                      {(standing) =>
+                        t('factoryRuns.answeredByStandingAgent', {
+                          answer: flowWordLabel(answer().answer),
+                          agent: standing().agent,
+                          role: standing().standingRole,
+                        })
+                      }
+                    </Match>
                     <Match when={answer().byOrchestrator}>
                       {t('factoryRuns.answeredByOrchestrator', {
                         answer: flowWordLabel(answer().answer),
@@ -366,19 +375,33 @@ function StepMarkdown(props: { markdown: string }) {
   );
 }
 
+/** What begins the name of a setup command's run among a round's results. */
+const SETUP_RESULT = 'setup:';
+
 /**
  * A round of checks: which it ran, who ran them, and how they went. A round
  * the factory ran on the pushed commit names each check that failed with its
- * exit code. A round with no end runs only while its Step does.
+ * exit code, and first each command of the repository's setup that failed
+ * there, before any check ran. A round with no end runs only while its Step
+ * does.
  */
 function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
-  const checks = () =>
-    props.round.checks.map((name) => {
+  const checks = () => [
+    ...props.round.results
+      .filter((ran) => ran.name.startsWith(SETUP_RESULT) && ran.exitCode !== 0)
+      .map((ran) =>
+        t('factoryRuns.setupExited', {
+          command: ran.name.slice(SETUP_RESULT.length),
+          code: ran.exitCode,
+        })
+      ),
+    ...props.round.checks.map((name) => {
       const result = props.round.results.find((ran) => ran.name === name);
       return result && result.exitCode !== 0
         ? t('factoryRuns.checkExited', { check: name, code: result.exitCode })
         : name;
-    });
+    }),
+  ];
 
   // Who ran the round's checks: the factory on the pushed commit, or the
   // agent, which is known only once its report ends the round.
@@ -447,6 +470,32 @@ function MainHoldNote(props: { hold: MainHold; baseBranch: string }) {
         )}
       </Show>
     </StepNote>
+  );
+}
+
+/**
+ * A Run's review rounds, oldest first, each with what its reviewers found,
+ * as the Run's timeline shows them under their Steps: for a view that
+ * shows the review apart from the Steps, such as a pull request's.
+ */
+export function ReviewRoundList(props: {
+  rounds: ReviewRound[];
+  steps: Pick<RunStep, 'seq' | 'entry'>[];
+}) {
+  return (
+    <For each={props.rounds}>
+      {(round) => (
+        <>
+          <ReviewRoundNote
+            round={round}
+            afresh={reviewsAfresh(props.rounds, props.steps, round)}
+          />
+          <For each={round.findings}>
+            {(finding) => <FindingNote finding={finding} />}
+          </For>
+        </>
+      )}
+    </For>
   );
 }
 

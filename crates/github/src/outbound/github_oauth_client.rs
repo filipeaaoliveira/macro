@@ -22,9 +22,7 @@ use crate::domain::{
 };
 
 mod branches;
-pub use branches::ComparedFile;
-mod deployments;
-pub use deployments::GithubDeployment;
+pub use branches::{ComparedFile, FileTooLarge};
 mod pull_requests;
 #[cfg(test)]
 mod test;

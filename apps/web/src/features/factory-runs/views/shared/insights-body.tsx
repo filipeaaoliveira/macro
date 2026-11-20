@@ -13,6 +13,7 @@ import {
   INSIGHT_OUTCOME_COLORS,
   insightOutcomeLabel,
 } from '../../components/insight-outcomes';
+import { OutcomeKinds } from '../../components/outcome-kinds';
 import {
   formatInsightDay,
   RunsByDayChart,
@@ -160,6 +161,7 @@ function InsightsSections(props: {
           }))}
           empty={t('factoryInsights.noRunsInPeriod')}
         />
+        <OutcomeKinds totals={totals()} />
         <TroubleList
           entries={troubledEntries(props.insights.entries)}
           onOpenRun={props.onOpenRun}

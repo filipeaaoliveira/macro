@@ -782,13 +782,19 @@ export const externalRoute = defineRoute({
   externalSearch: ['whatsappPairing'],
 });
 
+/** Every factory Run the person can see, behind the factory Runs flag. */
+export const factoryBoardRoute = defineRoute({
+  id: 'view-factory',
+  path: 'factory',
+});
+
 /** How the person's factory Runs went, behind the factory Runs flag. */
 export const factoryInsightsRoute = defineRoute({
   id: 'view-factory-insights',
   path: 'factory/insights',
 });
 
-/** One of the person's factory Runs, opened over their insights. */
+/** One factory Run the person can read, as a pane of its own. */
 export const factoryRunRoute = defineRoute({
   id: 'view-factory-run',
   path: 'factory/runs/:runId',

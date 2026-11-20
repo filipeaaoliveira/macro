@@ -25,12 +25,11 @@ mod test;
 use std::collections::BTreeMap;
 
 use factory_records::domain::gate_replies::{AnsweredGate, PastAnswer};
-use factory_records::domain::models::{GateKind, Outcome, RunId};
+use factory_records::domain::models::{GateKind, Outcome, RunFlow, RunId};
 use factory_records::domain::standing_rules::RuleGateKind;
 
 use super::{percent, reply_question};
-use crate::domain::built_in_flows::BuiltInFlow;
-use crate::domain::flow::StepUse;
+use crate::domain::built_in_flows::walked_flow;
 use crate::domain::ports::{GateModel, ModelPick};
 use crate::domain::stand_in::{PAST_ANSWERS_READ, StandInContext, stand_in_question};
 use crate::domain::standing_rules::offers_kind_answers;
@@ -131,13 +130,17 @@ pub struct ReplayReport {
     pub stand_in: Measure,
 }
 
-/// The kind of `gate`, as its built-in Flow names it, when the stand-in
+/// The kind of `gate`, as its Run's own Flow names it, when the stand-in
 /// may answer Gates of that kind: never a merge Gate, nor a Gate of a Run
 /// whose Flow is not known.
 pub fn stand_in_kind(gate: &AnsweredGate) -> Option<RuleGateKind> {
-    let flow = BuiltInFlow::named(gate.flow.as_deref()?)?
-        .read(|_| Some(StepUse::Work))
-        .ok()?;
+    let flow = walked_flow(
+        gate.run_id,
+        RunFlow {
+            name: gate.flow.clone(),
+            definition: gate.flow_definition.clone(),
+        },
+    )?;
     let kind = flow
         .entries
         .iter()
@@ -168,7 +171,7 @@ pub async fn replay<M: GateModel>(model: &M, gates: &[AnsweredGate]) -> ReplayRe
             && gate.answers.len() > 1
         {
             let question = reply_question(&gate.question, &gate.answers, note);
-            let pick = model.pick(&gate.owner, &question).await.ok();
+            let pick = model.pick(&gate.owner, None, &question).await.ok();
             replies.count(pick.as_ref(), &gate.answer);
         }
 
@@ -184,7 +187,7 @@ pub async fn replay<M: GateModel>(model: &M, gates: &[AnsweredGate]) -> ReplayRe
                 past: earlier,
             };
             let pick = model
-                .pick(&gate.owner, &stand_in_question(&context))
+                .pick(&gate.owner, None, &stand_in_question(&context))
                 .await
                 .ok();
             stand_in.count(pick.as_ref(), &gate.answer);

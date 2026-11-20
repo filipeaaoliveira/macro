@@ -51,12 +51,15 @@ async fn a_run_waits_on_its_owner_while_its_gate_is_open(pool: PgPool) {
             request: "Plan the cutover",
             user_id: &teo(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -189,12 +192,15 @@ async fn a_run_holds_its_place_in_the_queue_before_its_first_gate(pool: PgPool) 
             request: "Say hello",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -266,12 +272,15 @@ async fn starts_at_the_same_time_are_held_to_the_queue_limit(pool: PgPool) {
                 request: "Plan the import",
                 user_id: &owner,
                 task_id: None,
+                project_id: None,
                 repository: None,
                 created_in_person: false,
                 control_file_patterns: &[],
                 control_files_team_id: None,
                 standing_rules: RunRules::DEFAULT,
                 automation: None,
+                definition: None,
+                kept_flow: None,
             },
             hold,
         )

@@ -10,7 +10,8 @@ export const RULE_NAMES = {
 /**
  * Which kinds of Gate the factory answers on its own: the plan, a review's
  * blockers, and the merge; whether the Gates it leaves go to the Run's
- * owner (the owner section); which the stand-in answers for the Run's
+ * owner (the owner section); whether those Gates leave the owner
+ * unnotified (`quietGates`, off when left out: the owner is notified); which the stand-in answers for the Run's
  * owner when no rule does (never the merge); and whether a Run posts its
  * updates to its task's thread (off when left out).
  */
@@ -19,6 +20,7 @@ export type OrchestratorDefinition = {
   blockers: boolean;
   merge: boolean;
   ownerGates: boolean;
+  quietGates?: boolean;
   taskThread?: boolean;
   standIn?: StandInKinds;
   /**
@@ -41,7 +43,12 @@ export type OrchestratorKinds = {
 /** A kind of Gate a rule decides. */
 export type GateKind = Exclude<
   keyof OrchestratorDefinition,
-  'ownerGates' | 'taskThread' | 'standIn' | 'queueLimit' | 'orchestrator'
+  | 'ownerGates'
+  | 'quietGates'
+  | 'taskThread'
+  | 'standIn'
+  | 'queueLimit'
+  | 'orchestrator'
 >;
 
 /** The Queue limit a team starts from when it turns the limit on. */

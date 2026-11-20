@@ -1,16 +1,29 @@
 import { throwOnErr } from '@core/util/result';
 import { factoryClient } from '@service-factory/client';
 import type { AutomationRequest } from '@service-factory/generated/schemas';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/solid-query';
 import { factoryRunKeys } from './keys';
 
-/** The person's team's Automations. */
-export function useAutomationsQuery() {
-  return useQuery(() => ({
+/**
+ * The read of the team's Automations, built at module scope so the cached
+ * query keeps no view alive.
+ */
+function automationsOptions() {
+  return queryOptions({
     queryKey: factoryRunKeys.automations.queryKey,
     queryFn: ({ signal }) =>
       throwOnErr(() => factoryClient.listAutomations(signal)),
-  }));
+  });
+}
+
+/** The person's team's Automations. */
+export function useAutomationsQuery() {
+  return useQuery(() => automationsOptions());
 }
 
 /**

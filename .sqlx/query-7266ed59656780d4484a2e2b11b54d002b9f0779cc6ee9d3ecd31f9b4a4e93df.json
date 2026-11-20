@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome,\n                r.definition_evaluation\n            FROM factory_run r\n            WHERE r.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "request",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "definition_evaluation",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "7266ed59656780d4484a2e2b11b54d002b9f0779cc6ee9d3ecd31f9b4a4e93df"
+}

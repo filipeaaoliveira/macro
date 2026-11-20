@@ -8,13 +8,14 @@ use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{DocumentTaskDirectory, may_add_to};
-use crate::domain::ports::{FollowUpMade, FollowUpTask};
+use crate::domain::ports::{FollowUpMade, FollowUpTask, TaskDirectory as _};
 use crate::outbound::task_project::fixture::{new_task_property_values, task_properties};
 use entity_access::domain::models::{
-    AccessError, AccessLevel, BotAccessScope, BotId, CallChannelInfo, EntityAccessReceipt,
-    EntityPermission, EntityType, RequiredPermission, TeamRole, UserTeamInfo,
+    AccessError, AccessLevel, BotAccessScope, BotId, CallChannelInfo, Entity, EntityAccessReceipt,
+    EntityPermission, EntityType, RequiredPermission, TeamRole, UserTeamInfo, ViewAccessLevel,
 };
 use entity_access::domain::ports::EntityAccessService;
+use macro_user_id::cowlike::CowLike as _;
 use macro_user_id::lowercased::Lowercase;
 use macro_user_id::user_id::MacroUserId;
 
@@ -231,6 +232,8 @@ async fn a_follow_up_goes_in_the_project_its_task_s_project_property_names() {
 struct OneLevel {
     level: Option<AccessLevel>,
     asked: std::sync::Arc<std::sync::Mutex<Vec<(String, EntityType)>>>,
+    /// The batches of documents asked about, in order.
+    batches: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
 impl EntityAccessService for OneLevel {
@@ -319,6 +322,61 @@ impl EntityAccessService for OneLevel {
         _: &MacroUserId<Lowercase<'_>>,
     ) -> Result<Option<UserTeamInfo>, AccessError> {
         unimplemented!("a follow-up only reads an access level")
+    }
+    async fn generate_document_view_access_receipts(
+        &self,
+        user_id: &MacroUserId<Lowercase<'_>>,
+        document_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, EntityAccessReceipt<ViewAccessLevel>>, AccessError>
+    {
+        self.batches
+            .lock()
+            .expect("batches")
+            .push(document_ids.to_vec());
+        let Some(access_level) = self.level.filter(|level| *level >= AccessLevel::View) else {
+            return Ok(std::collections::HashMap::new());
+        };
+        Ok(document_ids
+            .iter()
+            .filter_map(|id| {
+                EntityAccessReceipt::try_new_authenticated_user(
+                    MacroUserIdStr(user_id.clone().into_owned()),
+                    Entity {
+                        entity_id: id.clone(),
+                        entity_type: EntityType::Document,
+                    },
+                    EntityPermission::AccessLevel { access_level },
+                )
+                .ok()
+                .map(|receipt| (id.clone(), receipt))
+            })
+            .collect())
+    }
+}
+
+/// Which documents a person may view is asked in one batch, and a document
+/// they may not view is left out.
+#[tokio::test]
+async fn viewable_documents_are_asked_in_one_batch() {
+    let tasks = [Uuid::now_v7(), Uuid::now_v7()];
+    for (level, expected) in [(Some(AccessLevel::View), tasks.len()), (None, 0)] {
+        let access = OneLevel {
+            level,
+            ..OneLevel::default()
+        };
+        let directory = DocumentTaskDirectory {
+            access: access.clone(),
+            documents: DocumentStorageServiceClient::new("key".into(), "http://127.0.0.1:9".into()),
+        };
+
+        let viewable = directory
+            .viewable_documents(&julia(), &tasks)
+            .await
+            .expect("viewable");
+
+        assert_eq!(viewable.len(), expected);
+        assert_eq!(access.batches.lock().expect("batches").len(), 1);
+        assert!(access.asked.lock().expect("asked").is_empty());
     }
 }
 

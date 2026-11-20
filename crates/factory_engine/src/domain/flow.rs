@@ -251,6 +251,13 @@ pub struct Flow {
     /// before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub questions: Option<u8>,
+    /// Whether a Run of it asks no person anything: it has no Gate, its
+    /// agents are offered no question, and a Step whose agent stops without
+    /// a result fails rather than wait for the owner. Only a Benchmark
+    /// trial's Flow is; a Flow without it, as every other Run carries,
+    /// replays as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unattended: bool,
 }
 
 /// What is wrong with a Flow definition.
@@ -262,6 +269,9 @@ pub enum FlowError {
     /// The Flow has no entries.
     #[error("the flow has no entries")]
     NoEntries,
+    /// An unattended Flow's entry asks a Gate, which no person would answer.
+    #[error("entry {0} asks a gate, but the flow is unattended")]
+    UnattendedGate(EntryId),
     /// Two entries share an id.
     #[error("entry {0} appears twice")]
     DuplicateEntry(EntryId),
@@ -272,6 +282,16 @@ pub enum FlowError {
         from: EntryId,
         /// The entry it names.
         to: EntryId,
+    },
+    /// A transition ends the Run with an outcome no Flow gives: only the
+    /// workflow ends a Run `infrastructure`, and a Run turns `flawed` only
+    /// once it succeeded.
+    #[error("entry {entry} ends the run {outcome}, which no flow ends it with")]
+    ReservedEnd {
+        /// The entry.
+        entry: EntryId,
+        /// The outcome.
+        outcome: RunOutcome,
     },
     /// A condition or a transition names a fact the Flow does not declare.
     #[error("entry {entry} names fact {fact}, which the flow does not declare")]
@@ -343,6 +363,33 @@ pub enum FlowError {
         /// The Role.
         role: Role,
     },
+    /// A Gate on an entry that runs `ready_to_merge` or `merge` is not a
+    /// merge Gate, or a merge Gate is on an entry that does not run
+    /// `ready_to_merge`: only a merge Gate asks to merge, so only its rule,
+    /// and never the Orchestrator, approves a merge.
+    #[error(
+        "entry {0}: a gate on ready_to_merge or merge must be of kind merge, and a merge gate must be on ready_to_merge"
+    )]
+    MergeGateKind(EntryId),
+    /// An entry the worker does itself names a Role or reviewers.
+    #[error("entry {0} runs a step no agent does, and names a role or reviewers")]
+    RoleOnWork(EntryId),
+    /// A merge Gate opens after another outcome than `done`: it would ask
+    /// to merge a head whose checks did not pass, and leave `done`, which
+    /// nothing routes, to fall down into the merge.
+    #[error("entry {0}'s merge gate must open after `done`")]
+    MergeGateAfter(EntryId),
+    /// A way into an entry that runs `merge` does not go through a merge
+    /// Gate's approval: every merge needs a person's, or the merge rule's,
+    /// answer first.
+    #[error("entry {from} leads to the merge at entry {to} without a merge gate's approval")]
+    UnguardedMerge {
+        /// The entry the way starts from; the merge entry itself when the
+        /// Run would start there.
+        from: EntryId,
+        /// The entry that runs `merge`.
+        to: EntryId,
+    },
     /// An entry runs a Step the worker does not serve.
     #[error("entry {entry} runs step {step}, which no worker serves")]
     UnknownStep {
@@ -369,9 +416,11 @@ impl Flow {
     }
 
     /// Let its agent Steps ask the Run's owner up to `questions` questions
-    /// each.
+    /// each, unless it is unattended: then they ask none.
     pub fn allow_questions(&mut self, questions: u8) {
-        self.questions = Some(questions);
+        if !self.unattended {
+            self.questions = Some(questions);
+        }
     }
 
     /// Bound each review panel to `rounds` rounds, in place of the
@@ -395,6 +444,9 @@ impl Flow {
         for entry in &self.entries {
             if !ids.insert(&entry.id) {
                 return Err(FlowError::DuplicateEntry(entry.id.clone()));
+            }
+            if self.unattended && entry.gate.is_some() {
+                return Err(FlowError::UnattendedGate(entry.id.clone()));
             }
         }
 
@@ -422,8 +474,19 @@ impl Flow {
             targets.extend(&entry.next);
             let mut named: Vec<&EntryId> = transitions.clone().flat_map(|t| &t.reset).collect();
             for target in targets {
-                if let Target::Entry { entry } = target {
-                    named.push(entry);
+                match target {
+                    Target::Entry { entry } => named.push(entry),
+                    // Only the workflow ends a Run `infrastructure`, and only
+                    // a Scorer or a person marks one `flawed`.
+                    Target::End { outcome }
+                        if matches!(outcome, RunOutcome::Infrastructure | RunOutcome::Flawed) =>
+                    {
+                        return Err(FlowError::ReservedEnd {
+                            entry: entry.id.clone(),
+                            outcome: *outcome,
+                        });
+                    }
+                    Target::End { .. } => {}
                 }
             }
             if let Some(unknown) = named.into_iter().find(|id| !ids.contains(id)) {
@@ -445,7 +508,139 @@ impl Flow {
         }
         Ok(())
     }
+
+    /// Fails when an entry whose Step a worker does itself (`StepUse::Work`:
+    /// `merge`, `ready_to_merge`, `publish`...) names a Role or a review
+    /// panel, which no agent would fill. A Factory Definition's Flows are
+    /// held to it; Flows read with every Step taken as work are not.
+    pub fn check_work_roles(
+        &self,
+        serves: impl Fn(&StepName) -> Option<StepUse>,
+    ) -> Result<(), FlowError> {
+        let named = self.entries.iter().find(|entry| {
+            let roles = entry.role.is_some() || !entry.reviewers.is_empty();
+            roles && serves(&entry.step) == Some(StepUse::Work)
+        });
+        match named {
+            Some(entry) => Err(FlowError::RoleOnWork(entry.id.clone())),
+            None => Ok(()),
+        }
+    }
+
+    /// Fails unless only a merge Gate asks to merge, and every way into an
+    /// entry that runs `merge` goes through its approval. A Factory
+    /// Definition's Flows are held to it, and the built-in Flows keep to
+    /// it; Flows Runs carried before it are not read again.
+    ///
+    /// Only a merge Gate asks to merge, and every way into an entry that
+    /// runs `merge` goes through its approval: an explicit transition only
+    /// under its approving answer, and the way down from the entry above
+    /// only from a merge Gate's entry that routes every other outcome. A
+    /// Factory Definition's Flow could otherwise merge with no one's
+    /// approval, or label a merge Gate as another kind that the
+    /// Orchestrator or a plan rule approves.
+    pub fn check_merges(&self) -> Result<(), FlowError> {
+        let runs = |entry: &Entry, step: &str| entry.step.as_str() == step;
+        let merges: BTreeSet<&EntryId> = self
+            .entries
+            .iter()
+            .filter(|entry| runs(entry, MERGE_STEP))
+            .map(|entry| &entry.id)
+            .collect();
+        let into_merge = |target: &Target| match target {
+            Target::Entry { entry } => merges.get(entry).copied(),
+            Target::End { .. } => None,
+        };
+        let [approve, _] = kind_answers(RuleGateKind::Merge);
+
+        if let Some(first) = self.entries.first()
+            && runs(first, MERGE_STEP)
+        {
+            return Err(FlowError::UnguardedMerge {
+                from: first.id.clone(),
+                to: first.id.clone(),
+            });
+        }
+
+        for (index, entry) in self.entries.iter().enumerate() {
+            let at_merge = runs(entry, READY_TO_MERGE_STEP) || runs(entry, MERGE_STEP);
+            let merge_gate = entry
+                .gate
+                .as_ref()
+                .is_some_and(|gate| gate.kind == Some(RuleGateKind::Merge));
+            let wrong_kind = at_merge && entry.gate.is_some() && !merge_gate;
+            if wrong_kind || (merge_gate && !runs(entry, READY_TO_MERGE_STEP)) {
+                return Err(FlowError::MergeGateKind(entry.id.clone()));
+            }
+            // `ready_to_merge` ends `done` on the head whose checks passed:
+            // only then may a merge Gate ask, as its rule assumes.
+            let opens_after_done = entry
+                .gate
+                .as_ref()
+                .is_none_or(|gate| gate.opened_by() == Outcome::done());
+            if merge_gate && !opens_after_done {
+                return Err(FlowError::MergeGateAfter(entry.id.clone()));
+            }
+            let unguarded = |to: &EntryId| FlowError::UnguardedMerge {
+                from: entry.id.clone(),
+                to: to.clone(),
+            };
+
+            for (outcome, transitions) in &entry.on {
+                let approved = merge_gate && outcome.as_str() == approve;
+                let leads = transitions.iter().find_map(|t| into_merge(&t.to));
+                if let Some(to) = leads
+                    && !approved
+                {
+                    return Err(unguarded(to));
+                }
+            }
+            let exhausted = entry.on_exhausted.iter().find_map(|t| into_merge(&t.to));
+            let next = entry.next.as_ref().and_then(into_merge);
+            if let Some(to) = exhausted.or(next) {
+                return Err(unguarded(to));
+            }
+
+            // With no `next`, a skip and an outcome nothing routes go to
+            // the entry below: above a merge, only a merge Gate's entry
+            // that is never skipped and routes, with no condition, every
+            // outcome `ready_to_merge` ends with and both its answers.
+            let Some(below) = self.entries.get(index + 1) else {
+                continue;
+            };
+            if entry.next.is_some() || !runs(below, MERGE_STEP) {
+                continue;
+            }
+            let routed = |outcome: &str| {
+                entry.on.iter().any(|(routes, transitions)| {
+                    routes.as_str() == outcome && transitions.iter().any(|t| t.when.is_empty())
+                })
+            };
+            let covered = merge_gate
+                && entry.when.is_empty()
+                && READY_TO_MERGE_OUTCOMES
+                    .iter()
+                    .all(|outcome| routed(outcome))
+                && kind_answers(RuleGateKind::Merge)
+                    .iter()
+                    .all(|answer| routed(answer));
+            if !covered {
+                return Err(unguarded(&below.id));
+            }
+        }
+        Ok(())
+    }
 }
+
+/// The Step that merges a pull request.
+const MERGE_STEP: &str = "merge";
+
+/// The Step whose Gate asks to merge a pull request.
+const READY_TO_MERGE_STEP: &str = "ready_to_merge";
+
+/// The outcomes `ready_to_merge` ends with besides `done`, which opens its
+/// Gate (`pull_request_steps.rs`).
+const READY_TO_MERGE_OUTCOMES: [&str; 3] = ["changed", "merged", "closed"];
 
 /// A review panel names each of its Roles once, and no single Role beside
 /// them. Its outcome is the round's; a Gate on it asks about one of the

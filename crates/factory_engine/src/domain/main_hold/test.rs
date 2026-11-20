@@ -65,12 +65,15 @@ async fn run_of_on(
         request: "Add dark mode",
         user_id: owner,
         task_id: Some(run_task()),
+        project_id: None,
         repository: Some(repository),
         created_in_person: false,
         control_file_patterns: &[],
         control_files_team_id: None,
         standing_rules: RunRules::DEFAULT,
         automation: None,
+        definition: None,
+        kept_flow: None,
     })
     .await
     .expect("insert");
@@ -93,12 +96,14 @@ fn input(run_id: RunId) -> StepInput<'static> {
         earlier: &[],
         created_in_person: false,
         control_file_patterns: None,
+        definition_repo: None,
         review: None,
         reviewer: false,
         may_ask: false,
         questions_left: 0,
         resumes: None,
         owner_notes: &[],
+        base_commit: None,
     }
 }
 
@@ -767,6 +772,7 @@ fn approved_merge_gate(approved: &[&str]) -> Step {
         gate: Some(Gate {
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
             kind: GateKind::Flow,
             question: "Merge?".to_string(),
             answers: vec![approve.clone()],

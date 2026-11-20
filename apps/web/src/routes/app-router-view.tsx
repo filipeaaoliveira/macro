@@ -58,6 +58,7 @@ import {
   EmailDetailRouteView,
   ExternalChatRouteView,
   ExternalRouteView,
+  FactoryBoardRouteView,
   FactoryInsightsRouteView,
   FactoryRunRouteView,
   FoldersRouteView,
@@ -143,6 +144,7 @@ import {
   emailThreadRoute,
   externalChatRoute,
   externalRoute,
+  factoryBoardRoute,
   factoryInsightsRoute,
   factoryRunRoute,
   foldersRoute,
@@ -444,6 +446,10 @@ export function appRouteElements(): JSX.Element {
         <Route
           definition={bookingLinksRoute}
           component={BookingLinksRouteView}
+        />
+        <Route
+          definition={factoryBoardRoute}
+          component={FactoryBoardRouteView}
         />
         <Route
           definition={factoryInsightsRoute}

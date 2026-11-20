@@ -1,13 +1,14 @@
 import { repositoryLabel } from '@app/features/agents-view/core/repository';
 import { t } from '@app/lib/i18n';
 import { Button } from '@ui';
-import { createSignal, createUniqueId, Show } from 'solid-js';
+import { createSignal, createUniqueId, For, Show } from 'solid-js';
 import {
   type AutomationTriggerKind,
   type BaseRequiredChecks,
   type MainHold,
   type ReviewRound,
   type Run,
+  type RunStandingAct,
   type RunStatus,
   type RunStep,
   runRequestBody,
@@ -22,11 +23,29 @@ const AUTOMATION_TRIGGERS = {
   task_event: 'factoryRuns.automationTriggerTaskEvent',
 } as const satisfies Record<AutomationTriggerKind, string>;
 
+const STANDING_ACTS = {
+  start: 'factoryRuns.standingActStart',
+  cancel: 'factoryRuns.standingActCancel',
+  link: 'factoryRuns.standingActLink',
+} as const;
+
+/** An act shown with the Run: a Gate's answer is shown on its Step. */
+type RunLevelAct = RunStandingAct & { act: keyof typeof STANDING_ACTS };
+
+function isRunLevel(standing: RunStandingAct): standing is RunLevelAct {
+  return standing.act in STANDING_ACTS;
+}
+
+function runLevelActs(run: Run): RunLevelAct[] {
+  return (run.standingActs ?? []).filter(isRunLevel);
+}
+
 /**
  * Where the Run is, when it started and ended, the repository it works on,
- * the Automation that started it, and what its request says past the
- * title. The status line takes focus when the control a person used goes
- * away (an answered Gate, a cancelled Run).
+ * the Factory Definition commit it read, the Automation that started it,
+ * and what its request says past the title. The status line takes focus
+ * when the control a person used goes away (an answered Gate, a cancelled
+ * Run).
  */
 export function RunSummary(props: {
   run: Run;
@@ -77,6 +96,28 @@ export function RunSummary(props: {
           </section>
         )}
       </Show>
+      <Show when={props.run.definition}>
+        {(definition) => (
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-xs font-medium text-ink-muted">
+              {t('factoryRuns.definition')}
+            </h3>
+            <p class="text-sm leading-5 [overflow-wrap:anywhere]">
+              <a
+                class="underline"
+                href={`${definition().repoUrl}/tree/${definition().commit}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('factoryRuns.definitionAt', {
+                  repository: repositoryLabel(definition().repoUrl),
+                  commit: definition().commit.slice(0, 7),
+                })}
+              </a>
+            </p>
+          </section>
+        )}
+      </Show>
       <Show when={props.run.automation}>
         {(automation) => (
           <section class="flex flex-col gap-1.5">
@@ -91,6 +132,26 @@ export function RunSummary(props: {
             </p>
           </section>
         )}
+      </Show>
+      <Show when={runLevelActs(props.run).length > 0}>
+        <section class="flex flex-col gap-1.5">
+          <h3 class="text-xs font-medium text-ink-muted">
+            {t('factoryRuns.standingActs')}
+          </h3>
+          <ul class="flex flex-col gap-1 text-sm leading-5 [overflow-wrap:anywhere]">
+            <For each={runLevelActs(props.run)}>
+              {(standing) => (
+                <li>
+                  {t(STANDING_ACTS[standing.act], {
+                    agent: standing.agent,
+                    role: standing.standingRole,
+                    time: props.time(standing.at),
+                  })}
+                </li>
+              )}
+            </For>
+          </ul>
+        </section>
       </Show>
       <Show when={runRequestBody(props.run)}>
         {(body) => (

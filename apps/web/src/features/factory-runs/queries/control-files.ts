@@ -1,16 +1,29 @@
 import { throwOnErr } from '@core/util/result';
 import { factoryClient } from '@service-factory/client';
 import type { ControlFilesSettings } from '@service-factory/generated/schemas';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/solid-query';
 import { factoryRunKeys } from './keys';
 
-/** The Control File patterns the person's Runs are checked against. */
-export function useControlFilesQuery() {
-  return useQuery(() => ({
+/**
+ * The read of the Control File patterns, built at module scope so the cached
+ * query keeps no view alive.
+ */
+function controlFilesOptions() {
+  return queryOptions({
     queryKey: factoryRunKeys.controlFiles.queryKey,
     queryFn: ({ signal }) =>
       throwOnErr(() => factoryClient.getControlFiles(signal)),
-  }));
+  });
+}
+
+/** The Control File patterns the person's Runs are checked against. */
+export function useControlFilesQuery() {
+  return useQuery(() => controlFilesOptions());
 }
 
 /**

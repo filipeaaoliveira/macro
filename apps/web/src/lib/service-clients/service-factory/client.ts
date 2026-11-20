@@ -11,12 +11,17 @@ import {
   getCreateFactoryAutomationUrl,
   getCreateFactoryRunUrl,
   getDeleteFactoryAutomationUrl,
+  getFindPullRequestRunsUrl,
+  getFlawFactoryRunUrl,
   getGetFactoryControlFilesUrl,
+  getGetFactoryDefinitionUrl,
+  getGetFactoryEvaluationUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
   getGetFactorySessionStepUrl,
   getGetFactoryStandingRulesUrl,
   getListFactoryAutomationsUrl,
+  getListFactoryBoardUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
   getListFactoryWaitingRunsUrl,
@@ -26,6 +31,7 @@ import {
   getResumeFactoryStepUrl,
   getSetFactoryAutomationEnabledUrl,
   getSetFactoryControlFilesUrl,
+  getSetFactoryDefinitionUrl,
   getSetFactoryStandingRulesUrl,
   getStopFactoryStepUrl,
 } from './generated/client';
@@ -34,12 +40,19 @@ import type {
   Automation,
   AutomationRequest,
   AutomationsSettings,
+  BoardPage,
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionSettings,
+  EvaluationInsights,
+  FlawRunRequest,
   FlowsResponse,
+  GetFactoryEvaluationParams,
   GetFactoryInsightsParams,
+  ListFactoryBoardParams,
   NoteStepRequest,
+  PullRequestRuns,
   ReplyToGateRequest,
   ResumeStepRequest,
   RunDetail,
@@ -57,18 +70,27 @@ const host = () => SERVER_HOSTS.factory;
 export type StartRunErrorCode =
   | 'UNREACHABLE_REPOSITORY'
   | 'NO_PUSH_ACCESS'
-  | 'QUEUE_FULL';
+  | 'QUEUE_FULL'
+  | 'DEFINITION_UNREADABLE';
 
-/** The codes the service refuses a start with. */
+/**
+ * The codes the service refuses a start with. A person starts as themselves,
+ * so Standing Roles never refuse them.
+ */
 type StartRunRefusal = Exclude<
   RunErrorCode,
-  'controlFilesNotApproved' | 'reservedForAPerson'
+  | 'controlFilesNotApproved'
+  | 'reservedForAPerson'
+  | 'definitionNamed'
+  | 'notInStandingRole'
 >;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
   unreachableRepository: 'UNREACHABLE_REPOSITORY',
   noPushAccess: 'NO_PUSH_ACCESS',
   queueFull: 'QUEUE_FULL',
+  unreachableDefinition: 'DEFINITION_UNREADABLE',
+  invalidDefinition: 'DEFINITION_UNREADABLE',
 };
 
 function isRunErrorCode(code: unknown): code is StartRunRefusal {
@@ -111,8 +133,8 @@ async function refusal(
 }
 
 /**
- * The software factory's Runs, as the signed-in person sees them: their own
- * Runs only. The routes and shapes are the service's generated client's.
+ * The software factory's Runs, as the signed-in person sees them: their own,
+ * and on the board and a Run's page their team's on tasks they can see. The routes and shapes are the service's generated client's.
  */
 export const factoryClient = {
   /** The caller's Runs of a task, newest first; the service returns 50 at most. */
@@ -135,6 +157,30 @@ export const factoryClient = {
     );
   },
 
+  /**
+   * A page of the board: the caller's Runs, or their team's on tasks they
+   * can see, newest first, each with where it is; `next` starts the page
+   * after.
+   */
+  listBoard(params: ListFactoryBoardParams, signal?: AbortSignal) {
+    return fetchWithToken<BoardPage>(
+      `${host()}${getListFactoryBoardUrl(params)}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * The Runs that opened the pull requests at `urls` (at most 100), among
+   * those the caller's team board shows: a pull request a Run they can't
+   * see opened reads as one no Run opened.
+   */
+  findPullRequestRuns(urls: string[], signal?: AbortSignal) {
+    return fetchWithToken<PullRequestRuns>(
+      `${host()}${getFindPullRequestRunsUrl()}`,
+      { method: 'POST', body: JSON.stringify({ urls }), signal }
+    );
+  },
+
   getRun(runId: string, signal?: AbortSignal) {
     return fetchWithToken<RunDetail>(
       `${host()}${getGetFactoryRunUrl(encodeURIComponent(runId))}`,
@@ -149,6 +195,17 @@ export const factoryClient = {
   getInsights(params: GetFactoryInsightsParams, signal?: AbortSignal) {
     return fetchWithToken<RunInsights>(
       `${host()}${getGetFactoryInsightsUrl(params)}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * How the caller's own Runs over a period were judged by the Scorers and
+   * split by the Experiments, and the Benchmark suites they started.
+   */
+  getEvaluation(params: GetFactoryEvaluationParams, signal?: AbortSignal) {
+    return fetchWithToken<EvaluationInsights>(
+      `${host()}${getGetFactoryEvaluationUrl(params)}`,
       { method: 'GET', signal }
     );
   },
@@ -281,6 +338,35 @@ export const factoryClient = {
   },
 
   /**
+   * The Factory Definition the person's team names: its repository, the
+   * commit a Run started now would read, or why it doesn't read, and
+   * whether the person may change it.
+   */
+  getDefinition(signal?: AbortSignal) {
+    return fetchWithToken<DefinitionSettings>(
+      `${host()}${getGetFactoryDefinitionUrl()}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * Names the team's Factory Definition by its repository's URL; `null`
+   * names none. A Definition that doesn't read fails `HTTP_ERROR` (400),
+   * and someone who doesn't administer the team fails `FORBIDDEN`; either
+   * carries the service's message.
+   */
+  setDefinition(repoUrl: string | null) {
+    return fetchWithToken<DefinitionSettings>(
+      `${host()}${getSetFactoryDefinitionUrl()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ repoUrl }),
+        errorResponseHandler: refusal,
+      }
+    );
+  },
+
+  /**
    * The Standing Rules the person's Runs start with: which kinds of Gate
    * the factory answers on its own, their team's or the default, and
    * whether the person may change them.
@@ -368,5 +454,17 @@ export const factoryClient = {
       `${host()}${getCancelFactoryRunUrl(encodeURIComponent(runId))}`,
       { method: 'POST' }
     ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * Marks one of the caller's Runs that ended in success flawed, with why:
+   * it reads `flawed` after, with who marked it. 409 when it did not end in
+   * success.
+   */
+  flawRun(runId: string, body: FlawRunRequest) {
+    return fetchWithToken<RunDetail>(
+      `${host()}${getFlawFactoryRunUrl(encodeURIComponent(runId))}`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
   },
 };

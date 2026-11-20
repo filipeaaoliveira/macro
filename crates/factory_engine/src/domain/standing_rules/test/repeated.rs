@@ -103,6 +103,7 @@ fn fixed(seq: u16, rule: Option<StandingRule>) -> Step {
             }),
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
         }),
         role: None,
         agent: None,
@@ -117,6 +118,7 @@ const OWNER_GATES: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: false,
     owner_gates: true,
+    quiet_gates: false,
     task_thread: false,
     queue_limit: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {

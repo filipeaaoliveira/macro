@@ -15,7 +15,7 @@ use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::{GateFacts, rule_answer};
 use crate::inbound::temporal::workflow::review_round::Round;
-use crate::inbound::temporal::workflow::work::Work;
+use crate::inbound::temporal::workflow::work::{Work, WorkFailure};
 use crate::inbound::temporal::workflow::{Asking, Question, Questions};
 
 /// An activity that failed.
@@ -25,8 +25,9 @@ struct Failed;
 /// What the stand-in answers, and what it was asked, in order.
 #[derive(Default)]
 struct Script {
-    /// What the Step at a place ends with, when not `done`: `question`, or
-    /// `fail` for work that fails for good.
+    /// What the Step at a place ends with, when not `done`: `question`,
+    /// `fail` for work that fails for good, or `broke` for work that fails
+    /// for good for infrastructure.
     ends: BTreeMap<u16, &'static str>,
     cancelled: bool,
     /// Asking a Gate fails, other than by the Run's cancellation.
@@ -77,10 +78,11 @@ impl Work for Script {
         Ok(StepStart::Started)
     }
 
-    async fn run(&self, request: &StepRequest) -> Result<StepReport, Failed> {
+    async fn run(&self, request: &StepRequest) -> Result<StepReport, WorkFailure> {
         self.note(format!("run {}", request.key.seq));
         match self.ends.get(&request.key.seq).copied() {
-            Some("fail") => Err(Failed),
+            Some("fail") => Err(WorkFailure::Work),
+            Some("broke") => Err(WorkFailure::Infrastructure),
             Some("question") => Ok(StepReport {
                 outcome: Outcome::question(),
                 output: format!("Question of step {}?", request.key.seq),
@@ -100,7 +102,7 @@ impl Work for Script {
         }
     }
 
-    async fn run_all(&self, _requests: &[StepRequest]) -> Vec<Result<StepReport, Failed>> {
+    async fn run_all(&self, _requests: &[StepRequest]) -> Vec<Result<StepReport, WorkFailure>> {
         unreachable!("a Step's walk runs one Step at a time")
     }
 
@@ -174,6 +176,7 @@ fn asking(most: u8) -> Questions {
     Questions {
         may_ask: most > 0,
         most,
+        owner_answers: true,
     }
 }
 
@@ -476,6 +479,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: true,
     owner_gates: false,
+    quiet_gates: false,
     task_thread: false,
     queue_limit: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -857,5 +861,80 @@ async fn a_retried_verifier_s_blockers_count_the_visits_not_the_retry() {
                 fix_limit: crate::domain::standing_rules::rule_fix_limit(entry.max_visits),
             }),
         ]
+    );
+}
+
+/// Work that failed for good for a machine, quota or network reason is
+/// routed `failed` as any failed work is, marked as infrastructure's; work
+/// that failed for itself is not. A Gate that opens on `failed` takes a
+/// person's answer, which is routed as theirs.
+#[tokio::test]
+async fn work_that_failed_for_infrastructure_is_routed_as_such() {
+    let broke = Script {
+        ends: [(1, "broke")].into(),
+        ..Script::default()
+    };
+    let (walked, _) = walk(&broke, &plan(true), asking(0), 10).await;
+    assert_eq!(walked, Ok(Round::FailedForInfrastructure));
+    assert_eq!(
+        broke.asked(),
+        ["start 1", "run 1", "end 1 failed", "stop 1"]
+    );
+
+    let failing = Script {
+        ends: [(1, "fail")].into(),
+        ..Script::default()
+    };
+    let (walked, _) = walk(&failing, &plan(false), asking(0), 10).await;
+    assert_eq!(walked, Ok(Round::Routed(Outcome::failed())));
+
+    let flow = Flow::parse(
+        json!({ "entries": [{
+            "id": "plan", "step": "plan", "role": "planner",
+            "gate": { "question": "Try again?", "answers": ["again", "give_up"], "after": "failed" }
+        }] }),
+        |_| Some(StepUse::Agent),
+    )
+    .expect("valid flow");
+    let answered = Script {
+        ends: [(1, "broke")].into(),
+        ..Script::default()
+    };
+    let (walked, _) = walk(&answered, &flow.entries[0], asking(0), 10).await;
+    assert_eq!(
+        walked,
+        Ok(Round::Routed(
+            Outcome::try_from("again".to_string()).expect("valid")
+        ))
+    );
+}
+
+/// On an unattended Flow, a Benchmark trial's, an agent that stopped
+/// without a result asks no one: the Step fails, its agent is stopped, and
+/// the Flow routes `failed`.
+#[tokio::test]
+async fn an_unattended_step_without_a_result_fails_and_asks_no_one() {
+    let unattended = Questions::of(
+        &Flow::parse(
+            json!({
+                "unattended": true,
+                "entries": [{ "id": "plan", "step": "plan", "role": "planner" }]
+            }),
+            |_| Some(StepUse::Agent),
+        )
+        .expect("valid flow"),
+    );
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan(false), unattended, 10).await;
+
+    assert_eq!(walked, Ok(Round::Routed(Outcome::failed())));
+    assert!(held.is_empty());
+    assert_eq!(
+        script.asked(),
+        ["start 1", "run 1", "end 1 failed", "stop 1"]
     );
 }

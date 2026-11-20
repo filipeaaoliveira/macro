@@ -19,14 +19,19 @@ use crate::domain::models::{
     StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
-    StepService,
+    AgentFailure, AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError,
+    StepExecutor, StepService,
 };
 
 mod automations;
+mod board;
 mod control_files;
+mod definition;
+mod evaluation;
 mod gate_owner;
 mod orchestrator;
+mod self_improvement;
+mod standing;
 mod standing_rules;
 mod step_terminal;
 mod task_thread;
@@ -41,6 +46,8 @@ struct FakeWorkflows {
     replies: Arc<Mutex<Vec<ReplyGate>>>,
     cancelled: Arc<Mutex<Vec<RunId>>>,
     fail: bool,
+    /// Every cancel fails, as Temporal out of reach does.
+    cancel_fails: bool,
     started_anyway: bool,
     refuse: bool,
     /// The workflow completed, though the Run's end is not recorded yet.
@@ -92,6 +99,9 @@ impl RunWorkflows for FakeWorkflows {
     }
 
     async fn cancel(&self, run_id: RunId) -> Result<bool, RunWorkflowsError> {
+        if self.cancel_fails {
+            return Err(RunWorkflowsError::Other(rootcause::report!("unreachable")));
+        }
         self.cancelled.lock().expect("cancelled").push(run_id);
         let scripted = self.cancel_answers.lock().expect("cancels").pop_front();
         Ok(scripted.unwrap_or(!self.completed && !self.unstarted))
@@ -134,11 +144,23 @@ impl Default for FakeExecutor {
 #[error("the work failed")]
 struct WorkFailure {
     retryable: bool,
+    out_of_quota: bool,
+    overdue: bool,
 }
 
 impl Retryable for WorkFailure {
     fn retryable(&self) -> bool {
         self.retryable
+    }
+}
+
+impl AgentFailure for WorkFailure {
+    fn out_of_quota(&self) -> bool {
+        self.out_of_quota
+    }
+
+    fn overdue(&self) -> bool {
+        self.overdue
     }
 }
 
@@ -196,7 +218,11 @@ impl StepExecutor for FakeExecutor {
         steer: SessionSteer,
     ) -> Result<(), WorkFailure> {
         if self.steer_refused {
-            return Err(WorkFailure { retryable: false });
+            return Err(WorkFailure {
+                retryable: false,
+                out_of_quota: false,
+                overdue: false,
+            });
         }
         self.steered
             .lock()
@@ -216,6 +242,30 @@ fn teo() -> MacroUserIdStr<'static> {
 
 fn nobody() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|nobody@example.com".to_string()).expect("valid")
+}
+
+/// Keep for the Run `run_id` a Flow whose `reply` entry has a notify-only
+/// Gate, as a Run started on such a Flow keeps it.
+fn keep_notify_only_reply(repo: &FakeRepo, run_id: RunId) {
+    let mut flow = crate::domain::built_in_flows::BuiltInFlow::named("code")
+        .expect("built in")
+        .read(|_| Some(StepUse::Work))
+        .expect("valid flow");
+    let entry = &mut flow.entries[0];
+    entry.id = EntryId::try_from("reply".to_string()).expect("valid");
+    entry.gate = Some(crate::domain::flow::GateDefinition {
+        question: "The plan is ready.".to_string(),
+        answers: Vec::new(),
+        after: None,
+        kind: None,
+        person_only: false,
+        notify_only: true,
+    });
+    let kept = serde_json::to_value(&flow).expect("flows serialize");
+    repo.kept_flows
+        .lock()
+        .expect("kept flows")
+        .insert(run_id, (kept, false));
 }
 
 fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
@@ -275,12 +325,15 @@ async fn julia_s_run(repo: &FakeRepo) -> RunId {
             request: "Plan",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -309,6 +362,7 @@ async fn creating_a_run_records_it_for_its_owner_and_starts_its_workflow() {
             None,
             None,
             true,
+            None,
         )
         .await
         .expect("create");
@@ -339,6 +393,7 @@ async fn a_code_run_keeps_its_repository_and_its_base_branch() {
             None,
             Some("https://github.com/macro/app".to_string()),
             true,
+            None,
         )
         .await
         .expect("create");
@@ -373,6 +428,7 @@ async fn a_run_s_repository_must_fit_its_flow_and_be_reachable() {
                     None,
                     repo_url,
                     true,
+                    None,
                 )
                 .await
         }
@@ -422,6 +478,7 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -448,6 +505,7 @@ async fn a_run_whose_workflow_started_despite_a_failed_start_is_kept() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -469,6 +527,7 @@ async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept(
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -490,6 +549,7 @@ async fn a_flow_no_built_in_flow_is_named_for_is_refused_before_anything_is_kept
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -508,6 +568,7 @@ async fn an_empty_request_is_refused() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -526,6 +587,7 @@ async fn a_run_for_a_user_with_no_account_is_refused() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -552,8 +614,10 @@ async fn someone_else_s_run_reads_answers_and_cancels_as_missing() {
             Answerer::InPerson,
         )
         .await;
-    let cancelled = service.cancel_run(&teo(), run_id).await;
-    let linked = service.link_task(&teo(), run_id, Uuid::now_v7()).await;
+    let cancelled = service.cancel_run(&teo(), run_id, None, true).await;
+    let linked = service
+        .link_task(&teo(), run_id, Uuid::now_v7(), None)
+        .await;
 
     assert!(matches!(read, Err(FactoryError::NotFound)));
     assert!(matches!(answered, Err(FactoryError::NotFound)));
@@ -592,6 +656,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             user_id: julia(),
             approved_control_files: None,
             agent_session: None,
+            standing: None,
         }]
     );
 }
@@ -673,17 +738,19 @@ async fn cancelling_a_run_twice_is_one_cancel_and_an_ended_run_is_not_cancelled(
     let service = service(&repo, &workflows);
 
     service
-        .cancel_run(&julia(), cancelled_run)
+        .cancel_run(&julia(), cancelled_run, None, true)
         .await
         .expect("cancel");
     repo.end_run(cancelled_run, RunOutcome::Cancelled)
         .await
         .expect("the workflow ends it");
-    let again = service.cancel_run(&julia(), cancelled_run).await;
+    let again = service
+        .cancel_run(&julia(), cancelled_run, None, true)
+        .await;
     repo.end_run(finished_run, RunOutcome::Success)
         .await
         .expect("end");
-    let finished = service.cancel_run(&julia(), finished_run).await;
+    let finished = service.cancel_run(&julia(), finished_run, None, true).await;
 
     assert!(again.is_ok());
     assert!(matches!(finished, Err(FactoryError::RunEnded)));
@@ -708,6 +775,7 @@ async fn a_run_created_for_a_task_keeps_it() {
             Some(task_id),
             None,
             true,
+            None,
         )
         .await
         .expect("create");
@@ -731,6 +799,7 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
             Some(note),
             None,
             true,
+            None,
         )
         .await;
     let missing = service
@@ -741,6 +810,7 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
             Some(Uuid::now_v7()),
             None,
             true,
+            None,
         )
         .await;
 
@@ -760,11 +830,11 @@ async fn linking_a_run_replaces_its_task() {
     let service = service(&repo, &FakeWorkflows::default());
 
     service
-        .link_task(&julia(), run_id, first)
+        .link_task(&julia(), run_id, first, None)
         .await
         .expect("link");
     let relinked = service
-        .link_task(&julia(), run_id, second)
+        .link_task(&julia(), run_id, second, None)
         .await
         .expect("relink");
 
@@ -961,20 +1031,52 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
     let for_good = StepServiceImpl::new(
         repo.clone(),
         FakeExecutor {
-            failure: Some(WorkFailure { retryable: false }),
+            failure: Some(WorkFailure {
+                retryable: false,
+                out_of_quota: false,
+                overdue: false,
+            }),
             ..FakeExecutor::default()
         },
     );
     let for_now = StepServiceImpl::new(
         repo.clone(),
         FakeExecutor {
-            failure: Some(WorkFailure { retryable: true }),
+            failure: Some(WorkFailure {
+                retryable: true,
+                out_of_quota: false,
+                overdue: false,
+            }),
+            ..FakeExecutor::default()
+        },
+    );
+    let overdue = StepServiceImpl::new(
+        repo.clone(),
+        FakeExecutor {
+            failure: Some(WorkFailure {
+                retryable: true,
+                out_of_quota: false,
+                overdue: true,
+            }),
+            ..FakeExecutor::default()
+        },
+    );
+    let out_of_quota = StepServiceImpl::new(
+        repo.clone(),
+        FakeExecutor {
+            failure: Some(WorkFailure {
+                retryable: false,
+                out_of_quota: true,
+                overdue: false,
+            }),
             ..FakeExecutor::default()
         },
     );
 
     let final_failure = for_good.run_step(reply_step(run_id, 1)).await;
     let passing_failure = for_now.run_step(reply_step(run_id, 1)).await;
+    let quota_failure = out_of_quota.run_step(reply_step(run_id, 1)).await;
+    let overdue_failure = overdue.run_step(reply_step(run_id, 1)).await;
 
     assert!(matches!(
         final_failure,
@@ -983,6 +1085,16 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
     assert!(matches!(
         passing_failure,
         Err(crate::domain::models::StepError::Internal(_))
+    ));
+    // A quota that ran out is infrastructure's, which the workflow reads.
+    assert!(matches!(
+        quota_failure,
+        Err(crate::domain::models::StepError::OutOfQuota(_))
+    ));
+    // An agent still at work when the wait ended is the work's, retried.
+    assert!(matches!(
+        overdue_failure,
+        Err(crate::domain::models::StepError::Overdue(_))
     ));
 }
 
@@ -996,7 +1108,7 @@ async fn cancelling_a_run_whose_workflow_completed_is_a_conflict() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .cancel_run(&julia(), run_id)
+        .cancel_run(&julia(), run_id, None, true)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::RunEnded)));
@@ -1014,7 +1126,7 @@ async fn cancelling_a_run_whose_workflow_never_started_ends_it_cancelled() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id)
+        .cancel_run(&julia(), run_id, None, true)
         .await
         .expect("cancel");
     let started = StepServiceImpl::new(repo.clone(), FakeExecutor::default())
@@ -1049,7 +1161,7 @@ async fn a_workflow_that_starts_as_its_run_is_cancelled_is_cancelled_too() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id)
+        .cancel_run(&julia(), run_id, None, true)
         .await
         .expect("cancel");
 
@@ -1067,7 +1179,7 @@ async fn a_workflow_that_started_after_the_cancel_was_sent_is_cancelled() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id)
+        .cancel_run(&julia(), run_id, None, true)
         .await
         .expect("cancel");
 
@@ -1098,8 +1210,9 @@ async fn a_step_of_a_run_that_ended_does_no_work() {
 }
 
 /// A Run kept when Temporal could not say whether its workflow started,
-/// and whose workflow never came, ends failed once it is old enough; a new
-/// Run waiting for its first Step is left alone.
+/// and whose workflow never came, ends `infrastructure` once it is old
+/// enough, as none of its work ran; a new Run waiting for its first Step
+/// is left alone.
 #[tokio::test]
 async fn reading_a_run_whose_workflow_never_started_ends_it() {
     let repo = FakeRepo::default();
@@ -1116,16 +1229,19 @@ async fn reading_a_run_whose_workflow_never_started_ends_it() {
 
     assert_eq!(
         stuck.run.end.map(|end| end.outcome),
-        Some(RunOutcome::Failed)
+        Some(RunOutcome::Infrastructure)
     );
     assert_eq!(new.run.end, None);
 }
 
 /// Only the Flows whose Steps the worker serves are offered: this one
 /// serves `reply` alone.
-#[test]
-fn only_the_flows_the_worker_runs_are_offered() {
-    let flows = service(&FakeRepo::default(), &FakeWorkflows::default()).list_flows();
+#[tokio::test]
+async fn only_the_flows_the_worker_runs_are_offered() {
+    let flows = service(&FakeRepo::default(), &FakeWorkflows::default())
+        .list_flows(&julia())
+        .await
+        .expect("flows");
 
     let names: Vec<&str> = flows.iter().map(|flow| flow.name.as_str()).collect();
     assert_eq!(names, ["reply"]);
@@ -1151,12 +1267,15 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
                 request: &format!("Run {n}"),
                 user_id: &julia(),
                 task_id: Some(task_id),
+                project_id: None,
                 repository: None,
                 created_in_person: false,
                 control_file_patterns: &[],
                 control_files_team_id: None,
                 standing_rules: RunRules::DEFAULT,
                 automation: None,
+                definition: None,
+                kept_flow: None,
             })
             .await
             .expect("insert")
@@ -1312,6 +1431,7 @@ async fn a_run_s_flow_keeps_how_many_questions_its_agents_may_ask() {
                 None,
                 None,
                 true,
+                None,
             )
             .await
             .expect("create");

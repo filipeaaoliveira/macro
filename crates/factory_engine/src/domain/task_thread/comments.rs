@@ -6,8 +6,7 @@ use factory_records::domain::review_rounds::ReviewRound;
 use model_notifications::FactoryGateWaitingMetadata;
 
 use super::{RunUpdate, ThreadComment, comment_id};
-use crate::domain::built_in_flows::BUILT_IN_FLOWS;
-use crate::domain::flow::StepUse;
+use crate::domain::flow::Flow;
 use crate::domain::gate_owner::factory_signed;
 use crate::domain::review_rounds::escape;
 
@@ -23,6 +22,8 @@ pub struct UpdateContext<'a> {
     pub rounds: &'a [ReviewRound],
     /// For an answer a person gave, the name they show others.
     pub answerer_name: Option<&'a str>,
+    /// The Flow the Run walks; none when it cannot be read.
+    pub flow: Option<&'a Flow>,
 }
 
 /// The thread's first comment: the Run started, with the link that opens
@@ -69,7 +70,9 @@ pub fn update_comment(
             );
             // A pull request Step's output starts by naming its pull
             // request; any other Step's output stays on the Run.
-            if runs_pull_request_step(&step.entry)
+            if context
+                .flow
+                .is_some_and(|flow| runs_pull_request_step(flow, &step.entry))
                 && let Some(named) = end.output.lines().next()
             {
                 text.push_str(&format!("\n\n{named}"));
@@ -181,16 +184,12 @@ fn on_review_panel(steps: &[Step], rounds: &[ReviewRound], entry: &EntryId) -> b
     })
 }
 
-/// Whether the entry `entry` runs a pull request Step in a built-in Flow,
-/// whose output names the Run's pull request.
-fn runs_pull_request_step(entry: &EntryId) -> bool {
-    BUILT_IN_FLOWS
-        .into_iter()
-        .filter_map(|flow| flow.read(|_| Some(StepUse::Work)).ok())
-        .flat_map(|flow| flow.entries)
-        .any(|built_in| {
-            built_in.id == *entry && PULL_REQUEST_STEPS.contains(&built_in.step.as_str())
-        })
+/// Whether the entry `entry` runs a pull request Step in `flow`, the
+/// Run's own, whose output names the Run's pull request.
+fn runs_pull_request_step(flow: &Flow, entry: &EntryId) -> bool {
+    flow.entries
+        .iter()
+        .any(|walked| walked.id == *entry && PULL_REQUEST_STEPS.contains(&walked.step.as_str()))
 }
 
 /// Each reviewer of `round` and how they ended, in the order they first

@@ -9,6 +9,8 @@ pub mod fast_gate_model;
 pub mod github_pull_requests;
 pub mod ingress_gate_notifier;
 pub mod local_agent;
+pub mod local_definition_files;
+pub mod model_run_judge;
 pub mod routine_automation_triggers;
 pub(crate) mod task_project;
 pub mod temporal_main_watches;

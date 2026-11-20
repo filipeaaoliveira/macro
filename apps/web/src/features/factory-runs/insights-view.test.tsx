@@ -17,6 +17,7 @@ import {
   RunsProvider,
   type RunsQueue,
 } from './context/runs-context';
+import type { EvaluationInsights } from './core/evaluation';
 import type { InsightsParams, RunInsights } from './core/insights';
 import type { Run } from './core/run';
 import { RunInsightsView } from './insights-view';
@@ -90,6 +91,8 @@ const outcomes = (
   blocked: 0,
   failed: 0,
   cancelled: 0,
+  infrastructure: 0,
+  flawed: 0,
   ...changes,
 });
 
@@ -151,11 +154,86 @@ const november: RunInsights = {
   },
 };
 
+const judged: EvaluationInsights = {
+  from: '2026-10-13',
+  to: '2026-11-11',
+  timeZone: 'Europe/Lisbon',
+  scorers: [
+    {
+      name: 'correctness',
+      instructions: 'Does the change do what the request asks?',
+      flows: [],
+      samplePercent: 20,
+      judged: 4,
+      passed: 3,
+      meanScore: 0.7,
+    },
+  ],
+  experiments: [
+    {
+      name: 'writer-agent',
+      flow: 'code',
+      running: true,
+      arms: [
+        {
+          name: 'control',
+          agents: {},
+          runs: 3,
+          ended: 2,
+          succeeded: 1,
+          fellBack: 0,
+          scores: [],
+        },
+        {
+          name: 'backup',
+          agents: { writer: 'backup' },
+          runs: 2,
+          ended: 2,
+          succeeded: 2,
+          fellBack: 1,
+          scores: [{ scorer: 'correctness', judged: 2, meanScore: 0.9 }],
+        },
+      ],
+    },
+  ],
+  benchmarks: [
+    {
+      name: 'core',
+      tasks: ['typo'],
+      scorers: ['correctness'],
+    },
+  ],
+  suites: [
+    {
+      id: 'suite-1',
+      benchmark: 'core',
+      agents: { writer: 'backup' },
+      createdAt: '2026-11-10T09:00:00Z',
+      scored: 1,
+      infrastructure: 0,
+      meanScore: 0.5,
+      tokens: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0 },
+      trials: [
+        {
+          task: 'typo',
+          runId: failedImport.id,
+          runOutcome: 'manual',
+          score: 0.5,
+          tokens: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0 },
+          scores: [{ scorer: 'correctness', score: 0.25 }],
+        },
+      ],
+    },
+  ],
+};
+
 function mount(options: {
   state?: Accessor<'pending' | 'error' | 'ready'>;
   insights?: RunInsights;
+  evaluation?: EvaluationInsights;
+  evaluationState?: Accessor<'pending' | 'error' | 'ready'>;
+  evaluationRetry?: () => void;
   retry?: () => void;
-  openRunId?: Accessor<string | undefined>;
   queue?: RunsQueue;
 }) {
   const asked: InsightsParams[] = [];
@@ -170,6 +248,14 @@ function mount(options: {
         updating: () => false,
       };
     },
+    evaluation: () => ({
+      state:
+        options.evaluationState ??
+        (() => (options.evaluation ? 'ready' : 'pending')),
+      data: () => options.evaluation,
+      retry: options.evaluationRetry ?? vi.fn(),
+      updating: () => false,
+    }),
     flowNames: () => ({
       state: () => 'ready',
       data: () => ['plan', 'reply'],
@@ -199,6 +285,7 @@ function mount(options: {
     answerGate: vi.fn(),
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
+    markRunFlawed: vi.fn(),
     steerStep: vi.fn(),
   };
   render(() => (
@@ -207,7 +294,6 @@ function mount(options: {
         <RunInsightsView
           timeZone="Europe/Lisbon"
           now={() => new Date('2026-11-11T12:00:00Z')}
-          openRunId={options.openRunId?.()}
         />
       </InsightsProvider>
     </RunsProvider>
@@ -265,6 +351,56 @@ describe('RunInsightsView', () => {
         ?.textContent
     ).toContain('50');
     expect(screen.queryByText(/No runs match this period/)).toBeNull();
+  });
+
+  it('splits failures of the work from infrastructure, and flawed runs from done', () => {
+    mount({
+      insights: {
+        ...november,
+        totals: outcomes({
+          success: 3,
+          flawed: 1,
+          failed: 2,
+          infrastructure: 2,
+        }),
+      },
+    });
+
+    const outcomesList = screen.getByRole('list', { name: 'Run outcomes' });
+    expect(
+      within(outcomesList).getByText('Infrastructure failure').nextSibling
+        ?.textContent
+    ).toBe('2');
+    expect(
+      within(outcomesList).getByText('Flawed').nextSibling?.textContent
+    ).toBe('1');
+    const kinds = screen
+      .getByRole('heading', { name: 'Quality and infrastructure' })
+      .closest('section');
+    if (!kinds) throw new Error('No quality and infrastructure section');
+    // One flawed of the four that reached their end: 25%. Two of the eight
+    // that ended on their own failed for infrastructure: 25%.
+    expect(
+      within(kinds).getByText('Failed for the work').nextSibling?.textContent
+    ).toBe('2');
+    expect(
+      within(kinds).getByText('Failed for infrastructure').nextSibling
+        ?.textContent
+    ).toBe('2');
+    const figure = (label: string) =>
+      within(kinds)
+        .getByText(label)
+        .closest('div')
+        ?.parentElement?.querySelector('p')?.textContent;
+    expect(figure('Flawed')).toBe('25%');
+    expect(figure('Infrastructure failures')).toBe('25%');
+    // The success rate leaves the infrastructure failures out: 3 of 6.
+    expect(
+      screen
+        .getByText('Success rate')
+        .closest('div')
+        ?.parentElement?.querySelector('p')?.textContent
+    ).toBe('50%');
   });
 
   it('says there is nothing to show for a period with no runs', () => {
@@ -335,13 +471,154 @@ describe('RunInsightsView', () => {
     expect(screen.getByText('Plan the archive')).toBeTruthy();
   });
 
-  it('opens the run a link names, and another link’s run in the same view', async () => {
-    const [runId, setRunId] = createSignal<string | undefined>();
-    mount({ insights: november, openRunId: runId });
-    expect(screen.queryByText('No steps yet')).toBeNull();
+  it('shows each scorer, each experiment’s arms and each benchmark suite’s trials', async () => {
+    mount({ insights: november, evaluation: judged });
 
-    setRunId(failedImport.id);
+    const scorers = screen.getByRole('heading', { name: 'Scorers' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(scorers).getByText('correctness')).toBeTruthy();
+    expect(within(scorers).getByText('0.70')).toBeTruthy();
+    expect(within(scorers).getByText('75%')).toBeTruthy();
 
+    const backup = screen.getByRole('rowheader', { name: /backup/ });
+    expect(backup.parentElement?.textContent).toContain('0.90');
+    expect(backup.textContent).toContain('writer: backup');
+    expect(backup.textContent).toContain('1 run fell back to another agent');
+
+    const trials = screen.getByRole('list', { name: 'Trial' });
+    const trial = within(trials).getByRole('button', { name: /typo/ });
+    expect(trial.textContent).toContain('0.25');
+    expect(trial.textContent).toContain('0.50');
+
+    fireEvent.click(trial);
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('says how many of a suite’s trials were lost to infrastructure, with no score', () => {
+    const [suite] = judged.suites;
+    if (!suite) throw new Error('No suite');
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        suites: [
+          {
+            ...suite,
+            infrastructure: 1,
+            trials: [
+              ...suite.trials,
+              {
+                task: 'export',
+                runId: 'run-lost',
+                runOutcome: 'infrastructure',
+                score: null,
+                tokens: null,
+                scores: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByText('1 of 2 trials scored')).toBeTruthy();
+    expect(
+      screen.getByText('1 lost to infrastructure, left out of the score')
+    ).toBeTruthy();
+    const trials = screen.getByRole('list', { name: 'Trial' });
+    const lost = within(trials).getByRole('button', { name: /export/ });
+    expect(lost.textContent).not.toMatch(/\d\.\d\d/);
+  });
+
+  it('shows the team’s pending failures and its last self-improvement run, and opens it', async () => {
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        selfImprovement: {
+          repoUrl: 'https://github.com/macro/factory-definition',
+          enabled: true,
+          failuresThreshold: 25,
+          oldestDays: 7,
+          namer: 'admin',
+          pending: 4,
+          oldestPendingAt: '2026-11-05T09:00:00Z',
+          pendingBySource: [
+            { source: 'correctness', count: 3 },
+            { source: 'flawed', count: 1 },
+          ],
+          last: {
+            runId: failedImport.id,
+            state: 'closed',
+            failures: 12,
+            createdAt: '2026-11-01T09:00:00Z',
+          },
+        },
+      },
+    });
+
+    const section = screen.getByRole('heading', { name: 'Self-improvement' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(section).getByText('4')).toBeTruthy();
+    expect(within(section).getByText('25 failures or 7 days')).toBeTruthy();
+    expect(section.textContent).toContain('correctness 3');
+    expect(section.textContent).toContain('Marked flawed 1');
+    expect(within(section).getByText('Closed unmerged')).toBeTruthy();
+    expect(section.textContent).toContain('12 failures');
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Open run' }));
+    expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('says no self-improvement run starts once the definition’s namer left the team', () => {
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        selfImprovement: {
+          repoUrl: 'https://github.com/macro/factory-definition',
+          enabled: true,
+          failuresThreshold: 25,
+          oldestDays: 7,
+          namer: 'left_team',
+          pending: 30,
+          pendingBySource: [{ source: 'correctness', count: 30 }],
+        },
+      },
+    });
+
+    expect(
+      screen.getByText(
+        'The admin who named the factory definition left the team, so no run starts. An admin names it again in team settings.'
+      )
+    ).toBeTruthy();
+  });
+
+  it('shows no self-improvement for a team with no factory definition', () => {
+    mount({ insights: november, evaluation: judged });
+    expect(
+      screen.queryByRole('heading', { name: 'Self-improvement' })
+    ).toBeNull();
+  });
+
+  it('holds a placeholder while the evaluation loads, and reads it again on Retry', () => {
+    mount({ insights: november });
+    expect(
+      screen.getByLabelText('Loading scorers, experiments and benchmarks…')
+    ).toBeTruthy();
+    cleanup();
+
+    const retry = vi.fn();
+    mount({
+      insights: november,
+      evaluationState: () => 'error',
+      evaluationRetry: retry,
+    });
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(
+      'Scorers, experiments and benchmarks couldn’t be loaded'
+    );
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalledOnce();
   });
 });

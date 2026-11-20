@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr};
+use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::insights::{
     DurationSpread, EntryCount, EntryCountKind, EntrySummary, EntryTrouble, InsightsRecords,
     InsightsScope, RunInsightsRepository, RunSummary, StepSessionRef, TITLE_CHARS,
@@ -86,7 +87,7 @@ impl RunInsightsRepository for PgRunRepository {
         // `factory_run_user_created_idx` reads the person's Runs in the range
         // newest first and stops one past the cap, which tells whether Runs
         // were left out. A Flow filter drops the other Flows' Runs from that
-        // walk.
+        // walk, and Benchmark trials are never read: they are no one's work.
         let mut runs = sqlx::query_as!(
             RunSummaryRow,
             r#"
@@ -102,6 +103,7 @@ impl RunInsightsRepository for PgRunRepository {
               AND created_at >= $2
               AND created_at < $3
               AND ($4::text IS NULL OR flow = $4)
+              AND flow IS DISTINCT FROM $7
             ORDER BY created_at DESC, id DESC
             LIMIT $5
             "#,
@@ -111,6 +113,7 @@ impl RunInsightsRepository for PgRunRepository {
             scope.flow.as_deref(),
             i64::from(scope.cap) + 1,
             TITLE_CHARS,
+            BENCHMARK_FLOW,
         )
         .fetch_all(&mut *transaction)
         .await?
@@ -145,8 +148,9 @@ impl RunInsightsRepository for PgRunRepository {
         // result and its Gate: its owner's `retry` goes on in the same
         // visit, and their `stop` fails it, as its Flow routes it. A Step
         // fails its entry when it failed for good, or its owner stopped it
-        // so, or a verifier failed a merged change (`fail`) or its deploy
-        // failed (`deploy_failed`).
+        // so, or, on a Run recorded before Runs ended at their merge, a
+        // verifier failed a merged change (`fail`) or its deploy failed
+        // (`deploy_failed`).
         let entries = sqlx::query!(
             r#"
             WITH steps AS (

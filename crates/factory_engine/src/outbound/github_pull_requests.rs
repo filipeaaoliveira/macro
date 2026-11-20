@@ -6,20 +6,21 @@
 mod test;
 
 use authentication_service_client::AuthServiceClient;
+use factory_records::domain::models::RunId;
 use github::domain::models::{
-    GithubError, GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest,
-    GithubOpenPullRequestOutcome, GithubPullRequestHead,
+    GithubBranchDeletion, GithubError, GithubMergeOutcome, GithubMergeRejection,
+    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
 };
 use github::domain::ports::GithubOauth;
-use github::outbound::github_oauth_client::GithubOauthImpl;
+use github::outbound::github_oauth_client::{FileTooLarge, GithubOauthImpl};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, CommitStatus, Deployment, DeploymentState,
-    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
-    RequiredCheck, RequiredChecks,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks,
+    Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    RequiredCheck, RequiredChecks, run_branch,
 };
-use crate::domain::ports::{PullRequests, Retryable};
+use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
 
 /// GitHub Actions' app, whose workflow runs say whether a run still waits.
@@ -249,12 +250,23 @@ fn pull_request(found: GithubPullRequestHead) -> PullRequest {
         url: found.html_url,
         state,
         head_sha: found.head_sha,
-        merge_commit: found.merge_commit_sha,
     }
 }
 
 impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     type Err = GithubPullRequestsErr;
+
+    fn file_refusal(error: &GithubPullRequestsErr) -> Option<FileRefusal> {
+        match error {
+            GithubPullRequestsErr::Github(GithubError::Internal(error))
+                if error.downcast_ref::<FileTooLarge>().is_some() =>
+            {
+                Some(FileRefusal::TooLarge)
+            }
+            GithubPullRequestsErr::Github(GithubError::Forbidden) => Some(FileRefusal::Refused),
+            _ => None,
+        }
+    }
 
     #[tracing::instrument(err, skip(self, owner))]
     async fn repository_access(
@@ -274,8 +286,10 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .await?;
         Ok(access.and_then(|access| {
             Some(RepositoryAccess {
+                full_name: access.full_name,
                 default_branch: access.default_branch?,
                 can_push: access.push,
+                deletes_merged_branches: access.delete_branch_on_merge,
             })
         }))
     }
@@ -422,69 +436,31 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
-    async fn deployments(
+    async fn requires_pull_request(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
-        sha: Option<&str>,
-        environment: &str,
-        count: u8,
-    ) -> Result<Vec<Deployment>, GithubPullRequestsErr> {
-        let token = self.token(owner).await?;
-        let deployments = self
-            .github
-            .list_deployments(
-                &token,
-                repository.owner(),
-                repository.name(),
-                sha,
-                environment,
-                count,
-            )
-            .await?;
-        Ok(deployments
-            .into_iter()
-            .map(|deployment| Deployment {
-                commit: deployment.sha,
-                state: DeploymentState::of_status(deployment.state.as_deref()),
-                url: deployment.environment_url,
-            })
-            .collect())
-    }
-
-    #[tracing::instrument(err, skip(self, owner))]
-    async fn first_parent(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        repository: &CodeRepository,
-        sha: &str,
-    ) -> Result<Option<String>, GithubPullRequestsErr> {
-        let token = self.token(owner).await?;
-        let parents = self
-            .github
-            .get_commit_parents(&token, repository.owner(), repository.name(), sha)
-            .await?;
-        Ok(parents.into_iter().next())
-    }
-
-    #[tracing::instrument(err, skip(self, owner))]
-    async fn contains(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        repository: &CodeRepository,
-        ancestor: &str,
-        head: &str,
-    ) -> Result<bool, GithubPullRequestsErr> {
+        branch: &str,
+    ) -> Result<Option<bool>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
         Ok(self
             .github
-            .commit_contains(
-                &token,
-                repository.owner(),
-                repository.name(),
-                ancestor,
-                head,
-            )
+            .get_requires_pull_request(&token, repository.owner(), repository.name(), branch)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn merge_base(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<String>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .merge_base(&token, repository.owner(), repository.name(), base, head)
             .await?)
     }
 
@@ -554,6 +530,41 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 ..
             } => Merging::HeadChanged,
             GithubMergeOutcome::Rejected { message, .. } => Merging::Refused(message),
+        })
+    }
+
+    /// The Step that asks logs a failure, so it is not logged here too.
+    #[tracing::instrument(skip(self, owner))]
+    async fn has_open_pull_request_onto(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<bool, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .has_open_pull_request_onto(&token, repository.owner(), repository.name(), branch)
+            .await?)
+    }
+
+    /// The Step that asks logs a failure, so it is not logged here too.
+    #[tracing::instrument(skip(self, owner))]
+    async fn delete_run_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        run_id: RunId,
+    ) -> Result<BranchDeletion, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let branch = run_branch(run_id);
+        let deletion = self
+            .github
+            .delete_branch(&token, repository.owner(), repository.name(), &branch)
+            .await?;
+        Ok(match deletion {
+            GithubBranchDeletion::Deleted => BranchDeletion::Deleted,
+            GithubBranchDeletion::Missing => BranchDeletion::Missing,
         })
     }
 }

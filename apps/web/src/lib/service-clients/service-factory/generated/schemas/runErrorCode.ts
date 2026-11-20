@@ -17,4 +17,8 @@ export const RunErrorCode = {
   controlFilesNotApproved: 'controlFilesNotApproved',
   queueFull: 'queueFull',
   reservedForAPerson: 'reservedForAPerson',
+  notInStandingRole: 'notInStandingRole',
+  unreachableDefinition: 'unreachableDefinition',
+  invalidDefinition: 'invalidDefinition',
+  definitionNamed: 'definitionNamed',
 } as const;

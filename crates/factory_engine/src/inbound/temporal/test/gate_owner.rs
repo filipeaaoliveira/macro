@@ -1,17 +1,18 @@
-//! The owner section on a running Temporal: the Gates a person answers are
-//! told to the Run's owner, and none with the section off; a Gate the
-//! stand-in answers is told to no one, unless its answer is taken back.
+//! Gates and their owner on a running Temporal: the Gates a person answers
+//! are told to the Run's owner by default, whatever the owner section says,
+//! and none when the Run's definition is quiet; a Gate the stand-in answers
+//! is told to no one, unless its answer is taken back.
 
 use std::time::Duration;
 
-use factory_records::domain::models::{ControlFileChanges, RunOutcome};
+use factory_records::domain::models::{ControlFileChanges, RunId, RunOutcome};
 use factory_records::domain::standing_rules::{
     OrchestratorDefinition, RulesSource, RunRules, StandInKinds,
 };
 
 use super::{CodeAgent, CodeWalk, PATIENCE, walk_code_with};
 use crate::domain::fakes::{FakeGateModel, FakeGithub, FakeNotifier, FakeRepo, ci};
-use crate::domain::gate_owner::notice_id;
+use crate::domain::gate_owner::{GateNotice, notice_id, stand_in_id};
 use crate::domain::gate_replies::GateReplySettings;
 
 fn rules(owner_gates: bool) -> RunRules {
@@ -25,10 +26,22 @@ fn rules(owner_gates: bool) -> RunRules {
     }
 }
 
+/// The factory's default rules, whose Gates notify no one.
+fn quiet() -> RunRules {
+    RunRules {
+        definition: OrchestratorDefinition {
+            quiet_gates: true,
+            ..OrchestratorDefinition::DEFAULT
+        },
+        source: RulesSource::Team,
+        project_id: None,
+    }
+}
+
 /// Walk a `code` Run whose review finds Blockers once, which the rule
 /// sends to a fix, and whose owner approves the plan and the merge; return
 /// the places of the Gates its owner was told of.
-async fn told_of(owner_gates: bool) -> Vec<u16> {
+async fn told_of(rules: RunRules) -> Vec<u16> {
     let github = FakeGithub::default();
     github.state().checks = [ci(Some("success"))].into();
     let agent = CodeAgent::new(&github);
@@ -40,7 +53,7 @@ async fn told_of(owner_gates: bool) -> Vec<u16> {
         &github,
         &FakeRepo::default(),
         CodeWalk {
-            rules: rules(owner_gates),
+            rules,
             notifier: Some(notifier.clone()),
             ..CodeWalk::default()
         },
@@ -56,24 +69,26 @@ async fn told_of(owner_gates: bool) -> Vec<u16> {
     sent.iter().map(|notice| notice.metadata.seq).collect()
 }
 
-/// With the owner section on, the plan and merge Gates, which wait for a
-/// person, are each told to the owner once; the Blockers Gate the rule
-/// answered is not.
+/// By default, with the owner section off or on, the plan and merge
+/// Gates, which wait for a person, are each told to the owner once; the
+/// Blockers Gate the rule answered is not.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Temporal doesn't exist in CI"]
 async fn the_gates_a_person_answers_are_told_to_the_owner() {
-    let told = told_of(true).await;
-    assert_eq!(told.len(), 2, "{told:?}");
-    assert_eq!(told[0], 1, "the plan's Gate");
-    assert!(told[1] > told[0], "{told:?}");
+    for owner_gates in [false, true] {
+        let told = told_of(rules(owner_gates)).await;
+        assert_eq!(told.len(), 2, "{told:?}");
+        assert_eq!(told[0], 1, "the plan's Gate");
+        assert!(told[1] > told[0], "{told:?}");
+    }
 }
 
-/// With the owner section off, the Run walks as before and no Gate is
-/// told to anyone.
+/// A Run whose definition is quiet walks as before and no Gate is told to
+/// anyone.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Temporal doesn't exist in CI"]
-async fn with_the_owner_section_off_no_gate_is_told() {
-    assert_eq!(told_of(false).await, Vec::<u16>::new());
+async fn a_quiet_run_tells_no_gate() {
+    assert_eq!(told_of(quiet()).await, Vec::<u16>::new());
 }
 
 /// Rules that fix Blockers, with the owner section on and the stand-in
@@ -144,14 +159,13 @@ async fn a_gate_the_stand_in_answers_is_not_told_to_the_owner() {
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
-    let told: Vec<u16> = notifier
-        .sent
-        .lock()
-        .expect("sent")
-        .iter()
-        .map(|notice| notice.metadata.seq)
-        .collect();
+    let told = told(&notifier);
     assert_eq!(told, [merge_gate.expect("the merge gate opened")]);
+    assert_eq!(
+        stand_in_told(&notifier),
+        [1],
+        "the stand-in's answer is told"
+    );
 }
 
 /// A stand-in's answer taken back when the window ends (the branch turned
@@ -188,7 +202,7 @@ async fn a_gate_whose_stand_in_answer_is_taken_back_is_told_to_the_owner() {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
                 // Nothing is told while the stand-in's answer may stand.
-                assert!(notifier.sent.lock().expect("sent").is_empty());
+                assert!(told(&notifier).is_empty());
                 run.repo
                     .control_file_changes
                     .lock()
@@ -212,13 +226,7 @@ async fn a_gate_whose_stand_in_answer_is_taken_back_is_told_to_the_owner() {
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
     let run_id = run_id.expect("walked");
-    let told: Vec<u16> = notifier
-        .sent
-        .lock()
-        .expect("sent")
-        .iter()
-        .map(|notice| notice.metadata.seq)
-        .collect();
+    let told = told(&notifier);
     assert_eq!(
         told.iter().filter(|seq| **seq == 1).count(),
         1,
@@ -289,15 +297,34 @@ async fn a_reply_that_answers_a_told_gate_marks_its_notification_done() {
     );
 }
 
-/// The places of the Gates `notifier` told the owner of, in order.
+/// The places of the Gates `notifier` told the owner wait for them, in
+/// order: not the notices that the stand-in answered one.
 fn told(notifier: &FakeNotifier) -> Vec<u16> {
+    notices(notifier, |notice| !by_stand_in(notice))
+}
+
+/// The Steps whose Gate the owner was told the stand-in answered for them.
+fn stand_in_told(notifier: &FakeNotifier) -> Vec<u16> {
+    notices(notifier, by_stand_in)
+}
+
+/// The Steps of the notices `notifier` was sent that `keep` keeps, in order.
+fn notices(notifier: &FakeNotifier, keep: impl Fn(&GateNotice) -> bool) -> Vec<u16> {
     notifier
         .sent
         .lock()
         .expect("sent")
         .iter()
+        .filter(|notice| keep(notice))
         .map(|notice| notice.metadata.seq)
         .collect()
+}
+
+/// Whether `notice` tells the owner the stand-in answered a Gate for them,
+/// which it does apart from the Gate's own notice.
+fn by_stand_in(notice: &GateNotice) -> bool {
+    let run_id = RunId::from_uuid(notice.metadata.run_id);
+    notice.notification_id == stand_in_id(run_id, notice.metadata.seq)
 }
 
 /// Words the owner gives in the stand-in's window, which the factory asks
@@ -332,7 +359,7 @@ async fn words_asked_back_in_the_stand_in_s_window_tell_the_owner() {
                 while run.gate(plan).await.stand_in.is_none() {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                assert!(notifier.sent.lock().expect("sent").is_empty());
+                assert!(told(&notifier).is_empty());
                 run.reply(plan, "Hmm, what about the tests?").await;
                 tokio::time::timeout(PATIENCE, async {
                     while told(&notifier).is_empty() {

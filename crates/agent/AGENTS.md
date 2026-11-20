@@ -27,7 +27,11 @@ and usage metering.
   content policy (`src/telemetry.rs`).
 - `src/stream.rs`: `StreamPart`/`ChatCompletionStream`, the wire shape
   callers consume.
-- `src/completion.rs`: one-shot, non-looping completions (no tools).
+- `src/completion.rs`: one-shot, non-looping completions (no tools). They
+  write their prompt to Anthropic's prompt cache unless the caller passes
+  `PromptCache::Skip` (`complete_with_history_params_and_cache`,
+  `dynamic_structured_completion_with_cache`), for a prompt no later call
+  shares a prefix with, whose write would only cost.
 - `src/tool_result_limit.rs`: `ToolResultLimit` cuts tool results too long for
   the model (in the hook and on replay through `to_rig_messages_limited`) and
   keeps them for the `ReadToolResult` pager tool; opt in with

@@ -28,14 +28,17 @@ use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::models::{
-    Answerer, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunStart,
+    ActingAgent, Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
+    RunDetail, RunStart,
 };
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
+mod board;
 mod control_files;
+mod flaws;
 mod orchestrator;
 mod standing_rules;
 mod step_terminal;
@@ -50,8 +53,11 @@ const ROBOT: &str = "macro|robot@example.com";
 /// Accepts the bearer tokens `alice` and `eve`, each its person's own
 /// session, `robot`: an agent account's session, `sdk`: Alice's Macro API
 /// token, `agent`: that token carrying an agent's attribution, as code mode
-/// mints, and `routine` and `routine-session`: a routine's token, and one
-/// that reads as a session yet signs a routine.
+/// mints, `routine` and `routine-session`: a routine's token, and one that
+/// reads as a session yet signs a routine, `routine-agent`: a routine's
+/// token signed for an agent, and `mcp-client` and `mcp-key`: what public
+/// MCP signs for Alice's own MCP client and API key, the Macro bot as
+/// their label, with the client's name and without.
 #[derive(Clone, Copy)]
 struct Tokens;
 
@@ -62,6 +68,7 @@ impl JwtValidator for Tokens {
     ) -> Result<ValidatedCredential, Report<MacroAuthorizationError>> {
         let agent = BotId::new_from_uuid(Uuid::from_u128(0xB07A));
         let routine = Uuid::from_u128(0x2007);
+        let macro_bot = Some(bot_id::MACRO_AI_BOT_ID);
         let (user_id, origin, agent_id, routine_id) = match jwt {
             "alice" => (ALICE, CredentialOrigin::Session, None, None),
             "eve" => (EVE, CredentialOrigin::Session, None, None),
@@ -70,13 +77,20 @@ impl JwtValidator for Tokens {
             "agent" => (ALICE, CredentialOrigin::MacroApiJwt, Some(agent), None),
             "routine" => (ALICE, CredentialOrigin::MacroApiJwt, None, Some(routine)),
             "routine-session" => (ALICE, CredentialOrigin::Session, None, Some(routine)),
+            "routine-agent" => (
+                ALICE,
+                CredentialOrigin::MacroApiJwt,
+                Some(agent),
+                Some(routine),
+            ),
+            "mcp-client" | "mcp-key" => (ALICE, CredentialOrigin::MacroApiJwt, macro_bot, None),
             _ => return Err(Report::new(MacroAuthorizationError::InvalidCredentials)),
         };
         Ok(ValidatedCredential {
             origin,
             identity: ValidatedIdentity {
                 agent_id,
-                agent_via: None,
+                agent_via: (jwt == "mcp-client").then(|| "Some client".to_string()),
                 routine_id,
                 user_id: user_id.to_string(),
                 fusion_user_id: format!("fusion-{jwt}"),
@@ -172,6 +186,10 @@ struct FakeService {
     answer: fn() -> FactoryError,
     actors: Mutex<Vec<String>>,
     answerers: Mutex<Vec<Answerer>>,
+    /// The agent each start, cancel and link acted as, in order.
+    acting: Mutex<Vec<Option<ActingAgent>>>,
+    /// Whether each cancel came from the person in their own session.
+    cancels_in_person: Mutex<Vec<bool>>,
 }
 
 impl FakeService {
@@ -182,8 +200,11 @@ impl FakeService {
 }
 
 impl FactoryService for FakeService {
-    fn list_flows(&self) -> Vec<FlowSummary> {
-        Vec::new()
+    async fn list_flows(
+        &self,
+        _actor: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<FlowSummary>, FactoryError> {
+        Ok(Vec::new())
     }
 
     async fn create_run(
@@ -194,7 +215,9 @@ impl FactoryService for FakeService {
         _task_id: Option<Uuid>,
         _repo_url: Option<String>,
         _in_person: bool,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
+        self.acting.lock().expect("acting").push(acting);
         Err(self.refusing(&actor))
     }
 
@@ -228,12 +251,30 @@ impl FactoryService for FakeService {
         Err(self.refusing(actor))
     }
 
+    async fn board(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _filter: crate::domain::board::BoardFilter,
+    ) -> Result<crate::domain::board::BoardPage, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn pull_request_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _urls: Vec<String>,
+    ) -> Result<crate::domain::board::PullRequestRuns, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
     async fn link_task(
         &self,
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
         _task_id: Uuid,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
+        self.acting.lock().expect("acting").push(acting);
         Err(self.refusing(actor))
     }
 
@@ -286,6 +327,21 @@ impl FactoryService for FakeService {
         Err(self.refusing(actor))
     }
 
+    async fn definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn set_definition(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _repo_url: Option<String>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
     async fn set_control_files(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -331,7 +387,23 @@ impl FactoryService for FakeService {
         &self,
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
+        acting: Option<ActingAgent>,
+        in_person: bool,
     ) -> Result<(), FactoryError> {
+        self.acting.lock().expect("acting").push(acting);
+        self.cancels_in_person
+            .lock()
+            .expect("cancels in person")
+            .push(in_person);
+        Err(self.refusing(actor))
+    }
+
+    async fn mark_run_flawed(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _id: RunId,
+        _reason: &str,
+    ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(actor))
     }
 
@@ -350,8 +422,56 @@ impl FactoryService for FakeService {
         _firing_key: &str,
         _request: String,
         _task_id: Option<Uuid>,
+        _acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(&automation.created_by))
+    }
+
+    async fn benchmark_base(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _repo_url: &str,
+    ) -> Result<String, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn team_evaluation(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Option<crate::domain::evaluation::TeamEvaluation>, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn create_trial_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _flow: String,
+        _request: String,
+        _repo_url: String,
+        _trial: factory_records::domain::evaluation::TrialKey,
+        _base_commit: String,
+        _started_by: Option<factory_records::domain::standing_acts::StandingActor>,
+    ) -> Result<RunDetail, FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
+    async fn standing_start(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _agents: Option<&crate::domain::agents::AgentDefinition>,
+        _acting: Option<ActingAgent>,
+    ) -> Result<Option<factory_records::domain::standing_acts::StandingActor>, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn create_improvement_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _request: String,
+        _repo_url: String,
+        _improvement: Uuid,
+    ) -> Result<RunDetail, FactoryError> {
+        Err(self.refusing(&actor))
     }
 
     async fn clear_main_hold(
@@ -368,6 +488,8 @@ fn router(answer: fn() -> FactoryError) -> (Router, Arc<FakeService>) {
         answer,
         actors: Mutex::new(Vec::new()),
         answerers: Mutex::new(Vec::new()),
+        acting: Mutex::new(Vec::new()),
+        cancels_in_person: Mutex::new(Vec::new()),
     });
     let state = FactoryRouterState::new(Arc::clone(&service), authorization());
     (factory_router(state), service)
@@ -438,12 +560,15 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
             request: "Plan the export",
             user_id: &alice,
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -1081,12 +1206,15 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
             request: "Add dark mode",
             user_id: &alice,
             task_id: None,
+            project_id: None,
             repository: Some(base),
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");

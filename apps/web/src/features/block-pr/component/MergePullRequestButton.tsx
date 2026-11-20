@@ -6,15 +6,19 @@ import {
   createMergePullRequestAction,
   type MergePullRequestTarget,
 } from '../primitives/create-merge-pull-request-action';
+import { usePrMergeGuard } from '../primitives/pr-merge-guard-context';
 import {
   type PullRequestCheck,
   pullRequestReadyToMerge,
 } from '../primitives/pull-request-ready-to-merge';
-import { prDisplayName } from '../util/prKey';
+import { prDisplayName, prHtmlUrl } from '../util/prKey';
 
-/** Ask before merging, naming the pull request. */
+/**
+ * Ask before merging, naming the pull request, and what the person should
+ * know first (`warning`), if anything.
+ */
 export function confirmMergePullRequest(
-  target: MergePullRequestTarget,
+  target: MergePullRequestTarget & { warning?: string },
   owner: Owner | null
 ) {
   return confirmDialog(
@@ -39,6 +43,11 @@ export function confirmMergePullRequest(
                 </p>
               </div>
             </div>
+            <Show when={target.warning}>
+              {(warning) => (
+                <p class="font-medium text-failure-ink">{warning()}</p>
+              )}
+            </Show>
             <p>
               This will merge the pull request into its base branch on GitHub.
             </p>
@@ -70,9 +79,22 @@ export function MergePullRequestButton(props: {
   onMerged?: () => void;
 }) {
   const owner = getOwner();
+  const url = () => prHtmlUrl(props.target);
+  // Someone else may own this merge (a factory Run's merge Gate): it takes
+  // the merge, or says why it doesn't merge now.
+  const guard = usePrMergeGuard(() => [url()]);
+  const refusal = () => guard.mergeRefusal(url());
   const action = createMergePullRequestAction({
     onMerged: props.onMerged,
-    confirm: (target) => confirmMergePullRequest(target, owner),
+    confirm: async (target) => {
+      const confirmed = await confirmMergePullRequest(
+        { ...target, warning: guard.mergeWarning(url()) },
+        owner
+      );
+      // The guard may have learned the pull request is a Run's while the
+      // confirmation was open: it takes the merge then, as before.
+      return confirmed && !guard.merge(url());
+    },
   });
   const label = () => (action.pending() ? 'Merging…' : 'Merge');
   const Control = props.grouped ? ButtonGroup.Button : Button;
@@ -89,10 +111,12 @@ export function MergePullRequestButton(props: {
         size={props.size ?? 'sm'}
         class={cn('shrink-0', props.class)}
         aria-label={`${label()} pull request #${props.target.number}`}
-        disabled={action.pending()}
+        disabled={action.pending() || refusal() !== undefined}
+        tooltip={refusal()}
         data-merge-pull-request={props.target.number}
         on:click={(event) => {
           event.stopPropagation();
+          if (guard.merge(url())) return;
           fireAndForget(action.merge(props.target), 'pr-merge');
         }}
       >
@@ -101,6 +125,7 @@ export function MergePullRequestButton(props: {
           <span>{label()}</span>
         </Show>
       </Control>
+      {guard.gate()}
     </Show>
   );
 }

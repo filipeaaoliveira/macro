@@ -82,7 +82,7 @@ impl StepAgent for AskingAgent {
     }
 
     async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
-        Err(AgentFailed)
+        Err(AgentFailed::ForGood)
     }
 
     async fn run_check(
@@ -149,6 +149,7 @@ impl AskingRun {
             user_id: julia(),
             approved_control_files: None,
             agent_session: None,
+            standing: None,
         };
         let mut delivery = AnswerDelivery::Refused("not sent".to_string());
         for _ in 0..50 {
@@ -184,12 +185,15 @@ where
             request: "Export the report",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -224,6 +228,7 @@ where
             reviews: ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
             gates: gates(&repo),
             watches: watches(&repo),
+            scoring: super::scoring(&repo),
         },
     )
     .expect("worker");

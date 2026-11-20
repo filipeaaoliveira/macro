@@ -21,6 +21,7 @@ use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
 
 mod acceptance;
+mod setup;
 mod verified;
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -29,29 +30,42 @@ struct SessionFailed {
     out_of_quota: bool,
     /// The agent's last message, when it stopped without a result.
     last_words: Option<&'static str>,
+    /// What the owner is shown, when the repository's setup failed in the
+    /// session before its first prompt.
+    setup: Option<&'static str>,
 }
 
 /// A failure a retry may get past.
 const FAILED: SessionFailed = SessionFailed {
     out_of_quota: false,
     last_words: None,
+    setup: None,
 };
 
 /// The agent's quota ran out: asking again does not help.
 const NO_QUOTA: SessionFailed = SessionFailed {
     out_of_quota: true,
     last_words: None,
+    setup: None,
 };
 
 /// The agent stopped without a result, even once reminded.
 const STOPPED: SessionFailed = SessionFailed {
     out_of_quota: false,
     last_words: Some("I stopped before checking."),
+    setup: None,
+};
+
+/// The repository's setup failed in the session before its first prompt.
+const SETUP_FAILED: SessionFailed = SessionFailed {
+    out_of_quota: false,
+    last_words: None,
+    setup: Some("`install` (`bun install`) exited with status 1."),
 };
 
 impl Retryable for SessionFailed {
     fn retryable(&self) -> bool {
-        !self.out_of_quota && self.last_words.is_none()
+        !self.out_of_quota && self.last_words.is_none() && self.setup.is_none()
     }
 }
 
@@ -62,6 +76,10 @@ impl AgentFailure for SessionFailed {
 
     fn stopped_without_result(&self) -> Option<&str> {
         self.last_words
+    }
+
+    fn setup_failed(&self) -> Option<&str> {
+        self.setup
     }
 }
 
@@ -84,6 +102,9 @@ struct ScriptedAgent {
     /// for a runtime that runs no command, as a paired machine's.
     checkout: Option<Arc<Mutex<VecDeque<Ran>>>>,
     commands: Arc<Mutex<Vec<AgentCommand>>>,
+    /// How long each command run in the worktree, a check's or a setup
+    /// command's, takes.
+    run_takes: Option<std::time::Duration>,
     /// What setting a round's worktree up answers: by default, that it is
     /// at the branch's [`HEAD`].
     set_up: Option<Ran>,
@@ -138,6 +159,9 @@ impl StepAgent for ScriptedAgent {
         }
         if self.work == "stopped" {
             return Err(STOPPED);
+        }
+        if self.work == "setup_failed" {
+            return Err(SETUP_FAILED);
         }
         Ok(AgentAnswer {
             outcome: outcome(self.work),
@@ -209,6 +233,9 @@ impl StepAgent for ScriptedAgent {
             .push(format!("check {run}"));
         let key = command.key;
         self.commands.lock().expect("commands").push(command);
+        if let Some(takes) = self.run_takes {
+            tokio::time::sleep(takes).await;
+        }
         let ran = checkout
             .lock()
             .expect("checkout")
@@ -306,6 +333,7 @@ fn input() -> StepInput<'static> {
         request: "Add a dark mode toggle",
         created_in_person: true,
         control_file_patterns: None,
+        definition_repo: None,
         task_id: None,
         repository: Some(&REPOSITORY),
         earlier: &[],
@@ -315,6 +343,7 @@ fn input() -> StepInput<'static> {
         questions_left: 0,
         resumes: None,
         owner_notes: &[],
+        base_commit: None,
     }
 }
 
