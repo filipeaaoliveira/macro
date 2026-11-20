@@ -161,19 +161,21 @@ fn longest_backticks(text: &str) -> usize {
         .unwrap_or(0)
 }
 
-/// `line` (with its line break) cut to at most [`DIFF_LINE_BYTES`] at a
-/// character, with a marker of how many bytes were cut, so one long line
-/// (a minified file, a lockfile) leaves room for the files after it.
+/// `line` (with its line break) cut to at most [`DIFF_LINE_BYTES`], its
+/// line break aside, at a character, with a marker of how many bytes were
+/// cut, so one long line (a minified file, a lockfile) leaves room for the
+/// files after it.
 fn capped_line(line: &str) -> std::borrow::Cow<'_, str> {
-    if line.len() <= DIFF_LINE_BYTES {
+    let text = line.trim_end_matches('\n');
+    if text.len() <= DIFF_LINE_BYTES {
         return line.into();
     }
     let mut end = DIFF_LINE_BYTES;
-    while !line.is_char_boundary(end) {
+    while !text.is_char_boundary(end) {
         end -= 1;
     }
-    let cut = line.trim_end_matches('\n').len() - end;
-    format!("{} [{cut} bytes of this line cut]\n", &line[..end]).into()
+    let cut = text.len() - end;
+    format!("{} [{cut} bytes of this line cut]\n", &text[..end]).into()
 }
 
 /// The diff as it fits in [`DIFF_BYTES`] once `fixed` bytes of text around

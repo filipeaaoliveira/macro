@@ -1279,6 +1279,23 @@ async fn a_long_line_is_cut_and_the_files_after_it_are_given() {
     assert!(!change.contains("left out"));
 }
 
+/// A line of exactly the cap, its line break aside, is given whole.
+#[tokio::test]
+async fn a_line_at_the_cap_is_given_whole() {
+    let at_cap = format!("+{}\n", "a".repeat(999));
+    let files = vec![ChangedFile::from_patch(
+        "wide.txt".to_string(),
+        None,
+        Some(&at_cap),
+    )];
+
+    let prompt = slop_prompt(Some(HEAD), Some(files)).await.expect("asked");
+
+    let change = change_part(&prompt);
+    assert!(change.contains(&at_cap), "{change}");
+    assert!(!change.contains("of this line cut"), "{change}");
+}
+
 /// A Run with no branch and no pull request is judged on having no change.
 #[tokio::test]
 async fn a_run_with_no_change_is_judged_on_that() {
@@ -1485,6 +1502,41 @@ async fn a_retried_trial_still_reads_its_change() {
     assert_eq!(judged[0].scorer, "slop");
     assert_eq!(judged[0].score, 0.7);
     assert_eq!(github.state().deleted_branches, [format!("factory/{run}")]);
+}
+
+/// A trial whose change is too large to list, or cannot be read, is not
+/// judged on it, and its branch is deleted on the first attempt all the
+/// same: there is nothing to retry.
+#[tokio::test]
+async fn a_trial_skipped_on_its_change_still_has_its_branch_deleted() {
+    for unread in [false, true] {
+        let judge = Arc::new(FakeJudge::default());
+        judge.then(0.7);
+        let (repo, github, run, scoring) = diff_trial(judge.clone()).await;
+        {
+            let mut state = github.state();
+            if unread {
+                state.find_fails = true;
+            } else {
+                state.diffs.clear();
+            }
+        }
+
+        scoring
+            .score_run(run, unread)
+            .await
+            .expect("nothing to retry");
+
+        assert!(judge.asked().is_empty());
+        assert!(
+            repo.evaluation
+                .lock()
+                .expect("evaluation")
+                .trial_scores
+                .is_empty()
+        );
+        assert_eq!(github.state().deleted_branches, [format!("factory/{run}")]);
+    }
 }
 
 /// On its last attempt a trial's branch is deleted however its judging
