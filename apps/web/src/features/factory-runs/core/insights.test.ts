@@ -69,7 +69,7 @@ describe('outcome kinds', () => {
     expect(flawedRate(counts({ failed: 2 }))).toBeUndefined();
   });
 
-  it('measures infrastructure failures among runs that ended on their own', () => {
+  it('measures infrastructure failures among runs that ended and were not cancelled', () => {
     // The cancelled run is left out: 1 of 4.
     const rate = infrastructureRate(
       counts({ success: 2, failed: 1, infrastructure: 1, cancelled: 1 })
