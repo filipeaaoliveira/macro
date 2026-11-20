@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod test;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::types::Json;
@@ -111,6 +111,37 @@ impl EvaluationRepository for PgRunRepository {
             .await?;
         }
         Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_task_tags_unread(&self, run_id: RunId) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_run_task_tags_unread (run_id)
+            VALUES ($1)
+            ON CONFLICT (run_id) DO NOTHING
+            "#,
+            run_id.as_uuid(),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(runs = run_ids.len()))]
+    async fn runs_task_tags_unread(&self, run_ids: &[RunId]) -> Result<BTreeSet<RunId>, Self::Err> {
+        let ids: Vec<Uuid> = run_ids.iter().map(RunId::as_uuid).collect();
+        let unread = sqlx::query_scalar!(
+            r#"
+            SELECT run_id
+            FROM factory_run_task_tags_unread
+            WHERE run_id = ANY($1)
+            "#,
+            &ids,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(unread.into_iter().map(RunId::from_uuid).collect())
     }
 
     #[tracing::instrument(err, skip_all, fields(runs = run_ids.len()))]

@@ -171,6 +171,29 @@ async fn a_run_keeps_the_agent_rules_that_chose_its_agents(pool: PgPool) {
     );
 }
 
+/// A Run whose task's tags could not be read as it started keeps that, once,
+/// and the Run API reads it beside its rules.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn a_run_keeps_that_its_task_tags_were_unread(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+
+    repo.record_task_tags_unread(run(IMPORT))
+        .await
+        .expect("recorded");
+    repo.record_task_tags_unread(run(IMPORT))
+        .await
+        .expect("recorded again");
+
+    let unread = repo
+        .runs_task_tags_unread(&[run(IMPORT), run(EXPORT)])
+        .await
+        .expect("read");
+    assert_eq!(unread.into_iter().collect::<Vec<_>>(), [run(IMPORT)]);
+}
+
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people", "evaluation"))

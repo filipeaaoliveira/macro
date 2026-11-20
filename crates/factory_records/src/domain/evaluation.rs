@@ -5,7 +5,7 @@
 //! A trial's judgments are kept with the trial, never with the live
 //! Scorers' judgments, so a benchmark does not move their numbers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -351,6 +351,19 @@ pub trait EvaluationRepository: Send + Sync + 'static {
         run_id: RunId,
         rules: &[RunAgentRule],
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record that a new Run's task tags could not be read, so no Agent
+    /// Rule on a tag matched it.
+    fn record_task_tags_unread(
+        &self,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Which of `run_ids` started with their task's tags unread.
+    fn runs_task_tags_unread(
+        &self,
+        run_ids: &[RunId],
+    ) -> impl Future<Output = Result<BTreeSet<RunId>, Self::Err>> + Send;
 
     /// The Agent Rules each of `run_ids` keeps, by Role; a Run that keeps
     /// none is left out.
