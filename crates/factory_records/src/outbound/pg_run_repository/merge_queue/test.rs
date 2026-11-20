@@ -410,6 +410,39 @@ async fn a_held_merge_turn_locks_no_factory_table(pool: PgPool) {
     drop(turn);
 }
 
+/// A base's merge turn is keyed by the same advisory lock key in every
+/// release: workers on either side of a deploy share one turn per base only
+/// while the key stays the same. The literal is
+/// `hashtextextended('factory_merge_turn:https://github.com/macro/app main', 0)`,
+/// the key earlier workers took for this base.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_merge_turn_keeps_the_key_earlier_workers_took(pool: PgPool) {
+    const MACRO_APP_MAIN_KEY: i64 = -5_814_030_250_524_603_323;
+    let repo = PgRunRepository::new(pool);
+    let shouting = Repository {
+        url: "https://github.com/Macro/App.git".to_string(),
+        base_branch: "main".to_string(),
+    };
+    let run = code_run(&repo, Some(&shouting)).await;
+    let turn = repo.take_merge_turn(run).await.expect("take");
+    assert!(turn.is_some(), "the Run takes its turn");
+
+    let mut earlier_worker = repo.pool.begin().await.expect("begin");
+    let taken = sqlx::query_scalar!(
+        r#"SELECT pg_try_advisory_xact_lock($1) AS "taken!""#,
+        MACRO_APP_MAIN_KEY,
+    )
+    .fetch_one(&mut *earlier_worker)
+    .await
+    .expect("try");
+    assert!(!taken, "the turn holds the key earlier workers took");
+    earlier_worker.rollback().await.expect("rollback");
+    drop(turn);
+}
+
 /// The head a Run's review passed on is kept until another replaces it;
 /// asking an update again from a pushed head never touches it.
 #[sqlx::test(
