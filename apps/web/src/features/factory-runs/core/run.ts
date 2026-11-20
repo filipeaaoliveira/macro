@@ -427,6 +427,11 @@ export type Run = {
   standingActs?: RunStandingAct[];
   /** The Agent Rules that chose its Roles' first Agents, by Role. */
   agentRules?: RunAgentRule[];
+  /**
+   * Its task's tags couldn't be read as it started, so no Agent Rule on a
+   * tag applied: not the same as a task no rule matched.
+   */
+  taskTagsUnread?: boolean;
   /** Its token budget; none for a Run that keeps none. */
   tokenBudget?: RunTokenBudget;
 };

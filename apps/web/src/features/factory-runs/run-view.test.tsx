@@ -919,6 +919,14 @@ describe('RunView', () => {
 
     setRun({ ...waitingRun, agentRules: [] });
     expect(screen.queryByText('Agents chosen by rules')).toBeNull();
+
+    setRun({ ...waitingRun, agentRules: [], taskTagsUnread: true });
+    expect(screen.getByText('Agents chosen by rules')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'The task’s tags couldn’t be read when the run started, so no rule on a tag applied'
+      )
+    ).toBeTruthy();
   });
 
   it('retries a Run that couldn’t be loaded', () => {

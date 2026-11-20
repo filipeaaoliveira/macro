@@ -200,7 +200,11 @@ export function RunSummary(props: {
           </ul>
         </section>
       </Show>
-      <Show when={(props.run.agentRules ?? []).length > 0}>
+      <Show
+        when={
+          (props.run.agentRules ?? []).length > 0 || props.run.taskTagsUnread
+        }
+      >
         <section class="flex flex-col gap-1.5">
           <h3 class="text-xs font-medium text-ink-muted">
             {t('factoryRuns.agentRules')}
@@ -220,6 +224,11 @@ export function RunSummary(props: {
                 </li>
               )}
             </For>
+            <Show when={props.run.taskTagsUnread}>
+              <li data-task-tags-unread class="text-ink-muted">
+                {t('factoryRuns.taskTagsUnread')}
+              </li>
+            </Show>
           </ul>
         </section>
       </Show>

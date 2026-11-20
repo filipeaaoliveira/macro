@@ -194,6 +194,7 @@ export function toRun(detail: RunDetail): Run {
       rule: chosen.rule,
       agent: chosen.agent,
     })),
+    taskTagsUnread: detail.taskTagsUnread ?? false,
     reviewRounds: detail.reviewRounds.map((round) => ({
       round: round.round,
       visit: round.visit,
