@@ -316,3 +316,77 @@ fn compose_worker_telemetry_uses_generated_policy_over_inherited_shell() {
         expected
     );
 }
+
+#[test]
+fn persistent_mode_keeps_aws_state_on_a_volume_and_restarts_every_service() {
+    for name in [None, Some("bench-test")] {
+        let instance = Instance::derive(name, None).unwrap();
+        let mut services = IndexMap::new();
+        add_localstack_service(&mut services, &instance);
+        add_local_infra(&mut services, &instance, false).unwrap();
+        let compose = dct::Compose {
+            services: dct::Services(services),
+            ..Default::default()
+        };
+        let mut value = serde_yaml::to_value(compose).unwrap();
+        apply_tags(&mut value, Mode::Local, &instance);
+        set_networks_and_volumes(&mut value, Mode::Local, &instance);
+
+        // Off: the override generate writes is upstream's.
+        let localstack = &value["services"]["localstack"];
+        assert_eq!(localstack["image"], LOCALSTACK_IMAGE);
+        assert!(localstack["volumes"].is_null());
+        assert!(localstack["restart"].is_null());
+        assert!(value["services"]["postgres"]["command"].is_null());
+        assert!(value["services"]["authentication-service"].is_null());
+        assert!(value["volumes"]["localstack_data"].is_null());
+        assert_eq!(value["services"]["temporal"]["ports"].as_sequence().unwrap().len(), 2);
+
+        crate::local::persistent::apply_to_compose(&mut value, &instance).unwrap();
+
+        let localstack = &value["services"]["localstack"];
+        assert_eq!(localstack["image"], crate::local::persistent::LOCALSTACK_IMAGE);
+        assert_eq!(localstack["environment"]["SERVICES"], "sqs,dynamodb,s3,kms");
+        assert_eq!(localstack["environment"]["PERSIST_FREQUENCY"], "2");
+        assert_eq!(localstack["volumes"][0], "localstack_data:/persisted-data");
+        assert_eq!(
+            value["volumes"]["localstack_data"]["name"],
+            crate::local::persistent::localstack_volume(&instance)
+        );
+        assert!(value["volumes"]["localstack_data"]["external"].is_null());
+
+        let postgres = value["services"]["postgres"]["command"].as_str().unwrap();
+        assert!(postgres.starts_with("postgres -c max_connections=500"));
+        assert!(postgres.ends_with(" -c jit=off"));
+
+        assert_eq!(
+            value["services"]["temporal"]["ports"],
+            serde_yaml::to_value([format!(
+                "127.0.0.1:{}:8233",
+                instance.port(Port::TemporalUi)
+            )])
+            .unwrap()
+        );
+
+        // Generated services and those only the base compose files define.
+        for service in [
+            "localstack",
+            "openbao",
+            "temporal",
+            "postgres",
+            "redis",
+            "kafka",
+            "search",
+            "db",
+            "fusionauth",
+            "authentication-service",
+            "document_storage_service",
+            "sync_service",
+        ] {
+            assert_eq!(
+                value["services"][service]["restart"], "unless-stopped",
+                "{service}"
+            );
+        }
+    }
+}

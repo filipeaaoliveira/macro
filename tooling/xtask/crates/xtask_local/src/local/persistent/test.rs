@@ -37,3 +37,30 @@ fn an_attached_start_resumes_a_persistent_instance_with_data() {
     // Off, an attached start is always clean.
     assert_eq!(attached_start_for(false, true, false), Start::Fresh);
 }
+
+#[test]
+fn the_base_compose_files_are_read_with_their_includes() {
+    let base = BaseCompose::read(&repo_root()).unwrap();
+    for service in ["authentication-service", "postgres", "kafka", "fusionauth", "db"] {
+        assert!(
+            base.services.iter().any(|name| name == service),
+            "{service} missing from {:?}",
+            base.services
+        );
+    }
+    let command = base.postgres_command.as_str().unwrap();
+    assert!(command.starts_with("postgres "));
+    assert!(!command.contains("jit"));
+}
+
+#[test]
+fn jit_is_appended_to_either_command_form() {
+    assert_eq!(
+        without_jit(&Value::from("postgres -c max_connections=500")),
+        Value::from("postgres -c max_connections=500 -c jit=off")
+    );
+    assert_eq!(
+        without_jit(&serde_yaml::from_str("[postgres, -c, max_connections=500]").unwrap()),
+        serde_yaml::from_str::<Value>("[postgres, -c, max_connections=500, -c, jit=off]").unwrap()
+    );
+}

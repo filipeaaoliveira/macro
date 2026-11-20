@@ -6,23 +6,42 @@
 //! also stays persistent while its LocalStack data volume exists, so a shell
 //! that lacks the variable still can't wipe it.
 //!
-//! For a persistent instance, an attached `run_local` resumes over the
-//! existing volumes, and nothing deletes them without `--wipe-persistent-data`
-//! ([`ensure_may_wipe`]).
+//! For a persistent instance:
+//! - an attached `run_local` resumes over the existing volumes, and nothing
+//!   deletes them without `--wipe-persistent-data` ([`ensure_may_wipe`]);
+//! - LocalStack keeps S3, DynamoDB, SQS and KMS on a volume, Postgres runs
+//!   without JIT, and every container restarts with Docker ([`apply_to_compose`]);
+//! - Temporal's gRPC port stays off the host, so tests can't start workflows
+//!   on it.
 //!
 //! Everything else behaves as upstream, so this module holds the whole mode and
 //! the orchestrator only calls into it.
 
-use anyhow::{Result, bail};
+use std::path::Path;
 
-use super::Start;
+use anyhow::{Context, Result, bail};
+use serde_yaml::{Mapping, Value};
+
 use super::instance::Instance;
+use super::{Start, repo_root};
 
 #[cfg(test)]
 mod test;
 
 /// Names the instances that run in persistent mode, comma-separated.
 pub const SWITCH_VAR: &str = "MACRO_LOCAL_PERSISTENT";
+
+/// LocalStack 4.14.0, the version `gen_compose::LOCALSTACK_IMAGE` resolves to,
+/// with persistence hooks that write every service's state to
+/// `/persisted-data`. Pinned by digest: the image is a third-party build.
+pub const LOCALSTACK_IMAGE: &str = "gresau/localstack-persist:4.14.0@sha256:02045e045f1f3868c3cadef78de2a7c048840f48ffd506babf4a36f42a4845ba";
+
+/// How often LocalStack writes its state, in seconds: a crash loses at most
+/// this much.
+const PERSIST_FREQUENCY: &str = "2";
+
+/// The compose key of LocalStack's data volume.
+const LOCALSTACK_VOLUME_KEY: &str = "localstack_data";
 
 /// The volume LocalStack keeps its state on.
 pub fn localstack_volume(instance: &Instance) -> String {
@@ -95,4 +114,139 @@ fn attached_start_for(persistent: bool, has_data: bool, fresh: bool) -> Start {
     } else {
         Start::Fresh
     }
+}
+
+/// Layer persistent mode onto the generated compose override.
+pub fn apply_to_compose(value: &mut Value, instance: &Instance) -> Result<()> {
+    let base = BaseCompose::read(&repo_root())?;
+    apply(value, instance, &base);
+    Ok(())
+}
+
+/// What persistent mode needs from the checked-in compose files, which the
+/// generated override can only extend.
+struct BaseCompose {
+    /// Every service they define.
+    services: Vec<String>,
+    /// Postgres's server command, which an override replaces rather than
+    /// extends.
+    postgres_command: Value,
+}
+
+impl BaseCompose {
+    /// Read `docker/docker-compose.yml` and the files it includes. Include
+    /// paths are relative to the project directory, the repository root.
+    fn read(repo: &Path) -> Result<Self> {
+        let main = read_yaml(&repo.join("docker/docker-compose.yml"))?;
+        let mut files = vec![main.clone()];
+        for include in main["include"].as_sequence().into_iter().flatten() {
+            let path = include
+                .as_str()
+                .or_else(|| include["path"].as_str())
+                .context("docker/docker-compose.yml has an include without a path")?;
+            files.push(read_yaml(&repo.join(path))?);
+        }
+
+        let mut services = Vec::new();
+        let mut postgres_command = None;
+        for file in &files {
+            for (name, service) in file["services"].as_mapping().into_iter().flatten() {
+                let name = name.as_str().context("a compose service name is not a string")?;
+                if name == "postgres" {
+                    postgres_command = Some(service["command"].clone());
+                }
+                services.push(name.to_string());
+            }
+        }
+        Ok(Self {
+            services,
+            postgres_command: postgres_command
+                .context("no postgres service in the base compose files")?,
+        })
+    }
+}
+
+fn read_yaml(path: &Path) -> Result<Value> {
+    let raw = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    serde_yaml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// The override changes, given the base compose files:
+/// - LocalStack runs the persisting image on its own volume;
+/// - Postgres runs with `jit=off`. Compiling the plan of a large query costs
+///   seconds on every call, and the stack's tables are far too small to gain
+///   from it;
+/// - Temporal keeps its gRPC port off the host, so tests that default to
+///   `127.0.0.1:7233` can't start workflows on it. Its UI stays published;
+/// - every service restarts with Docker. `unless-stopped` honours an explicit
+///   stop, so `run_local stop` still stops the stack.
+fn apply(value: &mut Value, instance: &Instance, base: &BaseCompose) {
+    let root = value.as_mapping_mut().expect("compose root is a mapping");
+    let mut volume = Mapping::new();
+    volume.insert("name".into(), localstack_volume(instance).into());
+    child_mapping(root, "volumes").insert(LOCALSTACK_VOLUME_KEY.into(), Value::Mapping(volume));
+
+    let services = child_mapping(root, "services");
+    if let Some(localstack) = services
+        .get_mut("localstack")
+        .and_then(Value::as_mapping_mut)
+    {
+        localstack.insert("image".into(), LOCALSTACK_IMAGE.into());
+        child_mapping(localstack, "environment")
+            .insert("PERSIST_FREQUENCY".into(), PERSIST_FREQUENCY.into());
+        child_sequence(localstack, "volumes")
+            .push(format!("{LOCALSTACK_VOLUME_KEY}:/persisted-data").into());
+    }
+
+    let postgres = child_mapping(services, "postgres");
+    postgres.insert("command".into(), without_jit(&base.postgres_command));
+
+    if let Some(temporal) = services.get_mut("temporal").and_then(Value::as_mapping_mut) {
+        child_sequence(temporal, "ports")
+            .retain(|port| !port.as_str().is_some_and(|port| port.ends_with(":7233")));
+    }
+
+    let mut names: Vec<Value> = services.keys().cloned().collect();
+    names.extend(base.services.iter().map(|name| Value::from(name.as_str())));
+    for name in names {
+        let service = services
+            .entry(name)
+            .or_insert_with(|| Value::Mapping(Mapping::new()));
+        if let Some(service) = service.as_mapping_mut() {
+            service.insert("restart".into(), "unless-stopped".into());
+        }
+    }
+}
+
+/// The Postgres command with `-c jit=off` appended, in its own form.
+fn without_jit(command: &Value) -> Value {
+    match command {
+        Value::Sequence(args) => {
+            let mut args = args.clone();
+            args.extend(["-c".into(), "jit=off".into()]);
+            Value::Sequence(args)
+        }
+        Value::String(command) => format!("{command} -c jit=off").into(),
+        _ => "postgres -c jit=off".into(),
+    }
+}
+
+fn child_mapping<'a>(parent: &'a mut Mapping, key: &str) -> &'a mut Mapping {
+    let child = parent
+        .entry(key.into())
+        .or_insert_with(|| Value::Mapping(Mapping::new()));
+    if !child.is_mapping() {
+        *child = Value::Mapping(Mapping::new());
+    }
+    child.as_mapping_mut().expect("just made a mapping")
+}
+
+fn child_sequence<'a>(parent: &'a mut Mapping, key: &str) -> &'a mut Vec<Value> {
+    let child = parent
+        .entry(key.into())
+        .or_insert_with(|| Value::Sequence(Vec::new()));
+    if !child.is_sequence() {
+        *child = Value::Sequence(Vec::new());
+    }
+    child.as_sequence_mut().expect("just made a sequence")
 }

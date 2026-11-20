@@ -268,6 +268,9 @@ pub fn generate(
     if !instance.is_default() {
         set_external_project_networks(&mut value, instance);
     }
+    if mode.spec().runs_local_infra && super::persistent::is_on(instance)? {
+        super::persistent::apply_to_compose(&mut value, instance)?;
+    }
 
     let yaml = serde_yaml::to_string(&value).context("rendering override yaml")?;
     let path = instance
