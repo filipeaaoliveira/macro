@@ -2464,7 +2464,7 @@
     "/self-improvements/{id}/undo-dismissal": {
       "post": {
         "tags": ["factory"],
-        "summary": "Undo the dismissal of the failures a person's rejection of one of the\ncaller's team's self-improvement Runs dismissed (its pull request closed\nunmerged, or its Run cancelled in person): when the rejection was of the\nproposed fix and not of the failures, they go back to pending and count\ntoward the next self-improvement Run's thresholds at the team's next\nRun end, after any pause the rejection started. Only failures it still\nholds go back. Only the admin who named the team's Definition, or the\nowner of the self-improvement Run, may, in their own signed-in session\n(403 otherwise); a Run that dismissed nothing is refused (409). The undo\nis kept with who and when; undoing again answers it and changes nothing\n(`restored` 0).",
+        "summary": "Undo the dismissal of the failures a person's rejection of one of the\ncaller's team's self-improvement Runs dismissed (its pull request closed\nunmerged, or its Run cancelled in person): when the rejection was of the\nproposed fix and not of the failures, they go back to pending and count\ntoward the next self-improvement Run's thresholds at the team's next\nRun end, after any pause the rejection started. Only failures it still\nholds go back. Only the admin who named the team's Definition (while\nstill an admin), or the owner of the self-improvement Run, may, in their\nown signed-in session and never from an agent's account (403\notherwise); a Run that dismissed nothing is refused (409). The undo\nis kept with who and when; undoing again answers it and changes nothing\n(`restored` 0).",
         "operationId": "undo_factory_improvement_dismissal",
         "parameters": [
           {
@@ -4750,7 +4750,7 @@
         "properties": {
           "canUndoDismissal": {
             "type": "boolean",
-            "description": "Whether the caller may undo the dismissal now: it holds dismissed\nfailures, was not undone, and they named the Definition or own its\nRun."
+            "description": "Whether the caller may undo the dismissal now: it holds dismissed\nfailures, was not undone, and they are a person (never an agent's\naccount) who named the Definition and is still an admin of the\nteam, or who owns its Run."
           },
           "createdAt": {
             "type": "string",

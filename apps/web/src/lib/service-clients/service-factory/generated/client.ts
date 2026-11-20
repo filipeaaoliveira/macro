@@ -2276,9 +2276,10 @@ unmerged, or its Run cancelled in person): when the rejection was of the
 proposed fix and not of the failures, they go back to pending and count
 toward the next self-improvement Run's thresholds at the team's next
 Run end, after any pause the rejection started. Only failures it still
-holds go back. Only the admin who named the team's Definition, or the
-owner of the self-improvement Run, may, in their own signed-in session
-(403 otherwise); a Run that dismissed nothing is refused (409). The undo
+holds go back. Only the admin who named the team's Definition (while
+still an admin), or the owner of the self-improvement Run, may, in their
+own signed-in session and never from an agent's account (403
+otherwise); a Run that dismissed nothing is refused (409). The undo
 is kept with who and when; undoing again answers it and changes nothing
 (`restored` 0).
  */

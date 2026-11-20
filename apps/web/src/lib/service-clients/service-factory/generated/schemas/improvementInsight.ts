@@ -15,8 +15,9 @@ import type { ImprovementState } from './improvementState';
  */
 export interface ImprovementInsight {
   /** Whether the caller may undo the dismissal now: it holds dismissed
-failures, was not undone, and they named the Definition or own its
-Run. */
+failures, was not undone, and they are a person (never an agent's
+account) who named the Definition and is still an admin of the
+team, or who owns its Run. */
   canUndoDismissal: boolean;
   /** When it began. */
   createdAt: string;
