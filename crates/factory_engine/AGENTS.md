@@ -302,8 +302,9 @@ agent's question (a reviewer's too) or from the owner's `retry` after
 (`factory_check_budget`, behind the `factory-token-budget` patch marker,
 for at most two minutes): the worker reads the sessions of the Run's
 Steps (`step_sessions`, each once, those a Step left for a new one, as
-when its session was lost after its agent worked in it, included) and sums what the usage log recorded
-for them as the Run's owner (`ai_usage`'s `SessionUsageReader`), as
+when its session was lost after its agent worked in it, included) and
+sums what the usage log recorded for them as the Run's owner
+(`ai_usage`'s `SessionUsageReader`), as
 Insights counts tokens: input, output, and input read from or written to
 the prompt cache, all of which the model bills, so a Run's spend is the
 one Insights shows for it. A Run that used its budget or more keeps why
@@ -352,9 +353,12 @@ unchecked, and a newer worker replays that history without the marker.
 at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step
 durations, Gate waits and answers, the entries that failed or were revisited
 with their newest Runs, and the tokens each agent Step's sessions used
-(its current one and those it left for a new one, each once, the same
-sessions the token budget counts), read from the usage log by session id
-(`ai_usage`'s `SessionUsageReader`). It
+(its current one and those it left for a new one, the same sessions the
+token budget counts), read from the usage log by session id
+(`ai_usage`'s `SessionUsageReader`). A Step counts once in the agent and
+measured Steps however many sessions it worked in (`StepSessionRef::seq`),
+and is measured when any of them recorded usage; a session counts its
+tokens once for its entry in its Run, however many Steps shared it. It
 reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
 zone or Flow name is 400.
 
@@ -457,7 +461,8 @@ trial whose Run is refused stops the suite, which reports it (`refused`)
 and plans only the trials it started, and a suite none of whose trials
 started is deleted. A suite still starting counts the trials it
 planned. Once a trial's Run ends it keeps its score (1 when write ended
-`done`, 0.5 `red`, 0 otherwise) and its agents' tokens, its Run's own
+`done`, 0.5 `red`, 0 otherwise) and its agents' tokens (the sessions its
+Run's token budget counts, `ScoringSubject::sessions`), its Run's own
 `factory/<run>` branch is deleted as its owner (best effort, through
 `PullRequests::delete_run_branch`, which takes the Run, never a branch
 name; one found missing counts as deleted), and, unless it was cancelled, the Scorers

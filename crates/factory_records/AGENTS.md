@@ -339,10 +339,17 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   one), so a session lost after its agent worked in it still counts.
   `20261119080000_factory_step_used_session.sql` backfilled each Step's
   current session; the sessions Steps left before it were never kept. The
-  reads (`step_sessions`, and Insights' `read_insights` and
-  `read_quality`) take the union of both, so a session counts once
-  however many Steps or rows keep it, and a Step claimed by a build
-  older than the table still counts its current session. The
+  reads (`step_sessions`, Insights' `read_insights` and `read_quality`,
+  and `scoring_subject`'s `sessions` for a Benchmark trial's tokens) take
+  the union of both, so a session counts once however many Steps or rows
+  keep it, and a Step claimed by a build older than the table still
+  counts its current session. `read_insights` returns one
+  `StepSessionRef` per Step and session, with the Step's `seq`, so
+  Insights count Steps apart from sessions. While a build older than the
+  table still runs after the migration (a rolling deploy), its
+  `pass_session` keeps no row, so the session that pass leaves is
+  dropped from the count; the next pass by a newer build keeps the
+  session it leaves. The
   kinds the
   Orchestrator may approve are kept in the same arrays as the rules
   (`orchestrator_plan`, `orchestrator_blockers`), and on the Run.
