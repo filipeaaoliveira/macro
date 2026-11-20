@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT run_id, seq, round_seq, problem, fix_status, ruling\n            FROM factory_review_finding\n            WHERE run_id = ANY($1) AND kind = 'blocker'\n            ORDER BY run_id, seq, place\n            ",
+  "query": "\n            SELECT\n                run_id, seq, round_seq, problem, fix_status, ruling,\n                kind = 'dismissed' AS \"dismissed!\"\n            FROM factory_review_finding\n            WHERE run_id = ANY($1) AND kind IN ('blocker', 'dismissed')\n            ORDER BY run_id, seq, place\n            ",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,11 @@
         "ordinal": 5,
         "name": "ruling",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "dismissed!",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -45,8 +50,9 @@
       false,
       false,
       true,
-      true
+      true,
+      null
     ]
   },
-  "hash": "2d8477885ef105435eb6ea16809aac19b3dedc2daab3273029f8de253dc28096"
+  "hash": "d95d2a6c24492f26eeea9e17ef4905cfa928979aff1bd24e67aa21ca90214bfb"
 }

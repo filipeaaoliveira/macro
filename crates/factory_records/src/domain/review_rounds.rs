@@ -167,17 +167,22 @@ pub struct Ruling {
     pub ruling: DisputeRuling,
 }
 
-/// What became of a Run's Blockers: fixed, or disputed and then upheld or
-/// dropped. A dispute no round ruled on yet counts as upheld.
+/// What became of a Run's Blockers: fixed as the fixer says, or disputed
+/// and then upheld or dropped, and the findings dismissed as repeats of a
+/// dropped one. A dispute no round ruled on yet counts as upheld.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockerResolutions {
-    /// Blockers the fix said it fixed.
+    /// Blockers the fixer said it fixed: its claim, which the next round
+    /// checks.
     pub fixed: u32,
     /// Blockers the fix disputed that a reviewer upheld, or did not drop.
     pub disputed_upheld: u32,
     /// Blockers the fix disputed that a reviewer dropped.
     pub disputed_dropped: u32,
+    /// Findings dismissed: a reviewer raised again, in a later round of the
+    /// visit, the same problem at the same lines as a Blocker it dropped.
+    pub dismissed: u32,
 }
 
 impl BlockerResolutions {
@@ -194,12 +199,21 @@ impl BlockerResolutions {
         }
     }
 
-    /// What became of the Blockers of a Run's `rounds`.
+    /// What became of the Blockers of a Run's `rounds`, and its findings
+    /// dismissed.
     pub fn of_rounds(rounds: &[ReviewRound]) -> Self {
         let mut counts = Self::default();
         for blocker in rounds.iter().flat_map(ReviewRound::blockers) {
             counts.count(blocker.fix_status, blocker.ruling);
         }
+        counts.dismissed = u32::try_from(
+            rounds
+                .iter()
+                .flat_map(|round| &round.findings)
+                .filter(|finding| finding.kind == Some(FindingKind::Dismissed))
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
         counts
     }
 }

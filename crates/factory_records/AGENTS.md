@@ -222,7 +222,11 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   (`ruling`, `ruled_by`): they replace what an earlier attempt of its Step
   ruled, in the same transaction, and a dispute another Step ruled on
   keeps its ruling. A finding that repeats a Blocker its reviewer dropped
-  (`repeats_dropped`) is classified `dismissed`.
+  (`repeats_dropped`) is classified `dismissed` when it is in the diff under
+  review. Insights' Blocker records carry dismissed findings too
+  (`dismissed`), which count only as dismissed. A binary older than these
+  columns fails to read a `dismissed` kind (`UnknownReviewWord`): deploy
+  the migration, then every reader at once.
 - `list_waiting_runs` reads one owner's Runs that have not ended and wait
   on an unanswered Gate, newest first, through `factory_run_user_open_idx`
   (open Runs only) and the Gates' primary key, up to its limit.

@@ -439,9 +439,11 @@ impl RunQualityRepository for PgRunRepository {
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
         let blockers = sqlx::query!(
             r#"
-            SELECT run_id, seq, round_seq, problem, fix_status, ruling
+            SELECT
+                run_id, seq, round_seq, problem, fix_status, ruling,
+                kind = 'dismissed' AS "dismissed!"
             FROM factory_review_finding
-            WHERE run_id = ANY($1) AND kind = 'blocker'
+            WHERE run_id = ANY($1) AND kind IN ('blocker', 'dismissed')
             ORDER BY run_id, seq, place
             "#,
             &ids,
@@ -457,6 +459,7 @@ impl RunQualityRepository for PgRunRepository {
                 problem: row.problem,
                 fix_status: stored_word(row.fix_status, FixStatus::from_word)?,
                 ruling: stored_word(row.ruling, DisputeRuling::from_word)?,
+                dismissed: row.dismissed,
             })
         })
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
