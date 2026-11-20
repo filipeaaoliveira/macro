@@ -387,7 +387,7 @@ describe('RunInsightsView', () => {
       .closest('section');
     if (!kinds) throw new Error('No quality and infrastructure section');
     // One flawed of the four that reached their end: 25%. Two of the eight
-    // that ended on their own failed for infrastructure: 25%.
+    // that ended and weren't cancelled failed for infrastructure: 25%.
     expect(
       within(kinds).getByText('Failed for the work').nextSibling?.textContent
     ).toBe('2');
@@ -705,10 +705,11 @@ describe('RunInsightsView', () => {
     mount({ insights: november, quality: () => quality() });
     expect(screen.getByTestId('cost-per-merged').textContent).toBe('$2.50');
     expect(figure('Autonomy rate')).toBe('25%');
-    // The rate is of the ended runs, not of the merged ones.
+    // The rate is of the runs that ended on their own, not of the merged
+    // ones.
     expect(
       screen.getByText(
-        'What merging cost, and the share of ended runs that merged with no person stepping in'
+        'What merging cost, and how often runs that ended on their own merged with no person stepping in and weren’t found flawed. Cancelled runs and infrastructure failures are left out.'
       )
     ).toBeTruthy();
     expect(figure('Merged pull requests')).toBe('1');
