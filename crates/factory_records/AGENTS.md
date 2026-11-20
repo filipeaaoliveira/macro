@@ -122,7 +122,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119044000_factory_ci_job_failure.sql`,
   `20261119045000_factory_ci_job_replaced.sql`,
   `20261119050000_factory_token_budget.sql`,
-  `20261119050100_factory_token_budget_validate.sql`), `factory_step_steer`,
+  `20261119050100_factory_token_budget_validate.sql`,
+  `20261120010000_factory_improvement_dismissal_undone.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
@@ -447,7 +448,17 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   (`dismissed_at`, `20261119020100_factory_improvement_failure_dismissed.sql`;
   they keep its `improvement_id`, so they are never pending again), and
   `closed` and `refused` (with why) clear their `improvement_id`, so they
-  are pending again. `failures` keeps how many it claimed. `recent_improvements` reads
+  are pending again. `undo_dismissal` undoes a rejection's dismissal once,
+  in one transaction with the improvement row locked: the failures it
+  still holds dismissed (`improvement_id` and `dismissed_at` set) are
+  pending again, and the improvement keeps who and when
+  (`dismissal_undone_by_user_id`, `dismissal_undone_at`,
+  `20261120010000_factory_improvement_dismissal_undone.sql`); a second undo
+  answers the kept one and changes nothing, so failures a later improvement
+  took stay with it, and one that dismissed nothing is
+  `NothingDismissed`. Reads of an improvement count the failures it holds
+  dismissed (`dismissed`, `factory_improvement_failure_improvement_idx`);
+  `improvement` reads one of a team's by id. `failures` keeps how many it claimed. `recent_improvements` reads
   a team's latest ones, newest first, for the pause after those that did
   not merge (`factory_improvement_team_created_idx`). Neither table decides
   who merges: the `improve` Flow keeps its plan and merge Gates for a
