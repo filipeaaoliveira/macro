@@ -40,6 +40,22 @@ pub struct MacroApiToken {
     /// `agent_correlation_id` so services with no database can enforce it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_scope: Option<String>,
+    /// The scheduler's proof that it started the run of `routine_id` itself
+    /// (a schedule it found due, or an event it watches), signed by the
+    /// harness beside `routine_id`; never supplied by an API caller, and
+    /// never copied into another token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduler_run: Option<SchedulerRunClaim>,
+}
+
+/// A routine run the scheduler started itself, as its code's token signs it.
+#[derive(serde::Serialize, serde::Deserialize, Eq, PartialEq, Debug, Clone, Copy)]
+pub struct SchedulerRunClaim {
+    /// The run's id, which its code reads as `run.id`.
+    pub run_id: Uuid,
+    /// The routine's configuration revision the run runs: every change to
+    /// its trigger, steps or settings makes a new one.
+    pub revision: i64,
 }
 
 pub struct EncodeMacroApiTokenArgs {
@@ -69,6 +85,9 @@ pub struct EncodeMacroApiTokenArgs {
     /// The correlated session's scope by its stored name; never supplied by
     /// an API caller.
     pub agent_scope: Option<String>,
+    /// The scheduler's proof that it started the routine run itself; only
+    /// the harness signs it, for the code of a run the scheduler started.
+    pub scheduler_run: Option<SchedulerRunClaim>,
 }
 
 #[tracing::instrument(skip(args))]
@@ -86,6 +105,7 @@ pub fn encode_macro_api_token(args: EncodeMacroApiTokenArgs) -> anyhow::Result<S
         agent_session_id: args.agent_session_id,
         routine_id: args.routine_id,
         agent_scope: args.agent_scope,
+        scheduler_run: args.scheduler_run,
         iss: args.issuer.clone(),
         fusion_user_id: args.fusionauth_id.clone(),
         macro_user_id: args.macro_user_id.clone(),

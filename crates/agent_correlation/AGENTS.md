@@ -45,7 +45,11 @@ code, not in its prompt. The harness also signs the scope into the credential
   display verb sent with a correlated SDK call, the validated session
   (`current_session`), and the scope stored with it, else the one the
   credential signs (`current_scope`)); capture before spawning,
-  scope each message. `current_routine()` feeds
+  scope each message. `current_scheduler_run()` is the signed
+  `scheduler_run` claim beside the routine: the scheduler's proof that it
+  started the run itself (a due schedule or a watched event), with the run's
+  id and the routine's configuration revision; it is read only from a token
+  that signs a routine and no correlation. `current_routine()` feeds
   `macro_event_broker::Event.routine_id`, which keeps routines from starting
   on routine writes. `may_share` says whether the request may change who can
   see an item. `entity_access_db_utils::scoped_grants` checks it wherever

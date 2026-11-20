@@ -44,8 +44,11 @@ internal API key, and the Axum JWT-decode middleware.
 Macro API tokens may include a signed `agent_id` for SDK message attribution,
 and with it an `agent_via` client label ("Claude Code"), plus a signed
 `routine_id` naming the routine whose run the token acts for (loop protection,
-see `agent_correlation`). Ordinary user token producers leave them absent; only
-key-holders signing for a verified context set them, never from request input.
+see `agent_correlation`), and with it `scheduler_run` (`SchedulerRunClaim`):
+the scheduler's proof that it started that run itself, with the run's id and
+the routine's configuration revision. Ordinary user token producers leave them
+absent; only key-holders signing for a verified context set them, never from
+request input. A token exchange never copies `scheduler_run`.
 
 ## Gotchas
 

@@ -24,6 +24,22 @@ pub struct Attribution {
     /// Display verb the SDK sent with a validated correlation. Display only;
     /// it is dropped whenever there is no correlation.
     pub verb: Option<AgentVerb>,
+    /// The scheduler's proof that it started the run of `routine_id` itself,
+    /// from a signed token claim beside the routine.
+    pub scheduler_run: Option<SchedulerRun>,
+}
+
+/// A routine run the scheduler started itself, from a schedule it found due
+/// or an event the routine watches; never a run by hand (Run Now) or any run
+/// an API caller asked for. Only the harness signs it, on the credential of
+/// the run's code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SchedulerRun {
+    /// The run's id, which its code reads as `run.id`.
+    pub run_id: Uuid,
+    /// The routine's configuration revision the run runs: every change to
+    /// the routine's trigger, steps or settings makes a new one.
+    pub revision: i64,
 }
 
 tokio::task_local! {
@@ -107,6 +123,12 @@ pub fn current_verb() -> Option<AgentVerb> {
 /// The routine whose run the current request acts for, if any.
 pub fn current_routine() -> Option<Uuid> {
     attribution().routine_id
+}
+
+/// The scheduler's proof that it started the routine run the current request
+/// acts for itself, when its credential signs one.
+pub fn current_scheduler_run() -> Option<SchedulerRun> {
+    attribution().scheduler_run
 }
 
 /// Run work with the correlation accepted at its boundary. `None` clears any
