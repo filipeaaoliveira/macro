@@ -474,7 +474,7 @@ const DETECT_SCHEMA_CHANGES: &str = indoc::indoc! {r#"
     result "No changed Rust file names a schema item." false
 "#};
 
-fn paths_filter() -> Step<Use> {
+pub(crate) fn paths_filter() -> Step<Use> {
     let artifact_paths = crate::workflows::web_artifact_paths::yaml_list("  ");
 
     // `codegen_inputs` holds the `gen-api` scripts and the SDK and docs packages

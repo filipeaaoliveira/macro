@@ -57,6 +57,7 @@ mod email_e2e_browser;
 mod email_e2e_full_stack;
 mod ensure_daytona_snapshot;
 mod export_ci_telemetry;
+mod fork_ci;
 mod ios_app_store_publish;
 mod ios_app_store_release;
 mod ios_preview;
@@ -531,6 +532,11 @@ const WORKFLOWS: &[WorkflowFile] = &[
         slug: "sdk_check",
         file_name: "sdk-check.yml",
         render_yaml: || render_gh_workflow(sdk_check::sdk_check)(),
+    },
+    WorkflowFile {
+        slug: "fork_ci",
+        file_name: "fork-ci.yml",
+        render_yaml: || render_gh_workflow(fork_ci::fork_ci)(),
     },
 ];
 

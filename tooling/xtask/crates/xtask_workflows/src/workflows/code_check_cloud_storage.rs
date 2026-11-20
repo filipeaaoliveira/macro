@@ -278,7 +278,7 @@ fn test_execution_runtime() -> Step<Run> {
 /// Detect whether cloud-storage-relevant paths changed, and whether any
 /// change could affect a service's Doppler config contract (a superset of
 /// what `xtask doppler-bins` checks, so the gate never hides a bin).
-fn paths_filter() -> Step<gh_workflow::Use> {
+pub(crate) fn paths_filter() -> Step<gh_workflow::Use> {
     Step::new("Filter changed paths")
         .uses(
             "dorny",

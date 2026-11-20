@@ -181,10 +181,7 @@ impl<Bindings, Machines: Guests> ComputerCommands<Bindings, Machines> {
             let process = self.guests.exec(computer, argv).await?;
             drop(process.stdin);
             let output = read_tail(process.stdout).await?;
-            let exit_code = process
-                .exit
-                .await
-                .map_err(|error| HarnessError::Container(error))?;
+            let exit_code = process.exit.await.map_err(HarnessError::Container)?;
             Ok(SessionCommandOutput::new(exit_code, &output, b""))
         };
         tokio::time::timeout(timeout, ran).await.map_err(|_| {
