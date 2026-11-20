@@ -688,6 +688,11 @@ pub struct RunDetail {
     /// or its repository as it started. A Role no rule chose for is not
     /// listed.
     pub agent_rules: Vec<RunAgentRule>,
+    /// Whether its task's tags could not be read as it started: its
+    /// Definition's Agent Rules on a tag then matched no tag, which is not
+    /// the same as a task no rule matched. False for a Run whose tags were
+    /// read, or that no rule on a tag needed them for.
+    pub task_tags_unread: bool,
     /// Its token budget and what its agent Steps used of it; none for a
     /// Run that keeps no budget.
     pub token_budget: Option<RunTokenBudget>,

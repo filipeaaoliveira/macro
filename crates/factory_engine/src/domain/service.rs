@@ -331,20 +331,24 @@ where
     }
 
     /// The tags of the task `task_id` as `user_id` sees them, for the
-    /// Agent Rules of the Definition a Run starts under. One that cannot
-    /// be read is taken as none, so a rule on a tag does not match and the
-    /// Role's own order applies, as for a task with no tags; the Run does
-    /// not wait on document storage.
-    async fn run_task_tags(&self, user_id: &MacroUserIdStr<'static>, task_id: Uuid) -> Vec<String> {
+    /// Agent Rules of the Definition a Run starts under; none when they
+    /// cannot be read. Then no rule on a tag matches and the Role's own
+    /// order applies, as for a task with no tags, and the Run keeps that
+    /// its tags went unread; the Run does not wait on document storage.
+    async fn run_task_tags(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Option<Vec<String>> {
         match self.tasks.task_tags(user_id, task_id).await {
-            Ok(tags) => tags,
+            Ok(tags) => Some(tags),
             Err(error) => {
                 tracing::warn!(
                     ?error,
                     %task_id,
                     "the run task's tags could not be read: no agent rule on a tag matches it"
                 );
-                Vec::new()
+                None
             }
         }
     }
@@ -543,6 +547,12 @@ where
             .map_err(internal)?
             .remove(&run.id)
             .unwrap_or_default();
+        let task_tags_unread = !self
+            .repo
+            .runs_task_tags_unread(&[run.id])
+            .await
+            .map_err(internal)?
+            .is_empty();
         let token_budget = self.token_budget(&run).await?;
         Ok(RunDetail {
             run,
@@ -552,6 +562,7 @@ where
             review_rounds,
             standing_acts,
             agent_rules,
+            task_tags_unread,
             token_budget,
         })
     }
@@ -592,6 +603,11 @@ where
         let mut rounds = self.repo.runs_review_rounds(&ids).await.map_err(internal)?;
         let mut standing_acts = self.repo.runs_standing_acts(&ids).await.map_err(internal)?;
         let mut agent_rules = self.repo.runs_agent_rules(&ids).await.map_err(internal)?;
+        let tags_unread = self
+            .repo
+            .runs_task_tags_unread(&ids)
+            .await
+            .map_err(internal)?;
         // The Flows of the Runs that may be at their merge, in one read.
         let at_merge_ids: Vec<RunId> = runs
             .iter()
@@ -613,6 +629,7 @@ where
                 .await?;
             let standing_acts = standing_acts.remove(&run.id).unwrap_or_default();
             let agent_rules = agent_rules.remove(&run.id).unwrap_or_default();
+            let task_tags_unread = tags_unread.contains(&run.id);
             // A list shows each Run's budget, not its use: reading the
             // usage log for every Run listed would cost a read each.
             let token_budget = budget_of(&run).map(|budget| RunTokenBudget {
@@ -629,6 +646,7 @@ where
                 review_rounds,
                 standing_acts,
                 agent_rules,
+                task_tags_unread,
                 token_budget,
             });
         }
@@ -994,7 +1012,7 @@ where
             (Some(pinned), Some(task_id)) if pinned.definition.agents.has_tag_rules() => {
                 self.run_task_tags(&actor, task_id).await
             }
-            _ => Vec::new(),
+            _ => Some(Vec::new()),
         };
         let standing_rules = self
             .run_rules(team, project_id, definition.as_ref())
@@ -1099,13 +1117,21 @@ where
                     Ok(()) => match &definition {
                         Some(pinned) => {
                             let subject = RuleSubject {
-                                tags: &task_tags,
+                                tags: task_tags.as_deref().unwrap_or_default(),
                                 repository: repository.as_ref().map(|kept| kept.url.as_str()),
                             };
                             let rules = pinned.definition.agents.chosen_by_rules(subject, |role| {
                                 arms.iter().any(|arm| arm.agents.contains_key(role))
                             });
-                            self.repo.record_agent_rules(run_id, &rules).await
+                            match self.repo.record_agent_rules(run_id, &rules).await {
+                                // The Run API says the tags went unread, so
+                                // no rule on a tag matching reads apart from
+                                // a task no rule matched.
+                                Ok(()) if task_tags.is_none() => {
+                                    self.repo.record_task_tags_unread(run_id).await
+                                }
+                                kept => kept,
+                            }
                         }
                         None => Ok(()),
                     },

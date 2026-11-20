@@ -34,6 +34,8 @@ pub(crate) struct FakeEvaluation {
     pub(crate) arms: BTreeMap<RunId, Vec<RunArm>>,
     /// Each Run's Agent Rules, one per Role, by Role.
     pub(crate) agent_rules: BTreeMap<RunId, Vec<RunAgentRule>>,
+    /// The Runs that started with their task's tags unread.
+    pub(crate) task_tags_unread: std::collections::BTreeSet<RunId>,
     /// The live Scorers' judgments, by Run.
     pub(crate) run_scores: BTreeMap<RunId, Vec<Judgment>>,
     /// The suites, by id.
@@ -107,6 +109,27 @@ impl EvaluationRepository for FakeRepo {
             }
         }
         Ok(())
+    }
+
+    async fn record_task_tags_unread(&self, run_id: RunId) -> Result<(), FakeError> {
+        if self.fails("record_task_tags_unread") {
+            return Err(FakeError);
+        }
+        let mut kept = self.evaluation.lock().expect("evaluation");
+        kept.task_tags_unread.insert(run_id);
+        Ok(())
+    }
+
+    async fn runs_task_tags_unread(
+        &self,
+        run_ids: &[RunId],
+    ) -> Result<std::collections::BTreeSet<RunId>, FakeError> {
+        let kept = self.evaluation.lock().expect("evaluation");
+        Ok(run_ids
+            .iter()
+            .filter(|run_id| kept.task_tags_unread.contains(run_id))
+            .copied()
+            .collect())
     }
 
     async fn runs_agent_rules(

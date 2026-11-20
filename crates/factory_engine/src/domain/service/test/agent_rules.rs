@@ -121,6 +121,8 @@ async fn a_run_keeps_the_agent_rules_its_task_tags_and_repository_match() {
         ]
     );
     assert_eq!(neither.agent_rules, []);
+    // Tags that were read, matched or not, are not unread.
+    assert!(!docs.task_tags_unread && !neither.task_tags_unread);
     let kept = repo.evaluation.lock().expect("evaluation").clone();
     assert!(!kept.agent_rules.contains_key(&neither.run.id));
 
@@ -183,6 +185,21 @@ async fn a_task_whose_tags_cannot_be_read_matches_no_tag_rule() {
     let run = start(&repo, &github, SITE, &["docs"]).await;
 
     assert_eq!(run.agent_rules, [agent_rule("planner", "site", "backup")]);
+    // The Run API says the tags went unread.
+    assert!(run.task_tags_unread);
+    let service = code_service(&repo, &FakeWorkflows::default(), &github);
+    let read = service.get_run(&teo(), run.run.id).await.expect("read");
+    assert!(read.task_tags_unread);
+    assert_eq!(
+        serde_json::to_value(&read).expect("json")["taskTagsUnread"],
+        json!(true)
+    );
+    let task_id = run.run.task_id.expect("a task");
+    let listed = service
+        .list_task_runs(&teo(), task_id)
+        .await
+        .expect("listed");
+    assert!(listed[0].task_tags_unread);
 }
 
 /// A Run whose rules cannot be kept does not start.
