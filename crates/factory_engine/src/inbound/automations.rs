@@ -273,9 +273,14 @@ where
 /// scheduler signed for the routine (403 for any other caller). It starts
 /// a Run as the Automation's creator, once per routine run, unless the
 /// Automation is switched off, the queue is full or a Run already runs on
-/// the task. A routine run for an agent, or in an agent session, starts it
-/// as that agent: under a Definition with Standing Roles its bot must fill
-/// one that allows `start`, or the firing is skipped as `refused`.
+/// the task. Only a run the scheduler started itself, from the routine's
+/// schedule or event as the factory last wrote it, starts it as its creator,
+/// proved by the `scheduler_run` claim its credential signs. Any other run
+/// (Run Now, by a person or an agent; a run of a routine changed since; a
+/// run for another agent or in an agent session) starts it as that agent,
+/// else as the Macro routine bot: under a Definition with Standing Roles
+/// its bot must fill one that allows `start`, or the firing is skipped as
+/// `refused`.
 #[utoipa::path(
     post,
     tag = "factory",
@@ -306,11 +311,12 @@ where
     // read it; no other caller names one.
     let routine_id =
         agent_correlation::context::current_routine().ok_or(FactoryError::NotARoutine)?;
-    // A routine the scheduler runs as its creator acts as them; one run for
-    // an agent, or in an agent session, acts as that agent, which Standing
-    // Roles check as for `POST /runs`. The Automation's own routine is an
-    // `Agent` routine signed for the Macro routine bot, which acts as that
-    // bot.
+    // The scheduler's proof that it started this run itself, signed beside
+    // the routine: the service fires the Automation as its creator only for
+    // a proof of this run on the routine as the factory wrote it. Any other
+    // run acts as its agent (a bot, an agent session, else the Macro routine
+    // bot), which Standing Roles check as for `POST /runs`.
+    let scheduler_run = agent_correlation::context::current_scheduler_run();
     let acting = program_agent(&caller.authorization);
     Ok(Json(
         state
@@ -318,6 +324,7 @@ where
             .fire_from_routine(
                 &caller.authorization.macro_user_id,
                 routine_id,
+                scheduler_run,
                 body,
                 acting,
             )

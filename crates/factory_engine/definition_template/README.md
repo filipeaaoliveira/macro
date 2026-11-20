@@ -364,15 +364,17 @@ which Standing Role.
 An empty section, `"standing": {}`, allows no agent any of these acts;
 leave the section out to allow them all. `"standing": null` is refused.
 
-Schedule and event Automations fire through a Macro routine that runs for
-the Macro routine bot (`00000000-0000-0000-0000-00000000a2a2`), so with a
-`standing` section they start a Run only when that bot is the `bot` of an
-Agent in a Standing Role that allows `start`; otherwise each firing is
-skipped as refused. To keep them firing, add that Agent, for example
-`"routine": { "bot": "00000000-0000-0000-0000-00000000a2a2" }` in `agents`
-and `"scheduler": { "acts": ["start"], "agents": ["routine"] }` in
-`standing`. This is a known limit: a later change is to let only the
-scheduler's own firing start a Run as the Automation's creator.
+Schedule and event Automations need no Role. A firing that Macro's
+scheduler starts itself, when the schedule comes due or the watched event
+happens, starts its Run as the Automation's creator, with or without a
+`standing` section. Any other run of the Automation's routine is checked as
+an agent's start. That includes Run Now, by a person or an agent, and any
+run after someone changed the routine. Such a run acts for the Macro
+routine bot (`00000000-0000-0000-0000-00000000a2a2`). With a `standing`
+section it starts a Run only when that bot is the `bot` of an Agent in a
+Standing Role that allows `start`; otherwise it is skipped as refused.
+Switching the Automation off and on writes its routine back as the factory
+made it, and its scheduled firings start Runs as its creator again.
 
 The validator refuses an act not in that list, any act that names a merge, a
 Standing Role with no act or no Agent, an Agent `agents` does not define,

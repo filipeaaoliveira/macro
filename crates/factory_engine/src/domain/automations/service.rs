@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use agent_correlation::context::SchedulerRun;
 use chrono::Utc;
 use factory_records::domain::automations::{
     Automation, AutomationRepository, AutomationTrigger, FiringClaim, FiringEnd, FiringSkip,
@@ -197,6 +198,34 @@ where
     }
 }
 
+/// Who a run of `automation`'s own routine fires it as: its creator (none)
+/// only with the scheduler's proof that it started this run itself (a due
+/// schedule or a watched event, never a run by hand) at the configuration
+/// revision the factory last wrote the routine at, so the run runs the
+/// trigger and code the factory wrote, signed for the Macro routine bot
+/// (`MACRO_NEW_BOT_ID`) as the factory's `Agent` routine is. The proof
+/// names its run, which keys the firing, so it fires once. Any other run
+/// acts as the agent its credential is signed for or its agent session,
+/// else as the Macro routine bot: Run Now, by a person or an agent, and a
+/// run of a routine changed since, by anyone, need a Standing Role that
+/// allows `start`, as any agent's start does.
+fn routine_acting(
+    automation: &Automation,
+    scheduler_run: Option<SchedulerRun>,
+    firing_key: &str,
+    acting: Option<ActingAgent>,
+) -> Option<ActingAgent> {
+    let routine_bot = ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID);
+    let schedulers_own = scheduler_run.is_some_and(|run| {
+        automation.routine_revision == Some(run.revision)
+            && Uuid::parse_str(firing_key).is_ok_and(|key| key == run.run_id)
+    });
+    if schedulers_own && acting.as_ref() == Some(&routine_bot) {
+        return None;
+    }
+    Some(acting.unwrap_or(routine_bot))
+}
+
 /// What a change to an Automation does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Change {
@@ -319,12 +348,13 @@ where
         // the Automation with it: the routine fires nothing without it.
         if automation.trigger != AutomationTrigger::Webhook {
             match self.triggers.create(&automation).await {
-                Ok(routine_id) => {
+                Ok(routine) => {
                     self.repo
-                        .set_automation_routine(id, routine_id)
+                        .set_automation_routine(id, routine.id, routine.revision)
                         .await
                         .map_err(internal)?;
-                    automation.routine_id = Some(routine_id);
+                    automation.routine_id = Some(routine.id);
+                    automation.routine_revision = Some(routine.revision);
                 }
                 Err(error) => {
                     self.repo.delete_automation(id).await.map_err(internal)?;
@@ -363,17 +393,28 @@ where
         };
         let mut automation = self.managed(actor, id, change).await?;
         // The routine is switched first: an Automation switched on whose
-        // routine stayed off would never fire.
-        if let Some(routine_id) = automation.routine_id {
-            self.triggers
-                .set_enabled(&automation.created_by, routine_id, enabled)
-                .await?;
-        }
+        // routine stayed off would never fire. Switching it on writes the
+        // routine back to what the factory makes, whatever an agent or anyone
+        // changed it to, and keeps the revision that makes: only runs of it
+        // fire the Automation as its creator.
+        let revision = match automation.routine_id {
+            Some(routine_id) if enabled => {
+                Some(self.triggers.rewrite(&automation, routine_id).await?)
+            }
+            Some(routine_id) => {
+                self.triggers
+                    .set_enabled(&automation.created_by, routine_id, false)
+                    .await?;
+                None
+            }
+            None => None,
+        };
         self.repo
-            .set_automation_enabled(id, enabled)
+            .set_automation_enabled(id, enabled, revision)
             .await
             .map_err(internal)?;
         automation.enabled = enabled;
+        automation.routine_revision = revision.or(automation.routine_revision);
         Ok(automation)
     }
 
@@ -392,11 +433,18 @@ where
         self.repo.delete_automation(id).await.map_err(internal)
     }
 
-    #[tracing::instrument(skip(self, actor, firing, acting))]
+    #[tracing::instrument(
+        skip(self, actor, scheduler_run, firing, acting),
+        fields(
+            scheduler_run = scheduler_run.is_some(),
+            as_creator = tracing::field::Empty
+        )
+    )]
     async fn fire_from_routine(
         &self,
         actor: &MacroUserIdStr<'static>,
         routine_id: Uuid,
+        scheduler_run: Option<SchedulerRun>,
         firing: RoutineFiring,
         acting: Option<ActingAgent>,
     ) -> Result<FiringResult, FactoryError> {
@@ -422,6 +470,8 @@ where
         if automation.created_by != *actor {
             return Err(FactoryError::NotFound);
         }
+        let acting = routine_acting(&automation, scheduler_run, &firing.firing, acting);
+        tracing::Span::current().record("as_creator", acting.is_none());
         let firing = firing.firing(&automation)?;
         self.fire(&automation, firing, acting).await
     }

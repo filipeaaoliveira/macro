@@ -34,6 +34,7 @@ fn automation(trigger: AutomationTrigger, repo_url: Option<&str>) -> Automation 
         request_template: "Fix the failing check\n".to_string(),
         enabled: true,
         routine_id: Some(Uuid::from_u128(0x5c)),
+        routine_revision: Some(1),
         created_at: Utc.with_ymd_and_hms(2026, 11, 18, 9, 0, 0).unwrap(),
     }
 }

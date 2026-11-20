@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_automation\n            SET enabled = $2, routine_revision = COALESCE($3, routine_revision)\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "450ac80f682d324cb78abdd47debb2135d8625b9eb29548476d9fe0ac0602661"
+}

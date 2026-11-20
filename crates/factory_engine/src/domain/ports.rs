@@ -8,6 +8,7 @@ mod gate_replies;
 pub use evaluation::{JudgeQuestion, JudgeVerdict, RunJudge, ScoringService};
 pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 
+use agent_correlation::context::SchedulerRun;
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::Automation;
@@ -1130,12 +1131,20 @@ pub trait FactoryService: Send + Sync + 'static {
 /// event's and a Task event's trigger is a routine of the Automation's
 /// creator, whose code step fires it. Every call acts as the creator.
 pub trait AutomationTriggers: Send + Sync + 'static {
-    /// Make the routine that fires `automation`, enabled, and return its
-    /// id.
+    /// Make the routine that fires `automation`, enabled, and return it.
     fn create(
         &self,
         automation: &Automation,
-    ) -> impl Future<Output = Result<Uuid, AutomationTriggerError>> + Send;
+    ) -> impl Future<Output = Result<SavedRoutine, AutomationTriggerError>> + Send;
+
+    /// Write the routine `routine_id` back to what the factory makes for
+    /// `automation`, enabled, whatever it was changed to since, and return
+    /// the configuration revision it is at now.
+    fn rewrite(
+        &self,
+        automation: &Automation,
+        routine_id: Uuid,
+    ) -> impl Future<Output = Result<i64, AutomationTriggerError>> + Send;
 
     /// Switch the routine `routine_id` of `owner` on or off.
     fn set_enabled(
@@ -1152,6 +1161,16 @@ pub trait AutomationTriggers: Send + Sync + 'static {
         owner: &MacroUserIdStr<'static>,
         routine_id: Uuid,
     ) -> impl Future<Output = Result<(), AutomationTriggerError>> + Send;
+}
+
+/// A routine that fires an Automation, as the scheduler saved it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SavedRoutine {
+    /// Its id.
+    pub id: Uuid,
+    /// Its configuration revision: the scheduler makes a new one on every
+    /// change to the routine, and signs the one a run it started runs.
+    pub revision: i64,
 }
 
 /// Why a routine that fires an Automation could not be made or changed.
@@ -1204,11 +1223,15 @@ pub trait AutomationService: Send + Sync + 'static {
 
     /// Fire the Automation the routine `routine_id` fires, from one of its
     /// runs, which acts as `actor`, or as the agent `acting` for them when
-    /// the run is an agent's.
+    /// the run is an agent's. `scheduler_run` is the scheduler's proof, as
+    /// the run's credential signs it, that it started the run itself: only
+    /// a proof for this firing's run, at the revision the factory wrote the
+    /// routine at, fires it as `actor` with no agent.
     fn fire_from_routine(
         &self,
         actor: &MacroUserIdStr<'static>,
         routine_id: Uuid,
+        scheduler_run: Option<SchedulerRun>,
         firing: RoutineFiring,
         acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<FiringResult, FactoryError>> + Send;

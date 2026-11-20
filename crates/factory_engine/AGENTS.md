@@ -218,7 +218,8 @@ bots fill it. The Run keeps it with its Agents (`definition_agents`);
 Definition keeps no Agents. The section governs bots. A call not in person
 acts as an agent (`acting_agent` for start, cancel and link, an
 `ActingAgent`, and for a start through a Benchmark suite or a routine
-firing an Automation, `program_agent`; `Answerer::Agent` for an answer): code in an agent session
+firing an Automation, `program_agent`, unless the scheduler's proof makes it
+the Automation's creator, see Automations; `Answerer::Agent` for an answer): code in an agent session
 (the correlation layer's session on a person's credential) acts as that
 session, and the service reads its bot (`StandingActRepository::session_bot`,
 the owner's sessions only); code in no session whose credential is signed
@@ -1731,20 +1732,33 @@ triggers:
   signed for it (`agent_correlation::context::current_routine`, never the
   body) and fires the Automation of that routine only for its creator.
   A webhook (which carries no login) fires it as its creator, unchecked by
-  Standing Roles. A routine the creator switched, in person, to write as
-  its owner signs no bot, so its runs fire as the creator unchecked too;
-  this is a known limit (a program can Run Now such a routine). A routine run
-  for a bot or in an agent session fires it as that agent
-  (`program_agent`): under a Definition with Standing Roles its bot must
-  fill one that allows `start`, else the firing is skipped as `refused`;
-  the Run keeps the agent as its start. That includes the schedule and
-  events: the routine is made as an `Agent` routine, so the scheduler signs
-  its code step for the Macro routine bot (`MACRO_NEW_BOT_ID`,
-  `00000000-0000-0000-0000-00000000a2a2`), and a Run Now or edited routine
-  code carries the same claims, so they are not told apart; a person's Run Now is checked like the schedule. Under Standing
-  Roles, to keep schedule and event Automations firing, give that bot an
-  Agent in a Standing Role that allows `start`. Known limit, with a
-  follow-up: let only the scheduler's own firing act as the creator. A
+  Standing Roles, through its own secret, never through a routine. The
+  routine is made as an `Agent` routine, so the scheduler signs its code
+  step for the Macro routine bot (`MACRO_NEW_BOT_ID`,
+  `00000000-0000-0000-0000-00000000a2a2`). A run the scheduler started
+  itself (a schedule its dispatch found due, or a watched event; never Run
+  Now) also signs the scheduler's proof
+  (`agent_correlation::context::current_scheduler_run`, the token's
+  `scheduler_run`): the run's id and the routine's configuration revision,
+  which every change to the routine, by anyone, moves. The Automation keeps
+  the revision the factory last wrote the routine at
+  (`factory_automation.routine_revision`: on making it, and on switching it
+  on, which writes the whole routine back, `AutomationTriggers::rewrite`).
+  Only a firing whose proof names this run (its key is the run's id) at
+  that revision, signed for the Macro routine bot, fires it as its creator,
+  unchecked by Standing Roles, with no Role for that bot
+  (`routine_acting`); the firing key makes a proof fire once. Any other run
+  fires it as an agent (`program_agent`): one for another bot or in an
+  agent session as that agent, whatever proof it carries; Run Now (by a
+  person or an agent), a run of a routine changed since, a proof of another
+  run, and a run that signs no bot (a routine switched to write as its
+  owner) as the Macro routine bot. Under a Definition with Standing Roles
+  that agent must fill one that allows `start`, else the firing is skipped
+  as `refused`; the Run keeps the agent as its start. An Automation made
+  before the revision was kept has none: its routine's firings act as the
+  Macro routine bot until its creator switches it off and on. A routine the
+  scheduler's SDK code upgrade rewrote keeps its revision, so it still
+  fires as the creator. A
   routine the scheduler refuses (an invalid cron, event routines the
   creator may not have, no linked GitHub account) takes its Automation
   with it, and the refusal says why (400). Only people's actions start
@@ -1757,7 +1771,10 @@ triggers:
   (`own_branch`). A delivery that names no branch, such as a comment, is
   not told apart. The routine is named and described as managed by the
   factory; the Routines page still shows and edits it like any other, and
-  an edit there is not read back.
+  an edit there is not read back: it moves the routine past the
+  Automation's revision, so its firings act as the Macro routine bot until
+  the creator switches the Automation off and on, which writes the routine
+  back.
 - `webhook` is fired by `POST /automations/{id}/webhook`, which carries no
   login: the call is signed with the Automation's secret (shown once, when
   it is made) as Macro signs its own webhooks (`webhook_signature`:
@@ -2295,6 +2312,13 @@ Definition.
 - A subscription that runs out mid-turn (a turn that fails with the
   provider's usage limit) is not a refusal to start: it fails the Step as any
   failed turn does, and no other Agent takes it.
+- Deploy `agent_harness_service` signing `scheduler_run` before
+  `factory_service` reads it, and run the
+  `factory_automation_routine_revision` migration first: until both, an
+  Automation's routine firings carry no proof (or the Automation no
+  revision) and act as the Macro routine bot, so under a Definition with
+  Standing Roles each is skipped as `refused`, as before this change.
+  Automations made earlier need switching off and on once.
 - Deploy `agent_harness_service` with an SDK that has
   `macro.factory.fireAutomation` before a factory that makes Automations:
   saving the routine type-checks its code step against the harness's SDK.

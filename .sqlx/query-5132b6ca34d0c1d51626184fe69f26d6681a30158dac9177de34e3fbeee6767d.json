@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id, team_id, created_by, name, trigger_kind,\n                trigger AS \"trigger: Json<serde_json::Value>\", flow, repo_url, request_template,\n                enabled, routine_id, routine_revision, created_at\n            FROM factory_automation\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "trigger_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "trigger: Json<serde_json::Value>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "request_template",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "routine_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "routine_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "5132b6ca34d0c1d51626184fe69f26d6681a30158dac9177de34e3fbeee6767d"
+}
