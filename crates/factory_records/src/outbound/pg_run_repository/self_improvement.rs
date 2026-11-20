@@ -94,7 +94,8 @@ fn improvement(
 /// An undo of a dismissal as its row keeps it.
 fn dismissal_undone(at: DateTime<Utc>, by: String) -> Result<DismissalUndone, PgRunRepositoryErr> {
     Ok(DismissalUndone {
-        by: MacroUserIdStr::try_from(by.clone()).map_err(|_| PgRunRepositoryErr::InvalidUserId(by))?,
+        by: MacroUserIdStr::try_from(by.clone())
+            .map_err(|_| PgRunRepositoryErr::InvalidUserId(by))?,
         at,
     })
 }
@@ -497,8 +498,7 @@ impl SelfImprovementRepository for PgRunRepository {
         let Some(kept) = kept else {
             return Ok(UndoDismissal::NotFound);
         };
-        if let (Some(at), Some(by)) = (kept.dismissal_undone_at, kept.dismissal_undone_by_user_id)
-        {
+        if let (Some(at), Some(by)) = (kept.dismissal_undone_at, kept.dismissal_undone_by_user_id) {
             return Ok(UndoDismissal::AlreadyUndone(dismissal_undone(at, by)?));
         }
         // Only the failures it still holds dismissed: one pending again, or
@@ -531,10 +531,7 @@ impl SelfImprovementRepository for PgRunRepository {
         tx.commit().await?;
         Ok(UndoDismissal::Undone {
             restored: u32::try_from(restored).unwrap_or(u32::MAX),
-            undone: DismissalUndone {
-                by: by.clone(),
-                at,
-            },
+            undone: DismissalUndone { by: by.clone(), at },
         })
     }
 }
