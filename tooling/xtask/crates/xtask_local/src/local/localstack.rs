@@ -9,6 +9,9 @@ use aws_sdk_s3::types as s3_types;
 use super::instance::{Instance, Port};
 use super::resources;
 
+#[cfg(test)]
+mod test;
+
 /// Provision all LocalStack resources idempotently. Blocking entry point: spins
 /// up a Tokio runtime so the orchestrator stays synchronous.
 pub fn provision(instance: &Instance) -> Result<()> {
@@ -49,19 +52,46 @@ async fn provision_async(url: &str) -> Result<()> {
     Ok(())
 }
 
-/// The KMS key that encrypts users' Cursor API keys, addressed by a stable
-/// alias so the compose env can name it.
+/// The KMS keys the services encrypt with, by the alias the compose env names
+/// them with, and their descriptions.
+const KMS_KEYS: [(&str, &str); 5] = [
+    (
+        resources::CURSOR_API_KEY_KMS_ALIAS,
+        "Cursor API key encryption key (local)",
+    ),
+    (
+        resources::CODEX_OAUTH_KMS_ALIAS,
+        "ChatGPT OAuth envelope encryption key (local)",
+    ),
+    (
+        resources::MCP_OAUTH_KMS_ALIAS,
+        "MCP OAuth authorization code encryption key (local)",
+    ),
+    (
+        resources::MICROSOFT_TOKEN_KMS_ALIAS,
+        "Microsoft refresh token envelope encryption key (local)",
+    ),
+    (
+        resources::WHATSAPP_SESSION_KMS_ALIAS,
+        "WhatsApp session data key encryption key (local)",
+    ),
+];
+
+/// Create the KMS keys whose alias doesn't exist yet.
 ///
-/// Idempotent by checking the alias first rather than by swallowing a
+/// Idempotent by checking the aliases first rather than by swallowing a
 /// create-alias conflict: `CreateKey` always succeeds and always mints a new
-/// key, so an unconditional call would orphan one key per run.
+/// key, so an unconditional call would orphan one key per run. An existing
+/// alias is never re-pointed and its key never replaced: data encrypted under
+/// it would become unreadable. Every page of aliases is read, so a long list
+/// can't hide one.
 ///
-/// A local key is disposable. Tearing LocalStack down loses it, and any
-/// `cursor_api_keys` rows encrypted under it become permanently undecryptable —
-/// the rows survive in Postgres but their CMK does not. That is fine for local
-/// (paste the key again) and is deliberately not repaired here: clearing user
-/// rows from a dev provisioning script would be a surprising place to delete
-/// data.
+/// A key lives as long as LocalStack's state. Without persistent mode, tearing
+/// LocalStack down loses it, and any `cursor_api_keys` rows encrypted under it
+/// become permanently undecryptable — the rows survive in Postgres but their
+/// CMK does not. That is fine for local (paste the key again) and is
+/// deliberately not repaired here: clearing user rows from a dev provisioning
+/// script would be a surprising place to delete data.
 ///
 /// LocalStack does enforce the encryption context, which was worth checking
 /// rather than assuming: probed against `localstack/localstack:4`, a `Decrypt`
@@ -70,40 +100,18 @@ async fn provision_async(url: &str) -> Result<()> {
 /// stops one user's ciphertext decrypting under another user's id is live
 /// locally too, and a local stack is a fair test of it.
 async fn create_kms_keys(kms: &aws_sdk_kms::Client) -> Result<()> {
-    let existing = kms
+    let existing: Vec<String> = kms
         .list_aliases()
+        .into_paginator()
+        .items()
         .send()
+        .collect::<Result<Vec<_>, _>>()
         .await
-        .context("listing kms aliases")?;
-    for (alias, description) in [
-        (
-            resources::CURSOR_API_KEY_KMS_ALIAS,
-            "Cursor API key encryption key (local)",
-        ),
-        (
-            resources::CODEX_OAUTH_KMS_ALIAS,
-            "ChatGPT OAuth envelope encryption key (local)",
-        ),
-        (
-            resources::MCP_OAUTH_KMS_ALIAS,
-            "MCP OAuth authorization code encryption key (local)",
-        ),
-        (
-            resources::MICROSOFT_TOKEN_KMS_ALIAS,
-            "Microsoft refresh token envelope encryption key (local)",
-        ),
-        (
-            resources::WHATSAPP_SESSION_KMS_ALIAS,
-            "WhatsApp session data key encryption key (local)",
-        ),
-    ] {
-        if existing
-            .aliases()
-            .iter()
-            .any(|entry| entry.alias_name() == Some(alias))
-        {
-            continue;
-        }
+        .context("listing kms aliases")?
+        .into_iter()
+        .filter_map(|entry| entry.alias_name().map(str::to_string))
+        .collect();
+    for (alias, description) in missing_kms_keys(&existing) {
         let key = kms
             .create_key()
             .description(description)
@@ -125,6 +133,14 @@ async fn create_kms_keys(kms: &aws_sdk_kms::Client) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// The keys of [`KMS_KEYS`] whose alias is not among `existing`.
+fn missing_kms_keys(existing: &[String]) -> Vec<(&'static str, &'static str)> {
+    KMS_KEYS
+        .into_iter()
+        .filter(|(alias, _)| !existing.iter().any(|name| name == alias))
+        .collect()
 }
 
 async fn create_queues(sqs: &aws_sdk_sqs::Client) -> Result<()> {
