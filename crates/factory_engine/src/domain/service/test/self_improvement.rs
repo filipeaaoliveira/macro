@@ -1655,9 +1655,10 @@ async fn undone_failures_count_toward_the_next_improvement() {
 }
 
 /// Only the admin who named the Definition, or the owner of the rejected
-/// improvement's Run, undoes its dismissal; another member is refused and
-/// nothing changes. An improvement that dismissed nothing, or none of the
-/// team's, is refused too.
+/// improvement's Run, undoes its dismissal; another member, a namer no
+/// longer an admin, and an agent's account are refused, Insights offers
+/// them no undo, and nothing changes. An improvement that dismissed
+/// nothing, or none of the team's, is refused too.
 #[tokio::test]
 async fn only_the_namer_or_the_run_owner_undoes_a_dismissal() {
     use crate::domain::evaluation::insights::{
@@ -1704,24 +1705,58 @@ async fn only_the_namer_or_the_run_owner_undoes_a_dismissal() {
     ));
     assert_eq!(bench.pending().await, 0, "nothing changed");
 
-    // Named by Teo, the Definition is his to undo for.
+    // Named by Teo, who is not an admin of the team: he may not, as no
+    // self-improvement Run would start for him.
     bench
         .repo
         .definition_namers
         .lock()
         .expect("namers")
         .insert(TEAM, teo().to_string());
+    assert!(!last_shown(&insights, &teo()).await.can_undo_dismissal);
+    assert!(matches!(
+        insights.undo_dismissal(&teo(), id).await,
+        Err(UndoDismissalError::NotAllowed)
+    ));
+    assert_eq!(bench.pending().await, 0, "nothing changed");
+
+    // An agent's account never undoes, though it owns the Run.
+    bench
+        .repo
+        .agent_accounts
+        .lock()
+        .expect("agents")
+        .insert(julia().as_ref().to_string());
+    assert!(!last_shown(&insights, &julia()).await.can_undo_dismissal);
+    assert!(matches!(
+        insights.undo_dismissal(&julia(), id).await,
+        Err(UndoDismissalError::NotAPerson)
+    ));
+    assert_eq!(bench.pending().await, 0, "nothing changed");
+    bench.repo.agent_accounts.lock().expect("agents").clear();
+
+    // Once an admin, the Definition's namer Teo may.
+    bench.repo.teams.lock().expect("teams").insert(
+        teo().to_string(),
+        TeamMembership {
+            team_id: TEAM,
+            admin: true,
+        },
+    );
+    assert!(last_shown(&insights, &teo()).await.can_undo_dismissal);
     let undone = insights.undo_dismissal(&teo(), id).await.expect("undone");
     assert_eq!(undone.restored, 2);
     assert_eq!(bench.pending().await, 2);
 
-    // With no namer kept, the Run's owner still may.
+    // With no namer kept, the Run's owner still may, even no longer an
+    // admin.
     bench
         .repo
         .definition_namers
         .lock()
         .expect("namers")
         .remove(&TEAM);
+    set_julia(&bench.repo, Some(false));
     let again = insights.undo_dismissal(&julia(), id).await.expect("owner");
     assert_eq!(again.restored, 0);
     assert!(matches!(

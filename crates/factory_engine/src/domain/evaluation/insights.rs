@@ -9,7 +9,7 @@ use factory_records::domain::evaluation::{
     AgentChoices, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository, MAX_OPEN_TRIALS,
     NewSuite, SuiteInsert, TrialKey,
 };
-use factory_records::domain::models::{RunId, RunOutcome};
+use factory_records::domain::models::{RunId, RunOutcome, TeamMembership};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::self_improvement::{
     DefinitionNaming, Improvement, ImprovementState, SelfImprovementRepository, UndoDismissal,
@@ -239,8 +239,9 @@ pub struct ImprovementInsight {
     /// pending; none while it was not.
     pub dismissal_undone_at: Option<DateTime<Utc>>,
     /// Whether the caller may undo the dismissal now: it holds dismissed
-    /// failures, was not undone, and they named the Definition or own its
-    /// Run.
+    /// failures, was not undone, and they are a person (never an agent's
+    /// account) who named the Definition and is still an admin of the
+    /// team, or who owns its Run.
     pub can_undo_dismissal: bool,
 }
 
@@ -261,12 +262,14 @@ pub enum UndoDismissalError {
     /// The caller's team has no self-improvement Run of that id.
     #[error("no self-improvement run of your team has this id")]
     NotFound,
-    /// The caller neither named the team's Definition nor owns the Run.
+    /// The caller is neither the admin who named the team's Definition (a
+    /// namer no longer an admin is not) nor the Run's owner.
     #[error(
         "only the admin who named the factory definition, or the owner of the self-improvement run, can undo its dismissal"
     )]
     NotAllowed,
-    /// The caller is not the person in their own signed-in session.
+    /// The caller is not the person in their own signed-in session, or
+    /// signs in as an agent's account.
     #[error("only the person, signed in to Macro, can undo a dismissal")]
     NotAPerson,
     /// It holds no dismissed failure: no person rejected it, or it is open.
@@ -281,19 +284,23 @@ fn undo_internal(error: impl std::error::Error + Send + Sync + 'static) -> UndoD
     UndoDismissalError::Internal(internal(error))
 }
 
-/// Whether `actor` may undo the dismissal of `improvement`'s failures: they
-/// named the team's Definition (`naming`), or own its Run, whoever may have
-/// rejected it in Macro.
+/// Whether `actor`, a person on the team (`membership`), may undo the
+/// dismissal of `improvement`'s failures: they named the team's Definition
+/// (`naming`) and are still an admin of the team, as a self-improvement Run
+/// starts only for such a namer ([`namer_standing`]), or they own its Run,
+/// whoever may have rejected it in Macro. The caller refuses an agent's
+/// account first.
 async fn may_undo<R>(
     repo: &R,
     actor: &MacroUserIdStr<'static>,
+    membership: &TeamMembership,
     naming: Option<&DefinitionNaming>,
     improvement: &Improvement,
 ) -> Result<bool, rootcause::Report>
 where
     R: SelfImprovementRepository,
 {
-    if naming.is_some_and(|naming| naming.named_by.as_ref() == Some(actor)) {
+    if membership.admin && naming.is_some_and(|naming| naming.named_by.as_ref() == Some(actor)) {
         return Ok(true);
     }
     let Some(run_id) = improvement.run_id else {
@@ -705,7 +712,12 @@ where
                 Some(last) => {
                     let undoable = last.dismissed > 0 && last.dismissal_undone.is_none();
                     let can_undo_dismissal = undoable
-                        && may_undo(&self.repo, actor, Some(&naming), &last)
+                        && !self
+                            .repo
+                            .is_agent_account(actor)
+                            .await
+                            .map_err(|error| InsightsError::Internal(internal(error)))?
+                        && may_undo(&self.repo, actor, &team, Some(&naming), &last)
                             .await
                             .map_err(InsightsError::Internal)?;
                     Some(ImprovementInsight {
@@ -891,6 +903,15 @@ where
         actor: &MacroUserIdStr<'static>,
         id: Uuid,
     ) -> Result<DismissalUndoneResponse, UndoDismissalError> {
+        // An agent's account signs in as a person does, yet never is one.
+        if self
+            .repo
+            .is_agent_account(actor)
+            .await
+            .map_err(undo_internal)?
+        {
+            return Err(UndoDismissalError::NotAPerson);
+        }
         let Some(team) = self.repo.team_of(actor).await.map_err(undo_internal)? else {
             return Err(UndoDismissalError::NotFound);
         };
@@ -907,7 +928,7 @@ where
             .definition_naming(team.team_id)
             .await
             .map_err(undo_internal)?;
-        if !may_undo(&self.repo, actor, naming.as_ref(), &improvement)
+        if !may_undo(&self.repo, actor, &team, naming.as_ref(), &improvement)
             .await
             .map_err(UndoDismissalError::Internal)?
         {
