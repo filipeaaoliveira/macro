@@ -135,6 +135,8 @@ struct PullRequestListItem {
     html_url: String,
     state: String,
     merged_at: Option<String>,
+    #[serde(default)]
+    merge_commit_sha: Option<String>,
     head: PullRequestHeadRef,
 }
 
@@ -655,6 +657,9 @@ impl GithubOauthImpl {
                 state: pull_request.state,
                 merged: pull_request.merged_at.is_some(),
                 head_sha: pull_request.head.sha,
+                // GitHub names a test merge commit while a pull request is
+                // open: only a merged one's is kept.
+                merge_commit_sha: pull_request.merged_at.and(pull_request.merge_commit_sha),
             }))
     }
 

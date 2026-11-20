@@ -499,6 +499,7 @@ async fn the_pull_request_settles_the_failures() {
         url: "https://github.com/macro/factory-definition/pull/7".to_string(),
         state: PullRequestState::Open,
         head_sha: HEAD.to_string(),
+        merge_commit: None,
     });
     bench
         .improvement()
@@ -570,6 +571,7 @@ async fn the_pull_request_settles_the_failures() {
         url: "https://github.com/macro/factory-definition/pull/8".to_string(),
         state: PullRequestState::Closed,
         head_sha: HEAD.to_string(),
+        merge_commit: None,
     });
     bench
         .improvement()
@@ -1395,6 +1397,7 @@ async fn failures_a_person_rejected_do_not_come_back() {
         url: "https://github.com/macro/factory-definition/pull/9".to_string(),
         state: PullRequestState::Closed,
         head_sha: HEAD.to_string(),
+        merge_commit: None,
     });
     bench
         .improvement()

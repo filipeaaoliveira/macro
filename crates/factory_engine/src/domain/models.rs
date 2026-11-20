@@ -387,6 +387,8 @@ pub struct PullRequest {
     pub state: PullRequestState,
     /// The commit its head branch is at.
     pub head_sha: String,
+    /// The commit its merge made on its base branch, once it merged.
+    pub merge_commit: Option<String>,
 }
 
 /// Whether a pull request is open, closed, or merged.
