@@ -60,6 +60,7 @@ impl<Sessions: RoutineSessions> RoutineAgents for TargetRunner<Sessions> {
                 billing: Default::default(),
                 instructions: None,
                 repo_url: None,
+                work_branch: None,
                 selection: ValidateRoutineSession {
                     owner: identity.owner.clone(),
                     bot_id,
