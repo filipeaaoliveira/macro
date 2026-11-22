@@ -47,6 +47,7 @@ pub struct RoutineProgram {
     /// carry no scheduler's proof of who started them. Set by that rewrite
     /// and kept until the routine is saved without it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "schema", schema(ignore))]
     pub code_rewritten: bool,
 }
 
