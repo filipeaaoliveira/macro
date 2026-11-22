@@ -353,6 +353,17 @@ export type RunStandingAct = {
 };
 
 /**
+ * An Agent Rule of a Run's Factory Definition that chose the Agent its
+ * Steps of a Role start with, from its task's tags or its repository, as
+ * the Run started.
+ */
+export type RunAgentRule = {
+  role: string;
+  rule: string;
+  agent: string;
+};
+
+/**
  * Why a Run's token budget ended it: its agents used the budget or more
  * (`used`, counted as Insights counts tokens), or its usage could not be
  * read for too many agent Steps in a row.
@@ -420,6 +431,13 @@ export type Run = {
   reviewRounds?: ReviewRound[];
   /** What agents did to it under its Definition's Standing Roles, in order. */
   standingActs?: RunStandingAct[];
+  /** The Agent Rules that chose its Roles' first Agents, by Role. */
+  agentRules?: RunAgentRule[];
+  /**
+   * Its task's tags couldn't be read as it started, so no Agent Rule on a
+   * tag applied: not the same as a task no rule matched.
+   */
+  taskTagsUnread?: boolean;
   /** Its token budget; none for a Run that keeps none. */
   tokenBudget?: RunTokenBudget;
 };

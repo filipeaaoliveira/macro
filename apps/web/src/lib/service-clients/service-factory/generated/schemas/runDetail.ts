@@ -7,6 +7,7 @@
 
 import type { ReviewRound } from './reviewRound';
 import type { Run } from './run';
+import type { RunAgentRule } from './runAgentRule';
 import type { RunDetailBaseRequiredChecks } from './runDetailBaseRequiredChecks';
 import type { RunDetailMainHold } from './runDetailMainHold';
 import type { RunDetailTokenBudget } from './runDetailTokenBudget';
@@ -17,6 +18,11 @@ import type { Step } from './step';
  * A Run and the Steps it took.
  */
 export interface RunDetail {
+  /** The Agent Rules of its Factory Definition that chose the Agent its
+Steps of a Role start with, by Role: each matched its task's tags
+or its repository as it started. A Role no rule chose for is not
+listed. */
+  agentRules: RunAgentRule[];
   baseRequiredChecks?: RunDetailBaseRequiredChecks;
   mainHold?: RunDetailMainHold;
   /** Its review rounds, in order, each with what its reviewers found. */
@@ -29,5 +35,10 @@ its Gates. */
   standingActs: StandingActRecord[];
   /** Its Steps, in the order they started. */
   steps: Step[];
+  /** Whether its task's tags could not be read as it started: its
+Definition's Agent Rules on a tag then matched no tag, which is not
+the same as a task no rule matched. False for a Run whose tags were
+read, or that no rule on a tag needed them for. */
+  taskTagsUnread: boolean;
   tokenBudget?: RunDetailTokenBudget;
 }

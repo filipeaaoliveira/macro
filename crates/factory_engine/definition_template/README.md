@@ -69,6 +69,8 @@ Outside the files, all must be done:
 - `standing` (may): the Standing Roles (below). Left out, any of your
   agents may start, cancel and link Runs, and answer plan and Blockers
   Gates where `rules.json` lets it.
+- `rules` (may): the Agent Rules (below). Left out, every Run's Steps
+  start with their Role's first Agent, unless an Experiment arm chooses.
 
 `factory.json`:
 
@@ -245,7 +247,7 @@ each trial with the tokens it used.
 | --- | --- |
 | `factory.json` | The format's `version` (1), a `description`, and the Flows, by name. |
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
-| `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). |
+| `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). Optional `rules`: the Agent Rules (below). |
 | `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own, and the Queue limit and token budget. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
 | `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format, and when its failures start a self-improvement Run (below). Left out, the team has none, and the defaults apply. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
@@ -414,6 +416,61 @@ scheduler's own firing start a Run as the Automation's creator.
 The validator refuses an act not in that list, any act that names a merge, a
 Standing Role with no act or no Agent, an Agent `agents` does not define,
 and a name given twice.
+
+## Agent Rules
+
+A Role's Steps start with its first Agent in `roles`. An Agent Rule picks
+another one for some Runs: those whose task carries a tag, those on a
+repository, or both. For example, to have a cheaper model write the
+changes of tasks tagged `docs`, add an Agent on that model to the Role, and a `rules`
+list beside `agents` and `roles`:
+
+```json
+"agents": {
+  "primary": { "bot": "00000000-0000-0000-0000-000000000001" },
+  "backup": { "bot": "00000000-0000-0000-0000-000000000002" },
+  "docs-writer": { "bot": "00000000-0000-0000-0000-000000000002", "model": "a-smaller-model" }
+},
+"roles": {
+  "writer": ["primary", "backup", "docs-writer"]
+},
+"rules": [
+  { "name": "docs", "role": "writer", "tag": "docs", "agent": "docs-writer" },
+  { "name": "site-plans", "role": "planner", "repository": "acme/site", "agent": "backup" }
+]
+```
+
+A Run on a task tagged `docs` (your own tags or your team's, in any case)
+then has `docs-writer` write first. A Run on `acme/site` has `backup`
+plan first. A rule naming both a `tag` and a `repository` matches only a
+Run that has both. Each rule needs a `name` (lower-case letters, digits,
+`-` or `_`), a `role` that `roles` fills, an `agent` that the Role lists
+in `roles` (a rule only moves one of the Role's own Agents first, so a tag
+someone adds never hands a Run to an Agent kept for something else, such
+as one only a Standing Role lists), and a `tag`, a `repository`
+(`owner/name`, without `.git`), or both. Keep the rest of `roles` as it
+is: the example shows only `writer`.
+
+How the first Agent of a Role is chosen, first match first:
+
+1. An Experiment arm in `scorers.json` that chooses for the Role. An
+   Experiment compares its arms; a rule never moves an arm's Runs.
+2. The first rule, in the order listed, that matches the Run.
+3. The Role's own first Agent.
+
+When the chosen Agent cannot start for lack of quota, the Role's own
+Agents take the Step in their order, as before. A Run matches its rules
+once, when it starts, and keeps the rule that chose each Role: a tag
+added or removed later, or a change to the rules, does not change a Run
+under way. The Run's page shows the rule that chose each Role, and says
+when the task's tags couldn't be read as it started, so no rule on a tag
+applied.
+
+The validator refuses a rule whose Agent `agents` does not define or its
+Role does not list, whose Role `roles` does not fill, that names neither a
+tag nor a repository, a repository not written `owner/name`, an empty tag,
+a rule that matches the same Runs for the same Role as an earlier one (it
+could never choose), more than 64 rules, and a name given twice.
 
 ## Self-improvement
 

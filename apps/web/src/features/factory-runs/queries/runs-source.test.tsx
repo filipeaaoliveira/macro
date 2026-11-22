@@ -35,6 +35,8 @@ const ended: RunDetail = {
   steps: [],
   reviewRounds: [],
   standingActs: [],
+  agentRules: [],
+  taskTagsUnread: false,
 };
 
 afterEach(() => {

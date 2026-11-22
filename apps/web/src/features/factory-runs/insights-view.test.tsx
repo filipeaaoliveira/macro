@@ -197,6 +197,17 @@ const judged: EvaluationInsights = {
       ],
     },
   ],
+  agentRules: [
+    {
+      role: 'writer',
+      rule: 'docs',
+      agent: 'docs-writer',
+      runs: 4,
+      ended: 4,
+      succeeded: 3,
+      fellBack: 2,
+    },
+  ],
   benchmarks: [
     {
       name: 'core',
@@ -500,6 +511,22 @@ describe('RunInsightsView', () => {
 
     fireEvent.click(trial);
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('shows each agent rule beside the runs it chose an agent for', () => {
+    mount({ insights: november, evaluation: judged });
+
+    expect(screen.getByRole('heading', { name: 'Agent rules' })).toBeTruthy();
+    const docs = screen.getByRole('rowheader', { name: /docs/ });
+    expect(docs.textContent).toContain('writer: docs-writer');
+    expect(docs.textContent).toContain('2 runs fell back to another agent');
+    expect(docs.parentElement?.textContent).toContain('75%');
+  });
+
+  it('shows no agent rules section when no rule chose an agent', () => {
+    mount({ insights: november, evaluation: { ...judged, agentRules: [] } });
+
+    expect(screen.queryByRole('heading', { name: 'Agent rules' })).toBeNull();
   });
 
   it('says how many of a suite’s trials were lost to infrastructure, with no score', () => {

@@ -291,6 +291,10 @@ export default {
   standingActStart: 'Started by agent {{agent}} as {{role}}, {{time}}',
   standingActCancel: 'Cancelled by agent {{agent}} as {{role}}, {{time}}',
   standingActLink: 'Linked to a task by agent {{agent}} as {{role}}, {{time}}',
+  agentRules: 'Agents chosen by rules',
+  agentRuleChose: '{{role}}: {{agent}}, by rule {{rule}}',
+  taskTagsUnread:
+    'The task’s tags couldn’t be read when the run started, so no rule on a tag applied',
   automationTriggerSchedule: 'on its schedule',
   automationTriggerRepositoryEvent: 'on a repository event',
   automationTriggerWebhook: 'on a call to its webhook',

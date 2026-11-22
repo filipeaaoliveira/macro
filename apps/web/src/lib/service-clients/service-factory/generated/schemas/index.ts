@@ -6,6 +6,7 @@
  */
 
 export * from './agentName';
+export * from './agentRuleInsight';
 export * from './answerGateRequest';
 export * from './answerGateRequestApprovedControlFiles';
 export * from './answerGateRequestNote';
@@ -190,6 +191,7 @@ export * from './routineFiringGithub';
 export * from './routineFiringTaskId';
 export * from './rulesSource';
 export * from './run';
+export * from './runAgentRule';
 export * from './runAutomation';
 export * from './runAutomationProperty';
 export * from './runBudgetStop';

@@ -41,6 +41,8 @@ function page(steps: number): BoardPage {
           })),
           reviewRounds: [],
           standingActs: [],
+          agentRules: [],
+          taskTagsUnread: false,
         },
       },
     ],

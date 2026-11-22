@@ -90,6 +90,29 @@ pub struct ArmInsight {
     pub scores: Vec<ArmScoreInsight>,
 }
 
+/// An Agent Rule and how the Runs it chose an Agent for did over the
+/// period, to compare with the Role's other Runs.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuleInsight {
+    /// The Role it chose for.
+    pub role: String,
+    /// Its name.
+    pub rule: String,
+    /// The Agent it chose, for the newest of its Runs.
+    pub agent: String,
+    /// How many of the period's Runs it chose for.
+    pub runs: u32,
+    /// How many of them ended, but for those that ended `infrastructure`:
+    /// their work never ran.
+    pub ended: u32,
+    /// How many ended `success`.
+    pub succeeded: u32,
+    /// How many had a Step of the Role the rule's Agent could not start,
+    /// which another Agent took.
+    pub fell_back: u32,
+}
+
 /// An Experiment and how its arms did over the period.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -190,6 +213,9 @@ pub struct EvaluationInsights {
     pub scorers: Vec<ScorerInsight>,
     /// Each Experiment, defined or with Runs in the period.
     pub experiments: Vec<ExperimentInsight>,
+    /// Each Agent Rule that chose an Agent for one of the period's Runs,
+    /// by Role.
+    pub agent_rules: Vec<AgentRuleInsight>,
     /// The Benchmarks one may start a suite of.
     pub benchmarks: Vec<BenchmarkSummary>,
     /// The suites started in the period, newest first.
@@ -474,6 +500,20 @@ pub(crate) fn evaluation_insights(
         arms,
     }));
 
+    let agent_rules = records
+        .rules
+        .into_iter()
+        .map(|tally| AgentRuleInsight {
+            role: tally.role.as_str().to_string(),
+            rule: tally.rule,
+            agent: tally.agent.as_str().to_string(),
+            runs: tally.runs,
+            ended: tally.ended,
+            succeeded: tally.succeeded,
+            fell_back: tally.fell_back,
+        })
+        .collect();
+
     let benchmarks = definition
         .benchmarks()
         .iter()
@@ -558,6 +598,7 @@ pub(crate) fn evaluation_insights(
         flow: query.flow().map(str::to_string),
         scorers,
         experiments,
+        agent_rules,
         benchmarks,
         suites,
         self_improvement: None,

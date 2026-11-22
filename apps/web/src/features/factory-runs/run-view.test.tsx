@@ -899,6 +899,36 @@ describe('RunView', () => {
     ).toBeTruthy();
   });
 
+  it('shows the Agent Rules that chose a Run’s Agents', () => {
+    const { setRun } = mount({});
+    expect(screen.queryByText('Agents chosen by rules')).toBeNull();
+
+    setRun({
+      ...waitingRun,
+      agentRules: [
+        { role: 'writer', rule: 'docs', agent: 'docs-writer' },
+        { role: 'planner', rule: 'site-plans', agent: 'backup' },
+      ],
+    });
+
+    expect(screen.getByText('Agents chosen by rules')).toBeTruthy();
+    expect(screen.getByText('writer: docs-writer, by rule docs')).toBeTruthy();
+    expect(
+      screen.getByText('planner: backup, by rule site-plans')
+    ).toBeTruthy();
+
+    setRun({ ...waitingRun, agentRules: [] });
+    expect(screen.queryByText('Agents chosen by rules')).toBeNull();
+
+    setRun({ ...waitingRun, agentRules: [], taskTagsUnread: true });
+    expect(screen.getByText('Agents chosen by rules')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'The task’s tags couldn’t be read when the run started, so no rule on a tag applied'
+      )
+    ).toBeTruthy();
+  });
+
   it('retries a Run that couldn’t be loaded', () => {
     const [state, setState] = createSignal<'pending' | 'error' | 'ready'>(
       'error'

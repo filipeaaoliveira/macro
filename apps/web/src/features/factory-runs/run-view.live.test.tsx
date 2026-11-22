@@ -60,6 +60,8 @@ const planning: RunDetail = {
   ],
   reviewRounds: [],
   standingActs: [],
+  agentRules: [],
+  taskTagsUnread: false,
 };
 
 const waiting: RunDetail = {

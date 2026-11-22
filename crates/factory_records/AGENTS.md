@@ -53,7 +53,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   Runs that opened some pull requests.
 - `src/domain/evaluation.rs` and
   `src/outbound/pg_run_repository/evaluation.rs`: `EvaluationRepository`,
-  Experiment arms, Scorers' judgments, Benchmark suites and trials.
+  Experiment arms, the Agent Rules that chose a Run's Agents, Scorers'
+  judgments, Benchmark suites and trials.
 - `src/domain/merge_queue.rs` and
   `src/outbound/pg_run_repository/merge_queue.rs`: `MergeQueueRepository`,
   each base branch's merge queue and merge turn, the updates of Runs'
@@ -123,8 +124,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119045000_factory_ci_job_replaced.sql`,
   `20261119050000_factory_token_budget.sql`,
   `20261119050100_factory_token_budget_validate.sql`,
-  `20261119080000_factory_step_used_session.sql`), `factory_step_steer`,
-  `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
+  `20261119080000_factory_step_used_session.sql`,
+  `20261120020000_factory_run_agent_rule.sql`,
+  `20261120020100_factory_run_task_tags_unread.sql`), `factory_step_steer`,
+  `factory_run_score`, `factory_run_arm`, `factory_run_agent_rule`,
+  `factory_run_task_tags_unread`,
+  `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
   `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait`,

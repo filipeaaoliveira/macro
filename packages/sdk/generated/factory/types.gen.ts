@@ -11,6 +11,43 @@ export type ClientOptions = {
 export type AgentName = string;
 
 /**
+ * An Agent Rule and how the Runs it chose an Agent for did over the
+ * period, to compare with the Role's other Runs.
+ */
+export type AgentRuleInsight = {
+    /**
+     * The Agent it chose, for the newest of its Runs.
+     */
+    agent: string;
+    /**
+     * How many of them ended, but for those that ended `infrastructure`:
+     * their work never ran.
+     */
+    ended: number;
+    /**
+     * How many had a Step of the Role the rule's Agent could not start,
+     * which another Agent took.
+     */
+    fellBack: number;
+    /**
+     * The Role it chose for.
+     */
+    role: string;
+    /**
+     * Its name.
+     */
+    rule: string;
+    /**
+     * How many of the period's Runs it chose for.
+     */
+    runs: number;
+    /**
+     * How many ended `success`.
+     */
+    succeeded: number;
+};
+
+/**
  * Request body for answering a Gate.
  */
 export type AnswerGateRequest = {
@@ -836,6 +873,11 @@ export type ErrorResponse = {
  * The evaluation insights of a period.
  */
 export type EvaluationInsights = {
+    /**
+     * Each Agent Rule that chose an Agent for one of the period's Runs,
+     * by Role.
+     */
+    agentRules: Array<AgentRuleInsight>;
     /**
      * The Benchmarks one may start a suite of.
      */
@@ -1932,6 +1974,26 @@ export type Run = {
 };
 
 /**
+ * The Agent Rule of its Factory Definition that chose the Agent a Run's
+ * Steps of one Role start with, as the Run keeps it and the Run API shows
+ * it.
+ */
+export type RunAgentRule = {
+    /**
+     * The Agent it chose.
+     */
+    agent: AgentName;
+    /**
+     * The Role.
+     */
+    role: Role;
+    /**
+     * The rule, by name.
+     */
+    rule: string;
+};
+
+/**
  * The Automation that started a Run, as it was then.
  */
 export type RunAutomation = {
@@ -1968,6 +2030,13 @@ export type RunDefinition = {
  * A Run and the Steps it took.
  */
 export type RunDetail = {
+    /**
+     * The Agent Rules of its Factory Definition that chose the Agent its
+     * Steps of a Role start with, by Role: each matched its task's tags
+     * or its repository as it started. A Role no rule chose for is not
+     * listed.
+     */
+    agentRules: Array<RunAgentRule>;
     baseRequiredChecks?: null | RequiredChecksState;
     mainHold?: null | MainHold;
     /**
@@ -1988,6 +2057,13 @@ export type RunDetail = {
      * Its Steps, in the order they started.
      */
     steps: Array<Step>;
+    /**
+     * Whether its task's tags could not be read as it started: its
+     * Definition's Agent Rules on a tag then matched no tag, which is not
+     * the same as a task no rule matched. False for a Run whose tags were
+     * read, or that no rule on a tag needed them for.
+     */
+    taskTagsUnread: boolean;
     tokenBudget?: null | RunTokenBudget;
 };
 

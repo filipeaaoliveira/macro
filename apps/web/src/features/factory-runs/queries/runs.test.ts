@@ -63,6 +63,8 @@ const started: RunDetail = {
     },
   ],
   standingActs: [],
+  agentRules: [],
+  taskTagsUnread: false,
   reviewRounds: [
     {
       round: 1,
@@ -121,6 +123,8 @@ describe('createAppRunsContext', () => {
     const run: Run = {
       id: 'run-2',
       standingActs: [],
+      agentRules: [],
+      taskTagsUnread: false,
       request: 'Add a due date column',
       createdAt: '2026-11-16T09:00:00Z',
       ownerId: 'macro|owner@example.com',
@@ -285,6 +289,8 @@ describe('createAppRunsContext', () => {
           at: '2026-11-16T09:02:00Z',
         },
       ],
+      agentRules: [{ role: 'writer', rule: 'docs', agent: 'docs-writer' }],
+      taskTagsUnread: true,
     };
     vi.mocked(factoryClient.startRun).mockResolvedValueOnce(ok(detail));
 
@@ -311,6 +317,10 @@ describe('createAppRunsContext', () => {
       standingRole: 'intake',
       at: '2026-11-16T09:00:00Z',
     });
+    expect(run?.agentRules).toEqual([
+      { role: 'writer', rule: 'docs', agent: 'docs-writer' },
+    ]);
+    expect(run?.taskTagsUnread).toBe(true);
   });
 
   it('starts a Run on the repository it names and keeps it on the Run', async () => {

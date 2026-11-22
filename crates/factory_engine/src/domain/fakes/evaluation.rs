@@ -6,8 +6,8 @@ use std::sync::Mutex;
 
 use factory_records::domain::evaluation::{
     AgentChoices, EvaluationRecords, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite,
-    RunAgents, RunArm, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert, TrialKey,
-    TrialResult,
+    RunAgentRule, RunAgents, RunArm, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert,
+    TrialKey, TrialResult,
 };
 use factory_records::domain::insights::InsightsScope;
 use factory_records::domain::models::RunId;
@@ -33,6 +33,10 @@ pub(crate) struct FakeSuite {
 pub(crate) struct FakeEvaluation {
     /// Each Run's arms.
     pub(crate) arms: BTreeMap<RunId, Vec<RunArm>>,
+    /// Each Run's Agent Rules, one per Role, by Role.
+    pub(crate) agent_rules: BTreeMap<RunId, Vec<RunAgentRule>>,
+    /// The Runs that started with their task's tags unread.
+    pub(crate) task_tags_unread: std::collections::BTreeSet<RunId>,
     /// The live Scorers' judgments, by Run.
     pub(crate) run_scores: BTreeMap<RunId, Vec<Judgment>>,
     /// The suites, by id.
@@ -89,9 +93,63 @@ impl EvaluationRepository for FakeRepo {
         Ok(())
     }
 
+    async fn record_agent_rules(
+        &self,
+        run_id: RunId,
+        rules: &[RunAgentRule],
+    ) -> Result<(), FakeError> {
+        if self.fails("record_agent_rules") {
+            return Err(FakeError);
+        }
+        let mut kept = self.evaluation.lock().expect("evaluation");
+        for rule in rules {
+            let run = kept.agent_rules.entry(run_id).or_default();
+            if !run.iter().any(|kept| kept.role == rule.role) {
+                run.push(rule.clone());
+                run.sort_by(|first, second| first.role.cmp(&second.role));
+            }
+        }
+        Ok(())
+    }
+
+    async fn record_task_tags_unread(&self, run_id: RunId) -> Result<(), FakeError> {
+        if self.fails("record_task_tags_unread") {
+            return Err(FakeError);
+        }
+        let mut kept = self.evaluation.lock().expect("evaluation");
+        kept.task_tags_unread.insert(run_id);
+        Ok(())
+    }
+
+    async fn runs_task_tags_unread(
+        &self,
+        run_ids: &[RunId],
+    ) -> Result<std::collections::BTreeSet<RunId>, FakeError> {
+        let kept = self.evaluation.lock().expect("evaluation");
+        Ok(run_ids
+            .iter()
+            .filter(|run_id| kept.task_tags_unread.contains(run_id))
+            .copied()
+            .collect())
+    }
+
+    async fn runs_agent_rules(
+        &self,
+        run_ids: &[RunId],
+    ) -> Result<BTreeMap<RunId, Vec<RunAgentRule>>, FakeError> {
+        let kept = self.evaluation.lock().expect("evaluation");
+        Ok(run_ids
+            .iter()
+            .filter_map(|run_id| Some((*run_id, kept.agent_rules.get(run_id)?.clone())))
+            .collect())
+    }
+
     async fn run_agents(&self, run_id: RunId) -> Result<RunAgents, FakeError> {
         let kept = self.evaluation.lock().expect("evaluation");
         let mut agents = RunAgents::default();
+        for rule in kept.agent_rules.get(&run_id).into_iter().flatten() {
+            agents.ruled.insert(rule.role.clone(), rule.agent.clone());
+        }
         for arm in kept.arms.get(&run_id).into_iter().flatten() {
             agents.choices.extend(arm.agents.clone());
         }

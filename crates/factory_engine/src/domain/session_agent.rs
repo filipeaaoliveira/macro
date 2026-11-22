@@ -340,8 +340,9 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
 
     /// The Agents that take a Step of `task`'s Role in its Run, in order:
     /// the one the Run's Experiment arm or Benchmark suite chose for the
-    /// Role first, then the agent definition's, which take the Step when
-    /// one cannot start for lack of quota. A Benchmark trial takes only its
+    /// Role first, then the one its Definition's Agent Rule chose as it
+    /// started, then the agent definition's, which take the Step when one
+    /// cannot start for lack of quota. A Benchmark trial takes only its
     /// first, so every trial runs on its suite's configuration: one that
     /// cannot start, or that the definition no longer has, fails. An arm's
     /// choice the definition no longer has is passed over, and logged.
@@ -363,23 +364,36 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
         {
             return Err(SessionAgentError::UnknownAgent(agent.clone()));
         }
-        let chosen = run.choices.get(&task.role).filter(|agent| {
+        let defined = |agent: &&AgentName, chose: &str| {
             let defined = agents.agent(agent).is_some();
             if !defined {
                 tracing::warn!(
                     agent = %agent,
                     role = %task.role,
-                    "the agent a run's arm chose is no longer defined"
+                    "the agent a run's {chose} chose is no longer defined"
                 );
             }
             defined
-        });
+        };
+        // An arm's choice comes before a rule's: an Experiment compares its
+        // arms on the Runs it splits, which a rule must not move. The start
+        // records no rule for a Role an arm chose for, so this order only
+        // keeps a Run that kept both on its arm.
+        let chosen = run
+            .choices
+            .get(&task.role)
+            .filter(|agent| defined(agent, "arm"));
+        let ruled = run
+            .ruled
+            .get(&task.role)
+            .filter(|agent| defined(agent, "agent rule"));
         let listed = agents.for_role(&task.role);
-        let mut ordered: Vec<AgentName> = chosen
-            .into_iter()
-            .chain(listed.iter().filter(|agent| Some(*agent) != chosen))
-            .cloned()
-            .collect();
+        let mut ordered: Vec<AgentName> = Vec::new();
+        for agent in chosen.into_iter().chain(ruled).chain(listed) {
+            if !ordered.contains(agent) {
+                ordered.push(agent.clone());
+            }
+        }
         if run.trial {
             ordered.truncate(1);
         }

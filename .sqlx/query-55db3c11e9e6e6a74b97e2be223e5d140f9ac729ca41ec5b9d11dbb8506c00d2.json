@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_run_task_tags_unread (run_id)\n            VALUES ($1)\n            ON CONFLICT (run_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "55db3c11e9e6e6a74b97e2be223e5d140f9ac729ca41ec5b9d11dbb8506c00d2"
+}

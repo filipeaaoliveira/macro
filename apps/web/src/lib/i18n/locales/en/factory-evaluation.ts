@@ -59,6 +59,12 @@ export default {
   },
   definitionAgents: 'The agent definition’s agents',
   roleAgent: '{{role}}: {{agent}}',
+  // Agent Rules.
+  agentRules: 'Agent rules',
+  agentRulesDescription:
+    'Runs whose task tag or repository a rule matched, and the agent it chose for a role',
+  agentRule: 'Rule',
+  agentRuleChose: '{{role}}: {{agent}}',
   // Benchmarks.
   benchmarks: 'Benchmarks',
   benchmarksDescription:

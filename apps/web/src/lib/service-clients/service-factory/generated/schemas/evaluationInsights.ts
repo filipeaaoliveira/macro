@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { AgentRuleInsight } from './agentRuleInsight';
 import type { BenchmarkSummary } from './benchmarkSummary';
 import type { EvaluationInsightsFlow } from './evaluationInsightsFlow';
 import type { EvaluationInsightsSelfImprovement } from './evaluationInsightsSelfImprovement';
@@ -15,6 +16,9 @@ import type { SuiteInsight } from './suiteInsight';
  * The evaluation insights of a period.
  */
 export interface EvaluationInsights {
+  /** Each Agent Rule that chose an Agent for one of the period's Runs,
+by Role. */
+  agentRules: AgentRuleInsight[];
   /** The Benchmarks one may start a suite of. */
   benchmarks: BenchmarkSummary[];
   /** Each Experiment, defined or with Runs in the period. */
