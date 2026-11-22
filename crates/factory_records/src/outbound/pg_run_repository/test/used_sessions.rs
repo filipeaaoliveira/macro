@@ -112,7 +112,11 @@ async fn a_step_keeps_the_session_it_lost_with_the_one_it_went_on_in(pool: PgPoo
         .iter()
         .find(|run| run.run.id == id)
         .expect("the run is read");
-    assert_eq!(run.sessions, both);
+    let quality_sessions: Vec<Uuid> = run.sessions.iter().map(|session| session.id).collect();
+    assert_eq!(quality_sessions, both);
+    // A session the Step left keeps no bot of its own: it reads as the
+    // Step's.
+    assert!(run.sessions.iter().all(|session| session.bot == second.bot));
     // A Benchmark trial's tokens read the same sessions.
     let subject = repo
         .scoring_subject(id)
