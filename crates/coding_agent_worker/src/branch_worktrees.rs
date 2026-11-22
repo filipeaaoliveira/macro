@@ -239,7 +239,7 @@ async fn remove_stale(top: &Path, directory: &Path, keep: &str) {
             continue;
         }
         let key = entry.file_name().to_string_lossy().into_owned();
-        if key == keep || self::key(&branch_of(&key)).as_deref() != Ok(key.as_str()) {
+        if key == keep || self::key(&branch_of(&key)).ok().as_deref() != Some(key.as_str()) {
             continue;
         }
         let Some(age) = last_used(directory, &key).and_then(|used| now.duration_since(used).ok())
@@ -247,7 +247,7 @@ async fn remove_stale(top: &Path, directory: &Path, keep: &str) {
             continue;
         };
         if age >= STALE_AFTER {
-            tracing::info!(branch = branch_of(&key), "removing a worktree no session used");
+            tracing::info!(branch = %branch_of(&key), "removing a worktree no session used");
             remove(top, directory, &key).await;
         } else if age >= GONE_AFTER {
             idle.push(key);
@@ -280,7 +280,7 @@ async fn remove_stale(top: &Path, directory: &Path, keep: &str) {
     for key in tracked {
         let branch = branch_of(&key);
         if !heads.contains(&branch.as_str()) {
-            tracing::info!(branch, "removing the worktree of a branch origin deleted");
+            tracing::info!(%branch, "removing the worktree of a branch origin deleted");
             remove(top, directory, &key).await;
             let tracking = format!("refs/remotes/origin/{branch}");
             let _ = git(top, &["update-ref", "-d", &tracking]).await;

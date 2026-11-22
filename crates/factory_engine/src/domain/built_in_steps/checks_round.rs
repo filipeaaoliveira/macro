@@ -838,7 +838,7 @@ where
         tracing::warn!(
             run_id = %input.key.run_id,
             seq = input.key.seq,
-            why,
+            %why,
             "the agent handed back done, and its work is not on the run's branch"
         );
         Ok(Some(StepReport {
