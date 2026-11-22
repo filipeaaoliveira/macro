@@ -6,6 +6,7 @@
  */
 
 export * from './agentName';
+export * from './agentRuleInsight';
 export * from './answerGateRequest';
 export * from './answerGateRequestApprovedControlFiles';
 export * from './answerGateRequestNote';
@@ -86,6 +87,7 @@ export * from './deliveryInsight';
 export * from './deliveryInsightAutonomyRate';
 export * from './deliveryInsightCostPerMergedUsd';
 export * from './deliveryInsightTokensPerMerged';
+export * from './dismissalUndoneResponse';
 export * from './disputeRuling';
 export * from './durationStats';
 export * from './entryId';
@@ -141,6 +143,7 @@ export * from './githubFiringAction';
 export * from './githubFiringBranch';
 export * from './handBackRequest';
 export * from './improvementInsight';
+export * from './improvementInsightDismissalUndoneAt';
 export * from './improvementInsightRefusal';
 export * from './improvementInsightRunId';
 export * from './improvementInsightSettledAt';
@@ -206,6 +209,7 @@ export * from './routineFiringGithub';
 export * from './routineFiringTaskId';
 export * from './rulesSource';
 export * from './run';
+export * from './runAgentRule';
 export * from './runAutomation';
 export * from './runAutomationProperty';
 export * from './runBudgetStop';
