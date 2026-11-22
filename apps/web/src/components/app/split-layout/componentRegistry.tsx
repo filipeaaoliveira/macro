@@ -35,6 +35,14 @@ const FactoryRunView = lazyNamed(
   () => import('@app/features/factory-runs/factory-runs'),
   'FactoryRun'
 );
+const FactoryBoardRouteView = lazyNamed(
+  () => import('@app/features/factory-runs/route-views'),
+  'FactoryBoardRouteView'
+);
+const FactoryInsightsRouteView = lazyNamed(
+  () => import('@app/features/factory-runs/route-views'),
+  'FactoryInsightsRouteView'
+);
 const ActivityRouteView = lazyNamed(
   () => import('@app/features/activity/route-views'),
   'ActivityRouteView'
@@ -291,6 +299,10 @@ registerComponent(
   () => composableLayout()
 );
 registerComponent('activity', () => <ActivityRouteView />);
+// The sidebar's Factory item opens the board of every Run as a pane.
+registerComponent('factory', () => <FactoryBoardRouteView />);
+// A task's Runs section opens Insights as a pane beside it.
+registerComponent('factory-insights', () => <FactoryInsightsRouteView />);
 // A factory Run's notification opens the Run as a pane of its own.
 registerComponent('factory-run', (params) => (
   <FactoryRunView
