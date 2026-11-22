@@ -1753,6 +1753,9 @@ pub(crate) struct FakeGithubState {
     pub(crate) open_pull_requests: Vec<DefinitionPullRequest>,
     /// Whether listing open pull requests fails, as GitHub down does.
     pub(crate) open_pull_requests_fail: bool,
+    /// The commit whose files fail to read, as GitHub refusing a person
+    /// not linked to it, or limiting them, does.
+    pub(crate) file_reads_fail_at: Option<String>,
     /// How many times what the owner may do with the repository was read.
     pub(crate) access_reads: usize,
     /// Whether reading what the owner may do with the repository fails.
@@ -2028,6 +2031,9 @@ impl PullRequests for FakeGithub {
         state.file_reads.push(file.clone());
         if state.refused_files.contains(path) {
             return Err(FakeGithubError::TooLarge);
+        }
+        if state.file_reads_fail_at.as_deref() == Some(branch) {
+            return Err(FakeGithubError::Down);
         }
         Ok(state.files.get(&file).cloned())
     }

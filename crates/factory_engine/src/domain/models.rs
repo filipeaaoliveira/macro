@@ -738,17 +738,17 @@ pub struct DefinitionSettings {
     /// read, and when that Run started; none when none has.
     pub newest_run: Option<DefinitionRead>,
     /// What it holds at the commit the newest Run read, or at its head when
-    /// no Run read it yet or that commit no longer reads; none when it
-    /// reads at neither.
+    /// no Run read it yet or that commit does not read as the person
+    /// reaches it; none when it reads at neither.
     pub contents: Option<DefinitionContents>,
     /// Its repository's open pull requests, the most recently updated first,
-    /// at most [`DEFINITION_PULL_REQUESTS_LISTED`]; none when GitHub could
-    /// not list them for the person.
+    /// at most 20; none when GitHub could not list them for the person.
     pub open_pull_requests: Option<Vec<DefinitionPullRequest>>,
 }
 
 /// The most open pull requests of a Factory Definition's repository its
-/// setting lists.
+/// setting lists. `DefinitionSettings::open_pull_requests` names the number
+/// for the API's readers: change both together.
 pub const DEFINITION_PULL_REQUESTS_LISTED: usize = 20;
 
 /// What a Factory Definition holds at one commit, as its setting shows it.

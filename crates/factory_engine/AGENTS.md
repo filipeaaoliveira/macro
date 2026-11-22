@@ -1825,8 +1825,11 @@ why it does not read (`problem`). It also names the commit the newest Run of
 the team's members started under it read (`newestRun`,
 `RunRepository::newest_definition_read`), shows read-only what the
 Definition holds at that commit, or at its head when no Run read it yet or
-that commit no longer reads (`contents`: Flows with their entries, Roles
-with their Agents, Standing Rules and Scorers), and lists the repository's
+that commit does not read as the caller reaches it, for any reason (not
+linked to GitHub, the commit gone, GitHub down or limiting them: logged,
+never the setting's failure; none when the head does not read either)
+(`contents`: Flows with their entries, Roles with their Agents, Standing
+Rules and Scorers), and lists the repository's
 open pull requests (`openPullRequests`, at most
 `DEFINITION_PULL_REQUESTS_LISTED`; null when GitHub fails to list them,
 which does not fail the setting). While a team names one, `POST /runs`, `GET

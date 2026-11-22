@@ -246,6 +246,10 @@ where
         repository: &CodeRepository,
         commit: &str,
     ) -> Result<FactoryDefinition, FactoryError> {
+        // The commit goes into GitHub's paths: only a full commit id does.
+        if !is_commit_id(commit) {
+            return Err(FactoryError::UnreachableDefinition);
+        }
         let files = RepositoryFiles {
             github: &self.github,
             reader,
@@ -401,10 +405,10 @@ where
                     .newest_definition_read(team.team_id, repo_url)
                     .await
                     .map_err(internal)?;
-                let contents = self
-                    .shown_contents(actor, repo_url, newest_run.as_ref(), pinned.as_ref())
-                    .await?;
-                let open = self.definition_pull_requests(actor, repo_url).await;
+                let (contents, open) = tokio::join!(
+                    self.shown_contents(actor, repo_url, newest_run.as_ref(), pinned.as_ref()),
+                    self.definition_pull_requests(actor, repo_url),
+                );
                 (newest_run, contents, open)
             }
             _ => (None, None, None),
@@ -423,30 +427,36 @@ where
     }
 
     /// What the setting shows the Definition `repo_url` holds: at the
-    /// commit `newest_run` read, or, when no Run read it yet or that commit
-    /// no longer reads as `actor` reaches it, at its head (`head`, when it
-    /// reads there).
+    /// commit `newest_run` read, or at its head (`head`, when it reads
+    /// there) when no Run read it yet or that commit does not read as
+    /// `actor` reaches it: not linked to GitHub, the commit gone, GitHub
+    /// down or limiting them. That is not the settings' failure.
     async fn shown_contents(
         &self,
         actor: &MacroUserIdStr<'static>,
         repo_url: &str,
         newest_run: Option<&DefinitionRead>,
         head: Option<&PinnedDefinition>,
-    ) -> Result<Option<DefinitionContents>, FactoryError> {
+    ) -> Option<DefinitionContents> {
         let at_head = || head.map(|pinned| contents_of(&pinned.commit, &pinned.definition));
         let Some(read) = newest_run else {
-            return Ok(at_head());
+            return at_head();
         };
         if let Some(pinned) = head.filter(|pinned| pinned.commit == read.commit) {
-            return Ok(Some(contents_of(&pinned.commit, &pinned.definition)));
+            return Some(contents_of(&pinned.commit, &pinned.definition));
         }
         let Some(repository) = CodeRepository::parse(repo_url) else {
-            return Ok(at_head());
+            return at_head();
         };
         match self.definition_at(actor, &repository, &read.commit).await {
-            Ok(definition) => Ok(Some(contents_of(&read.commit, &definition))),
-            Err(FactoryError::Internal(report)) => Err(FactoryError::Internal(report)),
-            Err(_) => Ok(at_head()),
+            Ok(definition) => Some(contents_of(&read.commit, &definition)),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "the definition at the newest run's commit could not be read"
+                );
+                at_head()
+            }
         }
     }
 

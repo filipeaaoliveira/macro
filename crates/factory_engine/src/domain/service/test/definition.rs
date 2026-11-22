@@ -645,6 +645,83 @@ async fn a_definition_that_does_not_read_says_why_in_its_settings() {
     assert!(unlisted.problem.is_some());
 }
 
+/// A member GitHub refuses the Definition, as one not linked to it, while a
+/// teammate's Run read it: the setting says why it does not read, as it
+/// does before any Run, rather than failing.
+#[tokio::test]
+async fn a_member_github_refuses_sees_why_though_a_teammate_s_run_read_it() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    let service = code_service(&repo, &workflows, &github);
+    service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    github.state().unreachable = true;
+    github.state().file_reads_fail_at = Some(FIRST.to_string());
+
+    let settings = service.definition(&julia()).await.expect("settings");
+
+    assert_eq!(settings.commit, None);
+    assert_eq!(
+        settings.problem,
+        Some(FactoryError::UnreachableDefinition.to_string())
+    );
+    assert_eq!(
+        settings.newest_run.map(|read| read.commit),
+        Some(FIRST.to_string())
+    );
+    assert_eq!(settings.contents, None);
+}
+
+/// The commit the newest Run read no longer reads, as one GitHub dropped
+/// after a force-push or limits reads of: the setting shows the Definition
+/// at its head.
+#[tokio::test]
+async fn the_settings_show_the_head_when_the_newest_run_s_commit_does_not_read() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes, first.", None);
+    let service = code_service(&repo, &workflows, &github);
+    service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    definition_files(&github, SECOND, "Notes, second.", None);
+    github.state().head = Some(SECOND.to_string());
+    github.state().file_reads_fail_at = Some(FIRST.to_string());
+
+    let settings = service.definition(&julia()).await.expect("settings");
+
+    assert_eq!(settings.problem, None);
+    assert_eq!(
+        settings.newest_run.map(|read| read.commit),
+        Some(FIRST.to_string())
+    );
+    let contents = settings.contents.expect("the definition's contents");
+    assert_eq!(contents.commit, SECOND);
+    assert_eq!(contents.flows[0].description, "Notes, second.");
+}
+
 /// A file GitHub will not give, as one over the 1 MB its contents API
 /// gives, is the Definition's to fix: the Run is refused saying which
 /// file, not failed as an outage.
