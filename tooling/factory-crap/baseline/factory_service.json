@@ -1,0 +1,156 @@
+{
+  "$schema": "https://raw.githubusercontent.com/minikin/cargo-crap/main/schemas/report-v1.json",
+  "version": "0.9.0",
+  "entries": [
+    {
+      "file": "services/factory_service/src/definition_check.rs",
+      "function": "main",
+      "line": 15,
+      "cyclomatic": 4.0,
+      "coverage": 0.0,
+      "crap": 20.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 15,
+          "end": 39
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/gate_replay.rs",
+      "function": "main",
+      "line": 38,
+      "cyclomatic": 4.0,
+      "coverage": 0.0,
+      "crap": 20.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 38,
+          "end": 58
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/health.rs",
+      "function": "health_handler",
+      "line": 13,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 13,
+          "end": 15
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/health.rs",
+      "function": "router",
+      "line": 18,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 18,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/main.rs",
+      "function": "main",
+      "line": 99,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 99,
+          "end": 104
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/main.rs",
+      "function": "mount_at_root_and_prefix",
+      "line": 487,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 487,
+          "end": 491
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/main.rs",
+      "function": "run",
+      "line": 106,
+      "cyclomatic": 20.0,
+      "coverage": 0.0,
+      "crap": 420.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 106,
+          "end": 271
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/main.rs",
+      "function": "serve",
+      "line": 316,
+      "cyclomatic": 8.0,
+      "coverage": 0.0,
+      "crap": 72.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 316,
+          "end": 475
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/main.rs",
+      "function": "traced",
+      "line": 478,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 478,
+          "end": 485
+        }
+      ]
+    },
+    {
+      "file": "services/factory_service/src/openapi.rs",
+      "function": "main",
+      "line": 9,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_service",
+      "uncovered": [
+        {
+          "start": 9,
+          "end": 16
+        }
+      ]
+    }
+  ]
+}
