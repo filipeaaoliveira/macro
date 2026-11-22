@@ -7,8 +7,9 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use factory_records::domain::models::RunId;
 use factory_records::domain::self_improvement::{
-    DefinitionNaming, Failure, FailureSource, Improvement, ImprovementBegin, ImprovementState,
-    NewFailure, PendingFailures, RunFailureFacts, SelfImprovementRepository, Settlement,
+    DefinitionNaming, DismissalUndone, Failure, FailureSource, Improvement, ImprovementBegin,
+    ImprovementState, NewFailure, PendingFailures, RunFailureFacts, SelfImprovementRepository,
+    Settlement, UndoDismissal,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -220,15 +221,13 @@ impl SelfImprovementRepository for FakeRepo {
     }
 
     async fn latest_improvement(&self, team_id: Uuid) -> Result<Option<Improvement>, FakeError> {
-        Ok(self
-            .improvement
-            .lock()
-            .expect("improvement")
+        let kept = self.improvement.lock().expect("improvement");
+        Ok(kept
             .improvements
             .iter()
             .rev()
             .find(|improvement| improvement.team_id == team_id)
-            .cloned())
+            .map(|improvement| with_dismissed(&kept, improvement)))
     }
 
     async fn recent_improvements(
@@ -236,16 +235,14 @@ impl SelfImprovementRepository for FakeRepo {
         team_id: Uuid,
         limit: u32,
     ) -> Result<Vec<Improvement>, FakeError> {
-        Ok(self
-            .improvement
-            .lock()
-            .expect("improvement")
+        let kept = self.improvement.lock().expect("improvement");
+        Ok(kept
             .improvements
             .iter()
             .rev()
             .filter(|improvement| improvement.team_id == team_id)
             .take(limit as usize)
-            .cloned()
+            .map(|improvement| with_dismissed(&kept, improvement))
             .collect())
     }
 
@@ -292,6 +289,8 @@ impl SelfImprovementRepository for FakeRepo {
             created_at: Utc::now(),
             settled_at: None,
             failures: u32::try_from(claimed.len()).unwrap_or(u32::MAX),
+            dismissed: 0,
+            dismissal_undone: None,
         });
         Ok(ImprovementBegin::Claimed(claimed))
     }
@@ -323,6 +322,67 @@ impl SelfImprovementRepository for FakeRepo {
             settlement,
         );
         Ok(())
+    }
+
+    async fn improvement(&self, team_id: Uuid, id: Uuid) -> Result<Option<Improvement>, FakeError> {
+        let kept = self.improvement.lock().expect("improvement");
+        Ok(kept
+            .improvements
+            .iter()
+            .find(|improvement| improvement.id == id && improvement.team_id == team_id)
+            .map(|improvement| with_dismissed(&kept, improvement)))
+    }
+
+    async fn undo_dismissal(
+        &self,
+        team_id: Uuid,
+        id: Uuid,
+        by: &MacroUserIdStr<'static>,
+    ) -> Result<UndoDismissal, FakeError> {
+        let mut kept = self.improvement.lock().expect("improvement");
+        let kept = &mut *kept;
+        let Some(improvement) = kept
+            .improvements
+            .iter_mut()
+            .find(|improvement| improvement.id == id && improvement.team_id == team_id)
+        else {
+            return Ok(UndoDismissal::NotFound);
+        };
+        if let Some(undone) = &improvement.dismissal_undone {
+            return Ok(UndoDismissal::AlreadyUndone(undone.clone()));
+        }
+        let mut restored = 0;
+        for failure in kept
+            .failures
+            .iter_mut()
+            .filter(|failure| failure.improvement == Some(id) && failure.dismissed)
+        {
+            failure.improvement = None;
+            failure.dismissed = false;
+            restored += 1;
+        }
+        if restored == 0 {
+            return Ok(UndoDismissal::NothingDismissed);
+        }
+        let undone = DismissalUndone {
+            by: by.clone(),
+            at: Utc::now(),
+        };
+        improvement.dismissal_undone = Some(undone.clone());
+        Ok(UndoDismissal::Undone { restored, undone })
+    }
+}
+
+/// `improvement` as read, with how many of its failures are dismissed now.
+fn with_dismissed(kept: &FakeImprovement, improvement: &Improvement) -> Improvement {
+    let dismissed = kept
+        .failures
+        .iter()
+        .filter(|failure| failure.improvement == Some(improvement.id) && failure.dismissed)
+        .count();
+    Improvement {
+        dismissed: u32::try_from(dismissed).unwrap_or(u32::MAX),
+        ..improvement.clone()
     }
 }
 

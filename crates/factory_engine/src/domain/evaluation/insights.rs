@@ -9,9 +9,11 @@ use factory_records::domain::evaluation::{
     AgentChoices, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository, MAX_OPEN_TRIALS,
     NewSuite, SuiteInsert, TrialKey,
 };
-use factory_records::domain::models::{RunId, RunOutcome};
+use factory_records::domain::models::{RunId, RunOutcome, TeamMembership};
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::self_improvement::{ImprovementState, SelfImprovementRepository};
+use factory_records::domain::self_improvement::{
+    DefinitionNaming, Improvement, ImprovementState, SelfImprovementRepository, UndoDismissal,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 use uuid::Uuid;
@@ -240,6 +242,8 @@ pub struct PendingSource {
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImprovementInsight {
+    /// Its id, which undoing its dismissal names.
+    pub id: Uuid,
     /// Its Run; none while it starts, when it was refused, or once the
     /// Run is gone. Only its owner reads it.
     pub run_id: Option<RunId>,
@@ -253,6 +257,87 @@ pub struct ImprovementInsight {
     pub created_at: DateTime<Utc>,
     /// When it was settled.
     pub settled_at: Option<DateTime<Utc>>,
+    /// How many of its failures are dismissed: a person rejected it (closed
+    /// its pull request unmerged, or cancelled its Run), so they count
+    /// toward no other Run until the dismissal is undone.
+    pub dismissed: u32,
+    /// When the dismissal of its failures was undone, sending them back to
+    /// pending; none while it was not.
+    pub dismissal_undone_at: Option<DateTime<Utc>>,
+    /// Whether the caller may undo the dismissal now: it holds dismissed
+    /// failures, was not undone, and they are a person (never an agent's
+    /// account) who is still an admin of the team and named the
+    /// Definition or owns its Run.
+    pub can_undo_dismissal: bool,
+}
+
+/// What undoing a rejected self-improvement Run's dismissal did.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DismissalUndoneResponse {
+    /// How many failures went back to pending: none when it was undone
+    /// already.
+    pub restored: u32,
+    /// When it was undone, the first time.
+    pub undone_at: DateTime<Utc>,
+}
+
+/// Why undoing a self-improvement Run's dismissal was refused.
+#[derive(Debug, thiserror::Error)]
+pub enum UndoDismissalError {
+    /// The caller's team has no self-improvement Run of that id.
+    #[error("no self-improvement run of your team has this id")]
+    NotFound,
+    /// The caller is neither the admin who named the team's Definition (a
+    /// namer no longer an admin is not) nor the Run's owner.
+    #[error(
+        "only the admin who named the factory definition, or the owner of the self-improvement run, can undo its dismissal"
+    )]
+    NotAllowed,
+    /// The caller is not the person in their own signed-in session, or
+    /// signs in as an agent's account.
+    #[error("only the person, signed in to Macro, can undo a dismissal")]
+    NotAPerson,
+    /// It holds no dismissed failure: no person rejected it, or it is open.
+    #[error("the self-improvement run has no dismissed failures: no person rejected it")]
+    NothingDismissed,
+    /// Anything else.
+    #[error("undoing the dismissal failed: {0:?}")]
+    Internal(rootcause::Report),
+}
+
+fn undo_internal(error: impl std::error::Error + Send + Sync + 'static) -> UndoDismissalError {
+    UndoDismissalError::Internal(internal(error))
+}
+
+/// Whether `actor`, a person on the team (`membership`), may undo the
+/// dismissal of `improvement`'s failures: they are still an admin of the
+/// team, as a self-improvement Run starts only for an admin namer
+/// ([`namer_standing`]), and they named the team's Definition (`naming`)
+/// or own its Run, whoever may have rejected it in Macro. A namer or Run
+/// owner demoted to member may not. The caller refuses an agent's account
+/// first.
+async fn may_undo<R>(
+    repo: &R,
+    actor: &MacroUserIdStr<'static>,
+    membership: &TeamMembership,
+    naming: Option<&DefinitionNaming>,
+    improvement: &Improvement,
+) -> Result<bool, rootcause::Report>
+where
+    R: SelfImprovementRepository,
+{
+    if !membership.admin {
+        return Ok(false);
+    }
+    if naming.is_some_and(|naming| naming.named_by.as_ref() == Some(actor)) {
+        return Ok(true);
+    }
+    let Some(run_id) = improvement.run_id else {
+        return Ok(false);
+    };
+    let facts = repo.failure_facts(run_id).await.map_err(internal)?;
+    Ok(facts.is_some_and(|facts| &facts.user_id == actor))
 }
 
 /// A team's self-improvement against its Factory Definition: the failures
@@ -359,6 +444,17 @@ pub trait EvaluationService: Send + Sync + 'static {
         agents: AgentChoices,
         acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<SuiteStarted, SuiteError>> + Send;
+
+    /// Undo, as `actor`, the dismissal of the failures their team's rejected
+    /// self-improvement Run `id` dismissed, so they are pending again and
+    /// count toward the next one. Only the admin who named the team's
+    /// Definition or the owner of its Run may; undoing again answers the
+    /// first undo and changes nothing.
+    fn undo_dismissal(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: Uuid,
+    ) -> impl Future<Output = Result<DismissalUndoneResponse, UndoDismissalError>> + Send;
 }
 
 /// Evaluation over the records, the Run API (which starts trials as any
@@ -646,7 +742,6 @@ where
             .await
             .map_err(|error| InsightsError::Internal(internal(error)))?;
         Ok(Some(SelfImprovementInsight {
-            repo_url: naming.repo_url,
             enabled: thresholds.enabled,
             failures_threshold: thresholds.failures,
             oldest_days: thresholds.oldest_days,
@@ -658,14 +753,34 @@ where
                 .into_iter()
                 .map(|(source, count)| PendingSource { source, count })
                 .collect(),
-            last: last.map(|last| ImprovementInsight {
-                run_id: last.run_id,
-                state: last.state,
-                refusal: last.refusal,
-                failures: last.failures,
-                created_at: last.created_at,
-                settled_at: last.settled_at,
-            }),
+            last: match last {
+                Some(last) => {
+                    let undoable = last.dismissed > 0 && last.dismissal_undone.is_none();
+                    let can_undo_dismissal = undoable
+                        && !self
+                            .repo
+                            .is_agent_account(actor)
+                            .await
+                            .map_err(|error| InsightsError::Internal(internal(error)))?
+                        && may_undo(&self.repo, actor, &team, Some(&naming), &last)
+                            .await
+                            .map_err(InsightsError::Internal)?;
+                    Some(ImprovementInsight {
+                        id: last.id,
+                        run_id: last.run_id,
+                        state: last.state,
+                        refusal: last.refusal,
+                        failures: last.failures,
+                        created_at: last.created_at,
+                        settled_at: last.settled_at,
+                        dismissed: last.dismissed,
+                        dismissal_undone_at: last.dismissal_undone.map(|undone| undone.at),
+                        can_undo_dismissal,
+                    })
+                }
+                None => None,
+            },
+            repo_url: naming.repo_url,
         }))
     }
 }
@@ -822,5 +937,66 @@ where
             }
         }
         Ok(SuiteStarted { id, runs, refused })
+    }
+
+    #[tracing::instrument(
+        skip(self, actor),
+        fields(improvement_id = %id, restored = tracing::field::Empty)
+    )]
+    async fn undo_dismissal(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: Uuid,
+    ) -> Result<DismissalUndoneResponse, UndoDismissalError> {
+        // An agent's account signs in as a person does, yet never is one.
+        if self
+            .repo
+            .is_agent_account(actor)
+            .await
+            .map_err(undo_internal)?
+        {
+            return Err(UndoDismissalError::NotAPerson);
+        }
+        let Some(team) = self.repo.team_of(actor).await.map_err(undo_internal)? else {
+            return Err(UndoDismissalError::NotFound);
+        };
+        let Some(improvement) = self
+            .repo
+            .improvement(team.team_id, id)
+            .await
+            .map_err(undo_internal)?
+        else {
+            return Err(UndoDismissalError::NotFound);
+        };
+        let naming = self
+            .repo
+            .definition_naming(team.team_id)
+            .await
+            .map_err(undo_internal)?;
+        if !may_undo(&self.repo, actor, &team, naming.as_ref(), &improvement)
+            .await
+            .map_err(UndoDismissalError::Internal)?
+        {
+            return Err(UndoDismissalError::NotAllowed);
+        }
+        // The pending failures are read afresh at each of the team's Run
+        // ends; only the Definition's thresholds are kept for a while, so
+        // nothing kept needs forgetting.
+        let undone = self
+            .repo
+            .undo_dismissal(team.team_id, id, actor)
+            .await
+            .map_err(undo_internal)?;
+        let (restored, undone) = match undone {
+            UndoDismissal::Undone { restored, undone } => (restored, undone),
+            UndoDismissal::AlreadyUndone(undone) => (0, undone),
+            UndoDismissal::NothingDismissed => return Err(UndoDismissalError::NothingDismissed),
+            UndoDismissal::NotFound => return Err(UndoDismissalError::NotFound),
+        };
+        tracing::Span::current().record("restored", restored);
+        Ok(DismissalUndoneResponse {
+            restored,
+            undone_at: undone.at,
+        })
     }
 }

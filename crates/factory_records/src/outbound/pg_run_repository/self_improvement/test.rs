@@ -9,7 +9,7 @@ use crate::domain::models::{RunId, RunOutcome};
 use crate::domain::ports::RunRepository;
 use crate::domain::self_improvement::{
     FailureSource, ImprovementBegin, ImprovementState, NewFailure, SelfImprovementRepository,
-    Settlement,
+    Settlement, UndoDismissal,
 };
 
 const REPO_URL: &str = "https://github.com/macro/factory-definition";
@@ -535,4 +535,150 @@ async fn a_rejected_improvement_dismisses_its_failures(pool: PgPool) {
 
     failing_run(&repo, &[scorer_failure("tests", 0.2)]).await;
     assert_eq!(pending().await, 1);
+}
+
+/// Undoing a rejected improvement's dismissal sends its failures back to
+/// pending, where they count and a later improvement takes them, and keeps
+/// who undid it and when. Undoing again changes nothing and answers the
+/// first undo; it never takes back the failures a later improvement holds,
+/// even once that one was rejected too. Only the team's own improvement,
+/// holding dismissed failures, is undone.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn undoing_a_dismissal_makes_its_failures_pending_once(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    failing_run(&repo, &[scorer_failure("tests", 0.2), flawed()]).await;
+    let pending = || async {
+        repo.pending_failures(team(), REPO_URL)
+            .await
+            .expect("pending")
+            .count
+    };
+
+    // Not rejected yet: open, it holds nothing dismissed.
+    let first = Uuid::now_v7();
+    repo.begin_improvement(first, team(), REPO_URL, 10)
+        .await
+        .expect("begin");
+    assert_eq!(
+        repo.undo_dismissal(team(), first, &julia())
+            .await
+            .expect("undo"),
+        UndoDismissal::NothingDismissed
+    );
+    repo.settle_improvement(first, &Settlement::Rejected)
+        .await
+        .expect("reject");
+    assert_eq!(pending().await, 0);
+    let rejected = repo
+        .improvement(team(), first)
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(rejected.dismissed, 2);
+    assert_eq!(rejected.dismissal_undone, None);
+
+    // Another team's id is not found.
+    assert_eq!(
+        repo.undo_dismissal(Uuid::now_v7(), first, &julia())
+            .await
+            .expect("undo"),
+        UndoDismissal::NotFound
+    );
+
+    let UndoDismissal::Undone { restored, undone } = repo
+        .undo_dismissal(team(), first, &julia())
+        .await
+        .expect("undo")
+    else {
+        panic!("undone");
+    };
+    assert_eq!(restored, 2);
+    assert_eq!(undone.by, julia());
+    assert_eq!(pending().await, 2, "pending again");
+    let latest = repo
+        .latest_improvement(team())
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(latest.state, ImprovementState::Closed);
+    assert_eq!(latest.dismissed, 0);
+    assert_eq!(latest.dismissal_undone.as_ref(), Some(&undone));
+
+    // A later improvement takes them, and is rejected in turn.
+    let second = Uuid::now_v7();
+    let ImprovementBegin::Claimed(taken) = repo
+        .begin_improvement(second, team(), REPO_URL, 10)
+        .await
+        .expect("begin")
+    else {
+        panic!("claimed");
+    };
+    assert_eq!(taken.len(), 2);
+    repo.settle_improvement(second, &Settlement::Rejected)
+        .await
+        .expect("reject");
+
+    // Undoing the first again changes nothing.
+    assert_eq!(
+        repo.undo_dismissal(team(), first, &julia())
+            .await
+            .expect("again"),
+        UndoDismissal::AlreadyUndone(undone)
+    );
+    assert_eq!(pending().await, 0, "still the later one's");
+    let later = repo
+        .improvement(team(), second)
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(later.dismissed, 2);
+}
+
+/// Undoing one improvement's dismissal sends back only the failures it
+/// dismissed: those a later improvement took and dismissed stay with it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn undoing_a_dismissal_leaves_a_later_improvements_failures(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    failing_run(&repo, &[scorer_failure("tests", 0.2), flawed()]).await;
+    let first = Uuid::now_v7();
+    repo.begin_improvement(first, team(), REPO_URL, 10)
+        .await
+        .expect("begin");
+    repo.settle_improvement(first, &Settlement::Rejected)
+        .await
+        .expect("reject");
+    failing_run(&repo, &[scorer_failure("tests", 0.3)]).await;
+    let second = Uuid::now_v7();
+    repo.begin_improvement(second, team(), REPO_URL, 10)
+        .await
+        .expect("begin");
+    repo.settle_improvement(second, &Settlement::Rejected)
+        .await
+        .expect("reject");
+
+    let undone = repo
+        .undo_dismissal(team(), first, &julia())
+        .await
+        .expect("undo");
+    assert!(matches!(undone, UndoDismissal::Undone { restored: 2, .. }));
+    assert_eq!(
+        repo.pending_failures(team(), REPO_URL)
+            .await
+            .expect("pending")
+            .count,
+        2
+    );
+    let later = repo
+        .improvement(team(), second)
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(later.dismissed, 1);
+    assert_eq!(later.dismissal_undone, None);
 }

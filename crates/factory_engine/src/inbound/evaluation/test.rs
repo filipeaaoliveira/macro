@@ -20,7 +20,8 @@ use uuid::Uuid;
 use super::{EvaluationRouterState, evaluation_router};
 use crate::domain::evaluation::EvaluationDefinitionError;
 use crate::domain::evaluation::insights::{
-    EvaluationInsights, EvaluationService, SuiteError, SuiteStarted,
+    DismissalUndoneResponse, EvaluationInsights, EvaluationService, SuiteError, SuiteStarted,
+    UndoDismissalError,
 };
 use crate::domain::insights::{InsightsError, InsightsQuery};
 use crate::domain::models::{ActingAgent, FactoryError};
@@ -76,7 +77,16 @@ struct FakeEvaluation {
     read_by: Mutex<Vec<String>>,
     started_by: Mutex<Vec<(String, String)>>,
     acting: Mutex<Vec<Option<ActingAgent>>>,
+    undone_by: Mutex<Vec<(String, Uuid)>>,
 }
+
+/// The improvement `undo_dismissal` finds; [`ELSEWHERE`] is no Run of the
+/// caller's team, [`NOT_REJECTED`] dismissed nothing, and [`NOT_YOURS`] is
+/// one the caller may not undo.
+const UNDOABLE: Uuid = Uuid::from_u128(10);
+const ELSEWHERE: Uuid = Uuid::from_u128(11);
+const NOT_REJECTED: Uuid = Uuid::from_u128(12);
+const NOT_YOURS: Uuid = Uuid::from_u128(13);
 
 /// `core` starts; `missing` is no Benchmark; `bad` names an unknown Agent;
 /// `busy` still runs; `unreachable` is a repository the caller cannot reach.
@@ -130,6 +140,32 @@ impl EvaluationService for Arc<FakeEvaluation> {
             }),
         }
     }
+
+    async fn undo_dismissal(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: Uuid,
+    ) -> Result<DismissalUndoneResponse, UndoDismissalError> {
+        self.undone_by
+            .lock()
+            .expect("undone")
+            .push((actor.as_ref().to_string(), id));
+        match id {
+            ELSEWHERE => Err(UndoDismissalError::NotFound),
+            NOT_REJECTED => Err(UndoDismissalError::NothingDismissed),
+            NOT_YOURS => Err(UndoDismissalError::NotAllowed),
+            _ => Ok(DismissalUndoneResponse {
+                restored: 2,
+                undone_at: chrono::Utc::now(),
+            }),
+        }
+    }
+}
+
+fn undo(id: Uuid) -> axum::http::request::Builder {
+    Request::builder()
+        .method("POST")
+        .uri(format!("/self-improvements/{id}/undo-dismissal"))
 }
 
 fn app() -> (Router, Arc<FakeEvaluation>) {
@@ -284,4 +320,62 @@ async fn an_agent_session_starts_a_suite_as_that_session() {
         *service.acting.lock().expect("acting"),
         [Some(ActingAgent::Session(session_id)), None, None]
     );
+}
+
+/// Only the person in their own signed-in session undoes a dismissal, as
+/// themselves: an internal caller acting for them and an agent's code are
+/// refused before the service is asked.
+#[tokio::test]
+async fn only_a_person_in_their_session_undoes_a_dismissal() {
+    let (app, service) = app();
+
+    let internal = undo(UNDOABLE)
+        .header(INTERNAL_API_KEY_HEADER, KEY)
+        .header(INTERNAL_MACRO_USER_ID_HEADER, ALICE)
+        .body(Body::empty())
+        .expect("request");
+    let from_code = undo(UNDOABLE)
+        .header("authorization", "Bearer alice")
+        .header(CODE_EXECUTION_HEADER, "true")
+        .body(Body::empty())
+        .expect("request");
+    assert_eq!(status(&app, internal).await, StatusCode::FORBIDDEN);
+    assert_eq!(status(&app, from_code).await, StatusCode::FORBIDDEN);
+    assert!(service.undone_by.lock().expect("undone").is_empty());
+
+    let in_person = undo(UNDOABLE)
+        .header("authorization", "Bearer alice")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.clone().oneshot(in_person).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let body: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(body["restored"], 2);
+    assert!(body["undoneAt"].is_string());
+    assert_eq!(
+        *service.undone_by.lock().expect("undone"),
+        [(ALICE.to_string(), UNDOABLE)]
+    );
+}
+
+/// A refused undo answers with its status: another team's Run is not
+/// found, one that dismissed nothing conflicts, and one the caller may not
+/// undo is forbidden.
+#[tokio::test]
+async fn a_refused_undo_says_why_with_its_status() {
+    let (app, _) = app();
+    for (id, expected) in [
+        (ELSEWHERE, StatusCode::NOT_FOUND),
+        (NOT_REJECTED, StatusCode::CONFLICT),
+        (NOT_YOURS, StatusCode::FORBIDDEN),
+    ] {
+        let request = undo(id)
+            .header("authorization", "Bearer alice")
+            .body(Body::empty())
+            .expect("request");
+        assert_eq!(status(&app, request).await, expected, "{id}");
+    }
 }

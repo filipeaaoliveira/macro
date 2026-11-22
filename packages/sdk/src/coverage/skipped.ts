@@ -537,6 +537,9 @@ export const factoryExcluded = [
   // answer Gates in a person's place.
   'setFactoryProjectStandingRules',
   'setFactoryStandingRules',
+  // Only the person in their own session undoes the dismissal of a rejected
+  // self-improvement Run's failures, from Insights.
+  'undoFactoryImprovementDismissal',
 ] as const satisfies readonly (keyof FactorySdk)[];
 
 export const factoryBacklog =

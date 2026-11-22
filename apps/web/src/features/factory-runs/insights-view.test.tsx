@@ -1,9 +1,11 @@
 /** @vitest-environment jsdom */
+import { toast } from '@core/component/Toast/Toast';
 import {
   cleanup,
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from '@solidjs/testing-library';
 import { type Accessor, createSignal } from 'solid-js';
@@ -22,6 +24,10 @@ import type { InsightsParams, RunInsights } from './core/insights';
 import type { QualityInsights, QualityParams } from './core/quality';
 import type { Run } from './core/run';
 import { RunInsightsView } from './insights-view';
+
+vi.mock('@core/component/Toast/Toast', () => ({
+  toast: { alert: vi.fn(), failure: vi.fn(), success: vi.fn() },
+}));
 
 vi.mock('@core/mobile/isTouchDevice', () => ({
   isTouchDevice: () => false,
@@ -239,6 +245,27 @@ const judged: EvaluationInsights = {
   ],
 };
 
+/** A team whose last self-improvement run a person rejected. */
+const rejected: NonNullable<EvaluationInsights['selfImprovement']> = {
+  repoUrl: 'https://github.com/macro/factory-definition',
+  enabled: true,
+  failuresThreshold: 25,
+  oldestDays: 7,
+  namer: 'admin',
+  pending: 0,
+  pendingBySource: [],
+  last: {
+    id: 'improvement-1',
+    runId: failedImport.id,
+    state: 'closed',
+    failures: 3,
+    createdAt: '2026-11-01T09:00:00Z',
+    settledAt: '2026-11-02T09:00:00Z',
+    dismissed: 3,
+    canUndoDismissal: false,
+  },
+};
+
 function mount(options: {
   state?: Accessor<'pending' | 'error' | 'ready'>;
   insights?: RunInsights;
@@ -248,6 +275,7 @@ function mount(options: {
   quality?: (params: QualityParams) => QualityInsights;
   retry?: () => void;
   queue?: RunsQueue;
+  undoDismissal?: InsightsContext['undoDismissal'];
 }) {
   const asked: InsightsParams[] = [];
   const insights: InsightsContext = {
@@ -280,6 +308,7 @@ function mount(options: {
       data: () => ['plan', 'reply'],
       retry: vi.fn(),
     }),
+    undoDismissal: options.undoDismissal ?? vi.fn(),
   };
   const runs: RunsContext = {
     taskRuns: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
@@ -583,10 +612,13 @@ describe('RunInsightsView', () => {
             { source: 'flawed', count: 1 },
           ],
           last: {
+            id: 'improvement-1',
             runId: failedImport.id,
             state: 'closed',
             failures: 12,
             createdAt: '2026-11-01T09:00:00Z',
+            dismissed: 0,
+            canUndoDismissal: false,
           },
         },
       },
@@ -603,6 +635,139 @@ describe('RunInsightsView', () => {
 
     fireEvent.click(within(section).getByRole('button', { name: 'Open run' }));
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('offers the owner to undo a rejection’s dismissal, confirmed in place, and undoes that improvement', async () => {
+    const undoDismissal = vi.fn(async () => ({
+      ok: true as const,
+      value: undefined,
+    }));
+    mount({
+      insights: november,
+      undoDismissal,
+      evaluation: {
+        ...judged,
+        selfImprovement: {
+          ...rejected,
+          last: { ...rejected.last!, canUndoDismissal: true },
+        },
+      },
+    });
+
+    const section = screen.getByRole('heading', { name: 'Self-improvement' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(
+      within(section).getByText('3 failures dismissed by the rejection')
+    ).toBeTruthy();
+
+    // Keep dismissed, focused as the confirmation opens, leaves it be and
+    // hands focus back to Undo dismissal.
+    fireEvent.click(
+      within(section).getByRole('button', { name: 'Undo dismissal' })
+    );
+    expect(
+      within(section).getByText('Count these failures again?')
+    ).toBeTruthy();
+    const keep = within(section).getByRole('button', {
+      name: 'Keep dismissed',
+    });
+    await waitFor(() => expect(document.activeElement).toBe(keep));
+    fireEvent.click(keep);
+    expect(undoDismissal).not.toHaveBeenCalled();
+    expect(
+      within(section).queryByText('Count these failures again?')
+    ).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(section).getByRole('button', { name: 'Undo dismissal' })
+      )
+    );
+
+    fireEvent.click(
+      within(section).getByRole('button', { name: 'Undo dismissal' })
+    );
+    fireEvent.click(
+      within(section).getByRole('button', { name: 'Undo dismissal' })
+    );
+    expect(undoDismissal).toHaveBeenCalledWith('improvement-1');
+    expect(undoDismissal).toHaveBeenCalledTimes(1);
+  });
+
+  it('says when the person may no longer undo, and hands focus back to Undo dismissal', async () => {
+    const undoDismissal = vi.fn(async () => ({
+      ok: false as const,
+      reason: 'forbidden' as const,
+    }));
+    mount({
+      insights: november,
+      undoDismissal,
+      evaluation: {
+        ...judged,
+        selfImprovement: {
+          ...rejected,
+          last: { ...rejected.last!, canUndoDismissal: true },
+        },
+      },
+    });
+    const section = screen.getByRole('heading', { name: 'Self-improvement' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+
+    fireEvent.click(
+      within(section).getByRole('button', { name: 'Undo dismissal' })
+    );
+    fireEvent.click(
+      within(section).getByRole('button', { name: 'Undo dismissal' })
+    );
+
+    await waitFor(() =>
+      expect(toast.failure).toHaveBeenCalledWith(
+        'You may no longer undo this rejection.'
+      )
+    );
+    expect(
+      within(section).queryByText('Count these failures again?')
+    ).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(section).getByRole('button', { name: 'Undo dismissal' })
+      )
+    );
+  });
+
+  it('offers no undo to someone who may not, and says when it was undone', () => {
+    mount({
+      insights: november,
+      evaluation: { ...judged, selfImprovement: rejected },
+    });
+    const section = screen.getByRole('heading', { name: 'Self-improvement' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(
+      within(section).queryByRole('button', { name: 'Undo dismissal' })
+    ).toBeNull();
+    cleanup();
+
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        selfImprovement: {
+          ...rejected,
+          pending: 3,
+          last: {
+            ...rejected.last!,
+            dismissed: 0,
+            dismissalUndoneAt: '2026-11-03T09:00:00Z',
+          },
+        },
+      },
+    });
+    const undone = screen.getByRole('heading', { name: 'Self-improvement' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(undone.textContent).toContain('Dismissal undone');
+    expect(undone.textContent).not.toContain('dismissed by the rejection');
+    expect(
+      within(undone).queryByRole('button', { name: 'Undo dismissal' })
+    ).toBeNull();
   });
 
   it('says no self-improvement run starts once the definition’s namer left the team', () => {

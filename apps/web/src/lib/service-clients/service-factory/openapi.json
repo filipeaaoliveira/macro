@@ -2461,6 +2461,87 @@
         }
       }
     },
+    "/self-improvements/{id}/undo-dismissal": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Undo the dismissal of the failures a person's rejection of one of the\ncaller's team's self-improvement Runs dismissed (its pull request closed\nunmerged, or its Run cancelled in person): when the rejection was of the\nproposed fix and not of the failures, they go back to pending and count\ntoward the next self-improvement Run's thresholds at the team's next\nRun end, after any pause the rejection started. Only failures it still\nholds go back. Only a current admin of the team who named its\nDefinition or owns the self-improvement Run may, in their own signed-in\nsession and never from an agent's account (403 otherwise, a namer or\nRun owner made a member too); a Run that dismissed nothing is refused\n(409). The undo\nis kept with who and when; undoing again answers it and changes nothing\n(`restored` 0).",
+        "operationId": "undo_factory_improvement_dismissal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The self-improvement Run's id (`selfImprovement.last.id`).",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DismissalUndoneResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/step": {
       "get": {
         "tags": ["factory"],
@@ -4077,6 +4158,24 @@
           }
         }
       },
+      "DismissalUndoneResponse": {
+        "type": "object",
+        "description": "What undoing a rejected self-improvement Run's dismissal did.",
+        "required": ["restored", "undoneAt"],
+        "properties": {
+          "restored": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many failures went back to pending: none when it was undone\nalready.",
+            "minimum": 0
+          },
+          "undoneAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was undone, the first time."
+          }
+        }
+      },
       "DurationStats": {
         "type": "object",
         "description": "A spread of durations: how many, their median and 90th percentile.",
@@ -4706,18 +4805,45 @@
       "ImprovementInsight": {
         "type": "object",
         "description": "A team's latest self-improvement Run.",
-        "required": ["state", "failures", "createdAt"],
+        "required": [
+          "id",
+          "state",
+          "failures",
+          "createdAt",
+          "dismissed",
+          "canUndoDismissal"
+        ],
         "properties": {
+          "canUndoDismissal": {
+            "type": "boolean",
+            "description": "Whether the caller may undo the dismissal now: it holds dismissed\nfailures, was not undone, and they are a person (never an agent's\naccount) who is still an admin of the team and named the\nDefinition or owns its Run."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
             "description": "When it began."
+          },
+          "dismissalUndoneAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the dismissal of its failures was undone, sending them back to\npending; none while it was not."
+          },
+          "dismissed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of its failures are dismissed: a person rejected it (closed\nits pull request unmerged, or cancelled its Run), so they count\ntoward no other Run until the dismissal is undone.",
+            "minimum": 0
           },
           "failures": {
             "type": "integer",
             "format": "int32",
             "description": "How many failures it groups.",
             "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Its id, which undoing its dismissal names."
           },
           "refusal": {
             "type": ["string", "null"],

@@ -1,7 +1,9 @@
+import { fireAndForget } from '@core/util/fireAndForget';
 import { throwOnErr } from '@core/util/result';
 import { factoryClient } from '@service-factory/client';
 import {
   keepPreviousData,
+  type QueryClient,
   queryOptions,
   useQuery,
 } from '@tanstack/solid-query';
@@ -77,7 +79,7 @@ export function qualityOptions(params: QualityParams) {
 }
 
 /** The insights context on the factory service. */
-export function createAppInsightsContext(): InsightsContext {
+export function createAppInsightsContext(client: QueryClient): InsightsContext {
   return {
     insights: (params) => {
       const query = useQuery(() => insightsOptions(params()));
@@ -109,6 +111,26 @@ export function createAppInsightsContext(): InsightsContext {
         ...flows,
         data: () => flows.data()?.map((flow) => flow.name),
       };
+    },
+
+    async undoDismissal(improvementId) {
+      const result =
+        await factoryClient.undoImprovementDismissal(improvementId);
+      // Either way, the evaluation read shows where the run stands now: its
+      // failures pending again, or why there was nothing to undo.
+      const reads = client.invalidateQueries({
+        queryKey: factoryRunKeys.evaluation._def,
+      });
+      if (result.isErr()) {
+        const coded = (code: string) =>
+          result.error.some((error) => error.code === code);
+        fireAndForget(reads, 'factory-runs');
+        if (coded('CONFLICT')) return { ok: false, reason: 'conflict' };
+        if (coded('FORBIDDEN')) return { ok: false, reason: 'forbidden' };
+        return { ok: false, reason: 'failed' };
+      }
+      await reads.catch(() => undefined);
+      return { ok: true, value: undefined };
     },
   };
 }

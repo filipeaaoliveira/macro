@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, team_id, repo_url, run_id, state, refusal, created_at, settled_at, failures\n            FROM factory_improvement\n            WHERE team_id = $1\n            ORDER BY created_at DESC, id DESC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT i.id, i.team_id, i.repo_url, i.run_id, i.state, i.refusal, i.created_at,\n                i.settled_at, i.failures, i.dismissal_undone_at, i.dismissal_undone_by_user_id,\n                (\n                    SELECT count(*) FROM factory_improvement_failure f\n                    WHERE f.improvement_id = i.id AND f.dismissed_at IS NOT NULL\n                ) AS \"dismissed!\"\n            FROM factory_improvement i\n            WHERE i.team_id = $1\n            ORDER BY i.created_at DESC, i.id DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -47,6 +47,21 @@
         "ordinal": 8,
         "name": "failures",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "dismissal_undone_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "dismissal_undone_by_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "dismissed!",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -63,8 +78,11 @@
       true,
       false,
       true,
-      false
+      false,
+      true,
+      true,
+      null
     ]
   },
-  "hash": "6df730de98f3aba07a2ee56a6e57ceda6a8de83ae6a61eea1ba07faaaaba4294"
+  "hash": "ad41ae8f109d1069e5faebc55b17c8200c8e86ff27ae1cbc80542c1bdeed795d"
 }

@@ -44,6 +44,19 @@ export default {
   improvementMerged: 'Merged',
   improvementClosed: 'Closed unmerged',
   improvementRefused: 'Couldn’t start',
+  improvementDismissed: {
+    one: '{{count}} failure dismissed by the rejection',
+    other: '{{count}} failures dismissed by the rejection',
+  },
+  dismissalUndone: 'Dismissal undone {{time}}: its failures count again',
+  undoDismissal: 'Undo dismissal',
+  undoDismissalTitle: 'Count these failures again?',
+  undoDismissalBody:
+    'If the fix was rejected, not the failures, they go back to pending and count toward the next self-improvement run once this rejection’s pause ends.',
+  keepDismissed: 'Keep dismissed',
+  undoDismissalConflict: 'These failures are no longer dismissed.',
+  undoDismissalFailed: 'Couldn’t undo the dismissal. Try again.',
+  undoDismissalForbidden: 'You may no longer undo this rejection.',
   // Experiments.
   experiments: 'Experiments',
   experimentsDescription:

@@ -2139,7 +2139,23 @@ later one by an agent does not undo it, so an agent's cancel sent long after
 still leaves the person's earlier rejection standing); a cancel by
 an agent, a bot under a Standing Role, an internal caller or a program only
 means the Run did not finish, so its failures are pending again. Dismissed failures
-never start another Run; new failures, of the same Scorer too, count. A pull request a person
+never start another Run; new failures, of the same Scorer too, count.
+When the rejection was of the fix and not of the failures,
+`POST /self-improvements/{id}/undo-dismissal` (`EvaluationService::undo_dismissal`,
+in `domain/evaluation/insights.rs`) sends the failures it still holds
+dismissed back to pending, where they count toward the next Run's
+thresholds at the team's next Run end, after the pause the rejection
+started. Only a current admin of the team who named its Definition or
+owns the improvement's Run (who could reject it in Macro) may, as a
+self-improvement Run starts only for an admin namer: a namer or Run owner
+made a member may not. They undo in their own signed-in session and never
+from an agent's account (403 otherwise; 404 for no improvement of their
+team, 409 for one that dismissed nothing). It is kept once with who and
+when, so a repeat answers the first (`restored` 0) and never takes back
+failures a later improvement holds. Nothing kept needs forgetting: the
+worker keeps only the thresholds for `THRESHOLDS_KEPT_FOR`, and reads the
+pending failures afresh at each Run end. Insights show the last improvement's `id`, `dismissed`,
+`dismissalUndoneAt` and whether the caller `canUndoDismissal`. A pull request a person
 merges or closes after its Run ended is seen only at the team's next Run's
 end. Pending failures are matched to the Definition's repository ignoring
 case. `GET /insights/evaluation` shows the team's self-improvement

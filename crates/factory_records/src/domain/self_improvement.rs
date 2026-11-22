@@ -8,7 +8,9 @@
 //! held while one is open, addressed once that Run's pull request merged,
 //! and dismissed once a person rejected that Run (closed its pull request
 //! unmerged, or cancelled it); a Run that ended without a pull request, or
-//! could not start, lets its failures go back to pending.
+//! could not start, lets its failures go back to pending. A dismissal may be
+//! undone once, when the rejection was of the fix and not of the failures:
+//! they are pending again ([`UndoDismissal`]).
 //!
 //! [`PASS_SCORE`]: crate::domain::evaluation::PASS_SCORE
 
@@ -181,6 +183,41 @@ pub struct Improvement {
     pub settled_at: Option<DateTime<Utc>>,
     /// How many failures it holds or held.
     pub failures: u32,
+    /// How many of its failures are dismissed now: a person rejected it,
+    /// and the dismissal was not undone.
+    pub dismissed: u32,
+    /// Who undid the dismissal of its failures, and when; none while it
+    /// was not undone.
+    pub dismissal_undone: Option<DismissalUndone>,
+}
+
+/// Who undid the dismissal of a rejected self-improvement Run's failures,
+/// and when.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DismissalUndone {
+    /// Who undid it.
+    pub by: MacroUserIdStr<'static>,
+    /// When.
+    pub at: DateTime<Utc>,
+}
+
+/// What undoing the dismissal of a self-improvement Run's failures did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UndoDismissal {
+    /// Its dismissed failures are pending again: how many, and the undo
+    /// kept.
+    Undone {
+        /// How many failures went back to pending.
+        restored: u32,
+        /// The undo kept.
+        undone: DismissalUndone,
+    },
+    /// It was undone already, as kept: nothing changed.
+    AlreadyUndone(DismissalUndone),
+    /// It holds no dismissed failure: it was not rejected, or is open.
+    NothingDismissed,
+    /// The team has no self-improvement Run of that id.
+    NotFound,
 }
 
 /// What beginning a self-improvement Run did.
@@ -286,4 +323,25 @@ pub trait SelfImprovementRepository: Send + Sync + 'static {
         id: Uuid,
         settlement: &Settlement,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The team `team_id`'s self-improvement Run `id`; none when the team
+    /// has none of that id.
+    fn improvement(
+        &self,
+        team_id: Uuid,
+        id: Uuid,
+    ) -> impl Future<Output = Result<Option<Improvement>, Self::Err>> + Send;
+
+    /// Undo, as `by`, the dismissal of the failures the team `team_id`'s
+    /// rejected self-improvement Run `id` dismissed: the failures it still
+    /// holds dismissed go back to pending, and the undo is kept with who
+    /// and when, in one write. Only those it holds: a failure a later Run
+    /// took, after an earlier undo, stays with that Run. Undoing again
+    /// changes nothing and answers the undo kept.
+    fn undo_dismissal(
+        &self,
+        team_id: Uuid,
+        id: Uuid,
+        by: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<UndoDismissal, Self::Err>> + Send;
 }
