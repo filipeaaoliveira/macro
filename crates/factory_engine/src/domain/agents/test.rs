@@ -501,7 +501,7 @@ fn ruled(rules: serde_json::Value) -> AgentDefinition {
     read(json!({
         "agents": {
             "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
-            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0d1" }
         },
         "roles": { "planner": ["primary", "backup"], "writer": ["primary", "backup"] },
         "rules": rules

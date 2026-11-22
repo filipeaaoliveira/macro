@@ -30,7 +30,7 @@ fn kept() -> serde_json::Value {
     serde_json::json!({
         "agents": {
             "primary": { "bot": Uuid::from_u128(0xc1a0) },
-            "backup": { "bot": Uuid::from_u128(0xc0de) },
+            "backup": { "bot": Uuid::from_u128(0xc0d1) },
             "spare": { "bot": Uuid::from_u128(0x5a5e) },
             "docs-writer": { "bot": Uuid::from_u128(0xd0c5), "model": "small-model" }
         },
