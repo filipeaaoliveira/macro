@@ -4068,7 +4068,7 @@
               },
               {
                 "$ref": "#/components/schemas/DefinitionContents",
-                "description": "What it holds at the commit the newest Run read, or at its head when\nno Run read it yet or that commit no longer reads; none when it\nreads at neither."
+                "description": "What it holds at the commit the newest Run read, or at its head when\nno Run read it yet or that commit does not read as the person\nreaches it; none when it reads at neither."
               }
             ]
           },
@@ -4088,7 +4088,7 @@
             "items": {
               "$ref": "#/components/schemas/DefinitionPullRequest"
             },
-            "description": "Its repository's open pull requests, the most recently updated first,\nat most [`DEFINITION_PULL_REQUESTS_LISTED`]; none when GitHub could\nnot list them for the person."
+            "description": "Its repository's open pull requests, the most recently updated first,\nat most 20; none when GitHub could not list them for the person."
           },
           "problem": {
             "type": ["string", "null"],

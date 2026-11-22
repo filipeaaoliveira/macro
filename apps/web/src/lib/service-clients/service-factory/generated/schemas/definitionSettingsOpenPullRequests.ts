@@ -8,7 +8,6 @@ import type { DefinitionPullRequest } from './definitionPullRequest';
 
 /**
  * Its repository's open pull requests, the most recently updated first,
-at most [`DEFINITION_PULL_REQUESTS_LISTED`]; none when GitHub could
-not list them for the person.
+at most 20; none when GitHub could not list them for the person.
  */
 export type DefinitionSettingsOpenPullRequests = DefinitionPullRequest[] | null;

@@ -26,8 +26,7 @@ when the Definition reads there as the person reaches it. */
   contents?: DefinitionSettingsContents;
   newestRun?: DefinitionSettingsNewestRun;
   /** Its repository's open pull requests, the most recently updated first,
-at most [`DEFINITION_PULL_REQUESTS_LISTED`]; none when GitHub could
-not list them for the person. */
+at most 20; none when GitHub could not list them for the person. */
   openPullRequests?: DefinitionSettingsOpenPullRequests;
   /** Why it does not read now, when it does not: the person cannot reach
 it, or a file of it is wrong. */
