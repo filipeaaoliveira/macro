@@ -670,6 +670,122 @@ export type CreatedAutomation = {
 };
 
 /**
+ * What a Factory Definition holds at one commit, as its setting shows it.
+ */
+export type DefinitionContents = {
+    /**
+     * The commit it was read at.
+     */
+    commit: string;
+    /**
+     * What the Definition is for, from `factory.json`.
+     */
+    description: string;
+    /**
+     * Its Flows, by name.
+     */
+    flows: Array<DefinitionFlow>;
+    /**
+     * The Roles its Agents fill, by name.
+     */
+    roles: Array<DefinitionRole>;
+    /**
+     * Its Scorers, from `scorers.json`.
+     */
+    scorers: Array<DefinitionScorer>;
+    standingRules?: null | OrchestratorDefinition;
+};
+
+/**
+ * A Flow of a Factory Definition, as its setting lists it.
+ */
+export type DefinitionFlow = {
+    /**
+     * What it does, for a person.
+     */
+    description: string;
+    /**
+     * Its entries' ids, in order.
+     */
+    entries: Array<string>;
+    /**
+     * Its name, which a Run starts it by.
+     */
+    name: string;
+};
+
+/**
+ * An open pull request on a Factory Definition's repository: a change to
+ * the Definition waiting to merge.
+ */
+export type DefinitionPullRequest = {
+    /**
+     * Whether it is a draft.
+     */
+    draft: boolean;
+    /**
+     * Its number in the repository.
+     */
+    number: number;
+    /**
+     * Its title.
+     */
+    title: string;
+    /**
+     * Its page on GitHub.
+     */
+    url: string;
+};
+
+/**
+ * The commit of a Factory Definition the newest Run under it read, and
+ * when that Run started.
+ */
+export type DefinitionRead = {
+    /**
+     * The commit the Run read the Definition at.
+     */
+    commit: string;
+    /**
+     * When the Run started.
+     */
+    createdAt: string;
+};
+
+/**
+ * A Role of a Factory Definition and the Agents that fill it, the first
+ * its default.
+ */
+export type DefinitionRole = {
+    /**
+     * The Agents that fill it, in order.
+     */
+    agents: Array<string>;
+    /**
+     * The Role.
+     */
+    role: string;
+};
+
+/**
+ * A Scorer of a Factory Definition, as its setting lists it.
+ */
+export type DefinitionScorer = {
+    /**
+     * The Flows whose Runs it judges; every Flow when empty.
+     */
+    flows: Array<string>;
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * The percentage of those Runs it judges.
+     */
+    samplePercent: number;
+};
+
+/**
  * The Factory Definition a person's team names: the repository whose
  * files its Runs take their Flows, Agents and rules from.
  */
@@ -683,6 +799,13 @@ export type DefinitionSettings = {
      * when the Definition reads there as the person reaches it.
      */
     commit?: string | null;
+    contents?: null | DefinitionContents;
+    newestRun?: null | DefinitionRead;
+    /**
+     * Its repository's open pull requests, the most recently updated first,
+     * at most 20; none when GitHub could not list them for the person.
+     */
+    openPullRequests?: Array<DefinitionPullRequest> | null;
     /**
      * Why it does not read now, when it does not: the person cannot reach
      * it, or a file of it is wrong.

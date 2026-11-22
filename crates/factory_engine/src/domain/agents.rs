@@ -433,6 +433,14 @@ impl AgentDefinition {
         &[]
     }
 
+    /// The Roles the definition fills, by name, each with its Agents in
+    /// order.
+    pub fn roles(&self) -> impl Iterator<Item = (&Role, &[AgentName])> {
+        self.roles
+            .iter()
+            .map(|(role, agents)| (role, agents.as_slice()))
+    }
+
     /// The Agent named `name`, if the definition has it.
     pub fn agent(&self, name: &AgentName) -> Option<&Agent> {
         self.agents.get(name)

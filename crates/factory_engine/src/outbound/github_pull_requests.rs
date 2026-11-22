@@ -17,7 +17,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
+    BranchDeletion, DefinitionPullRequest, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     CommitStatus, FailureAnnotation, FinishedJob, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, PullRequestState, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
 };
@@ -734,6 +734,29 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .github
             .has_open_pull_request_onto(&token, repository.owner(), repository.name(), branch)
             .await?)
+    }
+
+    #[tracing::instrument(skip(self, owner))]
+    async fn open_pull_requests(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        limit: usize,
+    ) -> Result<Vec<DefinitionPullRequest>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let open = self
+            .github
+            .list_open_pull_requests(&token, repository.owner(), repository.name(), limit)
+            .await?;
+        Ok(open
+            .into_iter()
+            .map(|pull_request| DefinitionPullRequest {
+                number: pull_request.number,
+                title: pull_request.title,
+                url: pull_request.html_url,
+                draft: pull_request.draft,
+            })
+            .collect())
     }
 
     /// The Step that asks logs a failure, so it is not logged here too.

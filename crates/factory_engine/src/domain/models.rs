@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use factory_records::domain::evaluation::RunAgentRule;
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
-    EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step,
-    StepKey,
+    DefinitionRead, EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome,
+    SteerRefusal, Step, StepKey,
 };
 use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRound};
 use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
@@ -777,6 +777,90 @@ pub struct DefinitionSettings {
     pub team_id: Option<Uuid>,
     /// Whether the person may change it: they administer the team.
     pub can_edit: bool,
+    /// The commit the newest Run of the team's members started under it
+    /// read, and when that Run started; none when none has.
+    pub newest_run: Option<DefinitionRead>,
+    /// What it holds at the commit the newest Run read, or at its head when
+    /// no Run read it yet or that commit does not read as the person
+    /// reaches it; none when it reads at neither.
+    pub contents: Option<DefinitionContents>,
+    /// Its repository's open pull requests, the most recently updated first,
+    /// at most 20; none when GitHub could not list them for the person.
+    pub open_pull_requests: Option<Vec<DefinitionPullRequest>>,
+}
+
+/// The most open pull requests of a Factory Definition's repository its
+/// setting lists. `DefinitionSettings::open_pull_requests` names the number
+/// for the API's readers: change both together.
+pub const DEFINITION_PULL_REQUESTS_LISTED: usize = 20;
+
+/// What a Factory Definition holds at one commit, as its setting shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionContents {
+    /// The commit it was read at.
+    pub commit: String,
+    /// What the Definition is for, from `factory.json`.
+    pub description: String,
+    /// Its Flows, by name.
+    pub flows: Vec<DefinitionFlow>,
+    /// The Roles its Agents fill, by name.
+    pub roles: Vec<DefinitionRole>,
+    /// Its Standing Rules, from `rules.json`; none when it leaves them to
+    /// the factory's default.
+    pub standing_rules: Option<OrchestratorDefinition>,
+    /// Its Scorers, from `scorers.json`.
+    pub scorers: Vec<DefinitionScorer>,
+}
+
+/// A Flow of a Factory Definition, as its setting lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionFlow {
+    /// Its name, which a Run starts it by.
+    pub name: String,
+    /// What it does, for a person.
+    pub description: String,
+    /// Its entries' ids, in order.
+    pub entries: Vec<String>,
+}
+
+/// A Role of a Factory Definition and the Agents that fill it, the first
+/// its default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionRole {
+    /// The Role.
+    pub role: String,
+    /// The Agents that fill it, in order.
+    pub agents: Vec<String>,
+}
+
+/// A Scorer of a Factory Definition, as its setting lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionScorer {
+    /// Its name.
+    pub name: String,
+    /// The Flows whose Runs it judges; every Flow when empty.
+    pub flows: Vec<String>,
+    /// The percentage of those Runs it judges.
+    pub sample_percent: u8,
+}
+
+/// An open pull request on a Factory Definition's repository: a change to
+/// the Definition waiting to merge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionPullRequest {
+    /// Its number in the repository.
+    pub number: u64,
+    /// Its title.
+    pub title: String,
+    /// Its page on GitHub.
+    pub url: String,
+    /// Whether it is a draft.
+    pub draft: bool,
 }
 
 /// The Standing Rules a person's Runs are created with: their team's

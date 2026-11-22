@@ -33,7 +33,7 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
-    BranchUpdating, CodeRepository, CommitMade, ControlFilesSettings, DefinitionSettings,
+    BranchUpdating, DefinitionPullRequest, CodeRepository, CommitMade, ControlFilesSettings, DefinitionSettings,
     FactoryError, FinishedJob, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer,
     SessionStepRef, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport,
@@ -460,6 +460,15 @@ pub trait PullRequests: Send + Sync + 'static {
         repository: &CodeRepository,
         branch: &str,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// The open pull requests of `repository`, the most recently updated
+    /// first, at most `limit`.
+    fn open_pull_requests(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<DefinitionPullRequest>, Self::Err>> + Send;
 
     /// Ask GitHub to delete the branch of the Run `run_id` in
     /// `repository` ([`run_branch`](crate::domain::models::run_branch)), or

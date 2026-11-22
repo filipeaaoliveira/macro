@@ -2061,7 +2061,18 @@ key, ...) does not read. An admin of the team names it, in person, with `PUT
 `factory_team_definition`), which reads it first as them and refuses one that
 does not read (400 `invalidDefinition`, naming the file and the problem, or
 `unreachableDefinition`); `GET` reads it at its head as the caller and says
-why it does not read (`problem`). While a team names one, `POST /runs`, `GET
+why it does not read (`problem`). It also names the commit the newest Run of
+the team's members started under it read (`newestRun`,
+`RunRepository::newest_definition_read`), shows read-only what the
+Definition holds at that commit, or at its head when no Run read it yet or
+that commit does not read as the caller reaches it, for any reason (not
+linked to GitHub, the commit gone, GitHub down or limiting them: logged,
+never the setting's failure; none when the head does not read either)
+(`contents`: Flows with their entries, Roles with their Agents, Standing
+Rules and Scorers), and lists the repository's
+open pull requests (`openPullRequests`, at most
+`DEFINITION_PULL_REQUESTS_LISTED`; null when GitHub fails to list them,
+which does not fail the setting). While a team names one, `POST /runs`, `GET
 /flows` and an Automation's check read it as the Run's owner at the commit its
 default branch is at (`PullRequests::branch_head`, then `file_text` at that
 commit; `service/definition.rs`): the Run walks the Definition's Flow of that

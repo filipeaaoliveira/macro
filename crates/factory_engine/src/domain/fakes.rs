@@ -29,10 +29,11 @@ use chrono::Utc;
 use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     BudgetStop, CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart,
-    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
-    NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition,
-    RunEnd, RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step,
-    StepEnd, StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
+    ClaimedSession, ControlFileChanges, DefinitionRead, EntryId, Gate, GateAnswer, GateKind,
+    HandBack, HandedBack, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run,
+    RunDefinition, RunEnd, RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal,
+    Steered, Step, StepEnd, StepKey, StepSession, StepSteering, StoppingSession, TaskLink,
+    TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -43,7 +44,7 @@ use uuid::Uuid;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
+    BranchDeletion, DefinitionPullRequest, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     FinishedJob, GITHUB_COMMITTER, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
     PullRequestState, RepositoryAccess, RequiredChecks, run_branch,
 };
@@ -789,6 +790,35 @@ impl RunRepository for FakeRepo {
             .expect("team definitions")
             .get(&team_id)
             .cloned())
+    }
+
+    async fn newest_definition_read(
+        &self,
+        team_id: Uuid,
+        repo_url: &str,
+    ) -> Result<Option<DefinitionRead>, FakeError> {
+        let teams = self.teams.lock().expect("teams").clone();
+        Ok(self
+            .runs
+            .lock()
+            .expect("runs")
+            .values()
+            .filter(|run| {
+                teams
+                    .get(run.user_id.as_ref())
+                    .is_some_and(|team| team.team_id == team_id)
+            })
+            .filter_map(|run| {
+                let definition = run.definition.as_ref()?;
+                definition
+                    .repo_url
+                    .eq_ignore_ascii_case(repo_url)
+                    .then(|| DefinitionRead {
+                        commit: definition.commit.clone(),
+                        created_at: run.created_at,
+                    })
+            })
+            .max_by_key(|read| read.created_at))
     }
 
     async fn set_team_definition(
@@ -1749,6 +1779,13 @@ pub(crate) struct FakeGithubState {
     pub(crate) onto_fails: bool,
     /// The branches pull requests based on them were asked for, in order.
     pub(crate) onto_asked: Vec<String>,
+    /// The repository's open pull requests, as listed.
+    pub(crate) open_pull_requests: Vec<DefinitionPullRequest>,
+    /// Whether listing open pull requests fails, as GitHub down does.
+    pub(crate) open_pull_requests_fail: bool,
+    /// The commit whose files fail to read, as GitHub refusing a person
+    /// not linked to it, or limiting them, does.
+    pub(crate) file_reads_fail_at: Option<String>,
     /// How many times what the owner may do with the repository was read.
     pub(crate) access_reads: usize,
     /// Whether reading what the owner may do with the repository fails.
@@ -2029,6 +2066,9 @@ impl PullRequests for FakeGithub {
         if state.refused_files.contains(path) {
             return Err(FakeGithubError::TooLarge);
         }
+        if state.file_reads_fail_at.as_deref() == Some(branch) {
+            return Err(FakeGithubError::Down);
+        }
         Ok(state.files.get(&file).cloned())
     }
 
@@ -2196,6 +2236,24 @@ impl PullRequests for FakeGithub {
             return Err(FakeGithubError::Down);
         }
         Ok(state.based_on_branch)
+    }
+
+    async fn open_pull_requests(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        limit: usize,
+    ) -> Result<Vec<DefinitionPullRequest>, FakeGithubError> {
+        let state = self.state();
+        if state.open_pull_requests_fail {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(state
+            .open_pull_requests
+            .iter()
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     /// Deleting the Run's branch leaves it not there for later reads.

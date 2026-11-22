@@ -10,7 +10,9 @@ use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::standing_acts::StandingActRepository;
 use std::collections::BTreeMap;
 
-use factory_records::domain::models::{NewRunDefinition, RunFlow, RunId, TeamMembership};
+use factory_records::domain::models::{
+    DefinitionRead, NewRunDefinition, RunFlow, RunId, TeamMembership,
+};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use factory_records::domain::self_improvement::SelfImprovementRepository;
@@ -23,7 +25,10 @@ use crate::domain::definition::{
     DefinitionError, DefinitionFiles, DefinitionReadError, FactoryDefinition, read_definition,
 };
 use crate::domain::flow::Flow;
-use crate::domain::models::{CodeRepository, DefinitionSettings, FactoryError};
+use crate::domain::models::{
+    CodeRepository, DEFINITION_PULL_REQUESTS_LISTED, DefinitionContents, DefinitionFlow,
+    DefinitionPullRequest, DefinitionRole, DefinitionScorer, DefinitionSettings, FactoryError,
+};
 use crate::domain::ports::{
     FileRefusal, PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
 };
@@ -98,6 +103,46 @@ impl<G: PullRequests> DefinitionFiles for RepositoryFiles<'_, G> {
                 },
                 None => RepositoryFileError::Github(error),
             })
+    }
+}
+
+/// What `definition`, read at `commit`, holds, as its setting shows it.
+fn contents_of(commit: &str, definition: &FactoryDefinition) -> DefinitionContents {
+    DefinitionContents {
+        commit: commit.to_string(),
+        description: definition.description.clone(),
+        flows: definition
+            .flows
+            .iter()
+            .map(|(name, flow)| DefinitionFlow {
+                name: name.clone(),
+                description: flow.description.clone(),
+                entries: flow
+                    .entries
+                    .iter()
+                    .map(|entry| entry.id.to_string())
+                    .collect(),
+            })
+            .collect(),
+        roles: definition
+            .agents
+            .roles()
+            .map(|(role, agents)| DefinitionRole {
+                role: role.to_string(),
+                agents: agents.iter().map(ToString::to_string).collect(),
+            })
+            .collect(),
+        standing_rules: definition.rules.standing_rules,
+        scorers: definition
+            .evaluation
+            .scorers()
+            .iter()
+            .map(|scorer| DefinitionScorer {
+                name: scorer.name.clone(),
+                flows: scorer.flows.clone(),
+                sample_percent: scorer.sample_percent,
+            })
+            .collect(),
     }
 }
 
@@ -178,13 +223,40 @@ where
             .map_err(internal)?
             .filter(|commit| is_commit_id(commit))
             .ok_or(FactoryError::UnreachableDefinition)?;
+        let definition = self.definition_at(reader, &repository, &commit).await?;
+        let agents = serde_json::to_value(&definition.agents)
+            .map_err(|error| FactoryError::Internal(internal(error)))?;
+        let evaluation = serde_json::to_value(&definition.evaluation)
+            .map_err(|error| FactoryError::Internal(internal(error)))?;
+        Ok(PinnedDefinition {
+            repo_url: repository.url(),
+            branch: access.default_branch,
+            commit,
+            definition,
+            agents,
+            evaluation,
+        })
+    }
+
+    /// The Factory Definition in `repository`, read and checked at
+    /// `commit`, as `reader` reaches it on GitHub.
+    async fn definition_at(
+        &self,
+        reader: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        commit: &str,
+    ) -> Result<FactoryDefinition, FactoryError> {
+        // The commit goes into GitHub's paths: only a full commit id does.
+        if !is_commit_id(commit) {
+            return Err(FactoryError::UnreachableDefinition);
+        }
         let files = RepositoryFiles {
             github: &self.github,
             reader,
-            repository: &repository,
-            commit: &commit,
+            repository,
+            commit,
         };
-        let definition = read_definition(&files, |step| self.executor.serves(step))
+        read_definition(&files, |step| self.executor.serves(step))
             .await
             .map_err(|error| match error {
                 // GitHub's own words name the request; the Definition's
@@ -204,19 +276,7 @@ where
                     FactoryError::Internal(internal(error))
                 }
                 DefinitionReadError::Invalid(error) => FactoryError::InvalidDefinition(error),
-            })?;
-        let agents = serde_json::to_value(&definition.agents)
-            .map_err(|error| FactoryError::Internal(internal(error)))?;
-        let evaluation = serde_json::to_value(&definition.evaluation)
-            .map_err(|error| FactoryError::Internal(internal(error)))?;
-        Ok(PinnedDefinition {
-            repo_url: repository.url(),
-            branch: access.default_branch,
-            commit,
-            definition,
-            agents,
-            evaluation,
-        })
+            })
     }
 
     /// The Factory Definition `team` names, read at its default branch's
@@ -338,6 +398,21 @@ where
             Some(pinned) => self.requires_pull_request(actor, pinned).await,
             None => None,
         };
+        let (newest_run, contents, open_pull_requests) = match (&repo_url, team) {
+            (Some(repo_url), Some(team)) => {
+                let newest_run = self
+                    .repo
+                    .newest_definition_read(team.team_id, repo_url)
+                    .await
+                    .map_err(internal)?;
+                let (contents, open) = tokio::join!(
+                    self.shown_contents(actor, repo_url, newest_run.as_ref(), pinned.as_ref()),
+                    self.definition_pull_requests(actor, repo_url),
+                );
+                (newest_run, contents, open)
+            }
+            _ => (None, None, None),
+        };
         Ok(DefinitionSettings {
             repo_url,
             commit: pinned.map(|pinned| pinned.commit),
@@ -345,7 +420,69 @@ where
             requires_pull_request,
             team_id: team.map(|team| team.team_id),
             can_edit: editor && team.is_some_and(|team| team.admin),
+            newest_run,
+            contents,
+            open_pull_requests,
         })
+    }
+
+    /// What the setting shows the Definition `repo_url` holds: at the
+    /// commit `newest_run` read, or at its head (`head`, when it reads
+    /// there) when no Run read it yet or that commit does not read as
+    /// `actor` reaches it: not linked to GitHub, the commit gone, GitHub
+    /// down or limiting them. That is not the settings' failure.
+    async fn shown_contents(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        newest_run: Option<&DefinitionRead>,
+        head: Option<&PinnedDefinition>,
+    ) -> Option<DefinitionContents> {
+        let at_head = || head.map(|pinned| contents_of(&pinned.commit, &pinned.definition));
+        let Some(read) = newest_run else {
+            return at_head();
+        };
+        if let Some(pinned) = head.filter(|pinned| pinned.commit == read.commit) {
+            return Some(contents_of(&pinned.commit, &pinned.definition));
+        }
+        let Some(repository) = CodeRepository::parse(repo_url) else {
+            return at_head();
+        };
+        match self.definition_at(actor, &repository, &read.commit).await {
+            Ok(definition) => Some(contents_of(&read.commit, &definition)),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "the definition at the newest run's commit could not be read"
+                );
+                at_head()
+            }
+        }
+    }
+
+    /// The open pull requests of the Definition `repo_url`, as `reader`
+    /// reaches them; none when GitHub fails to list them, which is not the
+    /// settings' failure.
+    async fn definition_pull_requests(
+        &self,
+        reader: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> Option<Vec<DefinitionPullRequest>> {
+        let repository = CodeRepository::parse(repo_url)?;
+        match self
+            .github
+            .open_pull_requests(reader, &repository, DEFINITION_PULL_REQUESTS_LISTED)
+            .await
+        {
+            Ok(open) => Some(open),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "the definition's open pull requests could not be listed"
+                );
+                None
+            }
+        }
     }
 
     /// Whether `pinned`'s default branch takes changes only through a pull
