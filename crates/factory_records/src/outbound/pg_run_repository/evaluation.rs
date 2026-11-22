@@ -19,6 +19,7 @@ use crate::domain::evaluation::{
 };
 use crate::domain::insights::InsightsScope;
 use crate::domain::models::{EntryId, Outcome, RunId, RunOutcome};
+use crate::domain::ports::RunRepository;
 
 /// A count the schema keeps far below `u32::MAX`: insights read a capped
 /// number of Runs.
@@ -263,6 +264,9 @@ impl EvaluationRepository for PgRunRepository {
             }
         };
 
+        let mut sessions = RunRepository::step_sessions(self, run_id).await?;
+        sessions.sort_unstable();
+
         Ok(Some(ScoringSubject {
             run_id,
             user_id: MacroUserIdStr::try_from(run.user_id.clone())
@@ -273,6 +277,7 @@ impl EvaluationRepository for PgRunRepository {
             base_branch: run.base_branch,
             outcome: run_outcome(run.outcome)?,
             steps,
+            sessions,
             trial,
             judged,
             evaluation: run.definition_evaluation,

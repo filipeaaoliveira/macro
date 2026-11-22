@@ -547,7 +547,9 @@ pub trait RunRepository: Send + Sync + 'static {
 
     /// The agent sessions the Run `id`'s Steps worked in, each once, as
     /// Insights reads them: a Step that went on from its agent's question
-    /// shares the asking Step's session.
+    /// shares the asking Step's session, and a Step that went on in a new
+    /// session (its first was lost, or its Agent could not start) counts
+    /// the one it left too.
     fn step_sessions(&self, id: RunId)
     -> impl Future<Output = Result<Vec<Uuid>, Self::Err>> + Send;
 

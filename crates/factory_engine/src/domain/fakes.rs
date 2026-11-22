@@ -71,6 +71,9 @@ pub(crate) struct FakeSession {
     pub(crate) opened: bool,
     /// The session whose setup commands passed, and how many of them.
     pub(crate) setup: Option<(Uuid, u16)>,
+    /// The sessions the Step left for a new one, which its Run's token
+    /// budget still counts.
+    pub(crate) left: Vec<Uuid>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1132,6 +1135,7 @@ impl RunRepository for FakeRepo {
             prepared_at: None,
             opened: false,
             setup: None,
+            left: Vec::new(),
         });
         Ok(ClaimedSession { session, new: true })
     }
@@ -1154,6 +1158,7 @@ impl RunRepository for FakeRepo {
             return Ok(false);
         };
         if let Some(to) = to {
+            claimed.left.push(claimed.session.session_id);
             claimed.session = to.clone();
             claimed.prepared_at = None;
             claimed.opened = false;
@@ -1564,7 +1569,13 @@ impl RunRepository for FakeRepo {
             .expect("sessions")
             .iter()
             .filter(|claimed| claimed.key.run_id == id)
-            .map(|claimed| claimed.session.session_id)
+            .flat_map(|claimed| {
+                claimed
+                    .left
+                    .iter()
+                    .copied()
+                    .chain([claimed.session.session_id])
+            })
             .collect();
         sessions.sort();
         sessions.dedup();

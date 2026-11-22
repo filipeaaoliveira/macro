@@ -311,17 +311,26 @@ impl RunQualityRepository for PgRunRepository {
 
         // The Runs' agent sessions and the bot that ran each, through
         // `factory_step`'s primary key; a Step that went on after a question
-        // shares the asking Step's session, which counts once. A session
-        // keeps one bot, which a Step from before Steps recorded it lacks.
+        // shares the asking Step's session, which counts once. The sessions
+        // Steps left count too, as the Run's token budget counts them, with
+        // the bot of the Step that left them. A session keeps one bot, which
+        // a Step from before Steps recorded it lacks.
         let sessions = sqlx::query!(
             r#"
-            SELECT run_id, session_id AS "session_id!",
+            SELECT run_id AS "run_id!", session_id AS "session_id!",
                 (array_agg(bot_id) FILTER (WHERE bot_id IS NOT NULL))[1] AS bot_id
             FROM (
-                SELECT run_id, session_id, bot_id
-                FROM factory_step
-                WHERE run_id = ANY($1)
-                OFFSET 0
+                (
+                    SELECT run_id, session_id, bot_id
+                    FROM factory_step
+                    WHERE run_id = ANY($1)
+                    OFFSET 0
+                )
+                UNION ALL
+                SELECT u.run_id, u.session_id, s.bot_id
+                FROM factory_step_used_session u
+                JOIN factory_step s ON s.run_id = u.run_id AND s.seq = u.seq
+                WHERE u.run_id = ANY($1)
             ) steps
             WHERE session_id IS NOT NULL
             GROUP BY run_id, session_id

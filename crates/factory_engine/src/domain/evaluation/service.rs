@@ -9,7 +9,6 @@ use factory_records::domain::evaluation::{
 };
 use factory_records::domain::models::{Outcome, RunId, RunOutcome};
 use serde_json::json;
-use uuid::Uuid;
 
 use super::{EvaluationDefinition, ScorerDefinition};
 use crate::domain::models::{BranchDeletion, CodeRepository, StepError, run_branch};
@@ -326,15 +325,12 @@ where
     ) -> Result<bool, StepError> {
         let lost = subject.outcome == Some(RunOutcome::Infrastructure);
         if !trial.scored && !lost {
-            let sessions: Vec<Uuid> = subject
-                .steps
-                .iter()
-                .filter_map(|step| step.session_id)
-                .collect();
+            // The sessions the Run's token budget and Insights count, each
+            // once: a session lost after its agent worked in it too.
             let mut tokens = TrialTokens::default();
             for used in self
                 .usage
-                .session_tokens(&subject.user_id, &sessions)
+                .session_tokens(&subject.user_id, &subject.sessions)
                 .await
                 .map_err(internal)?
             {

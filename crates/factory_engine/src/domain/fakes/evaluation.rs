@@ -11,6 +11,7 @@ use factory_records::domain::evaluation::{
 };
 use factory_records::domain::insights::InsightsScope;
 use factory_records::domain::models::RunId;
+use factory_records::domain::ports::RunRepository as _;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -142,6 +143,8 @@ impl EvaluationRepository for FakeRepo {
     }
 
     async fn scoring_subject(&self, run_id: RunId) -> Result<Option<ScoringSubject>, FakeError> {
+        // Read before any lock is held: the read takes its own.
+        let used = self.step_sessions(run_id).await?;
         let Some(run) = self.runs.lock().expect("runs").get(&run_id).cloned() else {
             return Ok(None);
         };
@@ -185,6 +188,7 @@ impl EvaluationRepository for FakeRepo {
             base_branch: run.repository.map(|repository| repository.base_branch),
             outcome: run.end.map(|end| end.outcome),
             steps,
+            sessions: used,
             trial,
             judged,
             evaluation: self

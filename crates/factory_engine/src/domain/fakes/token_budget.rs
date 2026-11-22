@@ -1,6 +1,6 @@
 //! A usage log the tests set: what Runs' agent sessions used.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use macro_user_id::user_id::MacroUserIdStr;
@@ -18,6 +18,9 @@ pub(crate) struct FakeRunTokens {
     pub(crate) asked: Arc<Mutex<usize>>,
     /// Every read finds the sessions recorded no usage at all.
     pub(crate) unmeasured: bool,
+    /// What each session used, when reads sum what they are asked for
+    /// rather than answer `reads`: a session asked twice counts twice.
+    by_session: Option<Arc<HashMap<Uuid, u64>>>,
 }
 
 impl FakeRunTokens {
@@ -25,6 +28,15 @@ impl FakeRunTokens {
     pub(crate) fn reading(reads: impl IntoIterator<Item = Option<u64>>) -> Self {
         Self {
             reads: Arc::new(Mutex::new(reads.into_iter().collect())),
+            ..Self::default()
+        }
+    }
+
+    /// A log whose reads sum what each session asked for used, by
+    /// `sessions`; a session it does not list used nothing.
+    pub(crate) fn by_session(sessions: impl IntoIterator<Item = (Uuid, u64)>) -> Self {
+        Self {
+            by_session: Some(Arc::new(sessions.into_iter().collect())),
             ..Self::default()
         }
     }
@@ -48,9 +60,17 @@ impl RunTokens for FakeRunTokens {
     async fn used(
         &self,
         _owner: &MacroUserIdStr<'static>,
-        _sessions: &[Uuid],
+        sessions: &[Uuid],
     ) -> Result<Option<u64>, rootcause::Report> {
         *self.asked.lock().expect("asked") += 1;
+        if let Some(used) = &self.by_session {
+            return Ok(Some(
+                sessions
+                    .iter()
+                    .map(|session| used.get(session).copied().unwrap_or(0))
+                    .sum(),
+            ));
+        }
         let next = self.reads.lock().expect("reads").pop_front();
         let read = match next {
             Some(read) => {
