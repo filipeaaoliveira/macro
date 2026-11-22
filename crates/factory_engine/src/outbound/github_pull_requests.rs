@@ -17,9 +17,10 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, DefinitionPullRequest, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
-    CommitStatus, FailureAnnotation, FinishedJob, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, PullRequestState, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
+    CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, Merging,
+    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
+    RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;

@@ -44,9 +44,9 @@ use uuid::Uuid;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, DefinitionPullRequest, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
-    FinishedJob, GITHUB_COMMITTER, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
-    PullRequestState, RepositoryAccess, RequiredChecks, run_branch,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
+    DefinitionPullRequest, FinishedJob, GITHUB_COMMITTER, HeadChecks, Merging, OpenPullRequest,
+    Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
