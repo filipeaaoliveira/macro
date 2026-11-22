@@ -30,6 +30,11 @@ fn blocker(seq: u16, role: &str, path: &str, lines: Option<(u32, u32)>) -> Revie
         problem: "Drops the error".to_string(),
         why: "The caller never learns it failed".to_string(),
         blocks_anywhere: false,
+        repeats_dropped: false,
+        fix_status: None,
+        dispute: None,
+        ruling: None,
+        ruled_by: None,
         kind: Some(FindingKind::Blocker),
         follow_up_task_id: None,
         follow_up_key: None,
@@ -139,6 +144,7 @@ fn repeated_blockers_go_to_the_owner_only_with_the_owner_section_on() {
     let repeated = GateFacts {
         fix_rounds: 1,
         repeated_blockers: true,
+        dismissed: false,
         ..facts(RuleGateKind::Blockers)
     };
     assert_eq!(
@@ -167,6 +173,7 @@ fn repeated_blockers_go_to_the_owner_only_with_the_owner_section_on() {
 
     let changed = GateFacts {
         repeated_blockers: false,
+        dismissed: false,
         ..repeated
     };
     assert!(rule_answer(Some(OWNER_GATES), &changed, &fix_or_stop()).is_some());

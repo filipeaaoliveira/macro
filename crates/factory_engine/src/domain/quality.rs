@@ -28,7 +28,7 @@ use factory_records::domain::models::{RunId, RunOutcome};
 use factory_records::domain::quality::{
     CI_NAME_BYTES, CiJob, CiJobResult, CiVerdict, QualityRecords, QualityRun, QualityScope,
 };
-use factory_records::domain::review_rounds::ReviewRoundOutcome;
+use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRoundOutcome};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 use uuid::Uuid;
@@ -490,6 +490,10 @@ pub struct ReviewQuality {
     pub new_blockers: u32,
     /// Blockers an earlier round of their Run found too: not fixed.
     pub repeated_blockers: u32,
+    /// What became of the Blockers given to a fix: fixed as the fixer
+    /// says, or disputed and then upheld or dropped, and the findings
+    /// dismissed, over every reviewed Run.
+    pub resolutions: BlockerResolutions,
     /// Blockers by reviewer Role, most first.
     pub by_reviewer: Vec<BlockerCount>,
     /// Blockers by Agent, most first.
@@ -948,7 +952,13 @@ fn review_quality(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) 
         last: DateTime<Utc>,
     }
     let mut texts: BTreeMap<String, Recurring> = BTreeMap::new();
+    let mut resolutions = BlockerResolutions::default();
     for blocker in ordered {
+        if blocker.dismissed {
+            resolutions.dismissed += 1;
+            continue;
+        }
+        resolutions.count(blocker.fix_status, blocker.ruling);
         let text = blocker_text(&blocker.problem);
         let earlier = found_before.entry(blocker.run_id).or_default();
         let repeated = earlier
@@ -1021,6 +1031,7 @@ fn review_quality(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) 
         blockers: new_blockers + repeated_blockers,
         new_blockers,
         repeated_blockers,
+        resolutions,
         by_reviewer: by_count(by_reviewer),
         by_agent: by_count(by_agent),
         recurring,

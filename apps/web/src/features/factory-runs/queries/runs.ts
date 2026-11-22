@@ -171,6 +171,8 @@ export function toRun(detail: RunDetail): Run {
         }
       : undefined,
     baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
+    // A service older than disputes sends none.
+    blockerResolutions: detail.blockerResolutions ?? undefined,
     // A Run with no budget, and a service older than budgets, send none.
     tokenBudget: detail.tokenBudget
       ? {
@@ -217,6 +219,9 @@ export function toRun(detail: RunDetail): Run {
         blocksAnywhere: finding.blocksAnywhere,
         kind: finding.kind ?? undefined,
         followUpTaskId: finding.followUpTaskId ?? undefined,
+        fixStatus: finding.fixStatus ?? undefined,
+        dispute: finding.dispute ?? undefined,
+        ruling: finding.ruling ?? undefined,
       })),
     })),
   };

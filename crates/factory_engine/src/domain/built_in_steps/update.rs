@@ -34,6 +34,7 @@ use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::{BranchUpdate, MergeQueueRepository};
 use factory_records::domain::models::Outcome;
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::ReviewRoundRepository;
 
 use super::{BuiltInStepError, BuiltInSteps, outcomes};
 use crate::domain::flow::StepName;
@@ -57,7 +58,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository + MergeQueueRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
 {
     /// Merge the Run's base into its branch and check it again.
@@ -85,7 +86,7 @@ where
                     .replace("{base_sha}", &update.base_sha)
                     .replace("{head}", &head);
                 let checked = self
-                    .work_and_check(step, &instructions, vec![Outcome::done()], input)
+                    .work_and_check(step, &instructions, vec![Outcome::done()], input, None)
                     .await?;
                 if checked.outcome != Outcome::done() {
                     return Ok(checked);
@@ -126,7 +127,13 @@ where
                     .replace("{base_sha}", &update.base_sha)
                     .replace("{branch}", &run_branch(input.key.run_id));
                 let resolved = self
-                    .work_and_check(step, &instructions, outcomes(&["done", CONFLICT]), input)
+                    .work_and_check(
+                        step,
+                        &instructions,
+                        outcomes(&["done", CONFLICT]),
+                        input,
+                        None,
+                    )
                     .await?;
                 if resolved.outcome != Outcome::done() {
                     return Ok(resolved);

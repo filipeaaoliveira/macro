@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+import type { BlockerResolutions } from './blockerResolutions';
 import type { ReviewRound } from './reviewRound';
 import type { Run } from './run';
 import type { RunAgentRule } from './runAgentRule';
@@ -24,6 +25,9 @@ or its repository as it started. A Role no rule chose for is not
 listed. */
   agentRules: RunAgentRule[];
   baseRequiredChecks?: RunDetailBaseRequiredChecks;
+  /** What became of its Blockers: fixed, or disputed and then upheld or
+dropped. */
+  blockerResolutions: BlockerResolutions;
   mainHold?: RunDetailMainHold;
   /** Its review rounds, in order, each with what its reviewers found. */
   reviewRounds: ReviewRound[];

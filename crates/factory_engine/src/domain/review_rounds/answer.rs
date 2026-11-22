@@ -19,6 +19,12 @@ pub struct ReviewerAnswer {
     pub summary: String,
     /// Its Blockers, in the order it gave them.
     pub findings: Vec<Finding>,
+    /// The disputed Blockers of the round before it dropped, by their
+    /// number among the Blockers carried, from 1, each once, in order.
+    pub dropped: Vec<usize>,
+    /// The Blockers of the round before it found again (`previous`), by
+    /// their number, in the order it gave them.
+    pub listed_again: Vec<usize>,
 }
 
 /// Why a reviewer's hand back does not read.
@@ -41,6 +47,13 @@ pub enum ReviewerAnswerError {
     /// lists none.
     #[error("an answer that passes lists no blocker, and one that asks for changes lists some")]
     OutcomeAndBlockers,
+    /// It drops a Blocker that is not a dispute it rules on, or drops one
+    /// it also lists again.
+    #[error(
+        "`dropped` lists only the numbers of the disputed blockers you rule on, and none you \
+         also list again as `previous`"
+    )]
+    InvalidRuling,
 }
 
 /// A Blocker as the reviewer writes it.
@@ -64,6 +77,10 @@ struct WrittenBlocker {
 #[derive(Deserialize)]
 struct WrittenBlockers {
     blockers: Vec<WrittenBlocker>,
+    /// The numbers of the disputed Blockers of the round before the
+    /// reviewer drops.
+    #[serde(default)]
+    dropped: Vec<u32>,
 }
 
 /// The path of a finding about the whole change rather than one file.
@@ -81,6 +98,19 @@ impl ReviewerAnswer {
         text: &str,
         carried: usize,
     ) -> Result<Self, ReviewerAnswerError> {
+        Self::read_ruling(outcome, text, carried, &[])
+    }
+
+    /// Read what a reviewer handed back, as [`Self::read`] does, when it
+    /// rules on the disputes among the `carried` Blockers numbered
+    /// `rules`: its block may then list, as `dropped`, the numbers of
+    /// those it drops. One it drops it may not also list again.
+    pub fn read_ruling(
+        outcome: &Outcome,
+        text: &str,
+        carried: usize,
+        rules: &[usize],
+    ) -> Result<Self, ReviewerAnswerError> {
         let (summary, block) = json_block(text)
             .ok_or_else(|| ReviewerAnswerError::NoBlockers("no fenced json block".to_string()))?;
         let written: WrittenBlockers = serde_json::from_str(block)
@@ -90,7 +120,11 @@ impl ReviewerAnswer {
         }
 
         let mut findings = Vec::with_capacity(written.blockers.len());
+        let mut previous: Vec<usize> = Vec::new();
         for (index, blocker) in written.blockers.into_iter().enumerate() {
+            if let Some(number) = blocker.previous.and_then(|n| usize::try_from(n).ok()) {
+                previous.push(number);
+            }
             let finding =
                 finding(blocker, carried).ok_or(ReviewerAnswerError::InvalidBlocker(index + 1))?;
             findings.push(finding);
@@ -99,7 +133,25 @@ impl ReviewerAnswer {
         if passes != findings.is_empty() {
             return Err(ReviewerAnswerError::OutcomeAndBlockers);
         }
-        Ok(Self { summary, findings })
+
+        let mut dropped: Vec<usize> = Vec::with_capacity(written.dropped.len());
+        for number in written.dropped {
+            let number = usize::try_from(number).map_err(|_| ReviewerAnswerError::InvalidRuling)?;
+            let listed_again = previous.contains(&number);
+            if !rules.contains(&number) || listed_again {
+                return Err(ReviewerAnswerError::InvalidRuling);
+            }
+            if !dropped.contains(&number) {
+                dropped.push(number);
+            }
+        }
+        dropped.sort_unstable();
+        Ok(Self {
+            summary,
+            findings,
+            dropped,
+            listed_again: previous,
+        })
     }
 
     /// The answer of a reviewer whose hand back did not read, even when it
@@ -115,7 +167,10 @@ impl ReviewerAnswer {
                 problem: "The reviewer could not hand back a review that reads.".to_string(),
                 why: cut(&why, MAX_FINDING_TEXT_BYTES).to_string(),
                 blocks_anywhere: true,
+                repeats_dropped: false,
             }],
+            dropped: Vec::new(),
+            listed_again: Vec::new(),
         }
     }
 
@@ -129,6 +184,13 @@ impl ReviewerAnswer {
                 text.push_str(&format!("\n{}. {}", index + 1, describe(finding)));
             }
             text.push('\n');
+        }
+        if !self.dropped.is_empty() {
+            let numbers: Vec<String> = self.dropped.iter().map(ToString::to_string).collect();
+            text.push_str(&format!(
+                "\nDropped the disputed blockers of the round before numbered {}.\n",
+                numbers.join(", ")
+            ));
         }
         cut_to_output(text)
     }
@@ -201,6 +263,7 @@ fn finding(blocker: WrittenBlocker, carried: usize) -> Option<Finding> {
         problem,
         why,
         blocks_anywhere,
+        repeats_dropped: false,
     })
 }
 
@@ -218,7 +281,9 @@ pub(super) fn place(path: &str, lines: Option<Lines>) -> String {
 
 /// One finding, for a person or an agent to read.
 fn describe(finding: &Finding) -> String {
-    let again = if finding.blocks_anywhere && finding.path != WHOLE_CHANGE {
+    let again = if finding.repeats_dropped {
+        " (dropped before in this visit: it blocks nothing)"
+    } else if finding.blocks_anywhere && finding.path != WHOLE_CHANGE {
         " (still there from the round before)"
     } else {
         ""

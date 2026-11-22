@@ -1,5 +1,7 @@
 //! A reviewer's Step of a review round, with an agent the test scripts.
 
+mod dispute;
+
 use factory_records::domain::standing_rules::RunRules;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -127,6 +129,26 @@ const PASSES: &str = "Checked it.\n```json\n{\"blockers\": []}\n```";
 /// round 2 at Step 5, `fix_diff` or not, whose first reviewer's Step is
 /// started: the round 2 recorded.
 async fn second_round(repo: &FakeRepo, blockers: &[&str], fix_diff: bool) -> (RunId, ReviewRound) {
+    let found: Vec<Finding> = blockers
+        .iter()
+        .map(|path| Finding {
+            path: path.to_string(),
+            lines: None,
+            problem: format!("{path} drops the error"),
+            why: "Saves look done".to_string(),
+            blocks_anywhere: false,
+            repeats_dropped: false,
+        })
+        .collect();
+    second_round_finding(repo, &found, fix_diff).await
+}
+
+/// [`second_round`], with round 1 having found the Blockers `found`.
+async fn second_round_finding(
+    repo: &FakeRepo,
+    found: &[Finding],
+    fix_diff: bool,
+) -> (RunId, ReviewRound) {
     let run_id = RunId::generate();
     let RunInsert::Inserted(_) = repo
         .insert_run(NewRun {
@@ -164,21 +186,9 @@ async fn second_round(repo: &FakeRepo, blockers: &[&str], fix_diff: bool) -> (Ru
         .expect("round 1");
     let first = StepKey { run_id, seq: 3 };
     repo.start_step(first, &entry, 1).await.expect("start");
-    let found: Vec<Finding> = blockers
-        .iter()
-        .map(|path| Finding {
-            path: path.to_string(),
-            lines: None,
-            problem: format!("{path} drops the error"),
-            why: "Saves look done".to_string(),
-            blocks_anywhere: false,
-        })
-        .collect();
-    repo.record_findings(first, 3, &found)
-        .await
-        .expect("record");
+    repo.record_findings(first, 3, found).await.expect("record");
     let classes: Vec<FindingClass> = (1..)
-        .zip(blockers)
+        .zip(found)
         .map(|(place, _)| FindingClass {
             seq: 3,
             place,

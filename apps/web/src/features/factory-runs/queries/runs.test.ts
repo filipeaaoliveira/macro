@@ -65,6 +65,12 @@ const started: RunDetail = {
   standingActs: [],
   agentRules: [],
   taskTagsUnread: false,
+  blockerResolutions: {
+    fixed: 0,
+    disputedUpheld: 0,
+    disputedDropped: 0,
+    dismissed: 0,
+  },
   reviewRounds: [
     {
       round: 1,
@@ -125,6 +131,12 @@ describe('createAppRunsContext', () => {
       standingActs: [],
       agentRules: [],
       taskTagsUnread: false,
+      blockerResolutions: {
+        fixed: 0,
+        disputedUpheld: 0,
+        disputedDropped: 0,
+        dismissed: 0,
+      },
       request: 'Add a due date column',
       createdAt: '2026-11-16T09:00:00Z',
       ownerId: 'macro|owner@example.com',

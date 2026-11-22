@@ -464,6 +464,7 @@ async fn an_improvement_run_merges_only_by_a_person() {
             tampered: kept.is_tampered(),
             held: false,
             repeated_blockers: false,
+            dismissed: false,
         };
         let offered = [
             Outcome::try_from("approve".to_string()).expect("valid"),

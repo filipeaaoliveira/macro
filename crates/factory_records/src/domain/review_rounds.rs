@@ -23,6 +23,10 @@ pub const MAX_FINDING_PATH_BYTES: usize = 1_024;
 /// `factory_review_finding` checks).
 pub const MAX_FINDING_TEXT_BYTES: usize = 4_096;
 
+/// The most bytes a fix's reason to dispute a Blocker keeps (the
+/// `factory_review_finding_dispute` check); a longer one is cut.
+pub const MAX_DISPUTE_BYTES: usize = 2_048;
+
 /// The lines of a file a finding is about, from 1, both included.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +51,9 @@ pub struct Finding {
     /// Whether it blocks wherever it is: a Blocker of the round before
     /// found again, or a reviewer's answer that never read.
     pub blocks_anywhere: bool,
+    /// Whether its reviewer raises again a Blocker it dropped in this
+    /// visit of its entry: it is then dismissed, and blocks nothing.
+    pub repeats_dropped: bool,
 }
 
 /// What a finding turned out to be once its round ended.
@@ -59,6 +66,9 @@ pub enum FindingKind {
     /// Outside the diff under review: a follow-up task of its own, which
     /// does not hold the pull request.
     FollowUp,
+    /// A Blocker its reviewer dropped earlier in the visit, raised again:
+    /// kept, but it blocks nothing and becomes no task.
+    Dismissed,
 }
 
 impl FindingKind {
@@ -67,7 +77,144 @@ impl FindingKind {
         match self {
             Self::Blocker => "blocker",
             Self::FollowUp => "follow_up",
+            Self::Dismissed => "dismissed",
         }
+    }
+}
+
+/// What the fix said of a Blocker it was given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FixStatus {
+    /// It fixed it.
+    Fixed,
+    /// It disputes it, with why: the next round's reviewer rules on it.
+    Disputed,
+}
+
+impl FixStatus {
+    /// The status or ruling kept as `word`, if it is one.
+    pub fn from_word(word: &str) -> Option<Self> {
+        match word {
+            "fixed" => Some(Self::Fixed),
+            "disputed" => Some(Self::Disputed),
+            _ => None,
+        }
+    }
+
+    /// The word the status is kept as.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::Disputed => "disputed",
+        }
+    }
+}
+
+/// How the next round's reviewer ruled on a disputed Blocker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DisputeRuling {
+    /// The Blocker stands, and blocks again: the reviewer listed it again,
+    /// or did not drop it.
+    Upheld,
+    /// The reviewer dropped it: it is dismissed and blocks nothing.
+    Dropped,
+}
+
+impl DisputeRuling {
+    /// The status or ruling kept as `word`, if it is one.
+    pub fn from_word(word: &str) -> Option<Self> {
+        match word {
+            "upheld" => Some(Self::Upheld),
+            "dropped" => Some(Self::Dropped),
+            _ => None,
+        }
+    }
+
+    /// The word the ruling is kept as.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Upheld => "upheld",
+            Self::Dropped => "dropped",
+        }
+    }
+}
+
+/// What the fix said of the Blocker at `seq` and `place`, for
+/// [`ReviewRoundRepository::record_fix`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixAnswer {
+    /// The reviewer's Step that found the Blocker.
+    pub seq: u16,
+    /// The Blocker's place among what the reviewer handed back.
+    pub place: u16,
+    /// Fixed or disputed.
+    pub status: FixStatus,
+    /// Why it is disputed, at most [`MAX_DISPUTE_BYTES`]; none when fixed.
+    pub dispute: Option<String>,
+}
+
+/// A reviewer's ruling on the disputed Blocker of the round before at
+/// `seq` and `place`, for [`ReviewRoundRepository::record_findings`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ruling {
+    /// The reviewer's Step that found the disputed Blocker.
+    pub seq: u16,
+    /// Its place.
+    pub place: u16,
+    /// Upheld or dropped.
+    pub ruling: DisputeRuling,
+}
+
+/// What became of a Run's Blockers: fixed as the fixer says, or disputed
+/// and then upheld or dropped, and the findings dismissed as repeats of a
+/// dropped one. A dispute no round ruled on yet counts as upheld.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockerResolutions {
+    /// Blockers the fixer said it fixed: its claim, which the next round
+    /// checks.
+    pub fixed: u32,
+    /// Blockers the fix disputed that a reviewer upheld, or did not drop.
+    pub disputed_upheld: u32,
+    /// Blockers the fix disputed that a reviewer dropped.
+    pub disputed_dropped: u32,
+    /// Findings dismissed: a reviewer raised again, in a later round of the
+    /// visit, the same problem at the same lines as a Blocker it dropped.
+    pub dismissed: u32,
+}
+
+impl BlockerResolutions {
+    /// Count one Blocker the fix answered with `status`, and ruled on
+    /// with `ruling`.
+    pub fn count(&mut self, status: Option<FixStatus>, ruling: Option<DisputeRuling>) {
+        match (status, ruling) {
+            (Some(FixStatus::Fixed), _) => self.fixed += 1,
+            (Some(FixStatus::Disputed), Some(DisputeRuling::Dropped)) => {
+                self.disputed_dropped += 1;
+            }
+            (Some(FixStatus::Disputed), _) => self.disputed_upheld += 1,
+            (None, _) => {}
+        }
+    }
+
+    /// What became of the Blockers of a Run's `rounds`, and its findings
+    /// dismissed.
+    pub fn of_rounds(rounds: &[ReviewRound]) -> Self {
+        let mut counts = Self::default();
+        for blocker in rounds.iter().flat_map(ReviewRound::blockers) {
+            counts.count(blocker.fix_status, blocker.ruling);
+        }
+        counts.dismissed = u32::try_from(
+            rounds
+                .iter()
+                .flat_map(|round| &round.findings)
+                .filter(|finding| finding.kind == Some(FindingKind::Dismissed))
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
+        counts
     }
 }
 
@@ -92,6 +239,20 @@ pub struct ReviewFinding {
     /// Whether it blocks wherever it is: a Blocker of the round before
     /// found again, or a reviewer's answer that never read.
     pub blocks_anywhere: bool,
+    /// Whether its reviewer raised again a Blocker it dropped in this
+    /// visit: it is then dismissed.
+    #[serde(skip)]
+    pub repeats_dropped: bool,
+    /// What the fix said of it, when it was a Blocker the fix was given.
+    pub fix_status: Option<FixStatus>,
+    /// Why the fix disputes it, as the fixer wrote it.
+    pub dispute: Option<String>,
+    /// How the next round's reviewer ruled on the dispute; none until a
+    /// reviewer answered.
+    pub ruling: Option<DisputeRuling>,
+    /// The reviewer's Step that ruled on the dispute.
+    #[serde(skip)]
+    pub ruled_by: Option<u16>,
     /// What it turned out to be; none while its round reviews.
     pub kind: Option<FindingKind>,
     /// The follow-up task it became, when it is a follow-up and the task
@@ -298,7 +459,31 @@ pub trait ReviewRoundRepository: Send + Sync + 'static {
         key: StepKey,
         round_seq: u16,
         findings: &[Finding],
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send {
+        self.record_answer(key, round_seq, findings, &[])
+    }
+
+    /// Record a reviewer's answer as [`Self::record_findings`] does, with
+    /// its `rulings` on the disputed Blockers of the round before: they
+    /// replace the rulings an earlier attempt of the Step made, and a
+    /// dispute another Step ruled on keeps its ruling.
+    fn record_answer(
+        &self,
+        key: StepKey,
+        round_seq: u16,
+        findings: &[Finding],
+        rulings: &[Ruling],
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Record what the fix said of the Blockers of the Run's round
+    /// `round_seq`, replacing what it said before, on the Blockers no
+    /// reviewer has ruled on yet: a ruled dispute keeps what the fix said.
+    fn record_fix(
+        &self,
+        run_id: RunId,
+        round_seq: u16,
+        answers: &[FixAnswer],
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The prompt in which the reviewer of the Step `key`, in the round
     /// that starts at `round_seq`, is asked once more for an answer that

@@ -16,6 +16,8 @@
 //!   may still go to a fix, which approves nothing, and `merge` reads the
 //!   Control Files again before it merges;
 //! - merge while the base branch has a Main Hold;
+//! - merge a Run whose review dismissed a finding as the repeat of a
+//!   Blocker its reviewer dropped ([`any_dismissed`]);
 //! - send Blockers to more fixes in a row than [`rule_fix_limit`] allows;
 //! - with the owner section on, send a round's Blockers to a fix when they
 //!   are the round before's, unchanged after the rule sent those to a fix
@@ -27,7 +29,7 @@
 mod test;
 
 use factory_records::domain::models::{Outcome, Step};
-use factory_records::domain::review_rounds::ReviewRound;
+use factory_records::domain::review_rounds::{FindingKind, ReviewRound};
 use factory_records::domain::standing_rules::{OrchestratorDefinition, RuleGateKind, StandingRule};
 use serde::{Deserialize, Serialize};
 
@@ -88,6 +90,11 @@ pub struct GateFacts {
     /// round before's, unchanged after the rule sent those to a fix
     /// ([`repeated_blockers`]); false for other Gates.
     pub repeated_blockers: bool,
+    /// For a merge Gate, whether a review round of the Run dismissed a
+    /// finding as the repeat of a Blocker its reviewer dropped: no rule
+    /// merges such a Run, a person does (the stand-in never merges); false
+    /// for other Gates.
+    pub dismissed: bool,
 }
 
 /// A Standing Rule's answer to a Gate: the rule, and the answer it gives.
@@ -121,6 +128,9 @@ pub fn rule_answer(
         // request's head still the commit `ci` called green, with its
         // checks still passing.
         RuleGateKind::Merge if facts.held => return None,
+        // A finding dismissed as a dropped Blocker's repeat is a person's
+        // to judge before the change merges.
+        RuleGateKind::Merge if facts.dismissed => return None,
         RuleGateKind::Merge => "approve",
     };
     let answer = Outcome::try_from(answer.to_string()).ok()?;
@@ -128,6 +138,14 @@ pub fn rule_answer(
         rule: facts.kind.rule(),
         answer,
     })
+}
+
+/// Whether any review round of the Run, `rounds`, dismissed a finding.
+pub fn any_dismissed(rounds: &[ReviewRound]) -> bool {
+    rounds
+        .iter()
+        .flat_map(|round| &round.findings)
+        .any(|finding| finding.kind == Some(FindingKind::Dismissed))
 }
 
 /// Whether the review round the Gate at `seq` asks about found the round

@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                run_id, seq, round_seq, problem, fix_status, ruling,\n                kind = 'dismissed' AS \"dismissed!\"\n            FROM factory_review_finding\n            WHERE run_id = ANY($1) AND kind IN ('blocker', 'dismissed')\n            ORDER BY run_id, seq, place\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "round_seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "problem",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "fix_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "ruling",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "dismissed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "d95d2a6c24492f26eeea9e17ef4905cfa928979aff1bd24e67aa21ca90214bfb"
+}

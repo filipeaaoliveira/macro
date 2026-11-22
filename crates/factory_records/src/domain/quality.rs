@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::insights::{InsightsScope, RunSummary};
 use crate::domain::models::{RunId, StepKey};
-use crate::domain::review_rounds::ReviewRoundOutcome;
+use crate::domain::review_rounds::{DisputeRuling, FixStatus, ReviewRoundOutcome};
 
 /// How a wait on a pull request's checks ended, as its `ci` Step routes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,7 +223,8 @@ pub struct ReviewerRecord {
     pub agent: Option<String>,
 }
 
-/// A Blocker a reviewer found.
+/// A Blocker a reviewer found, or a finding dismissed as the repeat of
+/// one it dropped.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockerRecord {
     /// The Run.
@@ -234,6 +235,13 @@ pub struct BlockerRecord {
     pub round_seq: u16,
     /// What is wrong, as the reviewer wrote it.
     pub problem: String,
+    /// What the fix said of it, when a fix was given it.
+    pub fix_status: Option<FixStatus>,
+    /// How the next round ruled on it, when the fix disputed it.
+    pub ruling: Option<DisputeRuling>,
+    /// Whether it was dismissed rather than a Blocker: it counts only as
+    /// dismissed.
+    pub dismissed: bool,
 }
 
 /// What CI health, review quality, cost and autonomy read about the Runs

@@ -2461,87 +2461,6 @@
         }
       }
     },
-    "/self-improvements/{id}/undo-dismissal": {
-      "post": {
-        "tags": ["factory"],
-        "summary": "Undo the dismissal of the failures a person's rejection of one of the\ncaller's team's self-improvement Runs dismissed (its pull request closed\nunmerged, or its Run cancelled in person): when the rejection was of the\nproposed fix and not of the failures, they go back to pending and count\ntoward the next self-improvement Run's thresholds at the team's next\nRun end, after any pause the rejection started. Only failures it still\nholds go back. Only a current admin of the team who named its\nDefinition or owns the self-improvement Run may, in their own signed-in\nsession and never from an agent's account (403 otherwise, a namer or\nRun owner made a member too); a Run that dismissed nothing is refused\n(409). The undo\nis kept with who and when; undoing again answers it and changes nothing\n(`restored` 0).",
-        "operationId": "undo_factory_improvement_dismissal",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "The self-improvement Run's id (`selfImprovement.last.id`).",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DismissalUndoneResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/sessions/{session_id}/step": {
       "get": {
         "tags": ["factory"],
@@ -3130,57 +3049,6 @@
         "type": "string",
         "description": "The name the factory's agent definition gives an Agent: a harness, a\nmodel and its instructions."
       },
-      "AgentRuleInsight": {
-        "type": "object",
-        "description": "An Agent Rule and how the Runs it chose an Agent for did over the\nperiod, to compare with the Role's other Runs.",
-        "required": [
-          "role",
-          "rule",
-          "agent",
-          "runs",
-          "ended",
-          "succeeded",
-          "fellBack"
-        ],
-        "properties": {
-          "agent": {
-            "type": "string",
-            "description": "The Agent it chose, for the newest of its Runs."
-          },
-          "ended": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many of them ended, but for those that ended `infrastructure`:\ntheir work never ran.",
-            "minimum": 0
-          },
-          "fellBack": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many had a Step of the Role the rule's Agent could not start,\nwhich another Agent took.",
-            "minimum": 0
-          },
-          "role": {
-            "type": "string",
-            "description": "The Role it chose for."
-          },
-          "rule": {
-            "type": "string",
-            "description": "Its name."
-          },
-          "runs": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many of the period's Runs it chose for.",
-            "minimum": 0
-          },
-          "succeeded": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many ended `success`.",
-            "minimum": 0
-          }
-        }
-      },
       "AnswerGateRequest": {
         "type": "object",
         "description": "Request body for answering a Gate.",
@@ -3559,6 +3427,37 @@
             "type": "integer",
             "format": "int32",
             "description": "The reviews it made: its reviewer Steps.",
+            "minimum": 0
+          }
+        }
+      },
+      "BlockerResolutions": {
+        "type": "object",
+        "description": "What became of a Run's Blockers: fixed as the fixer says, or disputed\nand then upheld or dropped, and the findings dismissed as repeats of a\ndropped one. A dispute no round ruled on yet counts as upheld.",
+        "required": ["fixed", "disputedUpheld", "disputedDropped", "dismissed"],
+        "properties": {
+          "dismissed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Findings dismissed: a reviewer raised again, in a later round of the\nvisit, the same problem at the same lines as a Blocker it dropped.",
+            "minimum": 0
+          },
+          "disputedDropped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers the fix disputed that a reviewer dropped.",
+            "minimum": 0
+          },
+          "disputedUpheld": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers the fix disputed that a reviewer upheld, or did not drop.",
+            "minimum": 0
+          },
+          "fixed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blockers the fixer said it fixed: its claim, which the next round\nchecks.",
             "minimum": 0
           }
         }
@@ -4071,7 +3970,6 @@
           "steered",
           "manual",
           "measuredRuns",
-          "unmeasuredRuns",
           "tokens",
           "costUsd",
           "unpricedCalls"
@@ -4080,18 +3978,18 @@
           "autonomous": {
             "type": "integer",
             "format": "int32",
-            "description": "Runs that merged with no person stepping in: no Gate a person\nanswered, no Step they steered, and no manual end. A Run found\nflawed afterwards, cancelled, or ended for infrastructure is not.",
+            "description": "Runs that merged with no person stepping in: no Gate a person\nanswered, no Step they steered, and no manual end.",
             "minimum": 0
           },
           "autonomyRate": {
             "type": ["number", "null"],
             "format": "double",
-            "description": "Their share, from 0 to 1, of the Runs whose work ended on its own,\nas the success rate counts them: Runs a person cancelled and Runs\nthat ended for infrastructure are left out. None while no Run ended\nthat way."
+            "description": "The share of ended Runs that did, from 0 to 1."
           },
           "costPerMergedUsd": {
             "type": ["number", "null"],
             "format": "double",
-            "description": "What every Run cost per merged pull request, in US dollars; none\nunless every Run's agent sessions recorded their usage and every\ncall was priced."
+            "description": "What every Run cost per merged pull request, in US dollars; none\nunless every call was priced."
           },
           "costUsd": {
             "type": "number",
@@ -4141,13 +4039,7 @@
           "tokensPerMerged": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "The tokens every Run used per merged pull request; none unless every\nRun's agent sessions recorded their usage.",
-            "minimum": 0
-          },
-          "unmeasuredRuns": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Runs with an agent session whose usage is not known: one on a\nruntime that records none, as Codex or Claude Code on its owner's\nown login. While any, no figure per merged pull request is given.",
+            "description": "The tokens every Run used per merged pull request.",
             "minimum": 0
           },
           "unpricedCalls": {
@@ -4158,23 +4050,10 @@
           }
         }
       },
-      "DismissalUndoneResponse": {
-        "type": "object",
-        "description": "What undoing a rejected self-improvement Run's dismissal did.",
-        "required": ["restored", "undoneAt"],
-        "properties": {
-          "restored": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many failures went back to pending: none when it was undone\nalready.",
-            "minimum": 0
-          },
-          "undoneAt": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When it was undone, the first time."
-          }
-        }
+      "DisputeRuling": {
+        "type": "string",
+        "description": "How the next round's reviewer ruled on a disputed Blocker.",
+        "enum": ["upheld", "dropped"]
       },
       "DurationStats": {
         "type": "object",
@@ -4320,18 +4199,10 @@
           "timeZone",
           "scorers",
           "experiments",
-          "agentRules",
           "benchmarks",
           "suites"
         ],
         "properties": {
-          "agentRules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AgentRuleInsight"
-            },
-            "description": "Each Agent Rule that chose an Agent for one of the period's Runs,\nby Role."
-          },
           "benchmarks": {
             "type": "array",
             "items": {
@@ -4420,7 +4291,7 @@
       "FindingKind": {
         "type": "string",
         "description": "What a finding turned out to be once its round ended.",
-        "enum": ["blocker", "follow_up"]
+        "enum": ["blocker", "follow_up", "dismissed"]
       },
       "FiringResult": {
         "type": "object",
@@ -4467,6 +4338,11 @@
           "creator_left_team",
           "agent_account"
         ]
+      },
+      "FixStatus": {
+        "type": "string",
+        "description": "What the fix said of a Blocker it was given.",
+        "enum": ["fixed", "disputed"]
       },
       "FlawMarker": {
         "oneOf": [
@@ -4805,45 +4681,18 @@
       "ImprovementInsight": {
         "type": "object",
         "description": "A team's latest self-improvement Run.",
-        "required": [
-          "id",
-          "state",
-          "failures",
-          "createdAt",
-          "dismissed",
-          "canUndoDismissal"
-        ],
+        "required": ["state", "failures", "createdAt"],
         "properties": {
-          "canUndoDismissal": {
-            "type": "boolean",
-            "description": "Whether the caller may undo the dismissal now: it holds dismissed\nfailures, was not undone, and they are a person (never an agent's\naccount) who is still an admin of the team and named the\nDefinition or owns its Run."
-          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
             "description": "When it began."
-          },
-          "dismissalUndoneAt": {
-            "type": ["string", "null"],
-            "format": "date-time",
-            "description": "When the dismissal of its failures was undone, sending them back to\npending; none while it was not."
-          },
-          "dismissed": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many of its failures are dismissed: a person rejected it (closed\nits pull request unmerged, or cancelled its Run), so they count\ntoward no other Run until the dismissal is undone.",
-            "minimum": 0
           },
           "failures": {
             "type": "integer",
             "format": "int32",
             "description": "How many failures it groups.",
             "minimum": 0
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Its id, which undoing its dismissal names."
           },
           "refusal": {
             "type": ["string", "null"],
@@ -5473,6 +5322,21 @@
             "type": "boolean",
             "description": "Whether it blocks wherever it is: a Blocker of the round before\nfound again, or a reviewer's answer that never read."
           },
+          "dispute": {
+            "type": ["string", "null"],
+            "description": "Why the fix disputes it, as the fixer wrote it."
+          },
+          "fixStatus": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FixStatus",
+                "description": "What the fix said of it, when it was a Blocker the fix was given."
+              }
+            ]
+          },
           "followUpTaskId": {
             "type": ["string", "null"],
             "format": "uuid",
@@ -5525,6 +5389,17 @@
               }
             ]
           },
+          "ruling": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DisputeRuling",
+                "description": "How the next round's reviewer ruled on the dispute; none until a\nreviewer answered."
+              }
+            ]
+          },
           "seq": {
             "type": "integer",
             "format": "int32",
@@ -5548,6 +5423,7 @@
           "blockers",
           "newBlockers",
           "repeatedBlockers",
+          "resolutions",
           "byReviewer",
           "byAgent",
           "recurring"
@@ -5608,6 +5484,10 @@
             "format": "int32",
             "description": "Blockers an earlier round of their Run found too: not fixed.",
             "minimum": 0
+          },
+          "resolutions": {
+            "$ref": "#/components/schemas/BlockerResolutions",
+            "description": "What became of the Blockers given to a fix: fixed as the fixer\nsays, or disputed and then upheld or dropped, and the findings\ndismissed, over every reviewed Run."
           },
           "reviewedRuns": {
             "type": "integer",
@@ -5887,25 +5767,6 @@
           }
         }
       },
-      "RunAgentRule": {
-        "type": "object",
-        "description": "The Agent Rule of its Factory Definition that chose the Agent a Run's\nSteps of one Role start with, as the Run keeps it and the Run API shows\nit.",
-        "required": ["role", "rule", "agent"],
-        "properties": {
-          "agent": {
-            "$ref": "#/components/schemas/AgentName",
-            "description": "The Agent it chose."
-          },
-          "role": {
-            "$ref": "#/components/schemas/Role",
-            "description": "The Role."
-          },
-          "rule": {
-            "type": "string",
-            "description": "The rule, by name."
-          }
-        }
-      },
       "RunAutomation": {
         "type": "object",
         "description": "The Automation that started a Run, as it was then.",
@@ -5948,18 +5809,10 @@
           "run",
           "steps",
           "reviewRounds",
-          "standingActs",
-          "agentRules",
-          "taskTagsUnread"
+          "blockerResolutions",
+          "standingActs"
         ],
         "properties": {
-          "agentRules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RunAgentRule"
-            },
-            "description": "The Agent Rules of its Factory Definition that chose the Agent its\nSteps of a Role start with, by Role: each matched its task's tags\nor its repository as it started. A Role no rule chose for is not\nlisted."
-          },
           "baseRequiredChecks": {
             "oneOf": [
               {
@@ -5970,6 +5823,10 @@
                 "description": "Why the checks the base branch requires decide nothing, while the\nRun is at its merge: they could not be read, or the base requires\nnone. Nothing holds the merge on them."
               }
             ]
+          },
+          "blockerResolutions": {
+            "$ref": "#/components/schemas/BlockerResolutions",
+            "description": "What became of its Blockers: fixed, or disputed and then upheld or\ndropped."
           },
           "mainHold": {
             "oneOf": [
@@ -6006,10 +5863,6 @@
               "$ref": "#/components/schemas/Step"
             },
             "description": "Its Steps, in the order they started."
-          },
-          "taskTagsUnread": {
-            "type": "boolean",
-            "description": "Whether its task's tags could not be read as it started: its\nDefinition's Agent Rules on a tag then matched no tag, which is not\nthe same as a task no rule matched. False for a Run whose tags were\nread, or that no rule on a tag needed them for."
           },
           "tokenBudget": {
             "oneOf": [

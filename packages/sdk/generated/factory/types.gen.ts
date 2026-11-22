@@ -11,43 +11,6 @@ export type ClientOptions = {
 export type AgentName = string;
 
 /**
- * An Agent Rule and how the Runs it chose an Agent for did over the
- * period, to compare with the Role's other Runs.
- */
-export type AgentRuleInsight = {
-    /**
-     * The Agent it chose, for the newest of its Runs.
-     */
-    agent: string;
-    /**
-     * How many of them ended, but for those that ended `infrastructure`:
-     * their work never ran.
-     */
-    ended: number;
-    /**
-     * How many had a Step of the Role the rule's Agent could not start,
-     * which another Agent took.
-     */
-    fellBack: number;
-    /**
-     * The Role it chose for.
-     */
-    role: string;
-    /**
-     * Its name.
-     */
-    rule: string;
-    /**
-     * How many of the period's Runs it chose for.
-     */
-    runs: number;
-    /**
-     * How many ended `success`.
-     */
-    succeeded: number;
-};
-
-/**
  * Request body for answering a Gate.
  */
 export type AnswerGateRequest = {
@@ -320,6 +283,32 @@ export type BlockerCount = {
      * The reviews it made: its reviewer Steps.
      */
     reviews: number;
+};
+
+/**
+ * What became of a Run's Blockers: fixed as the fixer says, or disputed
+ * and then upheld or dropped, and the findings dismissed as repeats of a
+ * dropped one. A dispute no round ruled on yet counts as upheld.
+ */
+export type BlockerResolutions = {
+    /**
+     * Findings dismissed: a reviewer raised again, in a later round of the
+     * visit, the same problem at the same lines as a Blocker it dropped.
+     */
+    dismissed: number;
+    /**
+     * Blockers the fix disputed that a reviewer dropped.
+     */
+    disputedDropped: number;
+    /**
+     * Blockers the fix disputed that a reviewer upheld, or did not drop.
+     */
+    disputedUpheld: number;
+    /**
+     * Blockers the fixer said it fixed: its claim, which the next round
+     * checks.
+     */
+    fixed: number;
 };
 
 /**
@@ -726,21 +715,16 @@ export type DefinitionSettings = {
 export type DeliveryInsight = {
     /**
      * Runs that merged with no person stepping in: no Gate a person
-     * answered, no Step they steered, and no manual end. A Run found
-     * flawed afterwards, cancelled, or ended for infrastructure is not.
+     * answered, no Step they steered, and no manual end.
      */
     autonomous: number;
     /**
-     * Their share, from 0 to 1, of the Runs whose work ended on its own,
-     * as the success rate counts them: Runs a person cancelled and Runs
-     * that ended for infrastructure are left out. None while no Run ended
-     * that way.
+     * The share of ended Runs that did, from 0 to 1.
      */
     autonomyRate?: number | null;
     /**
      * What every Run cost per merged pull request, in US dollars; none
-     * unless every Run's agent sessions recorded their usage and every
-     * call was priced.
+     * unless every call was priced.
      */
     costPerMergedUsd?: number | null;
     /**
@@ -776,16 +760,9 @@ export type DeliveryInsight = {
      */
     tokens: TokenCounts;
     /**
-     * The tokens every Run used per merged pull request; none unless every
-     * Run's agent sessions recorded their usage.
+     * The tokens every Run used per merged pull request.
      */
     tokensPerMerged?: number | null;
-    /**
-     * Runs with an agent session whose usage is not known: one on a
-     * runtime that records none, as Codex or Claude Code on its owner's
-     * own login. While any, no figure per merged pull request is given.
-     */
-    unmeasuredRuns: number;
     /**
      * Their model calls with no price.
      */
@@ -793,19 +770,9 @@ export type DeliveryInsight = {
 };
 
 /**
- * What undoing a rejected self-improvement Run's dismissal did.
+ * How the next round's reviewer ruled on a disputed Blocker.
  */
-export type DismissalUndoneResponse = {
-    /**
-     * How many failures went back to pending: none when it was undone
-     * already.
-     */
-    restored: number;
-    /**
-     * When it was undone, the first time.
-     */
-    undoneAt: string;
-};
+export type DisputeRuling = 'upheld' | 'dropped';
 
 /**
  * A spread of durations: how many, their median and 90th percentile.
@@ -889,11 +856,6 @@ export type ErrorResponse = {
  */
 export type EvaluationInsights = {
     /**
-     * Each Agent Rule that chose an Agent for one of the period's Runs,
-     * by Role.
-     */
-    agentRules: Array<AgentRuleInsight>;
-    /**
      * The Benchmarks one may start a suite of.
      */
     benchmarks: Array<BenchmarkSummary>;
@@ -953,7 +915,7 @@ export type ExperimentInsight = {
 /**
  * What a finding turned out to be once its round ended.
  */
-export type FindingKind = 'blocker' | 'follow_up';
+export type FindingKind = 'blocker' | 'follow_up' | 'dismissed';
 
 /**
  * What a firing came to.
@@ -972,6 +934,11 @@ export type FiringResult = {
  * Why a firing started no Run.
  */
 export type FiringSkip = 'disabled' | 'task_busy' | 'queue_full' | 'refused' | 'own_branch' | 'creator_left_team' | 'agent_account';
+
+/**
+ * What the fix said of a Blocker it was given.
+ */
+export type FixStatus = 'fixed' | 'disputed';
 
 /**
  * Who marked a Run flawed.
@@ -1193,35 +1160,13 @@ export type HandBackRequest = {
  */
 export type ImprovementInsight = {
     /**
-     * Whether the caller may undo the dismissal now: it holds dismissed
-     * failures, was not undone, and they are a person (never an agent's
-     * account) who is still an admin of the team and named the
-     * Definition or owns its Run.
-     */
-    canUndoDismissal: boolean;
-    /**
      * When it began.
      */
     createdAt: string;
     /**
-     * When the dismissal of its failures was undone, sending them back to
-     * pending; none while it was not.
-     */
-    dismissalUndoneAt?: string | null;
-    /**
-     * How many of its failures are dismissed: a person rejected it (closed
-     * its pull request unmerged, or cancelled its Run), so they count
-     * toward no other Run until the dismissal is undone.
-     */
-    dismissed: number;
-    /**
      * How many failures it groups.
      */
     failures: number;
-    /**
-     * Its id, which undoing its dismissal names.
-     */
-    id: string;
     /**
      * Why its Run could not start, when refused.
      */
@@ -1768,6 +1713,11 @@ export type ReviewFinding = {
      */
     blocksAnywhere: boolean;
     /**
+     * Why the fix disputes it, as the fixer wrote it.
+     */
+    dispute?: string | null;
+    fixStatus?: null | FixStatus;
+    /**
      * The follow-up task it became, when it is a follow-up and the task
      * was made: its task document's id.
      */
@@ -1787,6 +1737,7 @@ export type ReviewFinding = {
      */
     problem: string;
     role?: null | Role;
+    ruling?: null | DisputeRuling;
     /**
      * The reviewer's Step: its place among the Run's Steps.
      */
@@ -1837,6 +1788,12 @@ export type ReviewQuality = {
      * Blockers an earlier round of their Run found too: not fixed.
      */
     repeatedBlockers: number;
+    /**
+     * What became of the Blockers given to a fix: fixed as the fixer
+     * says, or disputed and then upheld or dropped, and the findings
+     * dismissed, over every reviewed Run.
+     */
+    resolutions: BlockerResolutions;
     /**
      * Runs with one or more review rounds.
      */
@@ -2011,26 +1968,6 @@ export type Run = {
 };
 
 /**
- * The Agent Rule of its Factory Definition that chose the Agent a Run's
- * Steps of one Role start with, as the Run keeps it and the Run API shows
- * it.
- */
-export type RunAgentRule = {
-    /**
-     * The Agent it chose.
-     */
-    agent: AgentName;
-    /**
-     * The Role.
-     */
-    role: Role;
-    /**
-     * The rule, by name.
-     */
-    rule: string;
-};
-
-/**
  * The Automation that started a Run, as it was then.
  */
 export type RunAutomation = {
@@ -2067,14 +2004,12 @@ export type RunDefinition = {
  * A Run and the Steps it took.
  */
 export type RunDetail = {
-    /**
-     * The Agent Rules of its Factory Definition that chose the Agent its
-     * Steps of a Role start with, by Role: each matched its task's tags
-     * or its repository as it started. A Role no rule chose for is not
-     * listed.
-     */
-    agentRules: Array<RunAgentRule>;
     baseRequiredChecks?: null | RequiredChecksState;
+    /**
+     * What became of its Blockers: fixed, or disputed and then upheld or
+     * dropped.
+     */
+    blockerResolutions: BlockerResolutions;
     mainHold?: null | MainHold;
     /**
      * Its review rounds, in order, each with what its reviewers found.
@@ -2094,13 +2029,6 @@ export type RunDetail = {
      * Its Steps, in the order they started.
      */
     steps: Array<Step>;
-    /**
-     * Whether its task's tags could not be read as it started: its
-     * Definition's Agent Rules on a tag then matched no tag, which is not
-     * the same as a task no rule matched. False for a Run whose tags were
-     * read, or that no rule on a tag needed them for.
-     */
-    taskTagsUnread: boolean;
     tokenBudget?: null | RunTokenBudget;
 };
 
@@ -3697,34 +3625,6 @@ export type LinkFactoryRunTaskResponses = {
 };
 
 export type LinkFactoryRunTaskResponse = LinkFactoryRunTaskResponses[keyof LinkFactoryRunTaskResponses];
-
-export type UndoFactoryImprovementDismissalData = {
-    body?: never;
-    path: {
-        /**
-         * The self-improvement Run's id (`selfImprovement.last.id`).
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/self-improvements/{id}/undo-dismissal';
-};
-
-export type UndoFactoryImprovementDismissalErrors = {
-    401: ErrorResponse;
-    403: ErrorResponse;
-    404: ErrorResponse;
-    409: ErrorResponse;
-    500: ErrorResponse;
-};
-
-export type UndoFactoryImprovementDismissalError = UndoFactoryImprovementDismissalErrors[keyof UndoFactoryImprovementDismissalErrors];
-
-export type UndoFactoryImprovementDismissalResponses = {
-    200: DismissalUndoneResponse;
-};
-
-export type UndoFactoryImprovementDismissalResponse = UndoFactoryImprovementDismissalResponses[keyof UndoFactoryImprovementDismissalResponses];
 
 export type GetFactorySessionStepData = {
     body?: never;

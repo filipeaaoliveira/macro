@@ -604,6 +604,12 @@ function qualityFixture(params: QualityParams): QualityInsights {
       blockers: 14,
       newBlockers: 11,
       repeatedBlockers: 3,
+      resolutions: {
+        fixed: 4,
+        disputedUpheld: 1,
+        disputedDropped: 2,
+        dismissed: 0,
+      },
       byReviewer: [
         { name: 'correctness-reviewer', reviews: 16, blockers: 9 },
         { name: 'scope-reviewer', reviews: 16, blockers: 3 },

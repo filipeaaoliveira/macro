@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_review_finding\n            SET ruling = NULL, ruled_by = NULL\n            WHERE run_id = $1 AND ruled_by = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b7a4e9bbf72724bc0392348a574ff4a28099b58505a360aee07561b4b63777a"
+}

@@ -37,6 +37,12 @@ const ended: RunDetail = {
   standingActs: [],
   agentRules: [],
   taskTagsUnread: false,
+  blockerResolutions: {
+    fixed: 0,
+    disputedUpheld: 0,
+    disputedDropped: 0,
+    dismissed: 0,
+  },
 };
 
 afterEach(() => {

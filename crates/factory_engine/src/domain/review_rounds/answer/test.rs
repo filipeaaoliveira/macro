@@ -121,3 +121,36 @@ fn a_path_that_could_quote_or_tag_a_brief_does_not_read() {
         assert_eq!(read, Err(ReviewerAnswerError::InvalidBlocker(1)), "{path}");
     }
 }
+
+/// A reviewer that rules on disputes drops them by number: each once, in
+/// order. It may drop only a dispute it rules on, and not one it also
+/// lists again.
+#[test]
+fn a_reviewer_drops_only_the_disputes_it_rules_on() {
+    let dropping = "```json\n{\"blockers\": [], \"dropped\": [3, 2, 3]}\n```";
+    let again_and_dropped = "```json\n{\"blockers\": [{\"file\": \"a.rs\", \"problem\": \"p\", \
+        \"why\": \"w\", \"previous\": 2}], \"dropped\": [2]}\n```";
+
+    let answer =
+        ReviewerAnswer::read_ruling(&outcome("pass"), dropping, 3, &[2, 3]).expect("reads");
+
+    assert_eq!(answer.dropped, [2, 3]);
+    assert!(answer.render().contains("numbered 2, 3"));
+    assert_eq!(
+        ReviewerAnswer::read_ruling(&outcome("pass"), dropping, 3, &[2]),
+        Err(ReviewerAnswerError::InvalidRuling)
+    );
+    assert_eq!(
+        ReviewerAnswer::read(&outcome("pass"), dropping, 3),
+        Err(ReviewerAnswerError::InvalidRuling)
+    );
+    assert_eq!(
+        ReviewerAnswer::read_ruling(&outcome("changes"), again_and_dropped, 3, &[2]),
+        Err(ReviewerAnswerError::InvalidRuling)
+    );
+    let again = "```json\n{\"blockers\": [{\"file\": \"a.rs\", \"problem\": \"p\", \"why\": \"w\", \
+        \"previous\": 2}]}\n```";
+    let listed = ReviewerAnswer::read_ruling(&outcome("changes"), again, 3, &[2]).expect("reads");
+    assert_eq!(listed.listed_again, [2]);
+    assert!(listed.dropped.is_empty());
+}

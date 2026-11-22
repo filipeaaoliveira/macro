@@ -270,6 +270,92 @@ describe('RunView', () => {
     expect(screen.getByText('Loading has no test')).toBeTruthy();
   });
 
+  it('shows what the fix said of each blocker, the ruling, and the Run’s counts', async () => {
+    const { setRun } = mount({});
+    const blocker = (
+      place: number,
+      path: string,
+      extra: Record<string, unknown>
+    ) => ({
+      seq: 3,
+      place,
+      role: 'correctness-reviewer',
+      path,
+      problem: `${path} drops its error`,
+      why: 'A failed save looks saved',
+      blocksAnywhere: false,
+      kind: 'blocker' as const,
+      ...extra,
+    });
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          seq: 3,
+          entry: 'review',
+          visit: 1,
+          startedAt: '2026-11-16T10:00:00Z',
+          role: 'correctness-reviewer',
+        },
+      ],
+      reviewRounds: [
+        {
+          round: 1,
+          visit: 1,
+          seq: 3,
+          reviewers: 1,
+          headSha: 'aaaaaaaaaa',
+          diffBase: 'main',
+          fixDiff: false,
+          startedAt: '2026-11-16T10:00:00Z',
+          end: { outcome: 'changes', endedAt: '2026-11-16T10:06:00Z' },
+          findings: [
+            blocker(1, 'src/a.rs', { fixStatus: 'fixed' }),
+            blocker(2, 'src/b.rs', {
+              fixStatus: 'disputed',
+              dispute: 'The sandbox cannot reach production',
+              ruling: 'dropped',
+            }),
+            blocker(3, 'src/c.rs', {
+              fixStatus: 'disputed',
+              dispute: 'It is generated',
+              ruling: 'upheld',
+            }),
+            blocker(4, 'src/d.rs', { kind: 'dismissed' }),
+          ],
+        },
+      ],
+      blockerResolutions: {
+        fixed: 1,
+        disputedUpheld: 1,
+        disputedDropped: 1,
+        dismissed: 1,
+      },
+    });
+
+    expect(await screen.findByText('Review round 1')).toBeTruthy();
+    expect(screen.getByText('The fixer says it fixed this')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'The fixer disputes this: The sandbox cannot reach production'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        'The next round dropped this blocker: it blocked nothing'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText('The next round upheld this blocker: it blocked again')
+    ).toBeTruthy();
+    expect(screen.getByText('Dismissed')).toBeTruthy();
+    expect(
+      screen.getByText(
+        '1 fixed, as the fixer says · 1 disputed, then upheld · 1 disputed, then dropped · 1 dismissed as repeats'
+      )
+    ).toBeTruthy();
+  });
+
   it('labels only a review round after a reset as a fresh review', async () => {
     const { setRun } = mount({});
     const reviewer = (seq: number, entry: string, visit: number) => ({

@@ -26,7 +26,9 @@ use factory_records::domain::models::{
     RunOutcome, SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
+use factory_records::domain::review_rounds::{
+    BlockerResolutions, ReviewRound, ReviewRoundRepository,
+};
 use factory_records::domain::self_improvement::{IMPROVE_FLOW, SelfImprovementRepository};
 use factory_records::domain::standing_acts::{StandingAct, StandingActRepository, StandingActor};
 use factory_records::domain::standing_rules::{
@@ -62,8 +64,8 @@ use crate::domain::ports::{
     TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
 use crate::domain::standing_rules::{
-    GateFacts, RuleAnswer, kind_answers, offers_kind_answers, repeated_blockers, rule_answer,
-    rule_fix_limit,
+    GateFacts, RuleAnswer, any_dismissed, kind_answers, offers_kind_answers, repeated_blockers,
+    rule_answer, rule_fix_limit,
 };
 use crate::domain::step_terminal::{
     PAUSE_RAN_OUT_OUTPUT, STOPPED_OUTPUT, TerminalRequest, note_prompt, paused_step_ends_by,
@@ -559,6 +561,7 @@ where
             steps: with_pause_ends(steps),
             main_hold: base.hold,
             base_required_checks: base.required,
+            blocker_resolutions: BlockerResolutions::of_rounds(&review_rounds),
             review_rounds,
             standing_acts,
             agent_rules,
@@ -643,6 +646,7 @@ where
                 steps,
                 main_hold: base.hold,
                 base_required_checks: base.required,
+                blocker_resolutions: BlockerResolutions::of_rounds(&review_rounds),
                 review_rounds,
                 standing_acts,
                 agent_rules,
@@ -2622,6 +2626,16 @@ where
             }
             _ => false,
         };
+        let dismissed = match ruling.kind {
+            RuleGateKind::Merge => any_dismissed(
+                &self
+                    .repo
+                    .review_rounds(key.run_id)
+                    .await
+                    .map_err(internal)?,
+            ),
+            _ => false,
+        };
         let facts = GateFacts {
             kind: ruling.kind,
             fix_rounds: ruling.fix_rounds,
@@ -2632,6 +2646,7 @@ where
                 .is_some_and(|changes| changes.is_tampered()),
             held,
             repeated_blockers: repeated,
+            dismissed,
         };
         let Some(ruled) = rule_answer(Some(rules.definition), &facts, &ruling.answers) else {
             return Ok(None);

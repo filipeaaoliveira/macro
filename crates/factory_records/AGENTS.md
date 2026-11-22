@@ -128,7 +128,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261120010000_factory_improvement_dismissal_undone.sql`,
   `20261120010100_factory_improvement_dismissal_undone_validate.sql`,
   `20261120020000_factory_run_agent_rule.sql`,
-  `20261120020100_factory_run_task_tags_unread.sql`), `factory_step_steer`,
+  `20261120020100_factory_run_task_tags_unread.sql`,
+  `20261120030000_factory_review_dispute.sql`,
+  `20261120030100_factory_review_dispute_validate.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_run_agent_rule`,
   `factory_run_task_tags_unread`,
   `factory_benchmark_suite`,
@@ -221,6 +223,18 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   references `"Document"` and is cleared when the task is deleted.
   `mark_follow_up_commented` sets `follow_up_commented` on a round's
   findings linked to a task, and repeating it changes nothing.
+  `record_fix` keeps what the fix said of each Blocker of a round
+  (`fix_status`, and the `dispute` reason, at most 2 KiB), replacing it
+  while no reviewer has ruled on it. `record_answer` is `record_findings`
+  with the reviewer's rulings on the disputes of the round before
+  (`ruling`, `ruled_by`): they replace what an earlier attempt of its Step
+  ruled, in the same transaction, and a dispute another Step ruled on
+  keeps its ruling. A finding that repeats a Blocker its reviewer dropped
+  (`repeats_dropped`) is classified `dismissed` when it is in the diff under
+  review. Insights' Blocker records carry dismissed findings too
+  (`dismissed`), which count only as dismissed. A binary older than these
+  columns fails to read a `dismissed` kind (`UnknownReviewWord`): deploy
+  the migration, then every reader at once.
 - `list_waiting_runs` reads one owner's Runs that have not ended and wait
   on an unanswered Gate, newest first, through `factory_run_user_open_idx`
   (open Runs only) and the Gates' primary key, up to its limit.
