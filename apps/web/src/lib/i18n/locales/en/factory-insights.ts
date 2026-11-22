@@ -31,7 +31,7 @@ export default {
     'Runs that reached their flow’s end but whose result a scorer or a person marked flawed, of all runs that reached their end.',
   infrastructureRate: 'Infrastructure failures',
   infrastructureRateDefinition:
-    'Runs that failed for a machine, quota or network reason rather than their work, of those that ended on their own.',
+    'Runs that failed for a machine, quota or network reason rather than their work, of those that ended and weren’t cancelled.',
   failedForWork: 'Failed for the work',
   failedForInfrastructure: 'Failed for infrastructure',
   flawedRuns: 'Flawed runs',

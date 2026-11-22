@@ -697,6 +697,80 @@ fn a_run_a_person_stepped_into_is_not_autonomous() {
     );
 }
 
+/// Run `n`, ended `outcome` on day `n`.
+fn ended(n: u128, outcome: RunOutcome, merged: bool) -> QualityRun {
+    let mut run = run(n);
+    run.merged = merged;
+    run.run.end = Some((outcome, at(&format!("2026-11-{n:02}T12:00:00Z"))));
+    run
+}
+
+/// Runs that ended for infrastructure are left out of the autonomy rate,
+/// as they are of the success rate: three autonomous merges beside two
+/// infrastructure endings are every Run whose work ended on its own.
+#[test]
+fn the_autonomy_rate_leaves_out_infrastructure_endings() {
+    let records = QualityRecords {
+        runs: vec![
+            run(1),
+            run(2),
+            run(3),
+            ended(4, RunOutcome::Infrastructure, false),
+            ended(5, RunOutcome::Infrastructure, false),
+        ],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(&query(None), records, &[]).delivery;
+
+    assert_eq!(delivery.ended_runs, 5);
+    assert_eq!(delivery.autonomous, 3);
+    assert_eq!(delivery.autonomy_rate, Some(1.0));
+}
+
+/// A merged Run found flawed afterwards is not autonomous, and counts
+/// against the rate, as it does against the success rate.
+#[test]
+fn a_flawed_merged_run_is_not_autonomous() {
+    let records = QualityRecords {
+        runs: vec![run(1), ended(2, RunOutcome::Flawed, true)],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(&query(None), records, &[]).delivery;
+
+    assert_eq!(delivery.merged, 2);
+    assert_eq!(delivery.autonomous, 1);
+    assert_eq!(delivery.autonomy_rate, Some(0.5));
+}
+
+/// Runs a person cancelled are left out of the autonomy rate, as they are
+/// of the success rate, merged or not; with only those, there is no rate.
+#[test]
+fn the_autonomy_rate_leaves_out_cancelled_runs() {
+    let with_one = QualityRecords {
+        runs: vec![
+            run(1),
+            ended(2, RunOutcome::Cancelled, false),
+            ended(3, RunOutcome::Cancelled, true),
+        ],
+        ..QualityRecords::default()
+    };
+    let only_cancelled = QualityRecords {
+        runs: vec![ended(2, RunOutcome::Cancelled, false)],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(&query(None), with_one, &[]).delivery;
+    let none = summarize_quality(&query(None), only_cancelled, &[]).delivery;
+
+    assert_eq!(delivery.ended_runs, 3);
+    assert_eq!(delivery.merged, 2);
+    assert_eq!(delivery.autonomous, 1);
+    assert_eq!(delivery.autonomy_rate, Some(1.0));
+    assert_eq!(none.autonomy_rate, None);
+}
+
 /// Every Run's usage per merged pull request: in money when every call was
 /// priced, in tokens otherwise.
 #[test]

@@ -6,6 +6,9 @@
  */
 
 /**
- * The share of ended Runs that did, from 0 to 1.
+ * Their share, from 0 to 1, of the Runs whose work ended on its own,
+as the success rate counts them: Runs a person cancelled and Runs
+that ended for infrastructure are left out. None while no Run ended
+that way.
  */
 export type DeliveryInsightAutonomyRate = number | null;

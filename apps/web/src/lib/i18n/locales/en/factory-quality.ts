@@ -73,10 +73,10 @@ export default {
   // Cost and autonomy.
   delivery: 'Cost and autonomy',
   deliveryDescription:
-    'What merging cost, and the share of ended runs that merged with no person stepping in',
+    'What merging cost, and how often runs that ended on their own merged with no person stepping in and weren’t found flawed. Cancelled runs and infrastructure failures are left out.',
   autonomyRate: 'Autonomy rate',
   autonomyRateDefinition:
-    'The share of ended runs that merged with no person stepping in: no gate a person answered, no step they steered, and no manual end.',
+    'Runs that merged with no person stepping in and weren’t found flawed, of those that ended on their own: no gate a person answered, no step they steered, and no manual end. Runs still going, runs you cancelled and runs that failed for infrastructure are left out.',
   merged: 'Merged pull requests',
   mergedDefinition: 'Runs that merged their pull request.',
   costPerMerged: 'Cost per merged pull request',

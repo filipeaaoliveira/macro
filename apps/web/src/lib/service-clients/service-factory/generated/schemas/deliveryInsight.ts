@@ -15,11 +15,15 @@ import type { TokenCounts } from './tokenCounts';
 export interface DeliveryInsight {
   /**
    * Runs that merged with no person stepping in: no Gate a person
-answered, no Step they steered, and no manual end.
+answered, no Step they steered, and no manual end. A Run found
+flawed afterwards, cancelled, or ended for infrastructure is not.
    * @minimum 0
    */
   autonomous: number;
-  /** The share of ended Runs that did, from 0 to 1. */
+  /** Their share, from 0 to 1, of the Runs whose work ended on its own,
+as the success rate counts them: Runs a person cancelled and Runs
+that ended for infrastructure are left out. None while no Run ended
+that way. */
   autonomyRate?: DeliveryInsightAutonomyRate;
   /** What every Run cost per merged pull request, in US dollars; none
 unless every call was priced. */
