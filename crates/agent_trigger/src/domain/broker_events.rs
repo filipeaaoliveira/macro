@@ -113,6 +113,14 @@ pub struct AgentSessionRequestedEvent {
     /// Repository selected by the requester, absent on older producers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_url: Option<String>,
+    /// The branch the session works on, when its requester keeps one per
+    /// piece of work (a factory Run's `factory/<run id>`): a runtime that
+    /// shares one checkout among its sessions gives every session naming
+    /// the branch one worktree of its own, so sessions on other branches
+    /// never share its files or its `HEAD`. Absent on older producers, and
+    /// for a session that works wherever its runtime puts it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_branch: Option<String>,
     /// What asked for the session. `Unknown` on events from producers that
     /// predate it.
     #[serde(default, skip_serializing_if = "TriggerOrigin::is_unknown")]

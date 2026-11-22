@@ -299,6 +299,7 @@ fn session_request(session: AgentSessionId) -> macro_event_broker::Event<AgentTr
     macro_event_broker::Event::new(AgentTriggerTopicEvent::New(
         NewAgentSessionEvent::Requested(AgentSessionRequestedEvent {
             repo_url: None,
+            work_branch: None,
             bot_id: AGENT,
             session_id: session,
             owner: REQUESTER.to_owned(),

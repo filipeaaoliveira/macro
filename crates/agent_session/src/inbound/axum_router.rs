@@ -2447,6 +2447,7 @@ pub async fn create_agent_session_handler<
                                 .unwrap_or_else(AgentSessionId::new),
                             bot_id,
                             repo_url,
+                            work_branch: None,
                             owner: owner.clone(),
                             model: request.model.filter(|model| !model.trim().is_empty()),
                             source: SessionSource::User,

@@ -209,6 +209,7 @@ where
                         bot_id,
                         owner: selection.owner,
                         repo_url: command.repo_url,
+                        work_branch: command.work_branch,
                         model: selection.model.clone(),
                         source: command.source,
                         visibility: command.visibility,

@@ -1501,6 +1501,7 @@ fn agent_trigger_requested_event()
         NewAgentSessionEvent::Requested(AgentSessionRequestedEvent {
             origin: trigger_context::TriggerOrigin::Unknown,
             repo_url: None,
+            work_branch: None,
             bot_id: bot_id::BotId::new_from_uuid(uuid::Uuid::from_u128(0xB07)),
             session_id: agent_session::domain::model::AgentSessionId::new_from_uuid(
                 uuid::Uuid::from_u128(0x5E55),
