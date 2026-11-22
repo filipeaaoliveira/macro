@@ -831,6 +831,9 @@ pub struct GithubPullRequestHead {
     pub merged: bool,
     /// The commit its head branch is at.
     pub head_sha: String,
+    /// The commit its merge made on its base branch, once it merged: a
+    /// merge commit, the squashed commit, or the last commit rebased.
+    pub merge_commit_sha: Option<String>,
 }
 
 /// A request to merge one pull request on the user's behalf.

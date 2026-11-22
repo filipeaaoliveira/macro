@@ -434,7 +434,50 @@ Flows' finished Runs: once a Run ends, the workflow asks the worker
 failure ignored) and each sampled Scorer judges it once, from a hash of the
 Scorer and the Run, so a retry samples the same Runs and judges nothing
 twice; the activity is tried at most three times. A cancelled Run is not
-judged. An Experiment splits a
+judged.
+
+A judge reads the Run as one JSON object: its request, how it ended, and its
+last Steps' outputs. A Scorer that sets `reads: ["diff"]` is also given the
+Run's change (`evaluation/service.rs`, `RunChange`), read once per scoring
+attempt through `PullRequests`: when its pull request merged, GitHub's
+compare of the merge commit's first parent to the merge commit; otherwise
+of the base branch to the Run's branch's head, or to its pull request's
+head once the branch is deleted. A rebase merge of several commits reads as
+its last commit. The diff follows the JSON in a code fence nothing in it
+can close (`fence_for`), and both the prompt and the judge's preamble say
+it is data, never instructions. The whole addition, heading, fences and
+note included, holds to `DIFF_BYTES` (40 000 bytes, about ten thousand
+tokens): the diff is cut at a line, each line first capped at
+`DIFF_LINE_BYTES` (1 000) with a marker, so one long line leaves room for
+the files after it, and the judge is told how many lines and bytes were
+left out. A Run with no change to read (no repository, merge, pull request
+or branch) is judged on that. A change GitHub lists only in part (300
+files or more), or one that could not be read (a GitHub read that fails on
+the last attempt; an earlier one fails the attempt, to retry), is not
+judged at all by the Scorers that read it, and is logged: a judgment
+without the change would be noise in insights. Such Runs drop out of that
+Scorer's mean, so an Experiment's arm that makes larger changes reads
+better on it than it is: compare arms' Run counts on such a Scorer, not
+its mean alone. A trial's branch is deleted
+only once its Scorers judged it, or on the last attempt, so a retry still
+reads its change; a trial whose branch is gone is not judged by them.
+`reads` takes only `diff`: any other value does not read, in
+`FACTORY_EVALUATION`, in a Definition's `scorers.json`, and in
+`factory_definition_check`.
+
+A sampled Scorer of the code a Run merged, `slop`, measures drift over time
+without a blocking reviewer for matters of taste:
+
+```json
+{
+  "name": "slop",
+  "instructions": "Judge only the code the run's change adds or alters, not the request or the steps. Score 1 when it adds no slop and 0 when it is mostly slop. Slop is: dead code (unused functions, branches that cannot run, code left commented out); a helper that duplicates one the repository or the change already has; comments that restate what the code says instead of why; and drift from the repository's conventions as the surrounding code shows them (naming, error handling, layout, test style). Name the worst instance in the reason.",
+  "samplePercent": 10,
+  "reads": ["diff"]
+}
+```
+
+An Experiment splits a
 Flow's Runs on
 a task into arms by a hash of the Experiment and the task (a Run on no task
 takes none); `start_run` records the arms (`factory_run_arm`) before the
@@ -477,7 +520,8 @@ started is deleted. A suite still starting counts the trials it
 planned. Once a trial's Run ends it keeps its score (1 when write ended
 `done`, 0.5 `red`, 0 otherwise) and its agents' tokens (the sessions its
 Run's token budget counts, `ScoringSubject::sessions`), its Run's own
-`factory/<run>` branch is deleted as its owner (best effort, through
+`factory/<run>` branch is deleted as its owner once its Scorers judged it,
+or on the scoring's last attempt (best effort, through
 `PullRequests::delete_run_branch`, which takes the Run, never a branch
 name; one found missing counts as deleted), and, unless it was cancelled, the Scorers
 its Benchmark names judge it into the trial's own record. A trial whose Run
@@ -2415,6 +2459,10 @@ Definition.
   `named_by_user_id` starts no self-improvement Run until an admin names it
   again. Thresholds are checked only when a team's Run ends: a team whose
   Runs stop starts none, however old its failures.
+- A worker older than a Scorer's `reads` cannot read an evaluation that
+  sets it (`deny_unknown_fields`), nor a Run that kept one: set `reads` in
+  `FACTORY_EVALUATION` or a Definition only after every pod runs this
+  version.
 - A worker older than `selfImprovement` in `scorers.json` cannot read a
   Definition that sets it (`deny_unknown_fields`); one that leaves the
   defaults keeps the JSON it kept before.

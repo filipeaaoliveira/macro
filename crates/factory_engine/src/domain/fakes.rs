@@ -1803,6 +1803,7 @@ impl FakeGithub {
             url: "https://github.com/macro/app/pull/7".to_string(),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
+            merge_commit: None,
         });
         github.state().checks = [checks].into();
         github
@@ -2105,6 +2106,7 @@ impl PullRequests for FakeGithub {
             url: format!("{}/pull/7", repository.url()),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
+            merge_commit: None,
         });
         Ok(Opening::Opened)
     }

@@ -92,6 +92,8 @@ pub struct ChangedFile {
     /// when the diff shows no hunks, as for a binary file, and the whole
     /// file counts as changed.
     pub hunks: Option<Vec<Lines>>,
+    /// The unified diff GitHub gives for it; none when it gives no text.
+    pub patch: Option<String>,
 }
 
 impl ChangedFile {
@@ -102,6 +104,7 @@ impl ChangedFile {
             path,
             previous_path,
             hunks: patch.map(hunk_lines),
+            patch: patch.map(str::to_string),
         }
     }
 }
