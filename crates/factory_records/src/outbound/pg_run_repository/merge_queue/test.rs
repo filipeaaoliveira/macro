@@ -385,7 +385,9 @@ async fn a_held_merge_turn_locks_no_factory_table(pool: PgPool) {
         JOIN pg_locks held ON held.pid = turn.pid
         JOIN pg_class c ON c.oid = held.relation
         WHERE turn.locktype = 'advisory' AND turn.granted
+            AND turn.database = (SELECT oid FROM pg_database WHERE datname = current_database())
             AND held.locktype = 'relation'
+            AND held.database = turn.database
             AND c.relname LIKE 'factory%'
         "#,
     )
