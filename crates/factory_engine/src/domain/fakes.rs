@@ -43,9 +43,9 @@ use uuid::Uuid;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, FinishedJob,
-    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
-    RequiredChecks, run_branch,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
+    FinishedJob, GITHUB_COMMITTER, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
+    PullRequestState, RepositoryAccess, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -1743,6 +1743,9 @@ pub(crate) struct FakeGithubState {
     /// The parents of each commit, by its id; a commit not listed is none
     /// GitHub has.
     pub(crate) parents: BTreeMap<String, Vec<String>>,
+    /// The commits of `parents` someone made by hand; GitHub made the
+    /// others itself.
+    pub(crate) made_by_hand: BTreeSet<String>,
     /// The head commit of each branch that is not a Run's, by its name.
     pub(crate) other_heads: BTreeMap<String, String>,
     /// The heads updates of the Run's branch were asked from, in order.
@@ -2188,13 +2191,21 @@ impl PullRequests for FakeGithub {
         Ok(BranchDeletion::Deleted)
     }
 
-    async fn commit_parents(
+    async fn commit_made(
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         sha: &str,
-    ) -> Result<Option<Vec<String>>, FakeGithubError> {
-        Ok(self.state().parents.get(sha).cloned())
+    ) -> Result<Option<CommitMade>, FakeGithubError> {
+        let state = self.state();
+        let by_hand = state.made_by_hand.contains(sha);
+        Ok(state.parents.get(sha).map(|parents| CommitMade {
+            parents: parents.clone(),
+            // A commit made by hand may name GitHub's email, and so its
+            // account, as its committer, but GitHub verifies no signature.
+            committer_login: Some(GITHUB_COMMITTER.to_string()),
+            verified: !by_hand,
+        }))
     }
 
     async fn merge_base(

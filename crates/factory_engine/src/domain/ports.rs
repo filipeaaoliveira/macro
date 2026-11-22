@@ -32,10 +32,11 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
-    BranchUpdating, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError,
-    FinishedJob, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
-    RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
-    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    BranchUpdating, CodeRepository, CommitMade, ControlFilesSettings, DefinitionSettings,
+    FactoryError, FinishedJob, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
+    PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer,
+    SessionStepRef, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport,
+    StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -412,15 +413,15 @@ pub trait PullRequests: Send + Sync + 'static {
         head: &str,
     ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
-    /// The parents of the commit `sha` of `repository`, in their order (a
-    /// merge's first is the branch merged into); none when the repository
-    /// has no such commit.
-    fn commit_parents(
+    /// The commit `sha` of `repository`: its parents in their order (a
+    /// merge's first is the branch merged into) and who made it; none when
+    /// the repository has no such commit.
+    fn commit_made(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         sha: &str,
-    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<CommitMade>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(

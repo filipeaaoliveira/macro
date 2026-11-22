@@ -34,9 +34,27 @@ impl MergeQueueRepository for PgRunRepository {
 
     /// The turn is a transaction-scoped advisory lock keyed by the base as
     /// the queue keys it, tried rather than waited for, so no connection
-    /// waits on it.
+    /// waits on it. The base is read first, outside the turn's transaction,
+    /// which then only takes the lock: it holds no row or table lock of any
+    /// factory table, so nothing it may hold for minutes stands in the way
+    /// of a write to the Run or a migration of its table.
     #[tracing::instrument(err, skip(self))]
     async fn take_merge_turn(&self, run_id: RunId) -> Result<Option<PgMergeTurn>, Self::Err> {
+        let key = sqlx::query_scalar!(
+            r#"
+            SELECT hashtextextended(
+                'factory_merge_turn:'
+                    || lower(regexp_replace(btrim(repo_url), '\.git$', ''))
+                    || ' ' || base_branch,
+                0
+            ) AS "key!"
+            FROM factory_run
+            WHERE id = $1 AND repo_url IS NOT NULL AND base_branch IS NOT NULL
+            "#,
+            run_id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
         let mut transaction = self.pool.begin().await?;
         sqlx::query_scalar!(
             r#"SELECT set_config('idle_in_transaction_session_timeout', $1, true) AS "set!""#,
@@ -44,23 +62,17 @@ impl MergeQueueRepository for PgRunRepository {
         )
         .fetch_one(&mut *transaction)
         .await?;
-        let taken = sqlx::query_scalar!(
-            r#"
-            SELECT pg_try_advisory_xact_lock(hashtextextended(
-                'factory_merge_turn:'
-                    || lower(regexp_replace(btrim(repo_url), '\.git$', ''))
-                    || ' ' || base_branch,
-                0
-            )) AS "taken!"
-            FROM factory_run
-            WHERE id = $1 AND repo_url IS NOT NULL AND base_branch IS NOT NULL
-            "#,
-            run_id.as_uuid(),
-        )
-        .fetch_optional(&mut *transaction)
-        .await?;
-        // A Run on no repository has no base another Run merges into.
-        if taken == Some(false) {
+        // A Run on no repository has no base another Run merges into: its
+        // turn is a transaction that holds nothing.
+        let Some(key) = key else {
+            return Ok(Some(PgMergeTurn {
+                _transaction: transaction,
+            }));
+        };
+        let taken = sqlx::query_scalar!(r#"SELECT pg_try_advisory_xact_lock($1) AS "taken!""#, key)
+            .fetch_one(&mut *transaction)
+            .await?;
+        if !taken {
             return Ok(None);
         }
         Ok(Some(PgMergeTurn {

@@ -111,6 +111,44 @@ async fn a_base_github_merges_in_ends_done() {
     assert!(tasks[0].prompt.contains("Change nothing"));
 }
 
+/// A merge made by hand with exactly the parents GitHub's would have, the
+/// reviewed head then the base, and edits of its own, is not taken for
+/// GitHub's: GitHub did not sign it as itself, so the Step ends `resolved`
+/// and the merge goes back through review.
+#[tokio::test(start_paused = true)]
+async fn a_hand_made_merge_with_github_s_parents_ends_resolved() {
+    let github = behind();
+    {
+        let mut state = github.state();
+        state.updated_head = Some(UPDATED.to_string());
+        state.made_by_hand.insert(UPDATED.to_string());
+    }
+    let agent = FakeAgent::ending_with("done");
+    let repository = repository();
+    let mut update = input(&[]);
+    update.repository = Some(&repository);
+    let repo = reviewed_at_head(update.key.run_id).await;
+
+    let report = run_update(&agent, &github, &repo, update)
+        .await
+        .expect("update");
+
+    assert_eq!(report.outcome.as_str(), "resolved", "{}", report.output);
+    assert!(
+        report.output.contains("GitHub did not make it"),
+        "{}",
+        report.output
+    );
+    assert_eq!(
+        repo.reviewed_head(update.key.run_id)
+            .await
+            .expect("read")
+            .as_deref(),
+        Some(FakeGithub::HEAD),
+        "a hand-made merge never stands for the reviewed head"
+    );
+}
+
 /// A branch that changed since GitHub's merge, as when a fix of the checks
 /// was pushed, ends `resolved`: the change is reviewed again.
 #[tokio::test]

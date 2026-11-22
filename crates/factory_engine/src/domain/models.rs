@@ -576,6 +576,33 @@ pub enum Opening {
     Refused(String),
 }
 
+/// The account GitHub commits as when it makes a commit itself, as the
+/// merge of "Update branch" or of a pull request: its own `web-flow`.
+pub const GITHUB_COMMITTER: &str = "web-flow";
+
+/// A commit of a Run's repository, as GitHub tells who made it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitMade {
+    /// Its parents, in their order: a merge's first is the branch merged
+    /// into.
+    pub parents: Vec<String>,
+    /// The login of the GitHub account its committer's email belongs to;
+    /// none when it belongs to none.
+    pub committer_login: Option<String>,
+    /// Whether GitHub verified its signature against its committer.
+    pub verified: bool,
+}
+
+impl CommitMade {
+    /// Whether GitHub made it itself: committed as [`GITHUB_COMMITTER`]
+    /// with a signature GitHub verified, which only GitHub's own key makes.
+    /// A commit made by hand may name GitHub's email as its committer, and
+    /// so its account, but cannot sign as it.
+    pub fn made_by_github(&self) -> bool {
+        self.verified && self.committer_login.as_deref() == Some(GITHUB_COMMITTER)
+    }
+}
+
 /// What asking GitHub to delete a branch came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BranchDeletion {

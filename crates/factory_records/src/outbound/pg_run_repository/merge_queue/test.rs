@@ -298,34 +298,25 @@ async fn a_repository_named_in_another_case_is_one_queue(pool: PgPool) {
 
 /// One Run of a base holds its merge turn at a time: another Run of that
 /// base, in whatever case its repository is named, takes none until the
-/// turn is dropped; a Run of another base takes its own meanwhile.
+/// turn is dropped.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people"))
 )]
-async fn one_run_of_a_base_holds_its_merge_turn_at_a_time(pool: PgPool) {
+async fn two_runs_on_one_base_take_its_merge_turn_one_at_a_time(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
-    let main = branch_of_app("main");
-    let first = code_run(&repo, Some(&main)).await;
+    let first = code_run(&repo, Some(&branch_of_app("main"))).await;
     let shouting = Repository {
         url: "https://github.com/Macro/App.git".to_string(),
         base_branch: "main".to_string(),
     };
     let second = code_run(&repo, Some(&shouting)).await;
-    let elsewhere = code_run(&repo, Some(&branch_of_app("release"))).await;
 
     let turn = repo.take_merge_turn(first).await.expect("take");
     assert!(turn.is_some(), "the first Run takes the turn");
     assert!(
         repo.take_merge_turn(second).await.expect("take").is_none(),
         "the base's turn is held"
-    );
-    assert!(
-        repo.take_merge_turn(elsewhere)
-            .await
-            .expect("take")
-            .is_some(),
-        "another base's turn is its own"
     );
 
     // Dropping the turn rolls its transaction back as the connection goes
@@ -344,6 +335,112 @@ async fn one_run_of_a_base_holds_its_merge_turn_at_a_time(pool: PgPool) {
             .expect("wait");
     }
     assert!(taken.is_some(), "a dropped turn is let go");
+}
+
+/// Two Runs on different bases each take their own merge turn at once: a
+/// Run of one repository's `release` and one of another repository's
+/// `main` wait on no `main` turn of this repository.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn two_runs_on_different_bases_take_their_turns_at_once(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let main = code_run(&repo, Some(&branch_of_app("main"))).await;
+    let release = code_run(&repo, Some(&branch_of_app("release"))).await;
+    let other_repository = Repository {
+        url: "https://github.com/macro/site".to_string(),
+        base_branch: "main".to_string(),
+    };
+    let elsewhere = code_run(&repo, Some(&other_repository)).await;
+
+    let main_turn = repo.take_merge_turn(main).await.expect("take");
+    assert!(main_turn.is_some(), "the main Run takes its turn");
+    let release_turn = repo.take_merge_turn(release).await.expect("take");
+    assert!(release_turn.is_some(), "another branch's turn is its own");
+    let elsewhere_turn = repo.take_merge_turn(elsewhere).await.expect("take");
+    assert!(
+        elsewhere_turn.is_some(),
+        "another repository's turn is its own"
+    );
+}
+
+/// A held merge turn locks no row or table of any factory table: the Run
+/// it is for can be written, and its table locked whole, as by a
+/// migration, while it is held.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_held_merge_turn_locks_no_factory_table(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let run = code_run(&repo, Some(&branch_of_app("main"))).await;
+    let turn = repo.take_merge_turn(run).await.expect("take");
+    assert!(turn.is_some(), "the Run takes its turn");
+
+    let held = sqlx::query_scalar!(
+        r#"
+        SELECT c.relname AS "relname!"
+        FROM pg_locks turn
+        JOIN pg_locks held ON held.pid = turn.pid
+        JOIN pg_class c ON c.oid = held.relation
+        WHERE turn.locktype = 'advisory' AND turn.granted
+            AND held.locktype = 'relation'
+            AND c.relname LIKE 'factory%'
+        "#,
+    )
+    .fetch_all(&repo.pool)
+    .await
+    .expect("locks");
+    assert_eq!(held, Vec::<String>::new(), "the turn holds factory locks");
+
+    let mut other = repo.pool.begin().await.expect("begin");
+    sqlx::query!("LOCK TABLE factory_run IN ACCESS EXCLUSIVE MODE NOWAIT")
+        .execute(&mut *other)
+        .await
+        .expect("the Run's table is not locked by the turn");
+    sqlx::query!(
+        "UPDATE factory_run SET merge_head_sha = merge_head_sha WHERE id = $1",
+        run.as_uuid(),
+    )
+    .execute(&mut *other)
+    .await
+    .expect("the Run's row is not locked by the turn");
+    other.rollback().await.expect("rollback");
+    drop(turn);
+}
+
+/// A base's merge turn is keyed by the same advisory lock key in every
+/// release: workers on either side of a deploy share one turn per base only
+/// while the key stays the same. The literal is
+/// `hashtextextended('factory_merge_turn:https://github.com/macro/app main', 0)`,
+/// the key earlier workers took for this base.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_merge_turn_keeps_the_key_earlier_workers_took(pool: PgPool) {
+    const MACRO_APP_MAIN_KEY: i64 = -5_814_030_250_524_603_323;
+    let repo = PgRunRepository::new(pool);
+    let shouting = Repository {
+        url: "https://github.com/Macro/App.git".to_string(),
+        base_branch: "main".to_string(),
+    };
+    let run = code_run(&repo, Some(&shouting)).await;
+    let turn = repo.take_merge_turn(run).await.expect("take");
+    assert!(turn.is_some(), "the Run takes its turn");
+
+    let mut earlier_worker = repo.pool.begin().await.expect("begin");
+    let taken = sqlx::query_scalar!(
+        r#"SELECT pg_try_advisory_xact_lock($1) AS "taken!""#,
+        MACRO_APP_MAIN_KEY,
+    )
+    .fetch_one(&mut *earlier_worker)
+    .await
+    .expect("try");
+    assert!(!taken, "the turn holds the key earlier workers took");
+    earlier_worker.rollback().await.expect("rollback");
+    drop(turn);
 }
 
 /// The head a Run's review passed on is kept until another replaces it;
