@@ -209,6 +209,8 @@ export default {
   definitionNoRunYet: 'No run has read it yet.',
   definitionContents: 'What the definition holds',
   definitionShownAt: 'As it is at {{commit}}',
+  definitionShownAtHead:
+    'The newest run’s commit couldn’t be read, so this is its default branch now.',
   definitionFlows: 'Flows',
   definitionRoles: 'Roles',
   definitionStandingRules: 'Standing rules',
@@ -224,6 +226,7 @@ export default {
     'Its pull requests couldn’t be listed with your GitHub account.',
   definitionPullRequest: '#{{number}} {{title}}',
   definitionPullRequestDraft: '(draft)',
+  definitionOpensInNewTab: '(opens in a new tab)',
   definitionAdminsOnly: 'Only team admins can change it.',
   definitionSave: 'Save',
   definitionRemove: 'Stop using it',

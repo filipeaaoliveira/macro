@@ -7,6 +7,24 @@ import type {
 import { For, type JSX, Show } from 'solid-js';
 import { RULE_NAMES } from '../core/standing-rules';
 
+/**
+ * A link to a page on GitHub, which opens in a new tab: screen readers hear
+ * that too.
+ */
+function ExternalLink(props: { href: string; children: JSX.Element }) {
+  return (
+    <a
+      class="underline"
+      href={props.href}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {props.children}
+      <span class="sr-only"> {t('factoryRuns.definitionOpensInNewTab')}</span>
+    </a>
+  );
+}
+
 /** A link to `repoUrl`'s files at `commit`, labelled by `children`. */
 function CommitLink(props: {
   repoUrl: string;
@@ -14,14 +32,9 @@ function CommitLink(props: {
   children: JSX.Element;
 }) {
   return (
-    <a
-      class="underline"
-      href={`${props.repoUrl}/tree/${props.commit}`}
-      target="_blank"
-      rel="noopener noreferrer"
-    >
+    <ExternalLink href={`${props.repoUrl}/tree/${props.commit}`}>
       {props.children}
-    </a>
+    </ExternalLink>
   );
 }
 
@@ -48,8 +61,9 @@ function standingRulesText(rules: Contents['standingRules']): string {
 
 /**
  * Which commit of the team's Factory Definition the newest Run read, and,
- * read-only, what the Definition holds there: its Flows, Roles, Standing
- * Rules and Scorers.
+ * read-only, what the Definition holds there (or at its head, saying so,
+ * when that commit couldn't be read): its Flows, Roles, Standing Rules and
+ * Scorers.
  */
 export function DefinitionContents(props: {
   repoUrl: string;
@@ -90,6 +104,15 @@ export function DefinitionContents(props: {
                 })}
               </CommitLink>
             </p>
+            <Show
+              when={
+                props.newestRun && props.newestRun.commit !== contents().commit
+              }
+            >
+              <p class="text-xs text-ink-muted">
+                {t('factoryRuns.definitionShownAtHead')}
+              </p>
+            </Show>
             <Show when={contents().description}>
               <p class="text-sm">{contents().description}</p>
             </Show>
@@ -103,6 +126,9 @@ export function DefinitionContents(props: {
                         {' '}
                         {flow.entries.join(' → ')}
                       </span>
+                      <Show when={flow.description}>
+                        <p class="text-xs text-ink-muted">{flow.description}</p>
+                      </Show>
                     </li>
                   )}
                 </For>
@@ -197,17 +223,12 @@ export function DefinitionPullRequests(props: {
               <For each={pullRequests()}>
                 {(pullRequest) => (
                   <li class="[overflow-wrap:anywhere]">
-                    <a
-                      class="underline"
-                      href={pullRequest.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
+                    <ExternalLink href={pullRequest.url}>
                       {t('factoryRuns.definitionPullRequest', {
                         number: pullRequest.number,
                         title: pullRequest.title,
                       })}
-                    </a>
+                    </ExternalLink>
                     <Show when={pullRequest.draft}>
                       <span class="text-ink-muted">
                         {' '}

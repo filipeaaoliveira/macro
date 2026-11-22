@@ -83,7 +83,7 @@ describe('DefinitionSettings', () => {
     mount(named);
 
     const read = await screen.findByRole('link', {
-      name: 'The newest run read it at aaaaaaa.',
+      name: 'The newest run read it at aaaaaaa. (opens in a new tab)',
     });
     expect(read.getAttribute('href')).toBe(`${REPO}/tree/${READ}`);
     const contents = screen.getByRole('group', {
@@ -91,11 +91,14 @@ describe('DefinitionSettings', () => {
     });
     const inside = within(contents);
     expect(
-      inside.getByRole('link', { name: 'As it is at aaaaaaa' })
+      inside.getByRole('link', {
+        name: 'As it is at aaaaaaa (opens in a new tab)',
+      })
     ).toBeTruthy();
     expect(inside.getByText('The team’s factory.')).toBeTruthy();
     expect(inside.getByText('notes')).toBeTruthy();
     expect(inside.getByText('plan → reply')).toBeTruthy();
+    expect(inside.getByText('Write a note.')).toBeTruthy();
     expect(inside.getByText('writer')).toBeTruthy();
     expect(inside.getByText('primary, backup')).toBeTruthy();
     expect(
@@ -105,17 +108,37 @@ describe('DefinitionSettings', () => {
     expect(inside.getByText('25% of runs of notes')).toBeTruthy();
     // Read-only: a member names nothing and edits none of it.
     expect(contents.querySelector('input, textarea, button')).toBeNull();
+    expect(
+      inside.queryByText(
+        'The newest run’s commit couldn’t be read, so this is its default branch now.'
+      )
+    ).toBeNull();
+  });
+
+  it('says when it shows the head, the newest run’s commit unread', async () => {
+    mount({ ...named, contents: { ...named.contents!, commit: HEAD } });
+
+    const contents = await screen.findByRole('group', {
+      name: 'What the definition holds',
+    });
+    expect(
+      within(contents).getByText(
+        'The newest run’s commit couldn’t be read, so this is its default branch now.'
+      )
+    ).toBeTruthy();
   });
 
   it('lists the open pull requests on the definition, each linked', async () => {
     mount(named);
 
     const fix = await screen.findByRole('link', {
-      name: '#4 Fix the notes flow',
+      name: '#4 Fix the notes flow (opens in a new tab)',
     });
     expect(fix.getAttribute('href')).toBe(`${REPO}/pull/4`);
     expect(
-      screen.getByRole('link', { name: '#7 Add a scorer' }).getAttribute('href')
+      screen
+        .getByRole('link', { name: '#7 Add a scorer (opens in a new tab)' })
+        .getAttribute('href')
     ).toBe(`${REPO}/pull/7`);
     expect(screen.getByText('(draft)')).toBeTruthy();
   });
