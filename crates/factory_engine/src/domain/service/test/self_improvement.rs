@@ -1587,6 +1587,7 @@ async fn undone_failures_count_toward_the_next_improvement() {
         url: "https://github.com/macro/factory-definition/pull/9".to_string(),
         state: PullRequestState::Closed,
         head_sha: HEAD.to_string(),
+        merge_commit: None,
     });
     bench
         .improvement()

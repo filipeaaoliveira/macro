@@ -457,9 +457,9 @@ where
             Some(merge) => {
                 let first = self
                     .github
-                    .commit_parents(owner, &repository, &merge)
+                    .commit_made(owner, &repository, &merge)
                     .await?
-                    .and_then(|parents| parents.into_iter().next());
+                    .and_then(|commit| commit.parents.into_iter().next());
                 let Some(first) = first else {
                     return Ok(RunChange::Missing);
                 };
