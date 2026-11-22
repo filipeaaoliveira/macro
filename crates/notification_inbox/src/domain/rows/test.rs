@@ -564,18 +564,30 @@ fn a_factory_run_without_a_task_has_a_row_of_its_own_under_its_owner() {
             NotificationState::Unseen,
         )
     };
-    // Anything else filed under a User has no row, as before Users were
-    // listed.
+    // A lighter notice of the same Run, a notify-only Gate's or the
+    // stand-in's, joins its row.
+    let told = notification(
+        5,
+        entity(EntityType::User, OWNER),
+        "factory_gate_waiting",
+        json!({
+            "runId": uuid(0xF2),
+            "seq": 4,
+            "taskId": "",
+            "request": "Fix the login bug",
+            "question": "The plan is ready.",
+            "notifyOnly": true,
+        }),
+        5,
+        NotificationState::Unseen,
+    );
+    // Anything else filed under the viewer's User, such as an inbox
+    // reconnection notice, has no row, as before Users were listed.
     let other = notification(
         4,
         entity(EntityType::User, OWNER),
-        "invite_to_team",
-        json!({
-            "teamName": "Team",
-            "teamId": uuid(TEAM),
-            "teamInviteId": uuid(0x1A),
-            "invitedBy": "macro|other@example.com",
-        }),
+        "inbox_reauth_required",
+        json!({ "emailAddress": "julia@example.com" }),
         4,
         NotificationState::Unseen,
     );
@@ -587,23 +599,24 @@ fn a_factory_run_without_a_task_has_a_row_of_its_own_under_its_owner() {
             waiting(2, 0xF2, 2, 2),
             waiting(3, 0xF1, 5, 3),
             other,
+            told,
         ],
     );
 
     assert_eq!(
         shape(&listed),
         vec![
+            (InboxRowType::Task, vec![uuid(5), uuid(2)], vec![]),
             (InboxRowType::Task, vec![uuid(3), uuid(1)], vec![]),
-            (InboxRowType::Task, vec![uuid(2)], vec![]),
         ]
     );
     assert_eq!(
         listed[0].id.id(),
-        format!("user:{}#factory_run:{}", uuid(OWNER), uuid(0xF1))
+        format!("user:{}#factory_run:{}", uuid(OWNER), uuid(0xF2))
     );
     assert_eq!(
         listed[1].id.id(),
-        format!("user:{}#factory_run:{}", uuid(OWNER), uuid(0xF2))
+        format!("user:{}#factory_run:{}", uuid(OWNER), uuid(0xF1))
     );
     assert_eq!(listed[0].actor, Some(InboxActor::Macro));
 }

@@ -2461,7 +2461,7 @@ where
         // An answer in the stand-in's window closes it, and so the notice
         // that the stand-in answered.
         if let Some(gate) = &gate
-            && stand_in_notice_may_be_out(&run, gate)
+            && stand_in_notice_may_be_out(gate)
         {
             let id = stand_in_id(answered.key.run_id, answered.key.seq);
             self.notifier.answered(&run.user_id, id).await;
@@ -2659,9 +2659,10 @@ where
         // that the stand-in answered is done, as the window closing would
         // make it.
         for step in &steps {
-            let in_window = step.gate.as_ref().is_some_and(|gate| {
-                gate.answer.is_none() && stand_in_notice_may_be_out(&run, gate)
-            });
+            let in_window = step
+                .gate
+                .as_ref()
+                .is_some_and(|gate| gate.answer.is_none() && stand_in_notice_may_be_out(gate));
             if in_window {
                 let id = stand_in_id(finish.run_id, step.seq);
                 self.notifier.answered(&run.user_id, id).await;
@@ -2679,7 +2680,7 @@ where
             .map_err(internal)?
             .and_then(|kept| walked_flow(finish.run_id, kept));
         let visited: BTreeSet<_> = steps.iter().map(|step| &step.entry).collect();
-        for entry in told_entries(&run, flow.as_ref(), visited) {
+        for entry in told_entries(flow.as_ref(), visited) {
             let id = told_id(finish.run_id, entry);
             self.notifier.answered(&run.user_id, id).await;
         }

@@ -19,7 +19,7 @@ use uuid::Uuid;
 use super::{FakeExecutor, julia, keep_notify_only_reply, reply_step};
 use crate::domain::fakes::{FakeGateModel, FakeNotifier, FakeRepo, FakeTaskNotes};
 use crate::domain::gate::{
-    AnswerGate, GateAnswered, GateRuling, ReplyRead, ReplyReading, StandInAsking,
+    AnswerGate, GateAnswered, GateRuling, GateTelling, ReplyRead, ReplyReading, StandInAsking,
 };
 use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id, stand_in_id, told_id};
 use crate::domain::gate_replies::GateReplySettings;
@@ -787,9 +787,8 @@ async fn the_stand_in_s_notice_is_done_when_its_window_closes_early() {
     assert!(!done.contains(&stand_in_id(run_id, 3)), "{done:?}");
 }
 
-/// A Run of Julia's started without a task, with the factory's default
-/// rules.
-async fn run_without_task(repo: &FakeRepo) -> RunId {
+/// A Run of Julia's started without a task, with `rules`.
+async fn run_without_task(repo: &FakeRepo, rules: RunRules) -> RunId {
     let RunInsert::Inserted(run) = repo
         .insert_run(NewRun {
             id: RunId::generate(),
@@ -802,7 +801,7 @@ async fn run_without_task(repo: &FakeRepo) -> RunId {
             created_in_person: true,
             control_file_patterns: &[],
             control_files_team_id: None,
-            standing_rules: rules(false),
+            standing_rules: rules,
             automation: None,
             definition: None,
             kept_flow: None,
@@ -849,26 +848,88 @@ async fn a_run_s_normal_end_closes_no_notice_never_sent() {
     assert!(notifier.done.lock().expect("done").is_empty());
 }
 
-/// A Run without a task sends no notify-only or stand-in notice, so its
-/// end closes neither; a Gate open in the stand-in's window told no one
-/// either.
+/// A Run without a task tells its owner of a notify-only Gate, about no
+/// task (so it is filed under the owner), not pushed, one per entry and
+/// Run, whatever its definition says; its end closes that notice and the
+/// stand-in's, and no waiting notice for the Gate the stand-in answered.
 #[tokio::test]
-async fn a_run_without_a_task_closes_no_lighter_notice() {
-    let repo = FakeRepo::default();
-    let run_id = run_without_task(&repo).await;
-    keep_notify_only_reply(&repo, run_id);
-    let notifier = FakeNotifier::default();
-    let steps = service(
-        &repo,
-        &FakeExecutor::default(),
-        &notifier,
-        &FakeTaskNotes::default(),
-    );
-    steps
-        .start_step(reply_step(run_id, 1))
+async fn a_run_without_a_task_tells_and_closes_its_lighter_notices() {
+    for quiet_gates in [false, true] {
+        let repo = FakeRepo::default();
+        let run_id = run_without_task(&repo, quiet(quiet_gates)).await;
+        keep_notify_only_reply(&repo, run_id);
+        let notifier = FakeNotifier::default();
+        let steps = service(
+            &repo,
+            &FakeExecutor::default(),
+            &notifier,
+            &FakeTaskNotes::default(),
+        );
+        steps
+            .start_step(reply_step(run_id, 1))
+            .await
+            .expect("start");
+        for _ in 0..2 {
+            steps
+                .tell_gate(GateTelling {
+                    key: StepKey { run_id, seq: 1 },
+                    question: "The plan is ready.".to_string(),
+                })
+                .await
+                .expect("told");
+        }
+        let reply = EntryId::try_from("reply".to_string()).expect("valid");
+        {
+            let sent = notifier.sent.lock().expect("sent");
+            assert_eq!(sent.len(), 2, "{quiet_gates}: {sent:?}");
+            assert_eq!(sent[0], sent[1], "a retry sends the same notice");
+            assert_eq!(sent[0].notification_id, told_id(run_id, &reply));
+            assert_eq!(sent[0].owner, julia());
+            assert_eq!(sent[0].task_id, None);
+            assert_eq!(sent[0].metadata.task_id, "");
+            assert!(sent[0].metadata.notify_only);
+            assert!(!sent[0].push);
+        }
+
+        let plan = StepKey { run_id, seq: 2 };
+        gate_at(&repo, plan, "plan", "done", &["approve", "revise"]).await;
+        repo.stand_in(
+            plan,
+            &StandInAnswer {
+                answer: outcome("approve"),
+                reason: "The plan matches the request.".to_string(),
+                confidence: 95,
+                until: Utc::now() + TimeDelta::minutes(10),
+            },
+        )
         .await
-        .expect("start");
-    let plan = StepKey { run_id, seq: 2 };
+        .expect("stand in");
+
+        steps
+            .end_run(RunFinish {
+                run_id,
+                outcome: RunOutcome::Cancelled,
+            })
+            .await
+            .expect("end");
+
+        let mut done = notifier.done.lock().expect("done").clone();
+        done.sort();
+        let mut expected = vec![told_id(run_id, &reply), stand_in_id(run_id, 2)];
+        expected.sort();
+        assert_eq!(done, expected, "{quiet_gates}");
+        assert!(!done.contains(&notice_id(run_id, 2)), "{done:?}");
+    }
+}
+
+/// The owner's answer in the stand-in's window on a Run without a task
+/// closes the notice that the stand-in answered, as on a Run on a task,
+/// and no waiting notice, which the Gate never sent while it stood.
+#[tokio::test]
+async fn an_answer_in_the_window_of_a_run_without_a_task_closes_its_notice() {
+    let repo = FakeRepo::default();
+    let run_id = run_without_task(&repo, rules(false)).await;
+    let plan = StepKey { run_id, seq: 1 };
     gate_at(&repo, plan, "plan", "done", &["approve", "revise"]).await;
     repo.stand_in(
         plan,
@@ -881,19 +942,34 @@ async fn a_run_without_a_task_closes_no_lighter_notice() {
     )
     .await
     .expect("stand in");
+    let notifier = FakeNotifier::default();
+    let steps = service(
+        &repo,
+        &FakeExecutor::default(),
+        &notifier,
+        &FakeTaskNotes::default(),
+    );
 
     steps
-        .end_run(RunFinish {
-            run_id,
-            outcome: RunOutcome::Cancelled,
+        .answer_gate(GateAnswered {
+            key: plan,
+            answer: AnswerGate {
+                seq: 1,
+                answer: outcome("revise"),
+                note: None,
+                user_id: julia(),
+                approved_control_files: None,
+                agent_session: None,
+                standing: None,
+            },
         })
         .await
-        .expect("end");
+        .expect("answer");
 
-    let done = notifier.done.lock().expect("done").clone();
-    let reply = EntryId::try_from("reply".to_string()).expect("valid");
-    assert!(!done.contains(&told_id(run_id, &reply)), "{done:?}");
-    assert!(done.is_empty(), "{done:?}");
+    assert_eq!(
+        *notifier.done.lock().expect("done"),
+        [stand_in_id(run_id, 1)]
+    );
 }
 
 /// A Run on a task closes, once it ends, the notify-only notice of an

@@ -65,10 +65,12 @@ rather than waits on an answer), lighter:
 not pushed to their phone, one per entry and Run however often its Gate
 tells (`gate_owner::told_id`), and marked done in `factory_end_run`
 (no record says which told, so each visited entry whose Gate the Run's
-Flow makes notify-only, and none for a Run without a task, which sends
-none: `gate_owner::told_entries`). It is sent whatever the definition says, since the Gate
-exists only to tell the owner (`gate_owner::gate_told`); the worker also
-posts the notice to the task thread when that section is on. No built-in
+Flow makes notify-only: `gate_owner::told_entries`). It is about the Run's
+task, or, for a Run started without one, filed under the owner's own User
+as a waiting Gate's is (see below). It is sent whatever the definition
+says, since the Gate exists only to tell the owner
+(`gate_owner::gate_told`); the worker also posts the notice to the task
+thread when that section is on. No built-in
 Flow has one.
 
 An agent may ask the Run's owner a question mid-Step (`src/domain/questions.rs`)
@@ -1468,10 +1470,11 @@ the ingress never creates or pushes it, and the egress drops a push queued
 before the withdrawal; it then marks it done again in case it was created
 in between. So the worker closes only notices that may have gone out
 (`gate_owner::notice_may_be_out`, `stand_in_notice_may_be_out`,
-`told_entries`): none on a quiet Run, none for a Gate a rule or the
-stand-in answered or while the stand-in's answer stood, no notify-only or
-stand-in notice for a Run without a task, and a notify-only notice only for
-the entries the Run's Flow gives a notify-only Gate. A notice marked done
+`told_entries`): no waiting notice on a quiet Run, none for a Gate a rule
+or the stand-in answered or while the stand-in's answer stood, a stand-in
+notice only for a Gate the stand-in answered, and a notify-only notice only
+for the entries the Run's Flow gives a notify-only Gate, with a task or
+without one. A notice marked done
 leaves no row; one closed before the ingress created it leaves one small
 row for good: only the rare notice that lost that race, at most one per
 Gate, notify-only entry and stand-in answer of a Run. A Gate a
@@ -1479,13 +1482,21 @@ Standing Rule or the stand-in answers was never left to a person, so it
 sent no such notification. `GET /runs/waiting` lists the caller's Runs
 waiting at an unanswered Gate, whatever the definition says.
 
-A Run started without a task files its notice under the owner's own User
-entity. The inbox lists a User's notices only to that user (Soup's
-`user_gate`), each such Run on a row of its own (`notification_inbox`'s
-`place_about_the_viewer`), so the notice reaches the owner in the inbox as
-well as live and by push, opens the Run from there, and is marked done or
-withdrawn as a task's is. Its Gate also shows in "Waiting on you" (`GET
-/runs/waiting`), which lists every waiting Run, with a task or without.
+A Run started without a task files its notices under the owner's own User
+entity: a waiting Gate's, a notify-only Gate's and the stand-in's, under
+the same ids as a Run on a task's, which the notification service keeps
+once (`ON CONFLICT DO NOTHING`). The inbox lists a User's notices only to
+that user (Soup's `user_gate`), each such Run on a row of its own
+(`notification_inbox`'s `place_about_the_viewer`), so the notices reach
+the owner in the inbox as well as live (and, for a waiting Gate, by push),
+open the Run from there, and are marked done or withdrawn as a task's are,
+the lighter ones once the Run ends at the latest. Such a Run's waiting Gate
+also shows in "Waiting on you" (`GET /runs/waiting`), which lists every
+waiting Run, with a task or without. A Run without a task that was already
+running when Runs without a task began sending the lighter notices sent
+none before then, so it closes notices it never sent: each leaves one
+harmless withdrawal row, at most one per Gate, notify-only entry and
+stand-in answer.
 
 A team's Orchestrator Definition also has an owner section
 (`owner_gates`, `ownerGates` in `PUT /settings/standing-rules` and its
@@ -1640,7 +1651,8 @@ why, none of them when it did not answer), which the
 Run view shows the owner. A retry returns the answer kept first, with what
 is left of its window. While the window is open the owner is told, lightly,
 whatever the definition says (`gate_owner::stand_in_notice`): a
-notification about the Run's task, of the waiting Gate's kind flagged
+notification about the Run's task (for a Run without one, filed under the
+owner, as above), of the waiting Gate's kind flagged
 `notifyOnly` as a notify-only Gate's, not pushed to their phone, saying
 what the stand-in answered (by the answer's label,
 `gate_owner::answer_label`, which mirrors the web app's `flowWordLabel`:
@@ -1649,7 +1661,7 @@ window closes (the Run view says when),
 one per Gate (`gate_owner::stand_in_id`, apart from the Gate's waiting
 notice); it is marked done once the window closes, the owner answers in
 it or replies in it (words asked back end the window too), or the Run
-ends. A Run with no task tells no one. Run insights count neither its
+ends. Run insights count neither its
 answers nor Rule Answers.
 
 A notice is sent through the notification ingress, a queue, while it is
