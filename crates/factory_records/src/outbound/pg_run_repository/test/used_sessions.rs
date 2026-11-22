@@ -69,7 +69,8 @@ async fn a_step_keeps_the_session_it_lost_with_the_one_it_went_on_in(pool: PgPoo
         .await
         .expect("claim")
         .session;
-    let second = session_of("primary");
+    // The Role's next Agent, on a bot of its own.
+    let second = session_of("backup");
     assert!(
         repo.pass_session(
             key(id, 1),
@@ -114,9 +115,18 @@ async fn a_step_keeps_the_session_it_lost_with_the_one_it_went_on_in(pool: PgPoo
         .expect("the run is read");
     let quality_sessions: Vec<Uuid> = run.sessions.iter().map(|session| session.id).collect();
     assert_eq!(quality_sessions, both);
-    // A session the Step left keeps no bot of its own: it reads as the
-    // Step's.
-    assert!(run.sessions.iter().all(|session| session.bot == second.bot));
+    // The Step keeps only its current bot: the session it left reads with
+    // none, not as the new Agent's, so a spend it did not record reads as
+    // unknown rather than as nothing.
+    let bot_of = |id: Uuid| {
+        run.sessions
+            .iter()
+            .find(|session| session.id == id)
+            .expect("the session is read")
+            .bot
+    };
+    assert_eq!(bot_of(first.session_id), None);
+    assert_eq!(bot_of(second.session_id), second.bot);
     // A Benchmark trial's tokens read the same sessions.
     let subject = repo
         .scoring_subject(id)

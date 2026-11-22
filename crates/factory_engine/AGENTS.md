@@ -478,7 +478,9 @@ to, as Codex or Claude Code through macrod), whose spend is unknown, not
 nothing. A session that recorded none, of a bot another session of the
 period recorded usage for (its Step's `bot_id`), made no model call, as
 one that failed before its first: it cost nothing and does not withhold
-the figure. A repository that names none is 400.
+the figure. A session a Step left for a new one has no known bot (the Step
+keeps only its current Agent's), so one that recorded none withholds the
+figure. A repository that names none is 400.
 
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
 `evaluation/insights.rs`, `inbound/evaluation.rs`): an

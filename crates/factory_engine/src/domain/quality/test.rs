@@ -932,6 +932,38 @@ fn a_session_that_made_no_model_call_costs_nothing() {
     assert_eq!(delivery.tokens_per_merged, None);
 }
 
+/// A writer Step whose first Agent (the owner's own login, which records
+/// no usage) worked, spent tokens and lost its session, then passed to a
+/// hosted Agent whose usage is recorded: the lost session reads with no
+/// bot, so its unrecorded spend is unknown and no figure per merged pull
+/// request is given. Credited to the hosted bot, it would read as a session
+/// that made no model call, and the figure would leave that spend out.
+#[test]
+fn a_session_a_step_left_with_no_usage_makes_the_cost_unknown() {
+    let lost = Uuid::from_u128(0x1057);
+    let mut passed_on = run(2);
+    passed_on.sessions.push(on(lost, None));
+    let records = |second: QualityRun| QualityRecords {
+        runs: vec![run(1), second],
+        ..QualityRecords::default()
+    };
+    let usage = [tokens(1, 1000, 1.5, 0), tokens(2, 500, 0.5, 0)];
+
+    let delivery = summarize_quality(&query(None), records(passed_on), &usage).delivery;
+
+    assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.unmeasured_runs, 1);
+    assert_eq!(delivery.cost_usd, 2.0);
+    assert_eq!(delivery.cost_per_merged_usd, None);
+    assert_eq!(delivery.tokens_per_merged, None);
+
+    // Read as the hosted bot's, the lost session would cost nothing.
+    let mut misread = run(2);
+    misread.sessions.push(on(lost, Some(HOSTED)));
+    let delivery = summarize_quality(&query(None), records(misread), &usage).delivery;
+    assert_eq!(delivery.cost_per_merged_usd, Some(1.0));
+}
+
 /// The service reads the repository asked for, by its URL, and the usage
 /// of the Runs' sessions; a repository that names none is refused.
 #[tokio::test]

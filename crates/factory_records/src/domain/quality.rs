@@ -173,8 +173,9 @@ pub struct QualityRun {
 pub struct QualitySession {
     /// The session.
     pub id: Uuid,
-    /// The bot that ran it; none for a Step from before Steps recorded
-    /// their bot.
+    /// The bot that ran it; none for a session a Step left for a new one
+    /// (the Step records only its current bot), or for a Step from before
+    /// Steps recorded their bot.
     pub bot: Option<Uuid>,
 }
 
