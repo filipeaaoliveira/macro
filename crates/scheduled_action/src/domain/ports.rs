@@ -718,17 +718,33 @@ pub trait ScheduledActionDispatcher {
 }
 
 pub trait ScheduledActionExecutor {
+    /// Run `action` now, as `starter` asks.
     fn execute_action(
         &self,
         action: ScheduledAction,
+        starter: RunStarter,
     ) -> impl Future<Output = Result<InProgressExecution>> + Send;
+}
+
+/// Who asks for a routine run: the scheduler's own dispatch of a due
+/// schedule, or a request (Run Now, by a person or a program).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunStarter {
+    /// The scheduler found the routine due.
+    Scheduler,
+    /// An API caller asked for the run.
+    Request,
 }
 
 /// What started a routine run.
 #[derive(Clone, Copy)]
 pub enum RoutineRun<'a> {
-    /// One of its schedules came due.
-    Scheduled { scheduled_for: DateTime<Utc> },
+    /// One of its schedules came due. `by_scheduler` is false when a request
+    /// started it once due (Run Now consumes the due firing).
+    Scheduled {
+        scheduled_for: DateTime<Utc>,
+        by_scheduler: bool,
+    },
     /// Its owner started it by hand.
     Manual { requested_at: DateTime<Utc> },
     /// An event it watches happened, and its owner may read it.
@@ -744,6 +760,16 @@ impl RoutineRun<'_> {
             Self::Event(run) => RoutineCause::Event {
                 event_id: run.pending.event.event_id().into(),
             },
+        }
+    }
+
+    /// Whether the scheduler started the run itself, with no API caller
+    /// asking: a schedule it found due, or an event the routine watches.
+    pub fn started_by_scheduler(&self) -> bool {
+        match self {
+            Self::Scheduled { by_scheduler, .. } => *by_scheduler,
+            Self::Event(_) => true,
+            Self::Manual { .. } => false,
         }
     }
 
@@ -946,6 +972,9 @@ pub struct CodeRun<'a> {
     /// The routine it belongs to, stamped on its credential so its writes
     /// never trigger routines.
     pub routine_id: macro_uuid::Uuid,
+    /// The scheduler's proof that it started the run itself, signed on its
+    /// credential; none for a run by hand and for a dry run.
+    pub scheduler_run: Option<agent_correlation::context::SchedulerRun>,
 }
 
 /// What one code step did.

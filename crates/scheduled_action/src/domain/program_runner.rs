@@ -114,6 +114,7 @@ where
         let routine_id = action.id.context("persisted routine required")?;
         let has_code = !program.code_steps().is_empty();
         let acts_as = program.code_identity();
+        let started_by_scheduler = firing.started_by_scheduler();
         // Code gets the triggering item whenever there is one.
         let trigger = match firing {
             RoutineRun::Event(run) if has_code => Some(self.trigger(owner, run).await?),
@@ -133,6 +134,16 @@ where
             &code_context,
         )
         .await?;
+        // The scheduler's proof, for a run it started itself: the run's id
+        // (its code's `run.id`) at the configuration it was claimed at. Code
+        // an SDK upgrade rewrote, in this run or before, gets none: it is not
+        // the code saved at that configuration.
+        let scheduler_run = (started_by_scheduler && !program.code_rewritten).then(|| {
+            agent_correlation::context::SchedulerRun {
+                run_id: handle.action_id,
+                revision: action.configuration_revision.get(),
+            }
+        });
         tracing::Span::current().record("steps", program.steps.len());
         let mut outputs = json!({});
         for (index, step) in program.steps.iter().enumerate() {
@@ -146,6 +157,7 @@ where
                         dry_run: false,
                         acts_as,
                         routine_id,
+                        scheduler_run,
                     };
                     let outcome = self.code(owner, run).await;
                     if let (Ok(output), Some(id), Value::Object(outputs)) =
@@ -259,7 +271,7 @@ where
         let owner = action.owner_user()?;
         let schedule = first_schedule(&action.trigger);
         let (at, started_by) = match firing {
-            RoutineRun::Scheduled { scheduled_for } => (
+            RoutineRun::Scheduled { scheduled_for, .. } => (
                 scheduled_for,
                 RunStart::Schedule {
                     schedule: schedule
@@ -358,7 +370,7 @@ where
         firing: RoutineRun<'_>,
     ) -> Result<Option<TriggerContext>> {
         let firing = match firing {
-            RoutineRun::Scheduled { scheduled_for } => RoutineFiring::Scheduled {
+            RoutineRun::Scheduled { scheduled_for, .. } => RoutineFiring::Scheduled {
                 scheduled_for,
                 schedule: schedule(&action.trigger),
             },

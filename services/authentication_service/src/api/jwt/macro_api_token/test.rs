@@ -87,6 +87,7 @@ fn token(agent: Option<Uuid>, routine: Option<Uuid>) -> String {
         agent_session_id: None,
         routine_id: routine,
         agent_scope: None,
+        scheduler_run: None,
     })
     .unwrap()
 }

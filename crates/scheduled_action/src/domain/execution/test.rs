@@ -56,7 +56,7 @@ impl AiAdmissionService for StalledAdmission {
 async fn shutdown_during_admission_releases_claim_without_contacting_runner() {
     let executor =
         executor(Repo::default(), Runner::default()).with_admission(Arc::new(StalledAdmission));
-    let mut request = Box::pin(executor.execute_action(action()));
+    let mut request = Box::pin(executor.execute_action(action(), RunStarter::Scheduler));
     assert!(futures::poll!(&mut request).is_pending());
     tokio::task::yield_now().await;
     assert!(executor.repo.claim.lock().unwrap().is_some());
@@ -83,7 +83,10 @@ async fn manual_and_cron_refusals_release_claims_and_advance_schedule_without_re
         let admission = admission(Err(error));
         let executor =
             executor(Repo::default(), Runner::default()).with_admission(admission.clone());
-        let returned = executor.execute_action(action()).await.unwrap_err();
+        let returned = executor
+            .execute_action(action(), RunStarter::Scheduler)
+            .await
+            .unwrap_err();
         assert_eq!(returned.downcast_ref::<AiAdmissionError>(), Some(&error));
         drain(&executor).await;
         assert_eq!(
@@ -142,7 +145,10 @@ async fn code_alone_needs_no_admission() {
     action.task = json!({ "steps": [{
         "type": "code", "title": "Post standup", "source": "export async function main() {}",
     }] });
-    executor.execute_action(action).await.unwrap();
+    executor
+        .execute_action(action, RunStarter::Scheduler)
+        .await
+        .unwrap();
     drain(&executor).await;
     assert!(admission.calls.lock().unwrap().is_empty());
 }
@@ -152,7 +158,10 @@ async fn admitted_model_execution_uses_the_persisted_owner_and_automation_featur
     let admission = admission(Ok(()));
     let executor = executor(Repo::default(), Runner::default()).with_admission(admission.clone());
     executor.runner.finish.cancel();
-    executor.execute_action(action()).await.unwrap();
+    executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     drain(&executor).await;
     assert_eq!(
         *admission.calls.lock().unwrap(),
@@ -167,7 +176,10 @@ async fn admitted_model_execution_uses_the_persisted_owner_and_automation_featur
 async fn a_scheduled_firing_is_consumed_before_its_program_runs() {
     // A process that dies mid-run must not leave the same firing due again.
     let executor = executor(Repo::default(), Runner::default());
-    executor.execute_action(action()).await.unwrap();
+    executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     for _ in 0..50 {
         if executor.runner.calls.load(Ordering::SeqCst) == 1 {
             break;
@@ -192,10 +204,34 @@ async fn a_firing_that_cannot_be_consumed_does_not_run_and_gives_its_claim_back(
         },
         Runner::default(),
     );
-    assert!(executor.execute_action(action()).await.is_err());
+    assert!(
+        executor
+            .execute_action(action(), RunStarter::Scheduler)
+            .await
+            .is_err()
+    );
     assert_eq!(executor.runner.calls.load(Ordering::SeqCst), 0);
     assert_eq!(executor.repo.releases.load(Ordering::SeqCst), 1);
     assert!(executor.repo.claim.lock().unwrap().is_none());
+}
+
+/// A due routine run is the scheduler's own only when its dispatch started
+/// it: Run Now on a due routine consumes the due firing, but is a request,
+/// never the scheduler's run, so its code gets no scheduler's proof.
+#[tokio::test]
+async fn only_the_schedulers_dispatch_is_its_own_run() {
+    let mut rescheduled = Vec::new();
+    for (starter, expected) in [(RunStarter::Scheduler, true), (RunStarter::Request, false)] {
+        let executor = executor(Repo::default(), Runner::default());
+        executor.runner.finish.cancel();
+        executor.execute_action(action(), starter).await.unwrap();
+        drain(&executor).await;
+        assert_eq!(*executor.runner.by_scheduler.lock().unwrap(), [expected]);
+        rescheduled.push(executor.repo.rescheduled.load(Ordering::SeqCst));
+    }
+    // Both consume the due firing alike.
+    assert!(rescheduled[0] > 0);
+    assert_eq!(rescheduled[0], rescheduled[1]);
 }
 
 #[tokio::test]
@@ -203,7 +239,10 @@ async fn a_manual_run_leaves_the_next_firing_alone_until_it_ends() {
     let mut manual = action();
     manual.next_run_at = Some(Utc::now() + chrono::Duration::hours(1));
     let executor = executor(Repo::default(), Runner::default());
-    executor.execute_action(manual).await.unwrap();
+    executor
+        .execute_action(manual, RunStarter::Request)
+        .await
+        .unwrap();
     for _ in 0..50 {
         if executor.runner.calls.load(Ordering::SeqCst) == 1 {
             break;
@@ -311,6 +350,8 @@ struct Runner {
     preparations: AtomicUsize,
     calls: AtomicUsize,
     contexts: Mutex<Vec<Option<EventReference>>>,
+    /// Whether the scheduler started each run itself.
+    by_scheduler: Mutex<Vec<bool>>,
     finish: CancellationToken,
     dropped: CancellationToken,
     fail_create: bool,
@@ -383,6 +424,10 @@ impl ScheduledAgentRunner for Runner {
         let _guard = self.dropped.clone().drop_guard();
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.contexts.lock().unwrap().push(firing.event().cloned());
+        self.by_scheduler
+            .lock()
+            .unwrap()
+            .push(firing.started_by_scheduler());
         handle.steps.push(routine_program::StepRecord {
             path: serde_json::from_value(json!("0")).unwrap(),
             result: routine_program::StepResult::Code {
@@ -487,7 +532,10 @@ async fn drain(executor: &InProcessExecutor<Repo, Live, Runner>) {
 #[tokio::test]
 async fn manual_returns_chat_before_completion_and_tracks_one_run() {
     let executor = executor(Repo::default(), Runner::default());
-    let progress = executor.execute_action(action()).await.unwrap();
+    let progress = executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     assert_eq!(progress.chat_id.as_deref(), Some("run-chat"));
     assert_eq!(executor.runner.calls.load(Ordering::SeqCst), 1);
     assert!(executor.repo.records.lock().unwrap().is_empty());
@@ -516,7 +564,10 @@ async fn manual_event_action_does_not_fabricate_event_context() {
     let mut action = event_run().action;
     action.enabled = false;
     executor.runner.finish.cancel();
-    executor.execute_action(action).await.unwrap();
+    executor
+        .execute_action(action, RunStarter::Scheduler)
+        .await
+        .unwrap();
     drain(&executor).await;
     assert_eq!(*executor.runner.contexts.lock().unwrap(), vec![None]);
     assert_eq!(executor.repo.claims.load(Ordering::SeqCst), 1);
@@ -528,7 +579,10 @@ async fn claim_is_fenced_to_the_snapshot_revision() {
     let mut action = action();
     action.configuration_revision = ConfigurationRevision::try_from(7).unwrap();
     executor.runner.finish.cancel();
-    executor.execute_action(action).await.unwrap();
+    executor
+        .execute_action(action, RunStarter::Scheduler)
+        .await
+        .unwrap();
     drain(&executor).await;
     assert_eq!(*executor.repo.claimed_revisions.lock().unwrap(), [7]);
 }
@@ -537,7 +591,12 @@ async fn claim_is_fenced_to_the_snapshot_revision() {
 async fn manual_claim_failure_never_prepares_or_runs() {
     let executor = executor(Repo::default(), Runner::default());
     *executor.repo.claim.lock().unwrap() = Some(ClaimToken::generate());
-    assert!(executor.execute_action(action()).await.is_err());
+    assert!(
+        executor
+            .execute_action(action(), RunStarter::Scheduler)
+            .await
+            .is_err()
+    );
     drain(&executor).await;
     assert_eq!(executor.runner.preparations.load(Ordering::SeqCst), 0);
     assert_eq!(executor.repo.releases.load(Ordering::SeqCst), 0);
@@ -548,7 +607,12 @@ async fn non_user_owner_never_claims() {
     let executor = executor(Repo::default(), Runner::default());
     let mut action = action();
     action.owner = Owner::Team(generate_uuid_v7());
-    assert!(executor.execute_action(action).await.is_err());
+    assert!(
+        executor
+            .execute_action(action, RunStarter::Scheduler)
+            .await
+            .is_err()
+    );
     assert_eq!(executor.repo.claims.load(Ordering::SeqCst), 0);
 }
 
@@ -561,7 +625,12 @@ async fn chat_creation_failure_releases_its_claim() {
             ..Runner::default()
         },
     );
-    assert!(executor.execute_action(action()).await.is_err());
+    assert!(
+        executor
+            .execute_action(action(), RunStarter::Scheduler)
+            .await
+            .is_err()
+    );
     drain(&executor).await;
     assert_eq!(executor.repo.releases.load(Ordering::SeqCst), 1);
     assert_eq!(executor.runner.calls.load(Ordering::SeqCst), 0);
@@ -582,7 +651,10 @@ async fn failed_execution_and_failed_bookkeeping_never_rerun_agent() {
         },
     );
     executor.runner.finish.cancel();
-    executor.execute_action(action()).await.unwrap();
+    executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     drain(&executor).await;
     assert_eq!(executor.runner.calls.load(Ordering::SeqCst), 1);
     assert_eq!(executor.repo.releases.load(Ordering::SeqCst), 1);
@@ -592,7 +664,10 @@ async fn failed_execution_and_failed_bookkeeping_never_rerun_agent() {
 #[tokio::test]
 async fn shutdown_cancels_tracked_run_and_releases_claim() {
     let executor = executor(Repo::default(), Runner::default());
-    executor.execute_action(action()).await.unwrap();
+    executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     executor.cancellation.cancel();
     drain(&executor).await;
     assert!(executor.runner.dropped.is_cancelled());
@@ -686,7 +761,10 @@ async fn failed_remote_cleanup_does_not_prevent_finalization() {
         },
     );
     executor.runner.finish.cancel();
-    executor.execute_action(action()).await.unwrap();
+    executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     drain(&executor).await;
     assert_eq!(executor.runner.cancellations.lock().unwrap().len(), 1);
     let records = executor.repo.records.lock().unwrap();
@@ -709,7 +787,10 @@ async fn stalled_cleanup_and_bookkeeping_still_release_exactly_once() {
         },
     );
     executor.runner.finish.cancel();
-    executor.execute_action(action()).await.unwrap();
+    executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     executor.tracker.close();
     tokio::time::timeout(Duration::from_secs(31), executor.tracker.wait())
         .await
@@ -791,7 +872,12 @@ async fn failed_preparation_cancels_the_preallocated_remote_identity() {
             ..Runner::default()
         },
     );
-    assert!(executor.execute_action(action()).await.is_err());
+    assert!(
+        executor
+            .execute_action(action(), RunStarter::Scheduler)
+            .await
+            .is_err()
+    );
     drain(&executor).await;
     assert_eq!(
         *executor.runner.cancellations.lock().unwrap(),
@@ -814,7 +900,12 @@ async fn failed_preparation_retains_an_established_agent_resource() {
             ..Runner::default()
         },
     );
-    assert!(executor.execute_action(action()).await.is_err());
+    assert!(
+        executor
+            .execute_action(action(), RunStarter::Scheduler)
+            .await
+            .is_err()
+    );
     drain(&executor).await;
     let records = executor.repo.records.lock().unwrap();
     assert_eq!(
@@ -840,7 +931,10 @@ async fn agent_progress_and_live_updates_never_use_the_legacy_chat_field() {
             ..Runner::default()
         },
     );
-    let progress = executor.execute_action(action()).await.unwrap();
+    let progress = executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     assert!(progress.chat_id.is_none());
     let resource = progress.resource.unwrap();
     assert_eq!(resource.resource_type, ExecutionResourceType::Agent);
@@ -872,7 +966,7 @@ async fn abandoned_manual_request_during_preparation_still_cleans_up() {
             ..Runner::default()
         },
     );
-    let mut request = Box::pin(executor.execute_action(action()));
+    let mut request = Box::pin(executor.execute_action(action(), RunStarter::Scheduler));
     assert!(futures::poll!(&mut request).is_pending());
     tokio::task::yield_now().await;
     assert_eq!(executor.runner.preparations.load(Ordering::SeqCst), 1);
@@ -907,7 +1001,7 @@ async fn preparation_and_execution_share_the_original_deadline() {
 async fn stalled_live_updates_preserve_resources_and_do_not_leak_claims() {
     let mut executor = executor(Repo::default(), Runner::default());
     executor.live_updates = Arc::new(Live(Mutex::default(), true));
-    let mut request = Box::pin(executor.execute_action(action()));
+    let mut request = Box::pin(executor.execute_action(action(), RunStarter::Scheduler));
     assert!(futures::poll!(&mut request).is_pending());
     tokio::task::yield_now().await;
     executor.cancellation.cancel();
@@ -972,7 +1066,10 @@ async fn due_and_manual_runs_are_reported_once_with_their_trigger() {
     ] {
         let (executor, observer) = observed(executor(Repo::default(), Runner::default()));
         executor.runner.finish.cancel();
-        executor.execute_action(action.clone()).await.unwrap();
+        executor
+            .execute_action(action.clone(), RunStarter::Scheduler)
+            .await
+            .unwrap();
         drain(&executor).await;
         assert_eq!(
             ends(&observer),
@@ -994,7 +1091,10 @@ async fn failed_and_refused_runs_report_how_they_ended() {
         },
     ));
     failing.runner.finish.cancel();
-    failing.execute_action(action()).await.unwrap();
+    failing
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     drain(&failing).await;
     assert_eq!(ends(&observer)[0].2, RunEnd::Failed);
 
@@ -1005,7 +1105,9 @@ async fn failed_and_refused_runs_report_how_they_ended() {
         let (executor, observer) = observed(
             executor(Repo::default(), Runner::default()).with_admission(admission(Err(error))),
         );
-        let _ = executor.execute_action(action()).await;
+        let _ = executor
+            .execute_action(action(), RunStarter::Scheduler)
+            .await;
         drain(&executor).await;
         assert_eq!(
             ends(&observer),
@@ -1017,7 +1119,10 @@ async fn failed_and_refused_runs_report_how_they_ended() {
 #[tokio::test]
 async fn interrupted_runs_are_reported_as_interrupted() {
     let (executor, observer) = observed(executor(Repo::default(), Runner::default()));
-    executor.execute_action(action()).await.unwrap();
+    executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     executor.cancellation.cancel();
     drain(&executor).await;
     assert_eq!(ends(&observer)[0].2, RunEnd::Interrupted);
@@ -1042,7 +1147,12 @@ async fn event_runs_report_the_event_that_fired_them() {
 async fn runs_that_never_claim_are_not_reported() {
     let (executor, observer) = observed(executor(Repo::default(), Runner::default()));
     *executor.repo.claim.lock().unwrap() = Some(ClaimToken::generate());
-    assert!(executor.execute_action(action()).await.is_err());
+    assert!(
+        executor
+            .execute_action(action(), RunStarter::Scheduler)
+            .await
+            .is_err()
+    );
     drain(&executor).await;
     assert!(observer.0.lock().unwrap().is_empty());
 }
@@ -1055,7 +1165,10 @@ async fn runs_of_only_code_report_no_model_or_agent() {
     action.task = json!({ "steps": [{
         "type": "code", "title": "Post standup", "source": "export async function main() {}",
     }] });
-    executor.execute_action(action).await.unwrap();
+    executor
+        .execute_action(action, RunStarter::Scheduler)
+        .await
+        .unwrap();
     drain(&executor).await;
     assert_eq!(
         ends(&observer),
@@ -1071,7 +1184,10 @@ async fn runs_without_a_transcript_still_announce_start_and_stop_and_keep_their_
     };
     runner.finish.cancel();
     let executor = executor(Repo::default(), runner);
-    let progress = executor.execute_action(action()).await.unwrap();
+    let progress = executor
+        .execute_action(action(), RunStarter::Scheduler)
+        .await
+        .unwrap();
     assert!(progress.resource.is_none());
     assert!(progress.chat_id.is_none());
     drain(&executor).await;

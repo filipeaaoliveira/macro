@@ -19,6 +19,8 @@ struct Code {
     rewrite_still_fails: bool,
     dry_run_fails: bool,
     dry_runs: Mutex<Vec<(Value, bool)>>,
+    /// The scheduler's proof each code run carried, dry or not.
+    proofs: Mutex<Vec<Option<agent_correlation::context::SchedulerRun>>>,
     rewrites: Mutex<Vec<(String, Vec<String>)>>,
 }
 
@@ -67,6 +69,7 @@ impl RoutineCode for Code {
             .lock()
             .unwrap()
             .push((run.context.clone(), run.dry_run));
+        self.proofs.lock().unwrap().push(run.scheduler_run);
         CodeOutcome {
             result: if self.dry_run_fails {
                 Err("TypeError: cannot read properties of undefined".into())
@@ -428,4 +431,62 @@ async fn a_paused_owner_routine_says_why_on_its_next_run() {
         *upgrades.recorded.lock().unwrap(),
         [Recorded::Claimed(CURRENT.into())]
     );
+}
+
+/// Code an SDK upgrade rewrote is no longer the code its routine was saved
+/// with, so a run the scheduler started of it carries no scheduler's proof,
+/// whether the rewrite happened in that run or one before (the saved task
+/// says so); its code then acts as whoever its credential is signed for.
+/// The same routine on the current SDK, never rewritten, carries it.
+#[tokio::test]
+async fn a_rewritten_routine_runs_without_the_schedulers_proof() {
+    use std::sync::Arc;
+
+    use crate::domain::execution::ExecutionHandle;
+    use crate::domain::ports::{RoutineRun, ScheduledAgentRunner};
+    use crate::domain::program_runner::test::{Agents, Fixture};
+
+    let scheduled = || RoutineRun::Scheduled {
+        scheduled_for: chrono::Utc::now(),
+        by_scheduler: true,
+    };
+    let run = async |action: &ScheduledAction, upgrades: Arc<Upgrades>| {
+        let code = Arc::new(Code::default());
+        let runner = Fixture::new(Agents::default())
+            .runner
+            .with_code(Arc::clone(&code), upgrades);
+        let mut handle = ExecutionHandle::default();
+        runner.run(action, &mut handle, scheduled()).await.unwrap();
+        let ran: Vec<_> = code
+            .proofs
+            .lock()
+            .unwrap()
+            .iter()
+            .zip(code.dry_runs.lock().unwrap().iter())
+            .filter(|(_, (_, dry_run))| !dry_run)
+            .map(|(proof, _)| *proof)
+            .collect();
+        ran
+    };
+    let task = |source: &str, sdk: &str| json!({ "steps": [{ "type": "code", "title": "File invoices", "source": source }], "sdk": sdk });
+
+    let current = action(task("await macro.tasks.add(x)", CURRENT));
+    assert!(
+        run(&current, Arc::new(Upgrades::default())).await[0].is_some(),
+        "code as it was saved carries the proof"
+    );
+
+    let upgrades = Arc::new(Upgrades::default());
+    let stale = action(task("await macro.tasks.create(x)", "0.2.0+old"));
+    assert_eq!(run(&stale, Arc::clone(&upgrades)).await, [None]);
+    let recorded = upgrades.recorded.lock().unwrap().clone();
+    let Some(Recorded::Saved(saved)) = recorded.last() else {
+        panic!("{recorded:?}");
+    };
+    assert_eq!(saved["code_rewritten"], true);
+
+    // The next scheduled run reads the saved rewrite, at the same revision.
+    let mut rewritten = stale.clone();
+    rewritten.task = saved.clone();
+    assert_eq!(run(&rewritten, Arc::new(Upgrades::default())).await, [None]);
 }

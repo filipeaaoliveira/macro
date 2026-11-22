@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, team_id, created_by, name, trigger_kind,\n                trigger AS \"trigger: Json<serde_json::Value>\", flow, repo_url, request_template,\n                enabled, routine_id, created_at\n            FROM factory_automation\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT\n                id, team_id, created_by, name, trigger_kind,\n                trigger AS \"trigger: Json<serde_json::Value>\", flow, repo_url, request_template,\n                enabled, routine_id, routine_revision, created_at\n            FROM factory_automation\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,11 @@
       },
       {
         "ordinal": 11,
+        "name": "routine_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -81,8 +86,9 @@
       false,
       false,
       true,
+      true,
       false
     ]
   },
-  "hash": "5ce666f8151608221bba02954768353924ccb7bdedd6681132fa3414082750bf"
+  "hash": "5132b6ca34d0c1d51626184fe69f26d6681a30158dac9177de34e3fbeee6767d"
 }

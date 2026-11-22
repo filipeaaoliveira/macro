@@ -90,8 +90,10 @@ client label (public MCP code mode signs the MCP client's name) and a
 `SignedCorrelation`: the code-mode correlation and its session's scope, signed
 as `agent_scope` so services with no database enforce it too; `mint_for`
 signs none of these claims. `mint_for_routine` signs the routine whose run the
-token acts for (and optionally an agent; `None` writes as the owner, and a
-scope, `dry_run` for a routine's dry run).
+token acts for (and optionally an agent; `None` writes as the owner, a
+scope, `dry_run` for a routine's dry run, and `scheduler_run`, the
+scheduler's proof that it started the run itself, which only the scheduler
+passes). `mint_for_agent` never signs `scheduler_run`.
 
 ## Telemetry
 

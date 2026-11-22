@@ -58,6 +58,7 @@ fn mint(
         agent_session_id: None,
         routine_id: routine,
         agent_scope: scope.map(str::to_owned),
+        scheduler_run: None,
     })
     .unwrap()
 }
@@ -125,6 +126,116 @@ async fn optional_claim_is_validated_before_a_handler_can_use_it() {
         .unwrap();
     assert_eq!(extracted.0, Some(Uuid::from_u128(1)));
     assert_eq!(extracted.1, None);
+}
+
+/// A token signing the scheduler's proof `run`, beside `routine` and
+/// `correlation` when given.
+fn scheduler_token(
+    routine: Option<Uuid>,
+    correlation: Option<Uuid>,
+    run: macro_auth::macro_api_token::SchedulerRunClaim,
+) -> String {
+    encode_macro_api_token(EncodeMacroApiTokenArgs {
+        fusionauth_id: "fixture".into(),
+        macro_user_id: "macro|owner@example.com".into(),
+        organization_id: None,
+        issuer: "fixture".into(),
+        private_key: PRIVATE.into(),
+        expiry_seconds: 60,
+        agent_id: Some(Uuid::from_u128(3)),
+        agent_via: None,
+        agent_correlation_id: correlation,
+        agent_session_id: None,
+        routine_id: routine,
+        agent_scope: None,
+        scheduler_run: Some(run),
+    })
+    .unwrap()
+}
+
+/// The scheduler's proof is read only from a verified token, beside the
+/// routine it signs, and never from a code-mode credential: a proof with no
+/// routine, one on an agent session's credential, and one spliced onto
+/// another token's signature all read as none.
+#[tokio::test]
+async fn propagate_reads_the_schedulers_proof_only_beside_its_signed_routine() {
+    use tower::ServiceExt;
+
+    let state = CorrelationState {
+        jwt: JwtValidationArgs::testing_macro_token("fixture", PUBLIC),
+        repository: Arc::new(Repository {
+            calls: AtomicUsize::new(0),
+        }),
+    };
+    let app = axum::Router::new()
+        .route(
+            "/",
+            axum::routing::post(|| async {
+                let run = crate::context::current_scheduler_run();
+                Json(serde_json::json!({
+                    "routine": crate::context::current_routine(),
+                    "run": run.map(|run| run.run_id),
+                    "revision": run.map(|run| run.revision),
+                }))
+            }),
+        )
+        .layer(axum::middleware::from_fn_with_state(state, propagate));
+    let routine = Uuid::from_u128(0x7001);
+    let run_id = Uuid::from_u128(0x7002);
+    let claim = macro_auth::macro_api_token::SchedulerRunClaim {
+        run_id,
+        revision: 4,
+    };
+    let signed = scheduler_token(Some(routine), None, claim);
+    let plain = routine_token(routine, None, Some(Uuid::from_u128(3)));
+    let [header, _, signature]: [&str; 3] =
+        plain.split('.').collect::<Vec<_>>().try_into().unwrap();
+    let forged = format!("{header}.{}.{signature}", signed.split('.').nth(1).unwrap());
+    let none = serde_json::Value::Null;
+    for (bearer, expected) in [
+        (
+            signed,
+            serde_json::json!({ "routine": routine, "run": run_id, "revision": 4 }),
+        ),
+        (
+            scheduler_token(None, None, claim),
+            serde_json::json!({ "routine": none, "run": none, "revision": none }),
+        ),
+        (
+            scheduler_token(Some(routine), Some(Uuid::from_u128(1)), claim),
+            serde_json::json!({ "routine": routine, "run": none, "revision": none }),
+        ),
+        (
+            plain,
+            serde_json::json!({ "routine": routine, "run": none, "revision": none }),
+        ),
+        // A proof spliced onto another token's signature is not verified.
+        (
+            forged,
+            serde_json::json!({ "routine": none, "run": none, "revision": none }),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/")
+                    .header("authorization", format!("Bearer {bearer}"))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            expected
+        );
+    }
 }
 
 fn routine_token(routine: Uuid, correlation: Option<Uuid>, agent: Option<Uuid>) -> String {
@@ -505,6 +616,7 @@ async fn a_scoped_token_in_the_cookie_scopes_the_request_whatever_else_it_carrie
         agent_session_id: None,
         routine_id: None,
         agent_scope: None,
+        scheduler_run: None,
     })
     .unwrap();
     let cookie_name = macro_auth::credential::access_token_cookie_name();
@@ -648,6 +760,7 @@ async fn propagate_refuses_tokens_of_different_users() {
         agent_session_id: None,
         routine_id: None,
         agent_scope: None,
+        scheduler_run: None,
     })
     .unwrap();
     let cookie = |token: &str| {

@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::domain::models::CodeRepository;
-use crate::domain::ports::{AutomationTriggerError, AutomationTriggers};
+use crate::domain::ports::{AutomationTriggerError, AutomationTriggers, SavedRoutine};
 
 /// The code step that fires the Automation: the routine run keys the
 /// firing, a Task event names its task and a repository event its GitHub
@@ -233,27 +233,66 @@ fn routine(automation: &Automation) -> Result<Value, AutomationTriggerError> {
     }))
 }
 
-/// The part of a saved routine read back.
+/// The part of a saved routine read back: its id and the configuration
+/// revision a run the scheduler starts signs.
 #[derive(Deserialize)]
-struct SavedRoutine {
+struct RoutineResponse {
     id: Uuid,
+    configuration_revision: i64,
+}
+
+impl RoutineResponse {
+    /// The routine `response` answers with.
+    async fn read(response: reqwest::Response) -> Result<Self, AutomationTriggerError> {
+        response
+            .json()
+            .await
+            .map_err(|error| AutomationTriggerError::Unavailable(rootcause::report!("{error}")))
+    }
 }
 
 impl AutomationTriggers for RoutineAutomationTriggers {
     #[tracing::instrument(skip_all, fields(automation_id = %automation.id))]
-    async fn create(&self, automation: &Automation) -> Result<Uuid, AutomationTriggerError> {
-        let saved: SavedRoutine = self
+    async fn create(
+        &self,
+        automation: &Automation,
+    ) -> Result<SavedRoutine, AutomationTriggerError> {
+        let response = self
             .send(
                 &automation.created_by,
                 Method::POST,
                 "scheduled-actions",
                 Some(routine(automation)?),
             )
-            .await?
-            .json()
-            .await
-            .map_err(|error| AutomationTriggerError::Unavailable(rootcause::report!("{error}")))?;
-        Ok(saved.id)
+            .await?;
+        let saved = RoutineResponse::read(response).await?;
+        Ok(SavedRoutine {
+            id: saved.id,
+            revision: saved.configuration_revision,
+        })
+    }
+
+    #[tracing::instrument(skip_all, fields(automation_id = %automation.id, %routine_id))]
+    async fn rewrite(
+        &self,
+        automation: &Automation,
+        routine_id: Uuid,
+    ) -> Result<i64, AutomationTriggerError> {
+        let response = self
+            .send(
+                &automation.created_by,
+                Method::PUT,
+                &format!("scheduled-actions/{routine_id}"),
+                Some(routine(automation)?),
+            )
+            .await?;
+        let saved = RoutineResponse::read(response).await?;
+        if saved.id != routine_id {
+            return Err(AutomationTriggerError::Unavailable(rootcause::report!(
+                "the scheduler answered another routine"
+            )));
+        }
+        Ok(saved.configuration_revision)
     }
 
     #[tracing::instrument(skip(self, owner))]

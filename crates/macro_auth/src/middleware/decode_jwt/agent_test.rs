@@ -17,6 +17,7 @@ fn signed_execution_token_preserves_owner_agent_and_lifetime() {
         agent_via: Some("Claude Code".into()),
         routine_id: None,
         agent_scope: None,
+        scheduler_run: None,
     })
     .unwrap();
     let args = JwtValidationArgs {
@@ -91,6 +92,7 @@ fn signed_routine_token_carries_its_routine_and_rejects_a_forged_one() {
         agent_session_id: None,
         routine_id: Some(routine),
         agent_scope: None,
+        scheduler_run: None,
     })
     .unwrap();
     let args = JwtValidationArgs {
@@ -122,6 +124,7 @@ fn signed_routine_token_carries_its_routine_and_rejects_a_forged_one() {
         agent_session_id: None,
         routine_id: None,
         agent_scope: None,
+        scheduler_run: None,
     })
     .unwrap();
     let [header, _, signature]: [&str; 3] =
@@ -160,6 +163,7 @@ fn a_signed_scope_survives_decoding_and_cannot_be_dropped() {
             agent_session_id: None,
             routine_id: None,
             agent_scope: agent_scope.map(str::to_owned),
+            scheduler_run: None,
         })
         .unwrap()
     };

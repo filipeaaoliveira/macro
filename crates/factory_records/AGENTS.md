@@ -125,6 +125,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119050000_factory_token_budget.sql`,
   `20261119050100_factory_token_budget_validate.sql`,
   `20261119080000_factory_step_used_session.sql`,
+  `20261120003000_factory_automation_routine_revision.sql`,
   `20261120010000_factory_improvement_dismissal_undone.sql`,
   `20261120010100_factory_improvement_dismissal_undone_validate.sql`,
   `20261120020000_factory_run_agent_rule.sql`,
@@ -428,6 +429,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_automation` belongs to its team and goes with it, and with its
   creator's account; its trigger is kept as JSON beside its kind, and a
   webhook's secret only for a webhook (`factory_automation_webhook`).
+  `routine_revision` (`20261120003000_factory_automation_routine_revision.sql`,
+  nullable, never serialized) is the scheduler's configuration revision the
+  factory last wrote its routine at: `set_automation_routine` sets it with
+  the routine, and `set_automation_enabled` replaces it only when given one.
   `claim_firing` claims a firing's key once, at the database's time, unless
   one that never ended is older than `FIRING_CLAIM_STALE_AFTER`: then it
   first looks for a Run started under the key, and ends the firing with it;

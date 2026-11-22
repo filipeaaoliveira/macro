@@ -131,7 +131,11 @@ impl ScheduledActionRepo for FakeRepo {
 
 struct NeverExecutor;
 impl ScheduledActionExecutor for NeverExecutor {
-    async fn execute_action(&self, _: ScheduledAction) -> Result<InProgressExecution> {
+    async fn execute_action(
+        &self,
+        _: ScheduledAction,
+        _: crate::domain::ports::RunStarter,
+    ) -> Result<InProgressExecution> {
         panic!("cleanup must not execute actions")
     }
 }

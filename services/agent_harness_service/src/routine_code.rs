@@ -13,6 +13,7 @@ use std::{
 use agent::structured_output::{DynamicSchema, dynamic_structured_completion};
 use agent::{Message, PredefinedModel};
 use agent_code_mode::domain::symbol_reference;
+use agent_correlation::context::SchedulerRun;
 use agent_egress::outbound::macro_mcp::MacroApiTokenSigner;
 use code_execution::domain::{
     CheckError, ExecuteRequest, Outcome, ProgramChecker, ProgramExecutor, RunEnvironment,
@@ -72,12 +73,15 @@ pub trait RoutineCredentials: Send + Sync + 'static {
     /// A token for `owner` that outlives one step's deadline, its writes
     /// attributed as `acts_as` says, for a run of `routine_id`. A dry run's
     /// token can only read: every service that accepts it refuses a write.
+    /// `scheduler_run` is the scheduler's proof that it started the run
+    /// itself, signed beside the routine.
     fn mint(
         &self,
         owner: &MacroUserIdStr<'static>,
         acts_as: CodeIdentity,
         routine_id: Uuid,
         dry_run: bool,
+        scheduler_run: Option<SchedulerRun>,
     ) -> impl std::future::Future<Output = anyhow::Result<String>> + Send;
 }
 
@@ -88,10 +92,18 @@ impl RoutineCredentials for MacroApiTokenSigner {
         acts_as: CodeIdentity,
         routine_id: Uuid,
         dry_run: bool,
+        scheduler_run: Option<SchedulerRun>,
     ) -> anyhow::Result<String> {
         let (agent_id, scope) = routine_claims(acts_as, dry_run);
         Ok(self
-            .mint_for_routine(owner, TOKEN_LIFETIME_SECONDS, agent_id, routine_id, scope)
+            .mint_for_routine(
+                owner,
+                TOKEN_LIFETIME_SECONDS,
+                agent_id,
+                routine_id,
+                scope,
+                scheduler_run,
+            )
             .await?)
     }
 }
@@ -296,7 +308,14 @@ impl<Credentials: RoutineCredentials> RoutineCode for SdkRoutineCode<Credentials
         };
         let token = match self
             .credentials
-            .mint(owner, run.acts_as, run.routine_id, run.dry_run)
+            .mint(
+                owner,
+                run.acts_as,
+                run.routine_id,
+                run.dry_run,
+                // A dry run is never the scheduler's run.
+                run.scheduler_run.filter(|_| !run.dry_run),
+            )
             .await
         {
             Ok(token) => token,

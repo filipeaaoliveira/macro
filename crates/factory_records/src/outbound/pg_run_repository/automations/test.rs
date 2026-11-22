@@ -83,7 +83,7 @@ async fn an_automation_reads_back_and_is_found_by_its_routine(pool: PgPool) {
     };
     let automation_id = keep(&repo, &trigger, None).await;
     let routine_id = Uuid::now_v7();
-    repo.set_automation_routine(automation_id, routine_id)
+    repo.set_automation_routine(automation_id, routine_id, 1)
         .await
         .expect("set routine");
 
@@ -102,6 +102,7 @@ async fn an_automation_reads_back_and_is_found_by_its_routine(pool: PgPool) {
     assert_eq!(read.created_by, julia());
     assert!(read.enabled);
     assert_eq!(read.routine_id, Some(routine_id));
+    assert_eq!(read.routine_revision, Some(1));
     assert_eq!(by_routine, read);
     assert_eq!(
         repo.team_automations(id(TEAM), 10)
@@ -109,6 +110,48 @@ async fn an_automation_reads_back_and_is_found_by_its_routine(pool: PgPool) {
             .expect("list")
             .len(),
         1
+    );
+}
+
+/// Switching an Automation keeps the routine revision the factory wrote,
+/// and one switched with none written keeps the last.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn switching_an_automation_keeps_the_routine_revision_written(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let trigger = AutomationTrigger::Schedule {
+        cron: "0 0 9 * * Mon-Fri".to_string(),
+        timezone: "Europe/Lisbon".to_string(),
+    };
+    let automation_id = keep(&repo, &trigger, None).await;
+    repo.set_automation_routine(automation_id, Uuid::now_v7(), 1)
+        .await
+        .expect("set routine");
+    let revision = async || {
+        repo.automation(automation_id)
+            .await
+            .expect("read")
+            .expect("the automation exists")
+            .routine_revision
+    };
+
+    assert!(
+        repo.set_automation_enabled(automation_id, false, None)
+            .await
+            .expect("off")
+    );
+    assert_eq!(revision().await, Some(1));
+    repo.set_automation_enabled(automation_id, true, Some(3))
+        .await
+        .expect("on");
+    assert_eq!(revision().await, Some(3));
+    assert!(
+        !repo
+            .set_automation_enabled(Uuid::now_v7(), true, Some(4))
+            .await
+            .expect("none")
     );
 }
 
@@ -148,7 +191,7 @@ async fn only_a_webhook_keeps_a_secret(pool: PgPool) {
         .await;
     assert!(refused.is_err(), "a schedule with a secret is refused");
     assert!(
-        repo.set_automation_routine(webhook, Uuid::now_v7())
+        repo.set_automation_routine(webhook, Uuid::now_v7(), 1)
             .await
             .is_err(),
         "a webhook has no routine"

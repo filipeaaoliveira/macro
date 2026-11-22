@@ -71,6 +71,7 @@ fn credential(scope: Option<&str>) -> String {
         agent_session_id: None,
         routine_id: None,
         agent_scope: scope.map(str::to_owned),
+        scheduler_run: None,
     })
     .unwrap()
 }

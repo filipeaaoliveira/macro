@@ -28,6 +28,7 @@ struct AutomationRow {
     request_template: String,
     enabled: bool,
     routine_id: Option<Uuid>,
+    routine_revision: Option<i64>,
     created_at: DateTime<Utc>,
 }
 
@@ -58,6 +59,7 @@ impl TryFrom<AutomationRow> for Automation {
             request_template: row.request_template,
             enabled: row.enabled,
             routine_id: row.routine_id,
+            routine_revision: row.routine_revision,
             created_at: row.created_at,
         })
     }
@@ -100,7 +102,7 @@ impl AutomationRepository for PgRunRepository {
             RETURNING
                 id, team_id, created_by, name, trigger_kind,
                 trigger AS "trigger: Json<serde_json::Value>", flow, repo_url, request_template,
-                enabled, routine_id, created_at
+                enabled, routine_id, routine_revision, created_at
             "#,
             automation.id,
             automation.team_id,
@@ -119,11 +121,17 @@ impl AutomationRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn set_automation_routine(&self, id: Uuid, routine_id: Uuid) -> Result<(), Self::Err> {
+    async fn set_automation_routine(
+        &self,
+        id: Uuid,
+        routine_id: Uuid,
+        revision: i64,
+    ) -> Result<(), Self::Err> {
         sqlx::query!(
-            "UPDATE factory_automation SET routine_id = $2 WHERE id = $1",
+            "UPDATE factory_automation SET routine_id = $2, routine_revision = $3 WHERE id = $1",
             id,
             routine_id,
+            revision,
         )
         .execute(&self.pool)
         .await?;
@@ -138,7 +146,7 @@ impl AutomationRepository for PgRunRepository {
             SELECT
                 id, team_id, created_by, name, trigger_kind,
                 trigger AS "trigger: Json<serde_json::Value>", flow, repo_url, request_template,
-                enabled, routine_id, created_at
+                enabled, routine_id, routine_revision, created_at
             FROM factory_automation
             WHERE id = $1
             "#,
@@ -160,7 +168,7 @@ impl AutomationRepository for PgRunRepository {
             SELECT
                 id, team_id, created_by, name, trigger_kind,
                 trigger AS "trigger: Json<serde_json::Value>", flow, repo_url, request_template,
-                enabled, routine_id, created_at
+                enabled, routine_id, routine_revision, created_at
             FROM factory_automation
             WHERE routine_id = $1
             "#,
@@ -185,7 +193,7 @@ impl AutomationRepository for PgRunRepository {
             SELECT
                 id, team_id, created_by, name, trigger_kind,
                 trigger AS "trigger: Json<serde_json::Value>", flow, repo_url, request_template,
-                enabled, routine_id, created_at
+                enabled, routine_id, routine_revision, created_at
             FROM factory_automation
             WHERE team_id = $1
             ORDER BY created_at DESC, id DESC
@@ -211,11 +219,21 @@ impl AutomationRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn set_automation_enabled(&self, id: Uuid, enabled: bool) -> Result<bool, Self::Err> {
+    async fn set_automation_enabled(
+        &self,
+        id: Uuid,
+        enabled: bool,
+        routine_revision: Option<i64>,
+    ) -> Result<bool, Self::Err> {
         let done = sqlx::query!(
-            "UPDATE factory_automation SET enabled = $2 WHERE id = $1",
+            r#"
+            UPDATE factory_automation
+            SET enabled = $2, routine_revision = COALESCE($3, routine_revision)
+            WHERE id = $1
+            "#,
             id,
             enabled,
+            routine_revision,
         )
         .execute(&self.pool)
         .await?;
