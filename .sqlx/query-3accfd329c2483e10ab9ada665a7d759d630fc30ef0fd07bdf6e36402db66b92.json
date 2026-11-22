@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_improvement_failure SET improvement_id = NULL, dismissed_at = NULL\n            WHERE improvement_id = $1 AND dismissed_at IS NOT NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3accfd329c2483e10ab9ada665a7d759d630fc30ef0fd07bdf6e36402db66b92"
+}

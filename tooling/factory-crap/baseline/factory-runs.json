@@ -1,0 +1,5987 @@
+{
+  "$schema": "",
+  "version": "1.0.1",
+  "config": {
+    "defaultThreshold": 16,
+    "overrides": []
+  },
+  "summary": {
+    "totalFunctions": 245,
+    "totalFiles": 67,
+    "exceedingThreshold": 5,
+    "exceedingPercent": 2,
+    "averageCrap": 2.88,
+    "medianCrap": 2,
+    "maxCrap": {
+      "value": 56,
+      "riskLevel": "high"
+    },
+    "worstFunction": {
+      "filePath": "src/features/factory-runs/core/run.ts",
+      "qualifiedName": "terminalState",
+      "span": {
+        "startLine": 556,
+        "startColumn": 7,
+        "endLine": 563,
+        "endColumn": 1
+      }
+    },
+    "distribution": {
+      "low": 216,
+      "acceptable": 15,
+      "moderate": 13,
+      "high": 1
+    },
+    "crapLoad": 64.44
+  },
+  "functions": [
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/board-view.tsx",
+          "qualifiedName": "FactoryBoardView",
+          "span": {
+            "startLine": 12,
+            "startColumn": 7,
+            "endLine": 80,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 47.37,
+        "crap": {
+          "value": 4.31,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/board-row.tsx",
+          "qualifiedName": "stateDot",
+          "span": {
+            "startLine": 24,
+            "startColumn": 0,
+            "endLine": 32,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 80,
+        "crap": {
+          "value": 1.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/board-row.tsx",
+          "qualifiedName": "BoardRunRow",
+          "span": {
+            "startLine": 39,
+            "startColumn": 7,
+            "endLine": 161,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 94.59,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/entry-list.tsx",
+          "qualifiedName": "Figure",
+          "span": {
+            "startLine": 8,
+            "startColumn": 0,
+            "endLine": 16,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/entry-list.tsx",
+          "qualifiedName": "Counts",
+          "span": {
+            "startLine": 18,
+            "startColumn": 0,
+            "endLine": 39,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/entry-list.tsx",
+          "qualifiedName": "EntryList",
+          "span": {
+            "startLine": 46,
+            "startColumn": 7,
+            "endLine": 117,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "Figure",
+          "span": {
+            "startLine": 24,
+            "startColumn": 0,
+            "endLine": 32,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "formatScore",
+          "span": {
+            "startLine": 34,
+            "startColumn": 0,
+            "endLine": 37,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 3,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "agentsLine",
+          "span": {
+            "startLine": 39,
+            "startColumn": 0,
+            "endLine": 46,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "EmptyRow",
+          "span": {
+            "startLine": 47,
+            "startColumn": 0,
+            "endLine": 52,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "ScorerRow",
+          "span": {
+            "startLine": 53,
+            "startColumn": 0,
+            "endLine": 95,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 96.43,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "ArmRow",
+          "span": {
+            "startLine": 96,
+            "startColumn": 0,
+            "endLine": 132,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "ExperimentRow",
+          "span": {
+            "startLine": 133,
+            "startColumn": 0,
+            "endLine": 172,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "SuiteRow",
+          "span": {
+            "startLine": 173,
+            "startColumn": 0,
+            "endLine": 252,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "BenchmarkRow",
+          "span": {
+            "startLine": 253,
+            "startColumn": 0,
+            "endLine": 271,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "sourceLabel",
+          "span": {
+            "startLine": 281,
+            "startColumn": 0,
+            "endLine": 284,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "LastImprovement",
+          "span": {
+            "startLine": 285,
+            "startColumn": 0,
+            "endLine": 325,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 84.62,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "namerProblem",
+          "span": {
+            "startLine": 330,
+            "startColumn": 0,
+            "endLine": 342,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 5,
+        "coveragePercent": 60,
+        "crap": {
+          "value": 6.6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "SelfImprovementBody",
+          "span": {
+            "startLine": 347,
+            "startColumn": 0,
+            "endLine": 409,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 92.16,
+        "crap": {
+          "value": 3,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/evaluation-sections.tsx",
+          "qualifiedName": "EvaluationSections",
+          "span": {
+            "startLine": 415,
+            "startColumn": 7,
+            "endLine": 497,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 84.31,
+        "crap": {
+          "value": 2.02,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateQuestion",
+          "span": {
+            "startLine": 23,
+            "startColumn": 7,
+            "endLine": 83,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 6,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateNote",
+          "span": {
+            "startLine": 89,
+            "startColumn": 7,
+            "endLine": 121,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 4,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateControlFiles",
+          "span": {
+            "startLine": 128,
+            "startColumn": 7,
+            "endLine": 174,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "ControlFileList",
+          "span": {
+            "startLine": 175,
+            "startColumn": 0,
+            "endLine": 185,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateAnswers",
+          "span": {
+            "startLine": 193,
+            "startColumn": 7,
+            "endLine": 256,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 90.32,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "ModelReadingLine",
+          "span": {
+            "startLine": 284,
+            "startColumn": 0,
+            "endLine": 301,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateStatus",
+          "span": {
+            "startLine": 309,
+            "startColumn": 7,
+            "endLine": 385,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 4,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/insight-format.ts",
+          "qualifiedName": "formatInsightDuration",
+          "span": {
+            "startLine": 5,
+            "startColumn": 7,
+            "endLine": 14,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/insight-format.ts",
+          "qualifiedName": "durationFigure",
+          "span": {
+            "startLine": 16,
+            "startColumn": 7,
+            "endLine": 35,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 4,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/insight-format.ts",
+          "qualifiedName": "formatTokens",
+          "span": {
+            "startLine": 37,
+            "startColumn": 7,
+            "endLine": 43,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/insight-format.ts",
+          "qualifiedName": "formatShare",
+          "span": {
+            "startLine": 45,
+            "startColumn": 7,
+            "endLine": 51,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/insight-format.ts",
+          "qualifiedName": "formatRunDate",
+          "span": {
+            "startLine": 53,
+            "startColumn": 7,
+            "endLine": 59,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/insight-outcomes.ts",
+          "qualifiedName": "insightOutcomeLabel",
+          "span": {
+            "startLine": 18,
+            "startColumn": 7,
+            "endLine": 23,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/outcome-kinds.tsx",
+          "qualifiedName": "percent",
+          "span": {
+            "startLine": 13,
+            "startColumn": 0,
+            "endLine": 16,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/outcome-kinds.tsx",
+          "qualifiedName": "OutcomeKinds",
+          "span": {
+            "startLine": 22,
+            "startColumn": 7,
+            "endLine": 63,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/pull-request-run-mark.tsx",
+          "qualifiedName": "pullRequestMergeNote",
+          "span": {
+            "startLine": 19,
+            "startColumn": 7,
+            "endLine": 52,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 80,
+        "crap": {
+          "value": 1.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/pull-request-run-mark.tsx",
+          "qualifiedName": "runPlace",
+          "span": {
+            "startLine": 57,
+            "startColumn": 0,
+            "endLine": 77,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 9,
+        "coveragePercent": 90,
+        "crap": {
+          "value": 9.08,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/pull-request-run-mark.tsx",
+          "qualifiedName": "PullRequestRunMark",
+          "span": {
+            "startLine": 83,
+            "startColumn": 7,
+            "endLine": 139,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "ciCauseLabel",
+          "span": {
+            "startLine": 34,
+            "startColumn": 7,
+            "endLine": 37,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "formatPerReview",
+          "span": {
+            "startLine": 39,
+            "startColumn": 0,
+            "endLine": 45,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "formatUsd",
+          "span": {
+            "startLine": 47,
+            "startColumn": 0,
+            "endLine": 54,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "percent",
+          "span": {
+            "startLine": 56,
+            "startColumn": 0,
+            "endLine": 61,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 3,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "EmptyNote",
+          "span": {
+            "startLine": 62,
+            "startColumn": 0,
+            "endLine": 67,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "MetricRow",
+          "span": {
+            "startLine": 68,
+            "startColumn": 0,
+            "endLine": 75,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "SubHeading",
+          "span": {
+            "startLine": 76,
+            "startColumn": 0,
+            "endLine": 86,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "CauseCounts",
+          "span": {
+            "startLine": 87,
+            "startColumn": 0,
+            "endLine": 106,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "causesLine",
+          "span": {
+            "startLine": 107,
+            "startColumn": 0,
+            "endLine": 112,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "CiSection",
+          "span": {
+            "startLine": 113,
+            "startColumn": 0,
+            "endLine": 278,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 94.9,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "BlockerTable",
+          "span": {
+            "startLine": 279,
+            "startColumn": 0,
+            "endLine": 327,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "ReviewSection",
+          "span": {
+            "startLine": 328,
+            "startColumn": 0,
+            "endLine": 422,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 90.57,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "DeliverySection",
+          "span": {
+            "startLine": 423,
+            "startColumn": 0,
+            "endLine": 493,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 97.37,
+        "crap": {
+          "value": 3,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/quality-sections.tsx",
+          "qualifiedName": "QualitySections",
+          "span": {
+            "startLine": 498,
+            "startColumn": 7,
+            "endLine": 519,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 84.62,
+        "crap": {
+          "value": 2.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/repository-field.tsx",
+          "qualifiedName": "RepositoryField",
+          "span": {
+            "startLine": 16,
+            "startColumn": 7,
+            "endLine": 152,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 6,
+        "coveragePercent": 74.29,
+        "crap": {
+          "value": 6.61,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-details.tsx",
+          "qualifiedName": "isRunLevel",
+          "span": {
+            "startLine": 37,
+            "startColumn": 0,
+            "endLine": 40,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-details.tsx",
+          "qualifiedName": "runLevelActs",
+          "span": {
+            "startLine": 41,
+            "startColumn": 0,
+            "endLine": 44,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-details.tsx",
+          "qualifiedName": "tokenBudgetLine",
+          "span": {
+            "startLine": 49,
+            "startColumn": 7,
+            "endLine": 72,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 7,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 7,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-details.tsx",
+          "qualifiedName": "RunSummary",
+          "span": {
+            "startLine": 81,
+            "startColumn": 7,
+            "endLine": 217,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 63.89,
+        "crap": {
+          "value": 1.05,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-details.tsx",
+          "qualifiedName": "CancelRun",
+          "span": {
+            "startLine": 264,
+            "startColumn": 7,
+            "endLine": 326,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-flaw.tsx",
+          "qualifiedName": "reasonBytes",
+          "span": {
+            "startLine": 12,
+            "startColumn": 0,
+            "endLine": 15,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-flaw.tsx",
+          "qualifiedName": "RunFlawNote",
+          "span": {
+            "startLine": 17,
+            "startColumn": 7,
+            "endLine": 41,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-flaw.tsx",
+          "qualifiedName": "MarkRunFlawed",
+          "span": {
+            "startLine": 47,
+            "startColumn": 7,
+            "endLine": 142,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 85.19,
+        "crap": {
+          "value": 3.03,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-link-list.tsx",
+          "qualifiedName": "RunLinkList",
+          "span": {
+            "startLine": 10,
+            "startColumn": 7,
+            "endLine": 49,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-status.tsx",
+          "qualifiedName": "RunStatusDot",
+          "span": {
+            "startLine": 11,
+            "startColumn": 7,
+            "endLine": 28,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-status.tsx",
+          "qualifiedName": "runOutcomeLabel",
+          "span": {
+            "startLine": 30,
+            "startColumn": 7,
+            "endLine": 41,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-status.tsx",
+          "qualifiedName": "runStatusLabel",
+          "span": {
+            "startLine": 43,
+            "startColumn": 7,
+            "endLine": 50,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-status.tsx",
+          "qualifiedName": "runStatusDetail",
+          "span": {
+            "startLine": 52,
+            "startColumn": 7,
+            "endLine": 65,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "stepLabel",
+          "span": {
+            "startLine": 30,
+            "startColumn": 7,
+            "endLine": 35,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "TimelineStep",
+          "span": {
+            "startLine": 86,
+            "startColumn": 0,
+            "endLine": 363,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 11,
+        "coveragePercent": 91.16,
+        "crap": {
+          "value": 11.08,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "StepMarkdown",
+          "span": {
+            "startLine": 365,
+            "startColumn": 0,
+            "endLine": 377,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "CheckRoundNote",
+          "span": {
+            "startLine": 388,
+            "startColumn": 0,
+            "endLine": 445,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "MainHoldNote",
+          "span": {
+            "startLine": 450,
+            "startColumn": 0,
+            "endLine": 475,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "ReviewRoundList",
+          "span": {
+            "startLine": 481,
+            "startColumn": 7,
+            "endLine": 501,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "ReviewRoundNote",
+          "span": {
+            "startLine": 508,
+            "startColumn": 0,
+            "endLine": 556,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 96.67,
+        "crap": {
+          "value": 4,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "findingPlace",
+          "span": {
+            "startLine": 558,
+            "startColumn": 0,
+            "endLine": 574,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 87.5,
+        "crap": {
+          "value": 4.03,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "findingKind",
+          "span": {
+            "startLine": 575,
+            "startColumn": 0,
+            "endLine": 584,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 80,
+        "crap": {
+          "value": 4.13,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "FindingNote",
+          "span": {
+            "startLine": 589,
+            "startColumn": 0,
+            "endLine": 630,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 85.71,
+        "crap": {
+          "value": 2.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "SteerNote",
+          "span": {
+            "startLine": 639,
+            "startColumn": 0,
+            "endLine": 655,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 45.45,
+        "crap": {
+          "value": 1.16,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "StepNote",
+          "span": {
+            "startLine": 656,
+            "startColumn": 0,
+            "endLine": 663,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/runs-by-day-chart.tsx",
+          "qualifiedName": "formatInsightDay",
+          "span": {
+            "startLine": 30,
+            "startColumn": 7,
+            "endLine": 38,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/runs-by-day-chart.tsx",
+          "qualifiedName": "runsByDayPlot",
+          "span": {
+            "startLine": 40,
+            "startColumn": 0,
+            "endLine": 111,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/runs-by-day-chart.tsx",
+          "qualifiedName": "RunsByDayChart",
+          "span": {
+            "startLine": 113,
+            "startColumn": 7,
+            "endLine": 180,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 56.82,
+        "crap": {
+          "value": 1.08,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/start-run-dialog.tsx",
+          "qualifiedName": "StartRunDialog",
+          "span": {
+            "startLine": 34,
+            "startColumn": 7,
+            "endLine": 246,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 92.24,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/start-run-dialog.tsx",
+          "qualifiedName": "FlowsNotice",
+          "span": {
+            "startLine": 248,
+            "startColumn": 0,
+            "endLine": 256,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/start-run-dialog.tsx",
+          "qualifiedName": "FlowCardsSkeleton",
+          "span": {
+            "startLine": 258,
+            "startColumn": 0,
+            "endLine": 274,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/step-session-gate.tsx",
+          "qualifiedName": "runLink",
+          "span": {
+            "startLine": 10,
+            "startColumn": 7,
+            "endLine": 13,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/step-session-gate.tsx",
+          "qualifiedName": "useSessionStep",
+          "span": {
+            "startLine": 19,
+            "startColumn": 0,
+            "endLine": 22,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/step-session-gate.tsx",
+          "qualifiedName": "sessionStepOptions",
+          "span": {
+            "startLine": 27,
+            "startColumn": 0,
+            "endLine": 39,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/step-session-gate.tsx",
+          "qualifiedName": "StepSessionComposerGate",
+          "span": {
+            "startLine": 45,
+            "startColumn": 7,
+            "endLine": 58,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 85.71,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/step-session-gate.tsx",
+          "qualifiedName": "StepSessionGate",
+          "span": {
+            "startLine": 59,
+            "startColumn": 0,
+            "endLine": 82,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/step-terminal.tsx",
+          "qualifiedName": "StepTerminalControls",
+          "span": {
+            "startLine": 14,
+            "startColumn": 7,
+            "endLine": 186,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 3,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/trouble-list.tsx",
+          "qualifiedName": "TroubleList",
+          "span": {
+            "startLine": 12,
+            "startColumn": 7,
+            "endLine": 81,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/usage-summary.tsx",
+          "qualifiedName": "UsageSummary",
+          "span": {
+            "startLine": 17,
+            "startColumn": 7,
+            "endLine": 63,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 82.14,
+        "crap": {
+          "value": 1.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/context/board-context.ts",
+          "qualifiedName": "useBoardContext",
+          "span": {
+            "startLine": 40,
+            "startColumn": 7,
+            "endLine": 45,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 75,
+        "crap": {
+          "value": 2.06,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/context/insights-context.ts",
+          "qualifiedName": "useInsightsContext",
+          "span": {
+            "startLine": 39,
+            "startColumn": 7,
+            "endLine": 44,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 75,
+        "crap": {
+          "value": 2.06,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/context/runs-context.ts",
+          "qualifiedName": "useRunsContext",
+          "span": {
+            "startLine": 134,
+            "startColumn": 7,
+            "endLine": 139,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 75,
+        "crap": {
+          "value": 2.06,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/board.ts",
+          "qualifiedName": "currentStep",
+          "span": {
+            "startLine": 81,
+            "startColumn": 7,
+            "endLine": 84,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/board.ts",
+          "qualifiedName": "openBlockers",
+          "span": {
+            "startLine": 90,
+            "startColumn": 7,
+            "endLine": 96,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 5,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 5,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/board.ts",
+          "qualifiedName": "stepSince",
+          "span": {
+            "startLine": 98,
+            "startColumn": 7,
+            "endLine": 103,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 6,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/board.ts",
+          "qualifiedName": "repositoryName",
+          "span": {
+            "startLine": 105,
+            "startColumn": 7,
+            "endLine": 108,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/board.ts",
+          "qualifiedName": "activeFilterCount",
+          "span": {
+            "startLine": 110,
+            "startColumn": 7,
+            "endLine": 119,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/flow-words.ts",
+          "qualifiedName": "flowWordLabel",
+          "span": {
+            "startLine": 9,
+            "startColumn": 7,
+            "endLine": 13,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/flow-words.ts",
+          "qualifiedName": "flowWordText",
+          "span": {
+            "startLine": 15,
+            "startColumn": 7,
+            "endLine": 23,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/flow-words.ts",
+          "qualifiedName": "fellShort",
+          "span": {
+            "startLine": 44,
+            "startColumn": 7,
+            "endLine": 48,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "runCount",
+          "span": {
+            "startLine": 58,
+            "startColumn": 7,
+            "endLine": 61,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "successRate",
+          "span": {
+            "startLine": 69,
+            "startColumn": 7,
+            "endLine": 79,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "infrastructureRate",
+          "span": {
+            "startLine": 85,
+            "startColumn": 7,
+            "endLine": 96,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "flawedRate",
+          "span": {
+            "startLine": 101,
+            "startColumn": 7,
+            "endLine": 106,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "troubledEntries",
+          "span": {
+            "startLine": 112,
+            "startColumn": 7,
+            "endLine": 117,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/pull-request-run.ts",
+          "qualifiedName": "pullRequestMerge",
+          "span": {
+            "startLine": 55,
+            "startColumn": 7,
+            "endLine": 89,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 13,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 13,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/pull-request-run.ts",
+          "qualifiedName": "latestReviewRound",
+          "span": {
+            "startLine": 91,
+            "startColumn": 7,
+            "endLine": 94,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/quality.ts",
+          "qualifiedName": "repositoryName",
+          "span": {
+            "startLine": 35,
+            "startColumn": 7,
+            "endLine": 38,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "isTampered",
+          "span": {
+            "startLine": 289,
+            "startColumn": 7,
+            "endLine": 292,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "runStatus",
+          "span": {
+            "startLine": 441,
+            "startColumn": 7,
+            "endLine": 457,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 5,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 5,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "isQuestion",
+          "span": {
+            "startLine": 465,
+            "startColumn": 7,
+            "endLine": 468,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "runTitle",
+          "span": {
+            "startLine": 481,
+            "startColumn": 7,
+            "endLine": 484,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "runRequestBody",
+          "span": {
+            "startLine": 486,
+            "startColumn": 7,
+            "endLine": 490,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "steerableSession",
+          "span": {
+            "startLine": 551,
+            "startColumn": 7,
+            "endLine": 554,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 3,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "appRunsContext",
+          "span": {
+            "startLine": 47,
+            "startColumn": 0,
+            "endLine": 50,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "useOpenInsights",
+          "span": {
+            "startLine": 55,
+            "startColumn": 0,
+            "endLine": 69,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 66.67,
+        "crap": {
+          "value": 2.15,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "useOpenRun",
+          "span": {
+            "startLine": 74,
+            "startColumn": 0,
+            "endLine": 88,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 66.67,
+        "crap": {
+          "value": 2.15,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "TaskRuns",
+          "span": {
+            "startLine": 90,
+            "startColumn": 7,
+            "endLine": 107,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 77.78,
+        "crap": {
+          "value": 1.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "TeamControlFiles",
+          "span": {
+            "startLine": 112,
+            "startColumn": 7,
+            "endLine": 115,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "TeamDefinition",
+          "span": {
+            "startLine": 120,
+            "startColumn": 7,
+            "endLine": 123,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "TeamStandingRules",
+          "span": {
+            "startLine": 128,
+            "startColumn": 7,
+            "endLine": 131,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "TeamAutomations",
+          "span": {
+            "startLine": 136,
+            "startColumn": 7,
+            "endLine": 139,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "FactoryInsights",
+          "span": {
+            "startLine": 141,
+            "startColumn": 7,
+            "endLine": 155,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "FactoryRun",
+          "span": {
+            "startLine": 157,
+            "startColumn": 7,
+            "endLine": 166,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "FactoryBoard",
+          "span": {
+            "startLine": 171,
+            "startColumn": 7,
+            "endLine": 184,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/factory-runs.tsx",
+          "qualifiedName": "useFactoryReviews",
+          "span": {
+            "startLine": 201,
+            "startColumn": 7,
+            "endLine": 295,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 85.94,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/insights-view.tsx",
+          "qualifiedName": "RunInsightsView",
+          "span": {
+            "startLine": 14,
+            "startColumn": 7,
+            "endLine": 52,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 45.45,
+        "crap": {
+          "value": 1.16,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/pr-merge-guard.tsx",
+          "qualifiedName": "factoryMergeGuard",
+          "span": {
+            "startLine": 30,
+            "startColumn": 7,
+            "endLine": 94,
+            "endColumn": 2
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 89.36,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/primitives/board-state.ts",
+          "qualifiedName": "sameFilters",
+          "span": {
+            "startLine": 7,
+            "startColumn": 0,
+            "endLine": 14,
+            "endColumn": 24
+          }
+        },
+        "cyclomaticComplexity": 6,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/primitives/board-state.ts",
+          "qualifiedName": "createBoardState",
+          "span": {
+            "startLine": 19,
+            "startColumn": 7,
+            "endLine": 73,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 86.36,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/primitives/focus-rescue.ts",
+          "qualifiedName": "createFocusRescue",
+          "span": {
+            "startLine": 10,
+            "startColumn": 7,
+            "endLine": 34,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/primitives/insights-state.ts",
+          "qualifiedName": "sameParams",
+          "span": {
+            "startLine": 11,
+            "startColumn": 0,
+            "endLine": 16,
+            "endColumn": 20
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 4,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/primitives/insights-state.ts",
+          "qualifiedName": "createInsightsState",
+          "span": {
+            "startLine": 22,
+            "startColumn": 7,
+            "endLine": 49,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 85.71,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/primitives/run-controller.ts",
+          "qualifiedName": "tampered",
+          "span": {
+            "startLine": 20,
+            "startColumn": 0,
+            "endLine": 23,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/primitives/run-controller.ts",
+          "qualifiedName": "gateKey",
+          "span": {
+            "startLine": 28,
+            "startColumn": 0,
+            "endLine": 31,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/primitives/run-controller.ts",
+          "qualifiedName": "createRunController",
+          "span": {
+            "startLine": 37,
+            "startColumn": 7,
+            "endLine": 280,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 92.73,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/automations.ts",
+          "qualifiedName": "automationsOptions",
+          "span": {
+            "startLine": 16,
+            "startColumn": 0,
+            "endLine": 23,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/automations.ts",
+          "qualifiedName": "useAutomationsQuery",
+          "span": {
+            "startLine": 25,
+            "startColumn": 7,
+            "endLine": 28,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/automations.ts",
+          "qualifiedName": "useAutomationMutations",
+          "span": {
+            "startLine": 33,
+            "startColumn": 7,
+            "endLine": 59,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/board.ts",
+          "qualifiedName": "toPage",
+          "span": {
+            "startLine": 33,
+            "startColumn": 0,
+            "endLine": 45,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/board.ts",
+          "qualifiedName": "flattenBoardPages",
+          "span": {
+            "startLine": 47,
+            "startColumn": 7,
+            "endLine": 59,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/board.ts",
+          "qualifiedName": "boardPollMs",
+          "span": {
+            "startLine": 61,
+            "startColumn": 7,
+            "endLine": 65,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/board.ts",
+          "qualifiedName": "boardOptions",
+          "span": {
+            "startLine": 66,
+            "startColumn": 7,
+            "endLine": 98,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/board.ts",
+          "qualifiedName": "createAppBoardContext",
+          "span": {
+            "startLine": 100,
+            "startColumn": 7,
+            "endLine": 174,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 21.62,
+        "crap": {
+          "value": 1.48,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/control-files.ts",
+          "qualifiedName": "controlFilesOptions",
+          "span": {
+            "startLine": 16,
+            "startColumn": 0,
+            "endLine": 23,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/control-files.ts",
+          "qualifiedName": "useControlFilesQuery",
+          "span": {
+            "startLine": 25,
+            "startColumn": 7,
+            "endLine": 28,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/control-files.ts",
+          "qualifiedName": "useSetControlFilesMutation",
+          "span": {
+            "startLine": 33,
+            "startColumn": 7,
+            "endLine": 43,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/definition.ts",
+          "qualifiedName": "definitionOptions",
+          "span": {
+            "startLine": 13,
+            "startColumn": 7,
+            "endLine": 20,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/definition.ts",
+          "qualifiedName": "useDefinitionQuery",
+          "span": {
+            "startLine": 22,
+            "startColumn": 7,
+            "endLine": 25,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/definition.ts",
+          "qualifiedName": "useSetDefinitionMutation",
+          "span": {
+            "startLine": 31,
+            "startColumn": 7,
+            "endLine": 47,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/insights.ts",
+          "qualifiedName": "insightsOptions",
+          "span": {
+            "startLine": 17,
+            "startColumn": 7,
+            "endLine": 37,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/insights.ts",
+          "qualifiedName": "evaluationOptions",
+          "span": {
+            "startLine": 38,
+            "startColumn": 7,
+            "endLine": 57,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/insights.ts",
+          "qualifiedName": "qualityOptions",
+          "span": {
+            "startLine": 58,
+            "startColumn": 7,
+            "endLine": 78,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/insights.ts",
+          "qualifiedName": "createAppInsightsContext",
+          "span": {
+            "startLine": 80,
+            "startColumn": 7,
+            "endLine": 115,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/pull-request-runs.ts",
+          "qualifiedName": "pullRequestKey",
+          "span": {
+            "startLine": 18,
+            "startColumn": 7,
+            "endLine": 21,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/pull-request-runs.ts",
+          "qualifiedName": "toRead",
+          "span": {
+            "startLine": 32,
+            "startColumn": 0,
+            "endLine": 45,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/pull-request-runs.ts",
+          "qualifiedName": "pullRequestRunsOptions",
+          "span": {
+            "startLine": 46,
+            "startColumn": 0,
+            "endLine": 59,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/pull-request-runs.ts",
+          "qualifiedName": "usePullRequestRuns",
+          "span": {
+            "startLine": 66,
+            "startColumn": 7,
+            "endLine": 119,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "taskRunsPollMs",
+          "span": {
+            "startLine": 38,
+            "startColumn": 0,
+            "endLine": 44,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 4,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "modelReading",
+          "span": {
+            "startLine": 46,
+            "startColumn": 0,
+            "endLine": 56,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 66.67,
+        "crap": {
+          "value": 4.59,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "toRun",
+          "span": {
+            "startLine": 70,
+            "startColumn": 7,
+            "endLine": 217,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 18,
+        "coveragePercent": 88.89,
+        "crap": {
+          "value": 18.44,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": true
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "seedRun",
+          "span": {
+            "startLine": 223,
+            "startColumn": 7,
+            "endLine": 233,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 6,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "taskRunsOptions",
+          "span": {
+            "startLine": 234,
+            "startColumn": 7,
+            "endLine": 251,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "waitingRunsOptions",
+          "span": {
+            "startLine": 256,
+            "startColumn": 7,
+            "endLine": 272,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "runOptions",
+          "span": {
+            "startLine": 273,
+            "startColumn": 7,
+            "endLine": 286,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "flowsOptions",
+          "span": {
+            "startLine": 287,
+            "startColumn": 7,
+            "endLine": 294,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "toSource",
+          "span": {
+            "startLine": 295,
+            "startColumn": 7,
+            "endLine": 307,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "startFailure",
+          "span": {
+            "startLine": 319,
+            "startColumn": 0,
+            "endLine": 329,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 5,
+        "coveragePercent": 90.91,
+        "crap": {
+          "value": 5.02,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "refreshRun",
+          "span": {
+            "startLine": 334,
+            "startColumn": 0,
+            "endLine": 354,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "taskOfRun",
+          "span": {
+            "startLine": 355,
+            "startColumn": 0,
+            "endLine": 358,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "createAppRunsContext",
+          "span": {
+            "startLine": 363,
+            "startColumn": 7,
+            "endLine": 517,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 42.47,
+        "crap": {
+          "value": 1.19,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/standing-rules.ts",
+          "qualifiedName": "standingRulesOptions",
+          "span": {
+            "startLine": 17,
+            "startColumn": 0,
+            "endLine": 24,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/standing-rules.ts",
+          "qualifiedName": "useStandingRulesQuery",
+          "span": {
+            "startLine": 26,
+            "startColumn": 7,
+            "endLine": 29,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/standing-rules.ts",
+          "qualifiedName": "useSetStandingRulesMutation",
+          "span": {
+            "startLine": 34,
+            "startColumn": 7,
+            "endLine": 44,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/run-view.tsx",
+          "qualifiedName": "RunView",
+          "span": {
+            "startLine": 16,
+            "startColumn": 7,
+            "endLine": 33,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 83.33,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/run-view.tsx",
+          "qualifiedName": "RunPageView",
+          "span": {
+            "startLine": 38,
+            "startColumn": 7,
+            "endLine": 50,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 57.14,
+        "crap": {
+          "value": 1.08,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/automations-settings.tsx",
+          "qualifiedName": "wordsOf",
+          "span": {
+            "startLine": 60,
+            "startColumn": 0,
+            "endLine": 66,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/automations-settings.tsx",
+          "qualifiedName": "triggerSummary",
+          "span": {
+            "startLine": 68,
+            "startColumn": 0,
+            "endLine": 88,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/automations-settings.tsx",
+          "qualifiedName": "refused",
+          "span": {
+            "startLine": 90,
+            "startColumn": 0,
+            "endLine": 97,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/automations-settings.tsx",
+          "qualifiedName": "AutomationsSettings",
+          "span": {
+            "startLine": 104,
+            "startColumn": 7,
+            "endLine": 244,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/automations-settings.tsx",
+          "qualifiedName": "WebhookSecret",
+          "span": {
+            "startLine": 246,
+            "startColumn": 0,
+            "endLine": 272,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/automations-settings.tsx",
+          "qualifiedName": "NewAutomationForm",
+          "span": {
+            "startLine": 274,
+            "startColumn": 0,
+            "endLine": 533,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 12,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/board.tsx",
+          "qualifiedName": "boardStateLabel",
+          "span": {
+            "startLine": 32,
+            "startColumn": 7,
+            "endLine": 41,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/board.tsx",
+          "qualifiedName": "BoardFilterMenu",
+          "span": {
+            "startLine": 43,
+            "startColumn": 0,
+            "endLine": 134,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 20.83,
+        "crap": {
+          "value": 1.5,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/board.tsx",
+          "qualifiedName": "BoardCapacity",
+          "span": {
+            "startLine": 139,
+            "startColumn": 0,
+            "endLine": 166,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/board.tsx",
+          "qualifiedName": "groupByState",
+          "span": {
+            "startLine": 168,
+            "startColumn": 0,
+            "endLine": 174,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/board.tsx",
+          "qualifiedName": "BoardView",
+          "span": {
+            "startLine": 180,
+            "startColumn": 7,
+            "endLine": 353,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 86.67,
+        "crap": {
+          "value": 3.02,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/control-files-settings.tsx",
+          "qualifiedName": "patternsOf",
+          "span": {
+            "startLine": 13,
+            "startColumn": 0,
+            "endLine": 19,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/control-files-settings.tsx",
+          "qualifiedName": "ControlFilesSettings",
+          "span": {
+            "startLine": 25,
+            "startColumn": 7,
+            "endLine": 143,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 85.37,
+        "crap": {
+          "value": 2.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/definition-settings.tsx",
+          "qualifiedName": "DefinitionSettings",
+          "span": {
+            "startLine": 17,
+            "startColumn": 7,
+            "endLine": 161,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/insights.tsx",
+          "qualifiedName": "InsightsView",
+          "span": {
+            "startLine": 15,
+            "startColumn": 7,
+            "endLine": 51,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 90.91,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/mobile/insights.tsx",
+          "qualifiedName": "MobileInsightsView",
+          "span": {
+            "startLine": 16,
+            "startColumn": 7,
+            "endLine": 49,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/mobile/run-sheet.tsx",
+          "qualifiedName": "MobileRunSheet",
+          "span": {
+            "startLine": 35,
+            "startColumn": 7,
+            "endLine": 205,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 79.55,
+        "crap": {
+          "value": 4.14,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/pull-request-run-section.tsx",
+          "qualifiedName": "PullRequestRunSection",
+          "span": {
+            "startLine": 18,
+            "startColumn": 7,
+            "endLine": 70,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 85.19,
+        "crap": {
+          "value": 2.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/run-dialog.tsx",
+          "qualifiedName": "RunDialogHeader",
+          "span": {
+            "startLine": 20,
+            "startColumn": 0,
+            "endLine": 38,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/run-dialog.tsx",
+          "qualifiedName": "RunGate",
+          "span": {
+            "startLine": 40,
+            "startColumn": 7,
+            "endLine": 66,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/run-dialog.tsx",
+          "qualifiedName": "RunDialog",
+          "span": {
+            "startLine": 71,
+            "startColumn": 7,
+            "endLine": 161,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 87.76,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/run-pane.tsx",
+          "qualifiedName": "RunPane",
+          "span": {
+            "startLine": 18,
+            "startColumn": 7,
+            "endLine": 85,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 80.43,
+        "crap": {
+          "value": 1.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/evaluation-panel.tsx",
+          "qualifiedName": "EvaluationPanel",
+          "span": {
+            "startLine": 13,
+            "startColumn": 7,
+            "endLine": 55,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/insights-body.tsx",
+          "qualifiedName": "InsightsSkeleton",
+          "span": {
+            "startLine": 35,
+            "startColumn": 0,
+            "endLine": 57,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/insights-body.tsx",
+          "qualifiedName": "InsightsSections",
+          "span": {
+            "startLine": 59,
+            "startColumn": 0,
+            "endLine": 164,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 98.61,
+        "crap": {
+          "value": 3,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/insights-body.tsx",
+          "qualifiedName": "InsightsBody",
+          "span": {
+            "startLine": 171,
+            "startColumn": 7,
+            "endLine": 226,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 90.24,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/insights-filters.tsx",
+          "qualifiedName": "InsightsFilters",
+          "span": {
+            "startLine": 15,
+            "startColumn": 7,
+            "endLine": 84,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 25.71,
+        "crap": {
+          "value": 1.41,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/quality-panel.tsx",
+          "qualifiedName": "QualityPanel",
+          "span": {
+            "startLine": 26,
+            "startColumn": 7,
+            "endLine": 100,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 83.67,
+        "crap": {
+          "value": 2.02,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "notifyAnswer",
+          "span": {
+            "startLine": 12,
+            "startColumn": 0,
+            "endLine": 22,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 4,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "notifyReply",
+          "span": {
+            "startLine": 23,
+            "startColumn": 0,
+            "endLine": 33,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 33.33,
+        "crap": {
+          "value": 8.74,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "notifyCancel",
+          "span": {
+            "startLine": 34,
+            "startColumn": 0,
+            "endLine": 42,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 83.33,
+        "crap": {
+          "value": 4.07,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "RunContent",
+          "span": {
+            "startLine": 44,
+            "startColumn": 7,
+            "endLine": 82,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "replyToGate",
+          "span": {
+            "startLine": 100,
+            "startColumn": 7,
+            "endLine": 105,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "cancelRun",
+          "span": {
+            "startLine": 106,
+            "startColumn": 0,
+            "endLine": 109,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "RunCancel",
+          "span": {
+            "startLine": 111,
+            "startColumn": 7,
+            "endLine": 121,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "RunLoadFailed",
+          "span": {
+            "startLine": 123,
+            "startColumn": 7,
+            "endLine": 133,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-time.ts",
+          "qualifiedName": "formatRunTime",
+          "span": {
+            "startLine": 4,
+            "startColumn": 7,
+            "endLine": 10,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/waiting-runs.tsx",
+          "qualifiedName": "WaitingRuns",
+          "span": {
+            "startLine": 16,
+            "startColumn": 7,
+            "endLine": 48,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 96.67,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/waiting-runs.tsx",
+          "qualifiedName": "RunRows",
+          "span": {
+            "startLine": 50,
+            "startColumn": 0,
+            "endLine": 71,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/standing-rules-settings.tsx",
+          "qualifiedName": "StandingRulesSettings",
+          "span": {
+            "startLine": 58,
+            "startColumn": 7,
+            "endLine": 409,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 89.81,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/step-terminal-dialog.tsx",
+          "qualifiedName": "notifySteer",
+          "span": {
+            "startLine": 22,
+            "startColumn": 0,
+            "endLine": 32,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 83.33,
+        "crap": {
+          "value": 4.07,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/step-terminal-dialog.tsx",
+          "qualifiedName": "steer",
+          "span": {
+            "startLine": 33,
+            "startColumn": 0,
+            "endLine": 36,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/step-terminal-dialog.tsx",
+          "qualifiedName": "StepSessionTranscript",
+          "span": {
+            "startLine": 42,
+            "startColumn": 0,
+            "endLine": 53,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/step-terminal-dialog.tsx",
+          "qualifiedName": "StepTerminalDialog",
+          "span": {
+            "startLine": 59,
+            "startColumn": 7,
+            "endLine": 139,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 6,
+        "coveragePercent": 88.64,
+        "crap": {
+          "value": 6.05,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/task-runs-section.tsx",
+          "qualifiedName": "StartRun",
+          "span": {
+            "startLine": 26,
+            "startColumn": 0,
+            "endLine": 63,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 80,
+        "crap": {
+          "value": 1.01,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/task-runs-section.tsx",
+          "qualifiedName": "RunRowsSkeleton",
+          "span": {
+            "startLine": 68,
+            "startColumn": 0,
+            "endLine": 88,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 100,
+        "crap": {
+          "value": 1,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/task-runs-section.tsx",
+          "qualifiedName": "TaskRunsSection",
+          "span": {
+            "startLine": 93,
+            "startColumn": 7,
+            "endLine": 237,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 92.21,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateReply",
+          "span": {
+            "startLine": 262,
+            "startColumn": 7,
+            "endLine": 282,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateGroup",
+          "span": {
+            "startLine": 387,
+            "startColumn": 7,
+            "endLine": 405,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateCard",
+          "span": {
+            "startLine": 411,
+            "startColumn": 7,
+            "endLine": 480,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-details.tsx",
+          "qualifiedName": "RunSteps",
+          "span": {
+            "startLine": 219,
+            "startColumn": 7,
+            "endLine": 259,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "RunTimeline",
+          "span": {
+            "startLine": 43,
+            "startColumn": 7,
+            "endLine": 85,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/board.ts",
+          "qualifiedName": "startedBy",
+          "span": {
+            "startLine": 73,
+            "startColumn": 7,
+            "endLine": 79,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 12,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "insightsParams",
+          "span": {
+            "startLine": 48,
+            "startColumn": 7,
+            "endLine": 57,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "durationIn",
+          "span": {
+            "startLine": 121,
+            "startColumn": 7,
+            "endLine": 130,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 20,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": true
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "tokenTotal",
+          "span": {
+            "startLine": 132,
+            "startColumn": 7,
+            "endLine": 140,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/quality.ts",
+          "qualifiedName": "mergedCost",
+          "span": {
+            "startLine": 43,
+            "startColumn": 7,
+            "endLine": 63,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 5,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 30,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": true
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "gateAsker",
+          "span": {
+            "startLine": 473,
+            "startColumn": 7,
+            "endLine": 479,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 12,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "roundStartingAt",
+          "span": {
+            "startLine": 495,
+            "startColumn": 7,
+            "endLine": 501,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "reviewsAfresh",
+          "span": {
+            "startLine": 508,
+            "startColumn": 7,
+            "endLine": 522,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 12,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "findingsOf",
+          "span": {
+            "startLine": 524,
+            "startColumn": 7,
+            "endLine": 532,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 2,
+          "riskLevel": "low"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "findingCounts",
+          "span": {
+            "startLine": 534,
+            "startColumn": 7,
+            "endLine": 546,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 20,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": true
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "terminalState",
+          "span": {
+            "startLine": 556,
+            "startColumn": 7,
+            "endLine": 563,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 7,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 56,
+          "riskLevel": "high"
+        }
+      },
+      "threshold": 16,
+      "exceeds": true
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "standingAnswer",
+          "span": {
+            "startLine": 58,
+            "startColumn": 0,
+            "endLine": 69,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 12,
+          "riskLevel": "moderate"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "failure",
+          "span": {
+            "startLine": 308,
+            "startColumn": 0,
+            "endLine": 314,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    },
+    {
+      "scored": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "answerGate",
+          "span": {
+            "startLine": 87,
+            "startColumn": 7,
+            "endLine": 95,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "coveragePercent": 0,
+        "crap": {
+          "value": 6,
+          "riskLevel": "acceptable"
+        }
+      },
+      "threshold": 16,
+      "exceeds": false
+    }
+  ],
+  "unmatched": [
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateReply",
+          "span": {
+            "startLine": 262,
+            "startColumn": 7,
+            "endLine": 282,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "contributors": [
+          {
+            "kind": "logical-operator",
+            "line": 274,
+            "column": 16,
+            "operator": "||"
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 6,
+        "riskLevel": "acceptable"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateGroup",
+          "span": {
+            "startLine": 387,
+            "startColumn": 7,
+            "endLine": 405,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "contributors": []
+      },
+      "worstCaseCrap": {
+        "value": 2,
+        "riskLevel": "low"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/gate-card.tsx",
+          "qualifiedName": "GateCard",
+          "span": {
+            "startLine": 411,
+            "startColumn": 7,
+            "endLine": 480,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "contributors": []
+      },
+      "worstCaseCrap": {
+        "value": 2,
+        "riskLevel": "low"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-details.tsx",
+          "qualifiedName": "RunSteps",
+          "span": {
+            "startLine": 219,
+            "startColumn": 7,
+            "endLine": 259,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "contributors": []
+      },
+      "worstCaseCrap": {
+        "value": 2,
+        "riskLevel": "low"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/components/run-timeline.tsx",
+          "qualifiedName": "RunTimeline",
+          "span": {
+            "startLine": 43,
+            "startColumn": 7,
+            "endLine": 85,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "contributors": []
+      },
+      "worstCaseCrap": {
+        "value": 2,
+        "riskLevel": "low"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/board.ts",
+          "qualifiedName": "startedBy",
+          "span": {
+            "startLine": 73,
+            "startColumn": 7,
+            "endLine": 79,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "contributors": [
+          {
+            "kind": "if-branch",
+            "line": 76,
+            "column": 2
+          },
+          {
+            "kind": "ternary",
+            "line": 77,
+            "column": 9
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 12,
+        "riskLevel": "moderate"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "insightsParams",
+          "span": {
+            "startLine": 48,
+            "startColumn": 7,
+            "endLine": 57,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "contributors": []
+      },
+      "worstCaseCrap": {
+        "value": 2,
+        "riskLevel": "low"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "durationIn",
+          "span": {
+            "startLine": 121,
+            "startColumn": 7,
+            "endLine": 130,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "contributors": [
+          {
+            "kind": "if-branch",
+            "line": 125,
+            "column": 2
+          },
+          {
+            "kind": "if-branch",
+            "line": 126,
+            "column": 2
+          },
+          {
+            "kind": "if-branch",
+            "line": 127,
+            "column": 2
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 20,
+        "riskLevel": "moderate"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/insights.ts",
+          "qualifiedName": "tokenTotal",
+          "span": {
+            "startLine": 132,
+            "startColumn": 7,
+            "endLine": 140,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "contributors": []
+      },
+      "worstCaseCrap": {
+        "value": 2,
+        "riskLevel": "low"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/quality.ts",
+          "qualifiedName": "mergedCost",
+          "span": {
+            "startLine": 43,
+            "startColumn": 7,
+            "endLine": 63,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 5,
+        "contributors": [
+          {
+            "kind": "if-branch",
+            "line": 49,
+            "column": 2
+          },
+          {
+            "kind": "logical-operator",
+            "line": 50,
+            "column": 4,
+            "operator": "&&"
+          },
+          {
+            "kind": "if-branch",
+            "line": 55,
+            "column": 2
+          },
+          {
+            "kind": "logical-operator",
+            "line": 56,
+            "column": 4,
+            "operator": "&&"
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 30,
+        "riskLevel": "moderate"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "gateAsker",
+          "span": {
+            "startLine": 473,
+            "startColumn": 7,
+            "endLine": 479,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "contributors": [
+          {
+            "kind": "ternary",
+            "line": 477,
+            "column": 9
+          },
+          {
+            "kind": "logical-operator",
+            "line": 477,
+            "column": 29,
+            "operator": "??"
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 12,
+        "riskLevel": "moderate"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "roundStartingAt",
+          "span": {
+            "startLine": 495,
+            "startColumn": 7,
+            "endLine": 501,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "contributors": []
+      },
+      "worstCaseCrap": {
+        "value": 2,
+        "riskLevel": "low"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "reviewsAfresh",
+          "span": {
+            "startLine": 508,
+            "startColumn": 7,
+            "endLine": 522,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "contributors": [
+          {
+            "kind": "if-branch",
+            "line": 516,
+            "column": 2
+          },
+          {
+            "kind": "logical-operator",
+            "line": 520,
+            "column": 9,
+            "operator": "&&"
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 12,
+        "riskLevel": "moderate"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "findingsOf",
+          "span": {
+            "startLine": 524,
+            "startColumn": 7,
+            "endLine": 532,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 1,
+        "contributors": []
+      },
+      "worstCaseCrap": {
+        "value": 2,
+        "riskLevel": "low"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "findingCounts",
+          "span": {
+            "startLine": 534,
+            "startColumn": 7,
+            "endLine": 546,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 4,
+        "contributors": [
+          {
+            "kind": "for-loop",
+            "line": 540,
+            "column": 2
+          },
+          {
+            "kind": "if-branch",
+            "line": 541,
+            "column": 4
+          },
+          {
+            "kind": "if-branch",
+            "line": 542,
+            "column": 4
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 20,
+        "riskLevel": "moderate"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/core/run.ts",
+          "qualifiedName": "terminalState",
+          "span": {
+            "startLine": 556,
+            "startColumn": 7,
+            "endLine": 563,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 7,
+        "contributors": [
+          {
+            "kind": "if-branch",
+            "line": 559,
+            "column": 2
+          },
+          {
+            "kind": "optional-chain",
+            "line": 559,
+            "column": 6,
+            "operator": "?."
+          },
+          {
+            "kind": "if-branch",
+            "line": 560,
+            "column": 2
+          },
+          {
+            "kind": "optional-chain",
+            "line": 560,
+            "column": 6,
+            "operator": "?."
+          },
+          {
+            "kind": "ternary",
+            "line": 561,
+            "column": 9
+          },
+          {
+            "kind": "optional-chain",
+            "line": 561,
+            "column": 9,
+            "operator": "?."
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 56,
+        "riskLevel": "high"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "standingAnswer",
+          "span": {
+            "startLine": 58,
+            "startColumn": 0,
+            "endLine": 69,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 3,
+        "contributors": [
+          {
+            "kind": "logical-operator",
+            "line": 62,
+            "column": 15,
+            "operator": "??"
+          },
+          {
+            "kind": "ternary",
+            "line": 67,
+            "column": 9
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 12,
+        "riskLevel": "moderate"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/queries/runs.ts",
+          "qualifiedName": "failure",
+          "span": {
+            "startLine": 308,
+            "startColumn": 0,
+            "endLine": 314,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "contributors": [
+          {
+            "kind": "ternary",
+            "line": 312,
+            "column": 30
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 6,
+        "riskLevel": "acceptable"
+      }
+    },
+    {
+      "kind": "no-coverage",
+      "complexity": {
+        "identity": {
+          "filePath": "src/features/factory-runs/views/shared/run-parts.tsx",
+          "qualifiedName": "answerGate",
+          "span": {
+            "startLine": 87,
+            "startColumn": 7,
+            "endLine": 95,
+            "endColumn": 1
+          }
+        },
+        "cyclomaticComplexity": 2,
+        "contributors": [
+          {
+            "kind": "logical-operator",
+            "line": 93,
+            "column": 9,
+            "operator": "||"
+          }
+        ]
+      },
+      "worstCaseCrap": {
+        "value": 6,
+        "riskLevel": "acceptable"
+      }
+    }
+  ],
+  "passed": false
+}

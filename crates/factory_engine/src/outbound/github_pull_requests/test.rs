@@ -13,6 +13,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::{GithubPullRequests, GithubPullRequestsErr, OwnerTokens};
 use crate::domain::models::{
     BranchDeletion, CheckState, CodeRepository, FailureAnnotation, HeadChecks, Merging,
+    PullRequestState,
 };
 use crate::domain::ports::{PullRequests, Retryable};
 
@@ -234,6 +235,48 @@ async fn a_linked_token_is_read_on_each_call() {
     }
 
     assert_eq!(tokens.reads.load(Ordering::SeqCst), 3);
+}
+
+/// A merged pull request is read with the commit its merge made; an open
+/// one, for which GitHub names a test merge commit, with none.
+#[tokio::test]
+async fn a_merged_pull_request_is_read_with_its_merge_commit() {
+    for (listed, state, merge_commit) in [
+        (
+            r#"[{"number":7,"html_url":"https://github.com/macro/app/pull/7","state":"closed","merged_at":"2026-11-16T10:00:00Z","merge_commit_sha":"def456","head":{"sha":"abc123"}}]"#,
+            PullRequestState::Merged,
+            Some("def456"),
+        ),
+        (
+            r#"[{"number":7,"html_url":"https://github.com/macro/app/pull/7","state":"open","merged_at":null,"merge_commit_sha":"def456","head":{"sha":"abc123"}}]"#,
+            PullRequestState::Open,
+            None,
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/macro/app/pulls"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(listed))
+            .mount(&server)
+            .await;
+        let github = GithubPullRequests::with_client(
+            Tokens {
+                linked: Some("token"),
+                ..Tokens::default()
+            },
+            GithubOauthImpl::with_api_base_url(server.uri()),
+        );
+
+        let found = github
+            .find(&julia(), &repository(), "factory/run")
+            .await
+            .expect("read")
+            .expect("a pull request");
+
+        assert_eq!(found.state, state);
+        assert_eq!(found.head_sha, "abc123");
+        assert_eq!(found.merge_commit.as_deref(), merge_commit);
+    }
 }
 
 const EMPTY_ACTIONS_SUITE: &str = r#"[{"id":1,"status":"queued","conclusion":null,"latest_check_runs_count":0,"app":{"slug":"github-actions"}}]"#;

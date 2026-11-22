@@ -141,6 +141,14 @@ worker that walks each Run's Flow, in one process.
   }
   ```
 
+  An Agent may run on Codex: its `bot` is the agent of a machine whose
+  macrod runs Codex (`--agent codex`, signed in with the owner's own Codex
+  login) and its `model` one Codex lists (`docs/runbooks/factory-codex-role.md`).
+  Codex's cloud agent cannot hand a Step back: a definition whose Roles list
+  an Agent on it stops the service (`CloudCodex`), as does a
+  `FACTORY_EVALUATION` arm choosing one, and a Benchmark configuration
+  choosing one is refused (`CloudCodexAgent`).
+
   When moving off `FACTORY_AGENT_ID`, make that bot the first Agent of every
   Role until the Runs started before have ended: a Step that opened its
   session before Steps recorded their Agent and bot is stopped, deleted or
@@ -152,7 +160,9 @@ worker that walks each Run's Flow, in one process.
   of teams that name none. Only a Definition's `agents.json` holds Standing
   Roles (a `standing` section, which says which agents' bots may start,
   cancel or link a Run, or answer its plan or Blockers Gate, for its
-  owner): `FACTORY_AGENTS` with one stops the service from starting. The agent Steps still run on `LocalAgent` when it
+  owner) and Agent Rules (a `rules` list, which picks a Role's first Agent
+  for a Run whose task tag or repository it matches): `FACTORY_AGENTS` with
+  either stops the service from starting. The agent Steps still run on `LocalAgent` when it
   is unset, Definition or not, so a deployment that runs agents sets it.
 
   Unset, the agent Steps run on `LocalAgent`, which does no work, unless the

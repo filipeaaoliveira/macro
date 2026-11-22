@@ -76,6 +76,9 @@ no I/O.
   can branch on anything it has read.
 - `sdk` is bookkeeping the scheduler writes after type-checking; never trust a
   client's value (`scheduled_action::domain::code_check`).
+- `code_rewritten` is set by the scheduler's SDK code upgrade when a model
+  rewrote the code steps; runs of such code carry no scheduler's proof
+  (`scheduled_action::domain::code_upgrade`).
 - Code steps are checked together: `check_files` appends a module-scoped
   `type StepContext` to each file, after its source so diagnostics keep their
   lines, and a step reads earlier steps' return types by importing their

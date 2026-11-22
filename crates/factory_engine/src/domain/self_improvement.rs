@@ -22,7 +22,9 @@
 //! rejected it (closed its pull request unmerged, or cancelled its Run), so
 //! they never start another, and go back to pending when its Run ended
 //! without a pull request or could not start; then the team's next waits
-//! ([`paused_until`]). New failures, of the same Scorer too, still count. The thresholds are the team's
+//! ([`paused_until`]). New failures, of the same Scorer too, still count;
+//! dismissed ones count again once the Definition's namer or the Run's
+//! owner undoes the dismissal (`EvaluationService::undo_dismissal`). The thresholds are the team's
 //! Definition's as it is now, read as its namer, who must still be an admin
 //! of the team ([`namer_standing`]).
 
@@ -85,7 +87,9 @@ pub const UNREAD_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::days(7);
 
 /// How long the thresholds read from a team's current Definition are kept
 /// before it is read from GitHub again: a Run's end of the team reads
-/// them at most this often.
+/// them at most this often. Only the thresholds are kept: the pending
+/// failures are read at each Run end, so failures whose dismissal was
+/// undone count at the next one.
 pub const THRESHOLDS_KEPT_FOR: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// The most characters of a failure's reason the request quotes.

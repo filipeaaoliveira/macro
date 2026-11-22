@@ -31,6 +31,7 @@ use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{CheckRound, CheckRoundOutcome, MAX_OUTPUT_BYTES, Outcome};
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::ReviewRoundRepository;
 
 use super::checks_round::{ATTEMPT_CHECKS_FOR, Checked, fit, lost, records};
 use super::{BuiltInStepError, BuiltInSteps, cut, outcomes};
@@ -104,7 +105,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository + MergeQueueRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
 {
     /// Have the verifier check the head of the Run's branch, and the

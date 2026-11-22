@@ -615,7 +615,7 @@ where
             BuiltInStep::Write => {
                 let outcomes = vec![Outcome::done(), Outcome::unchanged()];
                 if input.repository.is_some() {
-                    self.work_and_check(step, WRITE_INSTRUCTIONS, outcomes, input)
+                    self.work_and_check(step, WRITE_INSTRUCTIONS, outcomes, input, None)
                         .await
                 } else {
                     self.ask_agent(step, WRITE_INSTRUCTIONS, outcomes, input)
@@ -636,8 +636,11 @@ where
                 if input.repository.is_none() {
                     return Err(BuiltInStepError::NoRepository(step.clone()));
                 }
-                let instructions = fix_instructions(input.review);
-                self.work_and_check(step, &instructions, vec![Outcome::done()], input)
+                let blockers = input
+                    .review
+                    .filter(|round| round.blockers().next().is_some());
+                let instructions = fix_instructions(blockers);
+                self.work_and_check(step, &instructions, vec![Outcome::done()], input, blockers)
                     .await
             }
             BuiltInStep::CiFix => {
@@ -735,10 +738,9 @@ fn in_round(round: &ReviewRound, seq: u16) -> bool {
     round.step_seqs().contains(&seq)
 }
 
-/// What the fix is told: with the Blockers of the latest review round when
-/// it found some.
-fn fix_instructions(review: Option<&ReviewRound>) -> String {
-    let blockers = review.filter(|round| round.blockers().next().is_some());
+/// What the fix is told: with the Blockers of the latest review round,
+/// `blockers`, when it found some, and how to say what it did of each.
+fn fix_instructions(blockers: Option<&ReviewRound>) -> String {
     match blockers {
         Some(round) => format!("{FIX_INSTRUCTIONS}\n{}", blockers_brief(round)),
         None => FIX_INSTRUCTIONS.to_string(),

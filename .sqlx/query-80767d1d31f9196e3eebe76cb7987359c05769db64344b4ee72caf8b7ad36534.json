@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT hashtextextended(\n                'factory_merge_turn:'\n                    || lower(regexp_replace(btrim(repo_url), '\\.git$', ''))\n                    || ' ' || base_branch,\n                0\n            ) AS \"key!\"\n            FROM factory_run\n            WHERE id = $1 AND repo_url IS NOT NULL AND base_branch IS NOT NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "80767d1d31f9196e3eebe76cb7987359c05769db64344b4ee72caf8b7ad36534"
+}

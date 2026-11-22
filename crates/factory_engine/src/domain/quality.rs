@@ -20,7 +20,7 @@
 #[cfg(test)]
 mod test;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use ai_usage::domain::session_usage::{SessionTokens, SessionUsageReader};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -28,7 +28,7 @@ use factory_records::domain::models::{RunId, RunOutcome};
 use factory_records::domain::quality::{
     CI_NAME_BYTES, CiJob, CiJobResult, CiVerdict, QualityRecords, QualityRun, QualityScope,
 };
-use factory_records::domain::review_rounds::ReviewRoundOutcome;
+use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRoundOutcome};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 use uuid::Uuid;
@@ -490,6 +490,10 @@ pub struct ReviewQuality {
     pub new_blockers: u32,
     /// Blockers an earlier round of their Run found too: not fixed.
     pub repeated_blockers: u32,
+    /// What became of the Blockers given to a fix: fixed as the fixer
+    /// says, or disputed and then upheld or dropped, and the findings
+    /// dismissed, over every reviewed Run.
+    pub resolutions: BlockerResolutions,
     /// Blockers by reviewer Role, most first.
     pub by_reviewer: Vec<BlockerCount>,
     /// Blockers by Agent, most first.
@@ -507,9 +511,13 @@ pub struct DeliveryInsight {
     /// Runs that merged their pull request.
     pub merged: u32,
     /// Runs that merged with no person stepping in: no Gate a person
-    /// answered, no Step they steered, and no manual end.
+    /// answered, no Step they steered, and no manual end. A Run found
+    /// flawed afterwards, cancelled, or ended for infrastructure is not.
     pub autonomous: u32,
-    /// The share of ended Runs that did, from 0 to 1.
+    /// Their share, from 0 to 1, of the Runs whose work ended on its own,
+    /// as the success rate counts them: Runs a person cancelled and Runs
+    /// that ended for infrastructure are left out. None while no Run ended
+    /// that way.
     pub autonomy_rate: Option<f64>,
     /// Ended Runs with a Gate a person answered.
     pub person_answered: u32,
@@ -519,6 +527,10 @@ pub struct DeliveryInsight {
     pub manual: u32,
     /// Runs with usage recorded.
     pub measured_runs: u32,
+    /// Runs with an agent session whose usage is not known: one on a
+    /// runtime that records none, as Codex or Claude Code on its owner's
+    /// own login. While any, no figure per merged pull request is given.
+    pub unmeasured_runs: u32,
     /// The tokens every Run's agents used.
     pub tokens: TokenCounts,
     /// What their priced model calls cost, in US dollars.
@@ -526,9 +538,11 @@ pub struct DeliveryInsight {
     /// Their model calls with no price.
     pub unpriced_calls: u64,
     /// What every Run cost per merged pull request, in US dollars; none
-    /// unless every call was priced.
+    /// unless every Run's agent sessions recorded their usage and every
+    /// call was priced.
     pub cost_per_merged_usd: Option<f64>,
-    /// The tokens every Run used per merged pull request.
+    /// The tokens every Run used per merged pull request; none unless every
+    /// Run's agent sessions recorded their usage.
     pub tokens_per_merged: Option<u64>,
 }
 
@@ -938,7 +952,13 @@ fn review_quality(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) 
         last: DateTime<Utc>,
     }
     let mut texts: BTreeMap<String, Recurring> = BTreeMap::new();
+    let mut resolutions = BlockerResolutions::default();
     for blocker in ordered {
+        if blocker.dismissed {
+            resolutions.dismissed += 1;
+            continue;
+        }
+        resolutions.count(blocker.fix_status, blocker.ruling);
         let text = blocker_text(&blocker.problem);
         let earlier = found_before.entry(blocker.run_id).or_default();
         let repeated = earlier
@@ -1011,9 +1031,25 @@ fn review_quality(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) 
         blockers: new_blockers + repeated_blockers,
         new_blockers,
         repeated_blockers,
+        resolutions,
         by_reviewer: by_count(by_reviewer),
         by_agent: by_count(by_agent),
         recurring,
+    }
+}
+
+/// Whether a Run's work ended on its own, so the success and autonomy rates
+/// count it: a Run a person cancelled and one that ended for infrastructure,
+/// a machine, quota or network reason, measure the factory's plumbing, not
+/// its work.
+fn ended_on_its_own(outcome: RunOutcome) -> bool {
+    match outcome {
+        RunOutcome::Success
+        | RunOutcome::Flawed
+        | RunOutcome::Manual
+        | RunOutcome::Blocked
+        | RunOutcome::Failed => true,
+        RunOutcome::Cancelled | RunOutcome::Infrastructure => false,
     }
 }
 
@@ -1023,12 +1059,28 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
         .map(|tokens| (tokens.session_id, tokens))
         .collect();
     let mut ended_runs = 0;
+    let mut ended_on_their_own = 0;
     let mut merged = 0;
     let mut autonomous = 0;
     let mut person_answered = 0;
     let mut steered = 0;
     let mut manual = 0;
+    // The bots one of whose sessions recorded usage: their runtime records
+    // it, so a session of theirs that recorded none made no model call (it
+    // failed before its first) and cost nothing.
+    let measured_bots: HashSet<Uuid> = records
+        .runs
+        .iter()
+        .flat_map(|run| &run.sessions)
+        .filter(|session| by_session.contains_key(&session.id))
+        .filter_map(|session| session.bot)
+        .collect();
     let mut measured_runs = 0;
+    // Runs with an agent session that recorded no usage on a runtime that
+    // records none: one on someone's own login (Codex or Claude Code
+    // through macrod), so what those Runs spent is not known. A session
+    // whose bot is not known counts too.
+    let mut unmeasured_runs = 0;
     let mut used = TokenCounts::default();
     let mut cost_usd = 0.0;
     let mut unpriced_calls = 0;
@@ -1036,48 +1088,62 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
         let outcome = run.run.end.map(|(outcome, _)| outcome);
         let ended = outcome.is_some();
         let is_manual = outcome == Some(RunOutcome::Manual);
+        let on_its_own = outcome.is_some_and(ended_on_its_own);
         if ended {
             ended_runs += 1;
+            ended_on_their_own += u32::from(on_its_own);
             person_answered += u32::from(run.person_answered);
             steered += u32::from(run.steered);
             manual += u32::from(is_manual);
         }
         if run.merged {
             merged += 1;
-            if ended && !run.person_answered && !run.steered && !is_manual {
+            if on_its_own
+                && outcome != Some(RunOutcome::Flawed)
+                && !run.person_answered
+                && !run.steered
+                && !is_manual
+            {
                 autonomous += 1;
             }
         }
         let mut measured = false;
+        let mut unmeasured = false;
         for session in &run.sessions {
-            if let Some(session) = by_session.get(session) {
-                measured = true;
-                used.input += session.input;
-                used.output += session.output;
-                used.cache_read += session.cache_read;
-                used.cache_write += session.cache_write;
-                cost_usd += session.cost_usd;
-                unpriced_calls += session.unpriced_calls;
-            }
+            let Some(session) = by_session.get(&session.id) else {
+                unmeasured |= !session.bot.is_some_and(|bot| measured_bots.contains(&bot));
+                continue;
+            };
+            measured = true;
+            used.input += session.input;
+            used.output += session.output;
+            used.cache_read += session.cache_read;
+            used.cache_write += session.cache_write;
+            cost_usd += session.cost_usd;
+            unpriced_calls += session.unpriced_calls;
         }
         measured_runs += u32::from(measured);
+        unmeasured_runs += u32::from(unmeasured);
     }
     let total_tokens = used.input + used.output + used.cache_read + used.cache_write;
-    let priced = measured_runs > 0 && unpriced_calls == 0;
+    // A figure per merged pull request is every Run's spend over the
+    // merges: only known when every Run's agent sessions recorded theirs.
+    let whole = measured_runs > 0 && unmeasured_runs == 0;
+    let priced = whole && unpriced_calls == 0;
     DeliveryInsight {
         ended_runs,
         merged,
         autonomous,
-        autonomy_rate: share(autonomous, ended_runs),
+        autonomy_rate: share(autonomous, ended_on_their_own),
         person_answered,
         steered,
         manual,
         measured_runs,
+        unmeasured_runs,
         tokens: used,
         cost_usd,
         unpriced_calls,
         cost_per_merged_usd: (merged > 0 && priced).then(|| cost_usd / f64::from(merged)),
-        tokens_per_merged: (merged > 0 && measured_runs > 0)
-            .then(|| total_tokens / u64::from(merged)),
+        tokens_per_merged: (merged > 0 && whole).then(|| total_tokens / u64::from(merged)),
     }
 }

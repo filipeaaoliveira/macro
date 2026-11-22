@@ -9,7 +9,7 @@ use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{FIRE_STEP, RoutineAutomationTriggers};
-use crate::domain::ports::{AutomationTriggerError, AutomationTriggers};
+use crate::domain::ports::{AutomationTriggerError, AutomationTriggers, SavedRoutine};
 
 const OWNER: &str = "macro|julia@example.com";
 const ROUTINE: Uuid = Uuid::from_u128(0x5c4ed);
@@ -27,6 +27,7 @@ fn automation(trigger: AutomationTrigger, repo_url: Option<&str>) -> Automation 
         request_template: "Fix it".to_string(),
         enabled: true,
         routine_id: None,
+        routine_revision: None,
         created_at: Utc.with_ymd_and_hms(2026, 11, 18, 9, 0, 0).unwrap(),
     }
 }
@@ -38,18 +39,27 @@ async fn saved_routine(trigger: AutomationTrigger, repo_url: Option<&str>) -> Va
         .and(path("/scheduled-actions"))
         .and(header("x-internal-auth-key", "key"))
         .and(header("x-internal-macro-user-id", OWNER))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": ROUTINE })))
+        .respond_with(
+            ResponseTemplate::new(201)
+                .set_body_json(json!({ "id": ROUTINE, "configuration_revision": 1 })),
+        )
         .expect(1)
         .mount(&server)
         .await;
     let triggers = RoutineAutomationTriggers::new(&server.uri(), "key").expect("client");
 
-    let routine_id = triggers
+    let routine = triggers
         .create(&automation(trigger, repo_url))
         .await
         .expect("created");
 
-    assert_eq!(routine_id, ROUTINE);
+    assert_eq!(
+        routine,
+        SavedRoutine {
+            id: ROUTINE,
+            revision: 1
+        }
+    );
     let requests = server.received_requests().await.expect("requests");
     serde_json::from_slice(&requests[0].body).expect("json body")
 }
@@ -185,4 +195,47 @@ async fn deleting_a_routine_already_gone_succeeds() {
     let owner = MacroUserIdStr::try_from(OWNER.to_string()).expect("valid");
 
     triggers.delete(&owner, ROUTINE).await.expect("deleted");
+}
+
+/// Switching an Automation on writes its routine back whole, as the factory
+/// makes it, over whatever it was changed to, and reads the configuration
+/// revision that makes.
+#[tokio::test]
+async fn rewriting_a_routine_puts_it_back_whole_and_reads_its_revision() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/scheduled-actions/{ROUTINE}")))
+        .and(header("x-internal-auth-key", "key"))
+        .and(header("x-internal-macro-user-id", OWNER))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "id": ROUTINE, "configuration_revision": 5 })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let triggers = RoutineAutomationTriggers::new(&server.uri(), "key").expect("client");
+    let schedule = automation(
+        AutomationTrigger::Schedule {
+            cron: "0 0 9 * * Mon-Fri".to_string(),
+            timezone: "Europe/Lisbon".to_string(),
+        },
+        None,
+    );
+
+    let revision = triggers
+        .rewrite(&schedule, ROUTINE)
+        .await
+        .expect("rewritten");
+
+    assert_eq!(revision, 5);
+    let requests = server.received_requests().await.expect("requests");
+    let routine: Value = serde_json::from_slice(&requests[0].body).expect("json body");
+    assert_eq!(routine["enabled"], json!(true));
+    assert_eq!(routine["kind"], json!("Agent"));
+    assert_eq!(routine["task"]["steps"][0]["source"], json!(FIRE_STEP));
+    assert_eq!(
+        routine["trigger"],
+        json!({ "type": "cron", "schedule": "0 0 9 * * Mon-Fri", "timezone": "Europe/Lisbon" })
+    );
 }

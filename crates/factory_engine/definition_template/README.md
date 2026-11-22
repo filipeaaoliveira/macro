@@ -46,7 +46,17 @@ Outside the files, all must be done:
   agent each member who starts Runs may use. The zero ids name no agent:
   until you replace them, the validator fails, naming `agents.json` and
   the Agent, team settings refuse the Definition, and no Run starts.
-- `model` (may): left out, the agent's own default model.
+- `model` (may): left out, the agent's own default model. It must be one
+  the agent's runtime offers: a Claude Code agent's (`opus`, `sonnet`), a
+  Codex agent's (`gpt-5.5`, as `codex` lists it). A model the runtime does
+  not offer fails the Step.
+- A Role can run on Codex: run macrod on a machine with Codex signed in
+  (`macrod service --agent codex`, or a second profile beside a Claude
+  Code one), and give an Agent that machine's agent's `bot` id. Codex's
+  cloud agent (`00000000-0000-0000-0000-00000000c0de`) cannot take a Step:
+  its sessions cannot hand a result back, and the validator refuses an
+  Agent on it that a Role lists (one only a Standing Role lists reads)
+  and an Experiment arm in `scorers.json` that chooses one.
 - `instructions` (may): what every session of the Agent is told before the
   Step's prompt. Left as is, `primary` is told to work in small commits.
 - `roles` (may): the Agents of each Role, in order. A Step works with the
@@ -59,6 +69,8 @@ Outside the files, all must be done:
 - `standing` (may): the Standing Roles (below). Left out, any of your
   agents may start, cancel and link Runs, and answer plan and Blockers
   Gates where `rules.json` lets it.
+- `rules` (may): the Agent Rules (below). Left out, every Run's Steps
+  start with their Role's first Agent, unless an Experiment arm chooses.
 
 `factory.json`:
 
@@ -100,9 +112,13 @@ Outside the files, all must be done:
 
 `scorers.json` (may):
 
-- `samplePercent`: the share of finished `code` Runs the
-  `does-what-was-asked` Scorer judges. Left at 0, it judges none, and only
-  Runs a person marks flawed count as failures for self-improvement.
+- `samplePercent`: the share of finished `code` Runs each Scorer judges,
+  25 in the template. Each judgment is a model call, counted in the Run's
+  owner's model usage: lower it to spend less, or set it to 0 to judge
+  none. With every Scorer at 0, only Runs a person marks flawed count as
+  failures for self-improvement.
+- `instructions`: what each Scorer judges (Scorers, Experiments and
+  Benchmarks, below). Reword them to your team's standards.
 - `experiments` and `benchmarks`: left empty, the team has none.
 - `selfImprovement`: left out, on, starting a Run at 25 pending failures or
   when the oldest is 7 days old.
@@ -135,7 +151,7 @@ From this template to a first merged pull request:
 4. On a branch, replace the two `bot` ids in `agents.json`, and anything
    else from Customize the template you want now.
 5. Check it: `factory_definition_check .` prints `.: the definition reads:
-   flows code, plan, reply, 1 scorers, 0 experiments, 0 benchmarks`. Open
+   flows code, plan, reply, 2 scorers, 0 experiments, 0 benchmarks`. Open
    a pull request, and merge it once its check passes.
 6. An admin names the repository in team settings, Factory definition, and
    saves. Macro reads it first and refuses one that does not read, saying
@@ -214,8 +230,9 @@ Run insights opens from the chart button in a task's Runs section, or at
 period: their success rate, how long each Step took, where Runs stop, and
 the tokens the agents used. Its Scorers, Experiments and Benchmarks
 sections list the team's, with the results of your own Runs and suites;
-its Self-improvement section is the team's. The template's one Scorer is
-listed, with no judgments while its `samplePercent` is 0.
+its Self-improvement section is the team's. The template's two Scorers
+are listed, with the judgments of the quarter of your `code` Runs they
+sampled.
 
 Change one setting at a time, and repeat a Run before you compare: one
 Run says little. To compare Agents on the same kind of work, use an
@@ -230,7 +247,7 @@ each trial with the tokens it used.
 | --- | --- |
 | `factory.json` | The format's `version` (1), a `description`, and the Flows, by name. |
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
-| `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). |
+| `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). Optional `rules`: the Agent Rules (below). |
 | `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own, and the Queue limit and token budget. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
 | `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format, and when its failures start a self-improvement Run (below). Left out, the team has none, and the defaults apply. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
@@ -290,9 +307,11 @@ It leaves off:
   only the Runs that start after the change merges. A Run whose usage
   cannot be read for three agent Steps in a row ends too, as its budget
   cannot be checked. The budget applies only to agents whose model calls
-  Macro measures: an agent that runs locally or on its own runtime records
-  no token use, its run page says the budget is not measured, and the
-  budget never stops it. The check refuses a budget out of that range.
+  Macro measures: an agent that runs locally or on its own runtime (Claude
+  Code or Codex through macrod, signed in with its owner's own login)
+  records no token use, its run page says the budget is not measured, and
+  the budget never stops it. A Run that mixes both counts only the
+  measured Agents' Steps. The check refuses a budget out of that range.
 
 ## Scorers, Experiments and Benchmarks
 
@@ -301,8 +320,13 @@ It leaves off:
 
 - `scorers`: each a `name`, the `instructions` a small model judges a
   finished Run by (from 0 to 1), the `flows` whose Runs it judges (every
-  Flow of this Definition when left out), and `samplePercent`, the share of
-  those Runs it judges, from 0 to 100.
+  Flow of this Definition when left out), `samplePercent`, the share of
+  those Runs it judges, from 0 to 100, and `reads`: `["diff"]` also gives
+  its judge the Run's change, the code it merged (or its branch's head
+  when nothing merged), cut to 40 000 bytes, for a Scorer of the code
+  itself, such as one of dead code or duplicated helpers. It does not
+  judge a Run whose change touches 300 files or more, or could not be
+  read. Any other value does not read.
 - `experiments`: each a `name`, the `flow` whose Runs on a task it splits,
   and at least two `arms`, each a `name`, an optional `weight` and the
   `agents` it gives Roles in place of `agents.json`'s first.
@@ -314,9 +338,24 @@ The Flows and Agents they name must be this Definition's own. A
 Benchmark's trials walk the factory's own `benchmark` Flow (plan, then
 write, asking no one), which no Flow here may be named: with Benchmarks,
 `agents.json` must fill its `planner` and `writer` Roles. A Run keeps
-the Scorers it started with, as it keeps the commit. Every judgment is a
-model call: this template's Scorer judges no Run (`samplePercent` 0) until
-you raise it.
+the Scorers it started with, as it keeps the commit.
+
+This template's two Scorers each judge 25 percent of the finished `code`
+Runs. A judge reads the Run's request, how it ended, and its Steps' outputs
+(the last 30 Steps, the first 4000 characters of each); it reads no diff,
+so it judges the change from what the Steps report of it.
+
+- `delivers-done-when`: did the change deliver the request's Done-when
+  clauses, and only those? It scores 1 when every clause is met and
+  nothing else changed, and less for each clause missed and each change
+  no clause asked for.
+- `blockers-actionable`: did each Blocker the `review` Step's reviewers
+  found name a file, the harm it does, and a fix? It scores the share of
+  Blockers that do, and 1 for a Run whose review found none.
+
+Sampling costs model usage: every judgment is a model call, counted in the
+Run's owner's model usage. Lower `samplePercent` to spend less, or set
+it to 0 to judge no Run.
 
 ## Standing Roles
 
@@ -364,19 +403,79 @@ which Standing Role.
 An empty section, `"standing": {}`, allows no agent any of these acts;
 leave the section out to allow them all. `"standing": null` is refused.
 
-Schedule and event Automations fire through a Macro routine that runs for
-the Macro routine bot (`00000000-0000-0000-0000-00000000a2a2`), so with a
-`standing` section they start a Run only when that bot is the `bot` of an
-Agent in a Standing Role that allows `start`; otherwise each firing is
-skipped as refused. To keep them firing, add that Agent, for example
-`"routine": { "bot": "00000000-0000-0000-0000-00000000a2a2" }` in `agents`
-and `"scheduler": { "acts": ["start"], "agents": ["routine"] }` in
-`standing`. This is a known limit: a later change is to let only the
-scheduler's own firing start a Run as the Automation's creator.
+Schedule and event Automations need no Role. A firing that Macro's
+scheduler starts itself, when the schedule comes due or the watched event
+happens, starts its Run as the Automation's creator, with or without a
+`standing` section. Any other run of the Automation's routine is checked as
+an agent's start. That includes Run Now, by a person or an agent, and any
+run after someone changed the routine. Such a run acts for the Macro
+routine bot (`00000000-0000-0000-0000-00000000a2a2`). With a `standing`
+section it starts a Run only when that bot is the `bot` of an Agent in a
+Standing Role that allows `start`; otherwise it is skipped as refused.
+Switching the Automation off and on writes its routine back as the factory
+made it, and its scheduled firings start Runs as its creator again. Two
+kinds of Automation need a Role for the routine bot until their creator
+switches them off and on: one made before Macro began recording the
+routine's revision, and one whose routine Macro's SDK upgrade rewrote.
 
 The validator refuses an act not in that list, any act that names a merge, a
 Standing Role with no act or no Agent, an Agent `agents` does not define,
 and a name given twice.
+
+## Agent Rules
+
+A Role's Steps start with its first Agent in `roles`. An Agent Rule picks
+another one for some Runs: those whose task carries a tag, those on a
+repository, or both. For example, to have a cheaper model write the
+changes of tasks tagged `docs`, add an Agent on that model to the Role, and a `rules`
+list beside `agents` and `roles`:
+
+```json
+"agents": {
+  "primary": { "bot": "00000000-0000-0000-0000-000000000001" },
+  "backup": { "bot": "00000000-0000-0000-0000-000000000002" },
+  "docs-writer": { "bot": "00000000-0000-0000-0000-000000000002", "model": "a-smaller-model" }
+},
+"roles": {
+  "writer": ["primary", "backup", "docs-writer"]
+},
+"rules": [
+  { "name": "docs", "role": "writer", "tag": "docs", "agent": "docs-writer" },
+  { "name": "site-plans", "role": "planner", "repository": "acme/site", "agent": "backup" }
+]
+```
+
+A Run on a task tagged `docs` (your own tags or your team's, in any case)
+then has `docs-writer` write first. A Run on `acme/site` has `backup`
+plan first. A rule naming both a `tag` and a `repository` matches only a
+Run that has both. Each rule needs a `name` (lower-case letters, digits,
+`-` or `_`), a `role` that `roles` fills, an `agent` that the Role lists
+in `roles` (a rule only moves one of the Role's own Agents first, so a tag
+someone adds never hands a Run to an Agent kept for something else, such
+as one only a Standing Role lists), and a `tag`, a `repository`
+(`owner/name`, without `.git`), or both. Keep the rest of `roles` as it
+is: the example shows only `writer`.
+
+How the first Agent of a Role is chosen, first match first:
+
+1. An Experiment arm in `scorers.json` that chooses for the Role. An
+   Experiment compares its arms; a rule never moves an arm's Runs.
+2. The first rule, in the order listed, that matches the Run.
+3. The Role's own first Agent.
+
+When the chosen Agent cannot start for lack of quota, the Role's own
+Agents take the Step in their order, as before. A Run matches its rules
+once, when it starts, and keeps the rule that chose each Role: a tag
+added or removed later, or a change to the rules, does not change a Run
+under way. The Run's page shows the rule that chose each Role, and says
+when the task's tags couldn't be read as it started, so no rule on a tag
+applied.
+
+The validator refuses a rule whose Agent `agents` does not define or its
+Role does not list, whose Role `roles` does not fill, that names neither a
+tag nor a repository, a repository not written `owner/name`, an empty tag,
+a rule that matches the same Runs for the same Role as an earlier one (it
+could never choose), more than 64 rules, and a name given twice.
 
 ## Self-improvement
 
@@ -442,6 +541,9 @@ every such Agent, in the order `agents.json` lists them:
 ```text
 .: agents.json: agents primary, backup have the template's placeholder bot ids: replace them with the ids of Macro agents each member who starts runs may use
 ```
+
+An Agent on Codex's cloud agent that a Role lists does not read either,
+each named the same way, with how to run Codex through macrod instead.
 
 The validator has no mode that lets them through: the template as shipped
 fails it on purpose. Team settings and a Run read the Definition the same

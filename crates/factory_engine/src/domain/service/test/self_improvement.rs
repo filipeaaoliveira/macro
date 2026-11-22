@@ -464,6 +464,7 @@ async fn an_improvement_run_merges_only_by_a_person() {
             tampered: kept.is_tampered(),
             held: false,
             repeated_blockers: false,
+            dismissed: false,
         };
         let offered = [
             Outcome::try_from("approve".to_string()).expect("valid"),
@@ -499,6 +500,7 @@ async fn the_pull_request_settles_the_failures() {
         url: "https://github.com/macro/factory-definition/pull/7".to_string(),
         state: PullRequestState::Open,
         head_sha: HEAD.to_string(),
+        merge_commit: None,
     });
     bench
         .improvement()
@@ -570,6 +572,7 @@ async fn the_pull_request_settles_the_failures() {
         url: "https://github.com/macro/factory-definition/pull/8".to_string(),
         state: PullRequestState::Closed,
         head_sha: HEAD.to_string(),
+        merge_commit: None,
     });
     bench
         .improvement()
@@ -1395,6 +1398,7 @@ async fn failures_a_person_rejected_do_not_come_back() {
         url: "https://github.com/macro/factory-definition/pull/9".to_string(),
         state: PullRequestState::Closed,
         head_sha: HEAD.to_string(),
+        merge_commit: None,
     });
     bench
         .improvement()
@@ -1499,4 +1503,333 @@ async fn a_cancel_not_in_person_does_not_dismiss_the_failures() {
         assert_eq!(dismissed, 0, "round {round}: not dismissed");
         assert!(bench.pending().await >= 2, "round {round}: pending again");
     }
+}
+
+/// A notes Run of Teo's that ended `success`, not scored: its end is left
+/// for a test to hand to self-improvement.
+async fn ended_run(bench: &Bench) -> RunId {
+    let run = bench
+        .service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a notes run");
+    bench
+        .repo
+        .end_run(run.run.id, RunOutcome::Success)
+        .await
+        .expect("end");
+    run.run.id
+}
+
+/// The insights `evaluation` shows `actor` of the team's last
+/// self-improvement Run.
+async fn last_shown(
+    insights: &impl crate::domain::evaluation::insights::EvaluationService,
+    actor: &macro_user_id::user_id::MacroUserIdStr<'static>,
+) -> crate::domain::evaluation::insights::ImprovementInsight {
+    let today = Utc::now().date_naive();
+    let query = crate::domain::insights::InsightsQuery::new(today, today, "UTC", None)
+        .expect("valid query");
+    insights
+        .evaluation(actor, query)
+        .await
+        .expect("insights")
+        .self_improvement
+        .expect("the team names a definition")
+        .last
+        .expect("the last run")
+}
+
+/// When a person rejected an improvement for its fix, not its failures,
+/// the namer undoes the dismissal from Insights: the failures are pending
+/// again and count toward the next improvement once the pause ends, though
+/// the worker kept the Definition's thresholds from before the undo. The
+/// undo is kept, with when; repeating it changes nothing, and never takes
+/// back failures the next improvement holds.
+#[tokio::test]
+async fn undone_failures_count_toward_the_next_improvement() {
+    use crate::domain::evaluation::insights::{EvaluationService, EvaluationServiceImpl};
+
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    let insights = EvaluationServiceImpl::new(
+        bench.repo.clone(),
+        bench.service.clone(),
+        Arc::new(EvaluationDefinition::default()),
+        None,
+    );
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    let first = bench.improvement_runs()[0];
+    let first_id = bench
+        .repo
+        .latest_improvement(TEAM)
+        .await
+        .expect("read")
+        .expect("kept")
+        .id;
+
+    // A person closes its pull request: its two failures are dismissed.
+    bench
+        .repo
+        .end_run(first, RunOutcome::Manual)
+        .await
+        .expect("end");
+    bench.github.state().pull_request = Some(PullRequest {
+        number: 9,
+        url: "https://github.com/macro/factory-definition/pull/9".to_string(),
+        state: PullRequestState::Closed,
+        head_sha: HEAD.to_string(),
+        merge_commit: None,
+    });
+    bench
+        .improvement()
+        .after_run_end(first)
+        .await
+        .expect("after");
+    bench.github.state().pull_request = None;
+    assert_eq!(bench.pending().await, 0);
+    let shown = last_shown(&insights, &julia()).await;
+    assert_eq!(shown.id, first_id);
+    assert_eq!(shown.dismissed, 2);
+    assert!(shown.can_undo_dismissal, "the namer may undo it");
+    assert!(
+        !last_shown(&insights, &teo()).await.can_undo_dismissal,
+        "a member who neither named it nor owns its run may not"
+    );
+
+    // Past the pause, one new failure: below the threshold of two, and the
+    // worker keeps the thresholds it read.
+    bench.settled_hours_ago(25);
+    let improvement = bench.improvement();
+    let new_failure = bench.judged_run(0.2).await;
+    improvement.after_run_end(new_failure).await.expect("after");
+    assert_eq!(bench.pending().await, 1);
+    assert_eq!(bench.improvement_runs().len(), 1);
+
+    let undone = insights
+        .undo_dismissal(&julia(), first_id)
+        .await
+        .expect("undone");
+    assert_eq!(undone.restored, 2);
+    assert_eq!(bench.pending().await, 3, "unreviewed again");
+    let shown = last_shown(&insights, &julia()).await;
+    assert_eq!(shown.dismissed, 0);
+    assert_eq!(shown.dismissal_undone_at, Some(undone.undone_at));
+    assert!(!shown.can_undo_dismissal, "undone once");
+
+    // The next Run's end, on the worker that kept the thresholds from
+    // before the undo, starts an improvement of all three: the pending
+    // failures are read afresh.
+    let next = ended_run(&bench).await;
+    improvement.after_run_end(next).await.expect("after");
+    assert_eq!(bench.improvement_runs().len(), 2);
+    let second = bench
+        .repo
+        .latest_improvement(TEAM)
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(second.failures, 3);
+
+    // Again: the first undo, and the failures stay with the second.
+    let again = insights
+        .undo_dismissal(&julia(), first_id)
+        .await
+        .expect("again");
+    assert_eq!(again.restored, 0);
+    assert_eq!(again.undone_at, undone.undone_at);
+    assert_eq!(bench.pending().await, 0);
+    let held = bench
+        .repo
+        .improvement
+        .lock()
+        .expect("improvement")
+        .failures
+        .iter()
+        .filter(|failure| failure.improvement == Some(second.id))
+        .count();
+    assert_eq!(held, 3);
+}
+
+/// Only a team admin who named the Definition or owns the rejected
+/// improvement's Run undoes its dismissal; another member, a namer or Run
+/// owner no longer an admin, and an agent's account are refused, Insights offers
+/// them no undo, and nothing changes. An improvement that dismissed
+/// nothing, or none of the team's, is refused too.
+#[tokio::test]
+async fn only_the_namer_or_the_run_owner_undoes_a_dismissal() {
+    use crate::domain::evaluation::insights::{
+        EvaluationService, EvaluationServiceImpl, UndoDismissalError,
+    };
+
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    let insights = EvaluationServiceImpl::new(
+        bench.repo.clone(),
+        bench.service.clone(),
+        Arc::new(EvaluationDefinition::default()),
+        None,
+    );
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    let run = bench.improvement_runs()[0];
+    let id = bench
+        .repo
+        .latest_improvement(TEAM)
+        .await
+        .expect("read")
+        .expect("kept")
+        .id;
+
+    // Open, it dismissed nothing.
+    assert!(matches!(
+        insights.undo_dismissal(&julia(), id).await,
+        Err(UndoDismissalError::NothingDismissed)
+    ));
+    assert!(matches!(
+        insights.undo_dismissal(&julia(), Uuid::now_v7()).await,
+        Err(UndoDismissalError::NotFound)
+    ));
+
+    // Its owner cancels it in person: rejected.
+    bench.cancel(run, None, true).await;
+    bench.improvement().after_run_end(run).await.expect("after");
+    assert_eq!(bench.pending().await, 0);
+
+    // Teo neither named the Definition nor owns the Run.
+    assert!(matches!(
+        insights.undo_dismissal(&teo(), id).await,
+        Err(UndoDismissalError::NotAllowed)
+    ));
+    assert_eq!(bench.pending().await, 0, "nothing changed");
+
+    // Named by Teo, who is not an admin of the team: he may not, as no
+    // self-improvement Run would start for him.
+    bench
+        .repo
+        .definition_namers
+        .lock()
+        .expect("namers")
+        .insert(TEAM, teo().to_string());
+    assert!(!last_shown(&insights, &teo()).await.can_undo_dismissal);
+    assert!(matches!(
+        insights.undo_dismissal(&teo(), id).await,
+        Err(UndoDismissalError::NotAllowed)
+    ));
+    assert_eq!(bench.pending().await, 0, "nothing changed");
+
+    // An agent's account never undoes, though it owns the Run.
+    bench
+        .repo
+        .agent_accounts
+        .lock()
+        .expect("agents")
+        .insert(julia().as_ref().to_string());
+    assert!(!last_shown(&insights, &julia()).await.can_undo_dismissal);
+    assert!(matches!(
+        insights.undo_dismissal(&julia(), id).await,
+        Err(UndoDismissalError::NotAPerson)
+    ));
+    assert_eq!(bench.pending().await, 0, "nothing changed");
+    bench.repo.agent_accounts.lock().expect("agents").clear();
+
+    // Once an admin, the Definition's namer Teo may.
+    bench.repo.teams.lock().expect("teams").insert(
+        teo().to_string(),
+        TeamMembership {
+            team_id: TEAM,
+            admin: true,
+        },
+    );
+    assert!(last_shown(&insights, &teo()).await.can_undo_dismissal);
+    let undone = insights.undo_dismissal(&teo(), id).await.expect("undone");
+    assert_eq!(undone.restored, 2);
+    assert_eq!(bench.pending().await, 2);
+
+    // With no namer kept, the Run's owner, still an admin, may.
+    bench
+        .repo
+        .definition_namers
+        .lock()
+        .expect("namers")
+        .remove(&TEAM);
+    let again = insights.undo_dismissal(&julia(), id).await.expect("owner");
+    assert_eq!(again.restored, 0);
+    assert!(matches!(
+        insights.undo_dismissal(&teo(), id).await,
+        Err(UndoDismissalError::NotAllowed)
+    ));
+
+    // Once a member, the Run's owner may not.
+    set_julia(&bench.repo, Some(false));
+    assert!(matches!(
+        insights.undo_dismissal(&julia(), id).await,
+        Err(UndoDismissalError::NotAllowed)
+    ));
+}
+
+/// The admin who named the Definition rejects her self-improvement Run and
+/// is then made a member: though she owns the Run, she may no longer undo
+/// its dismissal, Insights offers her no undo, and nothing changes. While
+/// she was an admin, she could as its owner once someone else named it.
+#[tokio::test]
+async fn a_demoted_namer_who_owns_the_run_may_not_undo_a_dismissal() {
+    use crate::domain::evaluation::insights::{
+        EvaluationService, EvaluationServiceImpl, UndoDismissalError,
+    };
+
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    let insights = EvaluationServiceImpl::new(
+        bench.repo.clone(),
+        bench.service.clone(),
+        Arc::new(EvaluationDefinition::default()),
+        None,
+    );
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    let run = bench.improvement_runs()[0];
+    let id = bench
+        .repo
+        .latest_improvement(TEAM)
+        .await
+        .expect("read")
+        .expect("kept")
+        .id;
+
+    // Julia, its owner, cancels it in person: rejected.
+    bench.cancel(run, None, true).await;
+    bench.improvement().after_run_end(run).await.expect("after");
+    assert_eq!(bench.pending().await, 0);
+    assert!(last_shown(&insights, &julia()).await.can_undo_dismissal);
+
+    // Named by Teo, Julia, an admin, may still undo as the Run's owner.
+    bench
+        .repo
+        .definition_namers
+        .lock()
+        .expect("namers")
+        .insert(TEAM, teo().to_string());
+    assert!(last_shown(&insights, &julia()).await.can_undo_dismissal);
+    bench
+        .repo
+        .definition_namers
+        .lock()
+        .expect("namers")
+        .insert(TEAM, julia().to_string());
+
+    // Made a member, the namer and owner Julia may not.
+    set_julia(&bench.repo, Some(false));
+    assert!(!last_shown(&insights, &julia()).await.can_undo_dismissal);
+    assert!(matches!(
+        insights.undo_dismissal(&julia(), id).await,
+        Err(UndoDismissalError::NotAllowed)
+    ));
+    assert_eq!(bench.pending().await, 0, "nothing changed");
 }

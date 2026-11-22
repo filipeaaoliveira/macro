@@ -12,7 +12,8 @@ import type { TokenCounts } from './tokenCounts';
  */
 export interface UsageInsight {
   /**
-   * Steps an agent worked on, in a session.
+   * Steps an agent worked on, in a session: once each, however many
+sessions the Step worked in.
    * @minimum 0
    */
   agentSteps: number;
@@ -24,8 +25,8 @@ export interface UsageInsight {
    */
   measuredRuns: number;
   /**
-   * Those whose session has usage recorded. An agent that runs on a
-person's own computer records none.
+   * Those with usage recorded in any of their sessions. An agent that
+runs on a person's own computer records none.
    * @minimum 0
    */
   measuredSteps: number;

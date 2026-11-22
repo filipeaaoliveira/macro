@@ -18,7 +18,7 @@ mod test;
 
 use crate::domain::gate_owner::factory_signed;
 use crate::domain::ports::{FollowUpMade, FollowUpTask, TaskAccess, TaskDirectory};
-use crate::outbound::task_project::{initiative_of, new_task_properties};
+use crate::outbound::task_project::{initiative_of, new_task_properties, tags_of};
 
 /// What a follow-up's text adds when it could not go in the Run task's
 /// project.
@@ -134,6 +134,17 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         // An initiative's id is a UUID; one that is not names no Project
         // a team could set rules for.
         Ok(initiative.and_then(|id| Uuid::parse_str(&id).ok()))
+    }
+
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn task_tags(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Vec<String>, Self::Err> {
+        tags_of(&self.documents, user_id, task_id)
+            .await
+            .map_err(DocumentTaskDirectoryErr::Documents)
     }
 
     #[tracing::instrument(err, skip(self, user_id))]

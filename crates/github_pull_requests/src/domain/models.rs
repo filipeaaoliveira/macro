@@ -35,14 +35,15 @@ pub use pull_request::{
     EnrichGithubPullRequestsProxyRequest, EnrichGithubPullRequestsResponse,
     EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubBranchDeletion,
     GithubMergeMethod, GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest,
-    GithubOpenPullRequestOutcome, GithubPullRequestCheckRun, GithubPullRequestComment,
-    GithubPullRequestDetails, GithubPullRequestHead, GithubPullRequestLabel,
-    GithubPullRequestMerge, GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry,
-    GithubPullRequestMergeabilityRequest, GithubPullRequestMergeabilityResponse,
-    GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestReview,
-    GithubPullRequestReviewDecision, GithubPullRequestReviewState, GithubPullRequestStatus,
-    GithubPullRequestUser, GithubRepositoryAccess, GithubRepositoryMergeSettings,
-    MergeGithubPullRequestRequest, MergeGithubPullRequestResponse, latest_reviews,
+    GithubOpenPullRequestItem, GithubOpenPullRequestOutcome, GithubPullRequestCheckRun,
+    GithubPullRequestComment, GithubPullRequestDetails, GithubPullRequestHead,
+    GithubPullRequestLabel, GithubPullRequestMerge, GithubPullRequestMergeability,
+    GithubPullRequestMergeabilityEntry, GithubPullRequestMergeabilityRequest,
+    GithubPullRequestMergeabilityResponse, GithubPullRequestNumber, GithubPullRequestRef,
+    GithubPullRequestReview, GithubPullRequestReviewDecision, GithubPullRequestReviewState,
+    GithubPullRequestStatus, GithubPullRequestUser, GithubRepositoryAccess,
+    GithubRepositoryMergeSettings, MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
+    latest_reviews,
 };
 pub use repository_name::{is_github_owner, is_github_repository_name};
 pub use update::{

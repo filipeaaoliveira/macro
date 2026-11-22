@@ -30,11 +30,11 @@ use uuid::Uuid;
 use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
     AgentName, AskedBack, BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
-    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, GateModelReading,
-    HandBack, HandedBack, InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold,
-    QueuePlaces, Repository, Role, Run, RunDefinition, RunEnd, RunFlow, RunId, RunInsert,
-    RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered, Step, StepEnd, StepKey,
-    StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink, TeamMembership,
+    ClaimedSession, ControlFileChanges, DefinitionRead, EntryId, Gate, GateAnswer, GateKind,
+    GateModelReading, HandBack, HandedBack, InvalidName, NewRun, NewSteer, Outcome, PassedOver,
+    QueueHold, QueuePlaces, Repository, Role, Run, RunDefinition, RunEnd, RunFlow, RunId,
+    RunInsert, RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered, Step, StepEnd,
+    StepKey, StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -975,6 +975,40 @@ impl RunRepository for PgRunRepository {
         Ok(repo_url)
     }
 
+    // Each member's newest Run under the Definition (its repository
+    // compared ignoring case) is found walking their Runs newest first
+    // (`factory_run_user_created_idx`); the newest of those is the team's.
+    #[tracing::instrument(err, skip(self))]
+    async fn newest_definition_read(
+        &self,
+        team_id: Uuid,
+        repo_url: &str,
+    ) -> Result<Option<DefinitionRead>, Self::Err> {
+        let read = sqlx::query_as!(
+            DefinitionRead,
+            r#"
+            SELECT r.definition_commit AS "commit!", r.created_at
+            FROM team_user tu
+            CROSS JOIN LATERAL (
+                SELECT run.definition_commit, run.created_at, run.id
+                FROM factory_run run
+                WHERE run.user_id = tu.user_id
+                    AND lower(run.definition_repo_url) = lower($2)
+                ORDER BY run.created_at DESC, run.id DESC
+                LIMIT 1
+            ) r
+            WHERE tu.team_id = $1
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT 1
+            "#,
+            team_id,
+            repo_url,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(read)
+    }
+
     #[tracing::instrument(err, skip(self))]
     async fn set_team_definition(
         &self,
@@ -1572,12 +1606,22 @@ impl RunRepository for PgRunRepository {
     ) -> Result<ClaimedSession, Self::Err> {
         let offered: Vec<String> = offered.iter().map(|o| o.as_str().to_owned()).collect();
         // The first attempt of a Step records its session; a retry finds it.
-        let claimed = sqlx::query!(
+        // The Step keeps it among the sessions it used, for its Run's token
+        // budget and Insights.
+        let claimed = sqlx::query_scalar!(
             r#"
-            UPDATE factory_step
-            SET session_id = $3, action_id = $4, offered = $5, role = $6, agent = $7,
-                bot_id = $8
-            WHERE run_id = $1 AND seq = $2 AND session_id IS NULL
+            WITH claimed AS (
+                UPDATE factory_step
+                SET session_id = $3, action_id = $4, offered = $5, role = $6, agent = $7,
+                    bot_id = $8
+                WHERE run_id = $1 AND seq = $2 AND session_id IS NULL
+                RETURNING run_id, seq
+            ), used AS (
+                INSERT INTO factory_step_used_session (run_id, seq, session_id)
+                SELECT run_id, seq, $3 FROM claimed
+                ON CONFLICT DO NOTHING
+            )
+            SELECT count(*) AS "claimed!" FROM claimed
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
@@ -1588,9 +1632,9 @@ impl RunRepository for PgRunRepository {
             session.agent.as_ref().map(AgentName::as_str),
             session.bot,
         )
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
-        if claimed.rows_affected() == 1 {
+        if claimed == 1 {
             return Ok(ClaimedSession { session, new: true });
         }
 
@@ -1621,31 +1665,44 @@ impl RunRepository for PgRunRepository {
         // session, an Agent already recorded last is not recorded again, as
         // when overlapping attempts both find the Role exhausted. A Step
         // that took a later prompt has an Agent at work, and its checks
-        // rounds go on in that session.
+        // rounds go on in that session. The Step keeps both sessions among
+        // those it used: the one it leaves may have used tokens already, as
+        // when it was lost after its agent worked in it, and its Run's token
+        // budget and Insights still count them.
         let to_agent = to.and_then(|to| to.agent.as_ref()).map(AgentName::as_str);
-        let recorded = sqlx::query!(
+        let recorded = sqlx::query_scalar!(
             r#"
-            UPDATE factory_step s
-            SET session_id = COALESCE($4, s.session_id),
-                action_id = COALESCE($5, s.action_id),
-                role = COALESCE(s.role, $6),
-                agent = COALESCE($7, s.agent, $8),
-                bot_id = CASE WHEN $4::uuid IS NULL THEN s.bot_id ELSE $10 END,
-                passed_over = array_append(s.passed_over, $8),
-                pass_reasons = array_append(s.pass_reasons, $9),
-                prepared_at = CASE WHEN $4::uuid IS NULL THEN s.prepared_at END,
-                opened_at = CASE WHEN $4::uuid IS NULL THEN s.opened_at END,
-                steer_action_id = CASE WHEN $4::uuid IS NULL THEN s.steer_action_id END,
-                steer_closed = CASE WHEN $4::uuid IS NULL THEN s.steer_closed ELSE false END
-            FROM factory_run r
-            WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2 AND s.session_id = $3
-                AND s.session_released_at IS NULL AND s.handed_at IS NULL
-                AND s.turn_action_id IS NULL
-                AND s.ended_at IS NULL AND r.ended_at IS NULL
-                AND (
-                    $4::uuid IS NOT NULL
-                    OR s.passed_over[cardinality(s.passed_over)] IS DISTINCT FROM $8
-                )
+            WITH passed AS (
+                UPDATE factory_step s
+                SET session_id = COALESCE($4, s.session_id),
+                    action_id = COALESCE($5, s.action_id),
+                    role = COALESCE(s.role, $6),
+                    agent = COALESCE($7, s.agent, $8),
+                    bot_id = CASE WHEN $4::uuid IS NULL THEN s.bot_id ELSE $10 END,
+                    passed_over = array_append(s.passed_over, $8),
+                    pass_reasons = array_append(s.pass_reasons, $9),
+                    prepared_at = CASE WHEN $4::uuid IS NULL THEN s.prepared_at END,
+                    opened_at = CASE WHEN $4::uuid IS NULL THEN s.opened_at END,
+                    steer_action_id = CASE WHEN $4::uuid IS NULL THEN s.steer_action_id END,
+                    steer_closed = CASE WHEN $4::uuid IS NULL THEN s.steer_closed ELSE false END
+                FROM factory_run r
+                WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2 AND s.session_id = $3
+                    AND s.session_released_at IS NULL AND s.handed_at IS NULL
+                    AND s.turn_action_id IS NULL
+                    AND s.ended_at IS NULL AND r.ended_at IS NULL
+                    AND (
+                        $4::uuid IS NOT NULL
+                        OR s.passed_over[cardinality(s.passed_over)] IS DISTINCT FROM $8
+                    )
+                RETURNING s.run_id, s.seq
+            ), used AS (
+                INSERT INTO factory_step_used_session (run_id, seq, session_id)
+                SELECT p.run_id, p.seq, used.session_id
+                FROM passed p, unnest(ARRAY[$3::uuid, $4::uuid]) AS used (session_id)
+                WHERE used.session_id IS NOT NULL
+                ON CONFLICT DO NOTHING
+            )
+            SELECT count(*) AS "passed!" FROM passed
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
@@ -1658,9 +1715,9 @@ impl RunRepository for PgRunRepository {
             passed.reason,
             to.and_then(|to| to.bot),
         )
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
-        Ok(recorded.rows_affected() == 1)
+        Ok(recorded == 1)
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -2082,9 +2139,13 @@ impl RunRepository for PgRunRepository {
     async fn step_sessions(&self, id: RunId) -> Result<Vec<Uuid>, Self::Err> {
         let sessions = sqlx::query_scalar!(
             r#"
-            SELECT DISTINCT session_id AS "session_id!"
+            SELECT session_id AS "session_id!"
             FROM factory_step
             WHERE run_id = $1 AND session_id IS NOT NULL
+            UNION
+            SELECT session_id
+            FROM factory_step_used_session
+            WHERE run_id = $1
             "#,
             id.as_uuid(),
         )

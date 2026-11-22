@@ -4,10 +4,13 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { ReviewFindingDispute } from './reviewFindingDispute';
+import type { ReviewFindingFixStatus } from './reviewFindingFixStatus';
 import type { ReviewFindingFollowUpTaskId } from './reviewFindingFollowUpTaskId';
 import type { ReviewFindingKind } from './reviewFindingKind';
 import type { ReviewFindingLines } from './reviewFindingLines';
 import type { ReviewFindingRole } from './reviewFindingRole';
+import type { ReviewFindingRuling } from './reviewFindingRuling';
 
 /**
  * A finding as its round keeps it.
@@ -16,6 +19,9 @@ export interface ReviewFinding {
   /** Whether it blocks wherever it is: a Blocker of the round before
 found again, or a reviewer's answer that never read. */
   blocksAnywhere: boolean;
+  /** Why the fix disputes it, as the fixer wrote it. */
+  dispute?: ReviewFindingDispute;
+  fixStatus?: ReviewFindingFixStatus;
   /** The follow-up task it became, when it is a follow-up and the task
 was made: its task document's id. */
   followUpTaskId?: ReviewFindingFollowUpTaskId;
@@ -31,6 +37,7 @@ was made: its task document's id. */
   /** What is wrong. */
   problem: string;
   role?: ReviewFindingRole;
+  ruling?: ReviewFindingRuling;
   /**
    * The reviewer's Step: its place among the Run's Steps.
    * @minimum 0

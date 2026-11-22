@@ -6,8 +6,9 @@ use std::collections::BTreeMap;
 use chrono::Utc;
 use factory_records::domain::models::{Role, RunId, StepKey};
 use factory_records::domain::review_rounds::{
-    Finding, FindingClass, ReviewFinding, ReviewRound, ReviewRoundEnd, ReviewRoundFailure,
-    ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart, number_rounds,
+    Finding, FindingClass, FindingKind, FixAnswer, FixStatus, ReviewFinding, ReviewRound,
+    ReviewRoundEnd, ReviewRoundFailure, ReviewRoundOutcome, ReviewRoundRepository,
+    ReviewRoundStart, Ruling, number_rounds,
 };
 use uuid::Uuid;
 
@@ -145,11 +146,12 @@ impl ReviewRoundRepository for FakeRepo {
         Ok(rounds)
     }
 
-    async fn record_findings(
+    async fn record_answer(
         &self,
         key: StepKey,
         round_seq: u16,
         findings: &[Finding],
+        rulings: &[Ruling],
     ) -> Result<bool, FakeError> {
         if self.with_step(key, |step| step.end.is_some()) != Some(false) {
             return Ok(false);
@@ -165,6 +167,11 @@ impl ReviewRoundRepository for FakeRepo {
                 problem: finding.problem.clone(),
                 why: finding.why.clone(),
                 blocks_anywhere: finding.blocks_anywhere,
+                repeats_dropped: finding.repeats_dropped,
+                fix_status: None,
+                dispute: None,
+                ruling: None,
+                ruled_by: None,
                 kind: None,
                 follow_up_task_id: None,
                 follow_up_key: None,
@@ -183,7 +190,54 @@ impl ReviewRoundRepository for FakeRepo {
             }
         })
         .ok_or(FakeError)?;
+
+        // The Step's rulings replace the ones an earlier attempt made; a
+        // dispute another Step ruled on keeps its ruling.
+        let mut rounds = self.review_rounds.lock().expect("rounds");
+        for finding in rounds
+            .iter_mut()
+            .filter(|(run, _)| *run == key.run_id)
+            .flat_map(|(_, round)| round.findings.iter_mut())
+        {
+            if finding.ruled_by == Some(key.seq) {
+                finding.ruling = None;
+                finding.ruled_by = None;
+            }
+            let ruled = rulings
+                .iter()
+                .find(|ruling| ruling.seq == finding.seq && ruling.place == finding.place);
+            if let Some(ruled) = ruled
+                && finding.fix_status == Some(FixStatus::Disputed)
+                && finding.ruling.is_none()
+            {
+                finding.ruling = Some(ruled.ruling);
+                finding.ruled_by = Some(key.seq);
+            }
+        }
         Ok(true)
+    }
+
+    async fn record_fix(
+        &self,
+        run_id: RunId,
+        round_seq: u16,
+        answers: &[FixAnswer],
+    ) -> Result<(), FakeError> {
+        self.with_round(run_id, round_seq, |round| {
+            for finding in &mut round.findings {
+                let answer = answers
+                    .iter()
+                    .find(|answer| answer.seq == finding.seq && answer.place == finding.place);
+                if let Some(answer) = answer
+                    && finding.kind == Some(FindingKind::Blocker)
+                    && finding.ruling.is_none()
+                {
+                    finding.fix_status = Some(answer.status);
+                    finding.dispute = answer.dispute.clone();
+                }
+            }
+        })
+        .ok_or(FakeError)
     }
 
     async fn reask_action(

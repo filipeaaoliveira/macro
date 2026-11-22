@@ -112,6 +112,12 @@ pub struct Automation {
     /// The Macro routine that fires it, for a schedule, a repository event
     /// or a Task event, once it is made.
     pub routine_id: Option<Uuid>,
+    /// The scheduler's configuration revision of that routine as the factory
+    /// last wrote it (made, or switched on): a run the scheduler started
+    /// itself at this revision fires it as its creator. Not shown: it says
+    /// nothing to a person.
+    #[serde(skip)]
+    pub routine_revision: Option<i64>,
     /// When it was created.
     pub created_at: DateTime<Utc>,
 }
@@ -236,11 +242,13 @@ pub trait AutomationRepository: Send + Sync + 'static {
         automation: NewAutomation<'_>,
     ) -> impl Future<Output = Result<Automation, Self::Err>> + Send;
 
-    /// Record the routine that fires the Automation `id`.
+    /// Record the routine that fires the Automation `id`, at the scheduler's
+    /// configuration revision `revision` the factory wrote it at.
     fn set_automation_routine(
         &self,
         id: Uuid,
         routine_id: Uuid,
+        revision: i64,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The Automation `id`, if it exists.
@@ -269,11 +277,14 @@ pub trait AutomationRepository: Send + Sync + 'static {
         id: Uuid,
     ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
-    /// Switch the Automation `id` on or off; false when it does not exist.
+    /// Switch the Automation `id` on or off, with its routine now at the
+    /// configuration revision `routine_revision` the factory wrote it at,
+    /// when it wrote it; false when it does not exist.
     fn set_automation_enabled(
         &self,
         id: Uuid,
         enabled: bool,
+        routine_revision: Option<i64>,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// Remove the Automation `id` and its firings. The Runs it started keep

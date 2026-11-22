@@ -247,6 +247,46 @@ async fn the_owner_of_a_run_without_a_task_is_notified_about_themselves() {
     assert!(!sent[0]["build_apns"].is_null(), "{request}");
 }
 
+/// A lighter notice of a Run without a task, a notify-only Gate's or the
+/// stand-in's, is filed under the owner as a waiting Gate's is, sent to
+/// them alone under its own id, live and not pushed.
+#[tokio::test]
+async fn a_lighter_notice_of_a_run_without_a_task_is_filed_under_its_owner() {
+    let ingress = Arc::new(RecordingIngress::default());
+    let mut lighter = notice();
+    lighter.task_id = None;
+    lighter.metadata.task_id = String::new();
+    lighter.metadata.notify_only = true;
+    lighter.push = false;
+    notifier(ingress.clone(), Arc::new(RecordingReader::default()))
+        .notify(lighter)
+        .await;
+
+    let sent = ingress.sent.lock().expect("sent");
+    assert_eq!(sent.len(), 1);
+    let request = sent[0].to_string();
+    assert_eq!(
+        sent[0]["req"]["notification_entity"]["entity_type"], "user",
+        "{request}"
+    );
+    assert_eq!(
+        sent[0]["req"]["notification_entity"]["entity_id"], "macro|julia@example.com",
+        "{request}"
+    );
+    assert_eq!(
+        sent[0]["req"]["recipient_ids"],
+        serde_json::json!(["macro|julia@example.com"]),
+        "{request}"
+    );
+    assert_eq!(
+        sent[0]["uuid_to_write"],
+        Uuid::from_u128(0x1d).to_string(),
+        "{request}"
+    );
+    assert!(sent[0]["build_apns"].is_null(), "{request}");
+    assert_eq!(sent[0]["send_conn_gateway"], true, "{request}");
+}
+
 /// A notify-only Gate's notice is delivered live, and not pushed.
 #[tokio::test]
 async fn a_notice_that_is_not_pushed_is_delivered_live_only() {

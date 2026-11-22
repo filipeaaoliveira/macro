@@ -174,6 +174,8 @@ fn settled(state: ImprovementState, hours_ago: i64) -> Improvement {
         created_at: settled_at,
         settled_at: Some(settled_at),
         failures: 1,
+        dismissed: 0,
+        dismissal_undone: None,
     }
 }
 

@@ -275,6 +275,7 @@ impl ScheduledActionRepo for FakeRepo {
 #[derive(Default)]
 pub(crate) struct FakeExecutor {
     calls: Mutex<Vec<ScheduledAction>>,
+    starters: Mutex<Vec<crate::domain::ports::RunStarter>>,
     admission_error: Mutex<Option<ai_billing::AiAdmissionError>>,
 }
 
@@ -283,8 +284,13 @@ pub(crate) fn set_admission_error(service: &TestService, error: ai_billing::AiAd
 }
 
 impl ScheduledActionExecutor for FakeExecutor {
-    async fn execute_action(&self, action: ScheduledAction) -> Result<InProgressExecution> {
+    async fn execute_action(
+        &self,
+        action: ScheduledAction,
+        starter: crate::domain::ports::RunStarter,
+    ) -> Result<InProgressExecution> {
         let action_id = action.id.unwrap();
+        self.starters.lock().unwrap().push(starter);
         self.calls.lock().unwrap().push(action);
         if let Some(error) = *self.admission_error.lock().unwrap() {
             return Err(error.into());
@@ -1015,6 +1021,11 @@ async fn disabled_manual_runs_work_for_both_variants_even_with_gate_off() {
         assert!(!after.enabled);
     }
     assert_eq!(svc.executor.calls.lock().unwrap().len(), 2);
+    // Run Now is a request, never the scheduler's own run.
+    assert_eq!(
+        *svc.executor.starters.lock().unwrap(),
+        [crate::domain::ports::RunStarter::Request; 2]
+    );
 }
 
 #[tokio::test]

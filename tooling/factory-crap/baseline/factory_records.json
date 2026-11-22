@@ -1,0 +1,2995 @@
+{
+  "$schema": "https://raw.githubusercontent.com/minikin/cargo-crap/main/schemas/report-v1.json",
+  "version": "0.9.0",
+  "entries": [
+    {
+      "file": "crates/factory_records/src/domain/automations.rs",
+      "function": "AutomationTrigger::kind",
+      "line": 79,
+      "cyclomatic": 5.0,
+      "coverage": 85.71428571428571,
+      "crap": 5.072886297376093,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 82,
+          "end": 82
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/board.rs",
+      "function": "pull_request_key",
+      "line": 140,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/board.rs",
+      "function": "search_pattern",
+      "line": 145,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/main_hold.rs",
+      "function": "RequiredChecksState::name",
+      "line": 53,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/main_hold.rs",
+      "function": "RequiredChecksState::named",
+      "line": 44,
+      "cyclomatic": 4.0,
+      "coverage": 83.33333333333334,
+      "crap": 4.0740740740740735,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 48,
+          "end": 48
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/merge_guard.rs",
+      "function": "pull_request_page",
+      "line": 11,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "AgentName::as_str",
+      "line": 274,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "AgentName::fmt",
+      "line": 294,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 294,
+          "end": 296
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "AgentName::try_from",
+      "line": 282,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "CheckRoundOutcome::as_str",
+      "line": 1054,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "ControlFileChanges::approved_by",
+      "line": 493,
+      "cyclomatic": 2.0,
+      "coverage": 0.0,
+      "crap": 6.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 493,
+          "end": 498
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "ControlFileChanges::is_tampered",
+      "line": 486,
+      "cyclomatic": 2.0,
+      "coverage": 0.0,
+      "crap": 6.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 486,
+          "end": 488
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "EntryId::as_str",
+      "line": 109,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "EntryId::fmt",
+      "line": 129,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 129,
+          "end": 131
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "EntryId::try_from",
+      "line": 117,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "GateKind::answered_only_by_a_person",
+      "line": 785,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "GateKind::of",
+      "line": 774,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "NewSteer::action",
+      "line": 972,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "NewSteer::prompt_id",
+      "line": 982,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::answer",
+      "line": 176,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::as_str",
+      "line": 201,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::done",
+      "line": 145,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 145,
+          "end": 147
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::failed",
+      "line": 162,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 162,
+          "end": 164
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::fmt",
+      "line": 221,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 221,
+          "end": 223
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::no_result",
+      "line": 184,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 184,
+          "end": 186
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::question",
+      "line": 170,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::red",
+      "line": 151,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 151,
+          "end": 153
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::retry",
+      "line": 190,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 190,
+          "end": 192
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::stop",
+      "line": 196,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 196,
+          "end": 198
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::try_from",
+      "line": 209,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Outcome::unchanged",
+      "line": 156,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 156,
+          "end": 158
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "QueuePlaces::held",
+      "line": 626,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Role::as_str",
+      "line": 238,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Role::fmt",
+      "line": 258,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 258,
+          "end": 260
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "Role::try_from",
+      "line": 246,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "RunId::as_uuid",
+      "line": 61,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "RunId::fmt",
+      "line": 67,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 67,
+          "end": 69
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "RunId::from_str",
+      "line": 75,
+      "cyclomatic": 2.0,
+      "coverage": 0.0,
+      "crap": 6.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 75,
+          "end": 77
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "RunId::from_uuid",
+      "line": 56,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "RunId::generate",
+      "line": 51,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "SteerAction::as_str",
+      "line": 903,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "SteerAction::from_str",
+      "line": 916,
+      "cyclomatic": 6.0,
+      "coverage": 87.5,
+      "crap": 6.0703125,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 922,
+          "end": 922
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "String::from",
+      "line": 123,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 123,
+          "end": 125
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "String::from",
+      "line": 215,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 215,
+          "end": 217
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "String::from",
+      "line": 252,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "String::from",
+      "line": 288,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/models.rs",
+      "function": "checked_name",
+      "line": 91,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/quality.rs",
+      "function": "CiJobResult::as_str",
+      "line": 63,
+      "cyclomatic": 5.0,
+      "coverage": 85.71428571428571,
+      "crap": 5.072886297376093,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 67,
+          "end": 67
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/quality.rs",
+      "function": "CiJobResult::is_red",
+      "line": 84,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 84,
+          "end": 86
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/quality.rs",
+      "function": "CiJobResult::parse",
+      "line": 73,
+      "cyclomatic": 6.0,
+      "coverage": 87.5,
+      "crap": 6.0703125,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 79,
+          "end": 79
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/quality.rs",
+      "function": "CiVerdict::as_str",
+      "line": 25,
+      "cyclomatic": 4.0,
+      "coverage": 83.33333333333334,
+      "crap": 4.0740740740740735,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 29,
+          "end": 29
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/quality.rs",
+      "function": "CiVerdict::parse",
+      "line": 34,
+      "cyclomatic": 5.0,
+      "coverage": 71.42857142857143,
+      "crap": 5.5830903790087465,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 38,
+          "end": 39
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/review_rounds.rs",
+      "function": "FindingKind::as_str",
+      "line": 66,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/review_rounds.rs",
+      "function": "ReviewRound::blockers",
+      "line": 193,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/review_rounds.rs",
+      "function": "ReviewRound::step_seqs",
+      "line": 188,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/review_rounds.rs",
+      "function": "ReviewRoundOutcome::as_str",
+      "line": 125,
+      "cyclomatic": 4.0,
+      "coverage": 83.33333333333334,
+      "crap": 4.0740740740740735,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 129,
+          "end": 129
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/review_rounds.rs",
+      "function": "number_rounds",
+      "line": 203,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/self_improvement.rs",
+      "function": "FailureSource::label",
+      "line": 57,
+      "cyclomatic": 3.0,
+      "coverage": 0.0,
+      "crap": 12.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 57,
+          "end": 62
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/self_improvement.rs",
+      "function": "ImprovementState::is_open",
+      "line": 157,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 157,
+          "end": 159
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_acts.rs",
+      "function": "StandingRoleName::as_str",
+      "line": 63,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_acts.rs",
+      "function": "StandingRoleName::fmt",
+      "line": 83,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 83,
+          "end": 85
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_acts.rs",
+      "function": "StandingRoleName::try_from",
+      "line": 71,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_acts.rs",
+      "function": "String::from",
+      "line": 77,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 77,
+          "end": 79
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_rules.rs",
+      "function": "OrchestratorDefinition::decides",
+      "line": 265,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_rules.rs",
+      "function": "OrchestratorDefinition::from_kinds",
+      "line": 339,
+      "cyclomatic": 14.0,
+      "coverage": 100.0,
+      "crap": 14.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_rules.rs",
+      "function": "OrchestratorDefinition::kinds",
+      "line": 301,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_rules.rs",
+      "function": "OrchestratorDefinition::orchestrator_approves",
+      "line": 285,
+      "cyclomatic": 4.0,
+      "coverage": 83.33333333333334,
+      "crap": 4.0740740740740735,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 288,
+          "end": 288
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_rules.rs",
+      "function": "OrchestratorDefinition::stands_in",
+      "line": 275,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/domain/standing_rules.rs",
+      "function": "RuleGateKind::rule",
+      "line": 55,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::answer_gate",
+      "line": 1509,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::answer_gate_by_rule",
+      "line": 1480,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::begin_turn",
+      "line": 1974,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::check_rounds",
+      "line": 2026,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::claim_session",
+      "line": 1566,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::claimed_session",
+      "line": 1667,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::close_steering",
+      "line": 2016,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::delete_run",
+      "line": 1110,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::display_name",
+      "line": 903,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::end_check_round",
+      "line": 2040,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::end_check_round_on_quota",
+      "line": 2062,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::end_run",
+      "line": 2136,
+      "cyclomatic": 8.0,
+      "coverage": 100.0,
+      "crap": 8.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::end_step",
+      "line": 1433,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::forget_prepare",
+      "line": 1716,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::get_run",
+      "line": 1118,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::hand_back",
+      "line": 1924,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::handed_back",
+      "line": 1941,
+      "cyclomatic": 8.0,
+      "coverage": 100.0,
+      "crap": 8.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::holds_session",
+      "line": 1860,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::insert_run",
+      "line": 706,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::insert_run_in_queue",
+      "line": 711,
+      "cyclomatic": 15.0,
+      "coverage": 100.0,
+      "crap": 15.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::is_agent_account",
+      "line": 922,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::is_step_session",
+      "line": 123,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::kept_answer",
+      "line": 70,
+      "cyclomatic": 9.0,
+      "coverage": 97.2972972972973,
+      "crap": 9.001599115550905,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 92,
+          "end": 92
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::last_ci_wait",
+      "line": 872,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::link_task",
+      "line": 823,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::list_runs_steps",
+      "line": 1339,
+      "cyclomatic": 6.0,
+      "coverage": 100.0,
+      "crap": 6.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::list_starting_runs",
+      "line": 1293,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::list_steps",
+      "line": 1140,
+      "cyclomatic": 6.0,
+      "coverage": 100.0,
+      "crap": 6.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::list_task_runs",
+      "line": 1211,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::list_waiting_runs",
+      "line": 1250,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::merge_head",
+      "line": 1099,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::new",
+      "line": 64,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::open_gate",
+      "line": 1456,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::pass_session",
+      "line": 1608,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::pause_ran_out",
+      "line": 2011,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::record_budget_stop",
+      "line": 2097,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::record_cancel_sender",
+      "line": 2120,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::record_check_result",
+      "line": 2051,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::record_ci_wait",
+      "line": 867,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::record_open",
+      "line": 1737,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::record_prepare",
+      "line": 1691,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::record_setup_passed",
+      "line": 1777,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::release_session",
+      "line": 1843,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::run_definition_agents",
+      "line": 1050,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::run_flow",
+      "line": 1017,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::runs_flows",
+      "line": 1030,
+      "cyclomatic": 2.0,
+      "coverage": 0.0,
+      "crap": 6.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 1030,
+          "end": 1048
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::send_back_check_round",
+      "line": 2072,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::session_step",
+      "line": 1884,
+      "cyclomatic": 5.0,
+      "coverage": 66.66666666666666,
+      "crap": 5.925925925925927,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 1913,
+          "end": 1913
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::set_control_file_changes",
+      "line": 881,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::set_merge_head",
+      "line": 843,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::set_pull_request_url",
+      "line": 855,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::set_team_control_files",
+      "line": 1067,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::set_team_definition",
+      "line": 979,
+      "cyclomatic": 8.0,
+      "coverage": 100.0,
+      "crap": 8.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::setup_passed",
+      "line": 1755,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::start_check_round",
+      "line": 2031,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::start_step",
+      "line": 1415,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::steer",
+      "line": 1987,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::steering",
+      "line": 2006,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::step_sessions",
+      "line": 2082,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::stopping_session",
+      "line": 1803,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::team_control_files",
+      "line": 958,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::team_definition",
+      "line": 968,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::team_of",
+      "line": 935,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "PgRunRepository::unsteer",
+      "line": 1996,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "Run::try_from",
+      "line": 325,
+      "cyclomatic": 28.0,
+      "coverage": 90.78947368421053,
+      "crap": 28.612589298731592,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 331,
+          "end": 331
+        },
+        {
+          "start": 341,
+          "end": 341
+        },
+        {
+          "start": 346,
+          "end": 346
+        },
+        {
+          "start": 361,
+          "end": 361
+        },
+        {
+          "start": 376,
+          "end": 376
+        },
+        {
+          "start": 401,
+          "end": 401
+        },
+        {
+          "start": 409,
+          "end": 409
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "Step::try_from",
+      "line": 654,
+      "cyclomatic": 13.0,
+      "coverage": 95.1219512195122,
+      "crap": 13.019616662555679,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 663,
+          "end": 663
+        },
+        {
+          "start": 666,
+          "end": 666
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "StepRow::gate",
+      "line": 464,
+      "cyclomatic": 23.0,
+      "coverage": 92.5,
+      "crap": 23.223171875,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 492,
+          "end": 492
+        },
+        {
+          "start": 498,
+          "end": 498
+        },
+        {
+          "start": 507,
+          "end": 507
+        },
+        {
+          "start": 522,
+          "end": 522
+        },
+        {
+          "start": 528,
+          "end": 528
+        },
+        {
+          "start": 551,
+          "end": 551
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "budget_stop",
+      "line": 302,
+      "cyclomatic": 6.0,
+      "coverage": 90.9090909090909,
+      "crap": 6.027047332832457,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 312,
+          "end": 312
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "display_name",
+      "line": 2181,
+      "cyclomatic": 4.0,
+      "coverage": 90.9090909090909,
+      "crap": 4.012021036814425,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 2189,
+          "end": 2189
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "number",
+      "line": 647,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "percent",
+      "line": 624,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "queue_places",
+      "line": 566,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "reading",
+      "line": 630,
+      "cyclomatic": 6.0,
+      "coverage": 92.3076923076923,
+      "crap": 6.0163859808830225,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 642,
+          "end": 642
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository.rs",
+      "function": "token_budget",
+      "line": 295,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "Automation::try_from",
+      "line": 37,
+      "cyclomatic": 5.0,
+      "coverage": 95.65217391304348,
+      "crap": 5.00205473822635,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 47,
+          "end": 47
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::automation",
+      "line": 134,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::automation_of_routine",
+      "line": 153,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::claim_firing",
+      "line": 237,
+      "cyclomatic": 10.0,
+      "coverage": 100.0,
+      "crap": 10.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::delete_automation",
+      "line": 226,
+      "cyclomatic": 2.0,
+      "coverage": 0.0,
+      "crap": 6.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 226,
+          "end": 231
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::end_firing",
+      "line": 301,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::insert_automation",
+      "line": 85,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::running_run_on_task",
+      "line": 329,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::set_automation_enabled",
+      "line": 214,
+      "cyclomatic": 2.0,
+      "coverage": 0.0,
+      "crap": 6.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 214,
+          "end": 223
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::set_automation_routine",
+      "line": 122,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::team_automations",
+      "line": 175,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "PgRunRepository::webhook_secret",
+      "line": 203,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/automations.rs",
+      "function": "firing_end",
+      "line": 67,
+      "cyclomatic": 4.0,
+      "coverage": 91.66666666666666,
+      "crap": 4.0092592592592595,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 72,
+          "end": 72
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/board.rs",
+      "function": "BoardRun::try_from",
+      "line": 60,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/board.rs",
+      "function": "PgRunRepository::board_runs",
+      "line": 113,
+      "cyclomatic": 8.0,
+      "coverage": 100.0,
+      "crap": 8.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/board.rs",
+      "function": "PgRunRepository::pull_request_runs",
+      "line": 390,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "CheckRound::try_from",
+      "line": 42,
+      "cyclomatic": 11.0,
+      "coverage": 90.32258064516128,
+      "crap": 11.109663992480952,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 48,
+          "end": 48
+        },
+        {
+          "start": 53,
+          "end": 54
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "PgRunRepository::add_check_result",
+      "line": 243,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "PgRunRepository::finish_check_round",
+      "line": 219,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "PgRunRepository::fix_check_round",
+      "line": 302,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "PgRunRepository::insert_check_round",
+      "line": 191,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "PgRunRepository::quota_ends_check_round",
+      "line": 274,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "PgRunRepository::record_turn",
+      "line": 139,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "PgRunRepository::runs_check_rounds",
+      "line": 83,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/check_rounds.rs",
+      "function": "PgRunRepository::step_check_rounds",
+      "line": 115,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::delete_suite",
+      "line": 186,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::insert_suite",
+      "line": 352,
+      "cyclomatic": 8.0,
+      "coverage": 100.0,
+      "crap": 8.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::insert_trial",
+      "line": 429,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::read_evaluation",
+      "line": 452,
+      "cyclomatic": 11.0,
+      "coverage": 100.0,
+      "crap": 11.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::read_suites",
+      "line": 602,
+      "cyclomatic": 11.0,
+      "coverage": 98.38709677419355,
+      "crap": 11.000507703668893,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 624,
+          "end": 624
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::record_arms",
+      "line": 73,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::record_branch_deleted",
+      "line": 158,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::record_run_score",
+      "line": 283,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::record_trial_result",
+      "line": 326,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::record_trial_score",
+      "line": 302,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::run_agents",
+      "line": 93,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::scoring_subject",
+      "line": 201,
+      "cyclomatic": 11.0,
+      "coverage": 88.88888888888889,
+      "crap": 11.165980795610425,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 269,
+          "end": 269
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::set_planned_trials",
+      "line": 174,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::trial_base_commit",
+      "line": 147,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "PgRunRepository::trial_of",
+      "line": 121,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "agents_json",
+      "line": 39,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "agents_of",
+      "line": 43,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "count",
+      "line": 25,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "kept_reason",
+      "line": 58,
+      "cyclomatic": 3.0,
+      "coverage": 40.0,
+      "crap": 4.944,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 61,
+          "end": 66
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "run_outcome",
+      "line": 47,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "stored_tokens",
+      "line": 35,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/evaluation.rs",
+      "function": "tokens",
+      "line": 30,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/flaws.rs",
+      "function": "PgRunRepository::mark_flawed",
+      "line": 45,
+      "cyclomatic": 9.0,
+      "coverage": 100.0,
+      "crap": 9.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/flaws.rs",
+      "function": "run_flaw",
+      "line": 15,
+      "cyclomatic": 9.0,
+      "coverage": 90.9090909090909,
+      "crap": 9.060856498873028,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 28,
+          "end": 28
+        },
+        {
+          "start": 37,
+          "end": 37
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/gate_replies.rs",
+      "function": "PgRunRepository::answer_gate_by_stand_in",
+      "line": 167,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/gate_replies.rs",
+      "function": "PgRunRepository::answer_gate_from_reply",
+      "line": 54,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/gate_replies.rs",
+      "function": "PgRunRepository::answered_gates",
+      "line": 253,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/gate_replies.rs",
+      "function": "PgRunRepository::ask_back",
+      "line": 24,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/gate_replies.rs",
+      "function": "PgRunRepository::decline_stand_in",
+      "line": 143,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/gate_replies.rs",
+      "function": "PgRunRepository::past_answers",
+      "line": 200,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/gate_replies.rs",
+      "function": "PgRunRepository::stand_in",
+      "line": 84,
+      "cyclomatic": 7.0,
+      "coverage": 100.0,
+      "crap": 7.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/gate_replies.rs",
+      "function": "PgRunRepository::withdraw_stand_in",
+      "line": 183,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/insights.rs",
+      "function": "PgRunRepository::read_insights",
+      "line": 75,
+      "cyclomatic": 17.0,
+      "coverage": 100.0,
+      "crap": 17.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/insights.rs",
+      "function": "RunSummary::try_from",
+      "line": 31,
+      "cyclomatic": 5.0,
+      "coverage": 94.11764705882352,
+      "crap": 5.005088540606554,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 40,
+          "end": 40
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/insights.rs",
+      "function": "count",
+      "line": 54,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/insights.rs",
+      "function": "spread",
+      "line": 60,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::base_state",
+      "line": 97,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::claim_hold_task",
+      "line": 307,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::clear_main_hold",
+      "line": 191,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::hold_main",
+      "line": 131,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::main_hold",
+      "line": 77,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::mark_required",
+      "line": 162,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::recent_merges",
+      "line": 273,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::record_hold_task",
+      "line": 358,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::record_merge",
+      "line": 49,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::release_hold_task",
+      "line": 336,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "PgRunRepository::suspect_merges",
+      "line": 225,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/main_hold.rs",
+      "function": "hold",
+      "line": 26,
+      "cyclomatic": 5.0,
+      "coverage": 94.11764705882352,
+      "crap": 5.005088540606554,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 30,
+          "end": 30
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_guard.rs",
+      "function": "PgRunRepository::live_run_of_pull_request",
+      "line": 16,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgMergeTurn::fmt",
+      "line": 26,
+      "cyclomatic": 1.0,
+      "coverage": 0.0,
+      "crap": 2.0,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 26,
+          "end": 28
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::branch_update",
+      "line": 150,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::drop_from_merge_queue",
+      "line": 139,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::enter_merge_queue",
+      "line": 75,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::keep_branch_update",
+      "line": 167,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::leave_merge_queue",
+      "line": 124,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::merge_queue_ahead",
+      "line": 92,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::restart_branch_update",
+      "line": 194,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::reviewed_head",
+      "line": 220,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::set_reviewed_head",
+      "line": 231,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::set_updated_head",
+      "line": 248,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/merge_queue.rs",
+      "function": "PgRunRepository::take_merge_turn",
+      "line": 39,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/quality.rs",
+      "function": "PgRunRepository::read_quality",
+      "line": 204,
+      "cyclomatic": 25.0,
+      "coverage": 100.0,
+      "crap": 25.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/quality.rs",
+      "function": "QualityRun::try_from",
+      "line": 150,
+      "cyclomatic": 5.0,
+      "coverage": 92.0,
+      "crap": 5.0128,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 158,
+          "end": 159
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/quality.rs",
+      "function": "job_result",
+      "line": 183,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/quality.rs",
+      "function": "last_ci_wait",
+      "line": 98,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/quality.rs",
+      "function": "record_ci_wait",
+      "line": 26,
+      "cyclomatic": 8.0,
+      "coverage": 100.0,
+      "crap": 8.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/quality.rs",
+      "function": "round_outcome",
+      "line": 187,
+      "cyclomatic": 1.0,
+      "coverage": 77.77777777777779,
+      "crap": 1.0109739368998627,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 191,
+          "end": 192
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/quality.rs",
+      "function": "verdict",
+      "line": 179,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::classify_findings",
+      "line": 441,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::end_review_round",
+      "line": 525,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::fail_review_round",
+      "line": 252,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::follow_up_key",
+      "line": 417,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::link_follow_up",
+      "line": 476,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::mark_follow_up_commented",
+      "line": 503,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::reask_action",
+      "line": 392,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::record_findings",
+      "line": 294,
+      "cyclomatic": 13.0,
+      "coverage": 100.0,
+      "crap": 13.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::review_rounds",
+      "line": 279,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::round_at",
+      "line": 209,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::rounds_of",
+      "line": 134,
+      "cyclomatic": 13.0,
+      "coverage": 100.0,
+      "crap": 13.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::runs_review_rounds",
+      "line": 285,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "PgRunRepository::start_review_round",
+      "line": 223,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "ReviewFinding::try_from",
+      "line": 97,
+      "cyclomatic": 14.0,
+      "coverage": 92.85714285714286,
+      "crap": 14.071428571428571,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 104,
+          "end": 104
+        },
+        {
+          "start": 110,
+          "end": 110
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "ReviewRound::try_from",
+      "line": 36,
+      "cyclomatic": 11.0,
+      "coverage": 91.30434782608695,
+      "crap": 11.079559464124271,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 43,
+          "end": 43
+        },
+        {
+          "start": 48,
+          "end": 48
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "line",
+      "line": 86,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/review_rounds.rs",
+      "function": "stored_line",
+      "line": 90,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::begin_improvement",
+      "line": 300,
+      "cyclomatic": 9.0,
+      "coverage": 100.0,
+      "crap": 9.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::definition_naming",
+      "line": 90,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::failure_facts",
+      "line": 117,
+      "cyclomatic": 5.0,
+      "coverage": 88.88888888888889,
+      "crap": 5.034293552812072,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 151,
+          "end": 151
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::latest_improvement",
+      "line": 234,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::link_improvement_run",
+      "line": 388,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::pending_failures",
+      "line": 200,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::recent_improvements",
+      "line": 264,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::record_failures",
+      "line": 164,
+      "cyclomatic": 7.0,
+      "coverage": 100.0,
+      "crap": 7.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "PgRunRepository::settle_improvement",
+      "line": 403,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "close_other_open",
+      "line": 480,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "count",
+      "line": 30,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "cut_bytes",
+      "line": 35,
+      "cyclomatic": 3.0,
+      "coverage": 40.0,
+      "crap": 4.944,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 38,
+          "end": 43
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "improvement",
+      "line": 59,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "settle",
+      "line": 414,
+      "cyclomatic": 11.0,
+      "coverage": 100.0,
+      "crap": 11.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/self_improvement.rs",
+      "function": "source",
+      "line": 47,
+      "cyclomatic": 3.0,
+      "coverage": 100.0,
+      "crap": 3.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_acts.rs",
+      "function": "PgRunRepository::record_standing_act",
+      "line": 38,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_acts.rs",
+      "function": "PgRunRepository::runs_standing_acts",
+      "line": 70,
+      "cyclomatic": 7.0,
+      "coverage": 85.71428571428571,
+      "crap": 7.142857142857143,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 92,
+          "end": 92
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_acts.rs",
+      "function": "PgRunRepository::session_bot",
+      "line": 22,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_rules.rs",
+      "function": "PgRunRepository::list_project_rules",
+      "line": 148,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_rules.rs",
+      "function": "PgRunRepository::project_rules",
+      "line": 128,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_rules.rs",
+      "function": "PgRunRepository::set_project_rules",
+      "line": 170,
+      "cyclomatic": 7.0,
+      "coverage": 100.0,
+      "crap": 7.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_rules.rs",
+      "function": "PgRunRepository::set_team_rules",
+      "line": 87,
+      "cyclomatic": 7.0,
+      "coverage": 100.0,
+      "crap": 7.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_rules.rs",
+      "function": "PgRunRepository::team_rules",
+      "line": 65,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_rules.rs",
+      "function": "definition",
+      "line": 19,
+      "cyclomatic": 4.0,
+      "coverage": 100.0,
+      "crap": 4.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_rules.rs",
+      "function": "stored_queue_limit",
+      "line": 50,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/standing_rules.rs",
+      "function": "stored_token_budget",
+      "line": 40,
+      "cyclomatic": 1.0,
+      "coverage": 100.0,
+      "crap": 1.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/steering.rs",
+      "function": "PgRunRepository::read_steering",
+      "line": 179,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/steering.rs",
+      "function": "PgRunRepository::record_pause_ran_out",
+      "line": 209,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/steering.rs",
+      "function": "PgRunRepository::record_steer",
+      "line": 24,
+      "cyclomatic": 21.0,
+      "coverage": 98.33333333333333,
+      "crap": 21.002041666666667,
+      "crate": "factory_records",
+      "uncovered": [
+        {
+          "start": 48,
+          "end": 48
+        }
+      ]
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/steering.rs",
+      "function": "PgRunRepository::runs_steers",
+      "line": 268,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/steering.rs",
+      "function": "PgRunRepository::stop_steering",
+      "line": 232,
+      "cyclomatic": 2.0,
+      "coverage": 100.0,
+      "crap": 2.0,
+      "crate": "factory_records"
+    },
+    {
+      "file": "crates/factory_records/src/outbound/pg_run_repository/steering.rs",
+      "function": "PgRunRepository::undo_steer",
+      "line": 136,
+      "cyclomatic": 5.0,
+      "coverage": 100.0,
+      "crap": 5.0,
+      "crate": "factory_records"
+    }
+  ]
+}

@@ -8,7 +8,7 @@ use macro_uuid::Uuid;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::domain::models::{DispatchEvent, InProgressExecution, ScheduledAction};
-use crate::domain::ports::{ScheduledActionDispatcher, ScheduledActionExecutor};
+use crate::domain::ports::{RunStarter, ScheduledActionDispatcher, ScheduledActionExecutor};
 
 #[cfg(test)]
 mod test;
@@ -70,7 +70,7 @@ where
                         }
 
                         let action = tracked.action.clone();
-                        match self.executor.execute_action(action).await {
+                        match self.executor.execute_action(action, RunStarter::Scheduler).await {
                             Ok(execution) => {
                                 let _ = extx.send(execution).await;
                             }

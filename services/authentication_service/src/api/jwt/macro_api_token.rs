@@ -112,6 +112,9 @@ pub async fn handler(
             // No scope to keep: `AccountHolderOrInternal` refuses this route
             // to every credential that signs one (`ScopedMacroApiJwt`).
             agent_scope: None,
+            // The scheduler's proof is never copied: it belongs to the one
+            // credential the harness signed for the run's code.
+            scheduler_run: None,
             agent_id: authorization
                 .authorization
                 .user

@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod test;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::types::Json;
@@ -13,12 +13,13 @@ use uuid::Uuid;
 use super::{PgRunRepository, PgRunRepositoryErr};
 use crate::domain::evaluation::{
     AgentChoices, ArmScore, ArmTally, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository,
-    Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE, RunAgents, RunArm,
-    SUITE_STARTING_SECS, SUITES_READ, ScorerTally, ScoringStep, ScoringSubject, SubjectTrial,
-    SuiteInsert, SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
+    Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE, RuleTally, RunAgentRule,
+    RunAgents, RunArm, SUITE_STARTING_SECS, SUITES_READ, ScorerTally, ScoringStep, ScoringSubject,
+    SubjectTrial, SuiteInsert, SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
 };
 use crate::domain::insights::InsightsScope;
-use crate::domain::models::{EntryId, Outcome, RunId, RunOutcome};
+use crate::domain::models::{AgentName, EntryId, Outcome, Role, RunId, RunOutcome};
+use crate::domain::ports::RunRepository;
 
 /// A count the schema keeps far below `u32::MAX`: insights read a capped
 /// number of Runs.
@@ -89,6 +90,92 @@ impl EvaluationRepository for PgRunRepository {
         Ok(())
     }
 
+    #[tracing::instrument(err, skip(self, rules), fields(rules = rules.len()))]
+    async fn record_agent_rules(
+        &self,
+        run_id: RunId,
+        rules: &[RunAgentRule],
+    ) -> Result<(), Self::Err> {
+        for rule in rules {
+            sqlx::query!(
+                r#"
+                INSERT INTO factory_run_agent_rule (run_id, role, rule, agent)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (run_id, role) DO NOTHING
+                "#,
+                run_id.as_uuid(),
+                rule.role.as_str(),
+                rule.rule,
+                rule.agent.as_str(),
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_task_tags_unread(&self, run_id: RunId) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_run_task_tags_unread (run_id)
+            VALUES ($1)
+            ON CONFLICT (run_id) DO NOTHING
+            "#,
+            run_id.as_uuid(),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(runs = run_ids.len()))]
+    async fn runs_task_tags_unread(&self, run_ids: &[RunId]) -> Result<BTreeSet<RunId>, Self::Err> {
+        let ids: Vec<Uuid> = run_ids.iter().map(RunId::as_uuid).collect();
+        let unread = sqlx::query_scalar!(
+            r#"
+            SELECT run_id
+            FROM factory_run_task_tags_unread
+            WHERE run_id = ANY($1)
+            "#,
+            &ids,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(unread.into_iter().map(RunId::from_uuid).collect())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(runs = run_ids.len()))]
+    async fn runs_agent_rules(
+        &self,
+        run_ids: &[RunId],
+    ) -> Result<BTreeMap<RunId, Vec<RunAgentRule>>, Self::Err> {
+        let ids: Vec<Uuid> = run_ids.iter().map(RunId::as_uuid).collect();
+        let rows = sqlx::query!(
+            r#"
+            SELECT run_id, role, rule, agent
+            FROM factory_run_agent_rule
+            WHERE run_id = ANY($1)
+            ORDER BY run_id, role
+            "#,
+            &ids,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut rules: BTreeMap<RunId, Vec<RunAgentRule>> = BTreeMap::new();
+        for row in rows {
+            rules
+                .entry(RunId::from_uuid(row.run_id))
+                .or_default()
+                .push(RunAgentRule {
+                    role: Role::try_from(row.role)?,
+                    rule: row.rule,
+                    agent: AgentName::try_from(row.agent)?,
+                });
+        }
+        Ok(rules)
+    }
+
     #[tracing::instrument(err, skip(self))]
     async fn run_agents(&self, run_id: RunId) -> Result<RunAgents, Self::Err> {
         // A Run takes Agents from its arms, or from its suite when it is a
@@ -113,6 +200,14 @@ impl EvaluationRepository for PgRunRepository {
         for row in rows {
             agents.choices.extend(agents_of(row.agents.0)?);
             agents.trial |= row.trial;
+        }
+        for rule in self
+            .runs_agent_rules(&[run_id])
+            .await?
+            .remove(&run_id)
+            .unwrap_or_default()
+        {
+            agents.ruled.insert(rule.role, rule.agent);
         }
         Ok(agents)
     }
@@ -263,6 +358,9 @@ impl EvaluationRepository for PgRunRepository {
             }
         };
 
+        let mut sessions = RunRepository::step_sessions(self, run_id).await?;
+        sessions.sort_unstable();
+
         Ok(Some(ScoringSubject {
             run_id,
             user_id: MacroUserIdStr::try_from(run.user_id.clone())
@@ -273,6 +371,7 @@ impl EvaluationRepository for PgRunRepository {
             base_branch: run.base_branch,
             outcome: run_outcome(run.outcome)?,
             steps,
+            sessions,
             trial,
             judged,
             evaluation: run.definition_evaluation,
@@ -584,6 +683,49 @@ impl EvaluationRepository for PgRunRepository {
         })
         .collect();
 
+        // As for an arm: a rule's Agent is the newest Run's, and a Run fell
+        // back when another Agent took a Step of the Role, or the rule's
+        // was passed over.
+        let rules = sqlx::query!(
+            r#"
+            SELECT g.role, g.rule,
+                   (array_agg(g.agent ORDER BY r.created_at DESC))[1] AS "agent!",
+                   count(*) AS "runs!",
+                   count(r.outcome) FILTER (WHERE r.outcome <> 'infrastructure') AS "ended!",
+                   count(*) FILTER (WHERE r.outcome = 'success') AS "succeeded!",
+                   count(*) FILTER (
+                       WHERE EXISTS (
+                           SELECT 1
+                           FROM factory_step st
+                           WHERE st.run_id = g.run_id
+                             AND st.role = g.role
+                             AND (st.agent <> g.agent OR g.agent = ANY (st.passed_over))
+                       )
+                   ) AS "fell_back!"
+            FROM factory_run_agent_rule g
+            JOIN factory_run r ON r.id = g.run_id
+            WHERE g.run_id = ANY($1)
+            GROUP BY g.role, g.rule
+            ORDER BY g.role, g.rule
+            "#,
+            &ids,
+        )
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(|row| {
+            Ok(RuleTally {
+                role: Role::try_from(row.role)?,
+                rule: row.rule,
+                agent: AgentName::try_from(row.agent)?,
+                runs: count(row.runs),
+                ended: count(row.ended),
+                succeeded: count(row.succeeded),
+                fell_back: count(row.fell_back),
+            })
+        })
+        .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
+
         let suites = self.read_suites(&mut transaction, scope).await?;
 
         transaction.commit().await?;
@@ -591,6 +733,7 @@ impl EvaluationRepository for PgRunRepository {
             scorers,
             arms,
             arm_scores,
+            rules,
             suites,
         })
     }

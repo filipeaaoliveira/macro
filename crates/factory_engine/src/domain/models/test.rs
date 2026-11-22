@@ -69,3 +69,19 @@ fn a_step_request_refuses_a_field_it_does_not_know() {
     assert!(serde_json::from_value::<super::StepRequest>(sent).is_ok());
     assert!(serde_json::from_value::<super::StepRequest>(newer).is_err());
 }
+
+/// Only a commit GitHub signed as itself is GitHub's: its account named as
+/// committer without a verified signature, as a commit made by hand with
+/// GitHub's email, is not, nor one someone else signed.
+#[test]
+fn only_a_commit_github_signed_as_itself_is_github_s() {
+    let commit = |login: Option<&str>, verified| super::CommitMade {
+        parents: vec![],
+        committer_login: login.map(str::to_string),
+        verified,
+    };
+    assert!(commit(Some("web-flow"), true).made_by_github());
+    assert!(!commit(Some("web-flow"), false).made_by_github());
+    assert!(!commit(Some("julia"), true).made_by_github());
+    assert!(!commit(None, true).made_by_github());
+}

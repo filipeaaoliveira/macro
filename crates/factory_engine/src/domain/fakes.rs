@@ -29,10 +29,11 @@ use chrono::Utc;
 use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     BudgetStop, CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart,
-    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
-    NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition,
-    RunEnd, RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step,
-    StepEnd, StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
+    ClaimedSession, ControlFileChanges, DefinitionRead, EntryId, Gate, GateAnswer, GateKind,
+    HandBack, HandedBack, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run,
+    RunDefinition, RunEnd, RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal,
+    Steered, Step, StepEnd, StepKey, StepSession, StepSteering, StoppingSession, TaskLink,
+    TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -43,9 +44,9 @@ use uuid::Uuid;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, FinishedJob,
-    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
-    RequiredChecks, run_branch,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
+    DefinitionPullRequest, FinishedJob, GITHUB_COMMITTER, HeadChecks, Merging, OpenPullRequest,
+    Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -71,6 +72,9 @@ pub(crate) struct FakeSession {
     pub(crate) opened: bool,
     /// The session whose setup commands passed, and how many of them.
     pub(crate) setup: Option<(Uuid, u16)>,
+    /// The sessions the Step left for a new one, which its Run's token
+    /// budget still counts.
+    pub(crate) left: Vec<Uuid>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -207,6 +211,8 @@ pub(crate) struct FakeRepo {
     pub(crate) projects: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The Project each task is in.
     pub(crate) task_projects: Arc<Mutex<BTreeMap<Uuid, Uuid>>>,
+    /// The tags each task carries.
+    pub(crate) task_tags: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
     /// Whether reading a task's Project fails, as an outage would.
     pub(crate) project_reads_fail: Arc<Mutex<bool>>,
     /// The Projects a person may not edit: their id and the Project's.
@@ -310,6 +316,23 @@ impl TaskDirectory for FakeRepo {
             .expect("task projects")
             .get(&task_id)
             .copied())
+    }
+
+    async fn task_tags(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Vec<String>, FakeError> {
+        if self.fails("task_tags") {
+            return Err(FakeError);
+        }
+        Ok(self
+            .task_tags
+            .lock()
+            .expect("task tags")
+            .get(&task_id)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn may_edit_project(
@@ -769,6 +792,35 @@ impl RunRepository for FakeRepo {
             .cloned())
     }
 
+    async fn newest_definition_read(
+        &self,
+        team_id: Uuid,
+        repo_url: &str,
+    ) -> Result<Option<DefinitionRead>, FakeError> {
+        let teams = self.teams.lock().expect("teams").clone();
+        Ok(self
+            .runs
+            .lock()
+            .expect("runs")
+            .values()
+            .filter(|run| {
+                teams
+                    .get(run.user_id.as_ref())
+                    .is_some_and(|team| team.team_id == team_id)
+            })
+            .filter_map(|run| {
+                let definition = run.definition.as_ref()?;
+                definition
+                    .repo_url
+                    .eq_ignore_ascii_case(repo_url)
+                    .then(|| DefinitionRead {
+                        commit: definition.commit.clone(),
+                        created_at: run.created_at,
+                    })
+            })
+            .max_by_key(|read| read.created_at))
+    }
+
     async fn set_team_definition(
         &self,
         team_id: Uuid,
@@ -1132,6 +1184,7 @@ impl RunRepository for FakeRepo {
             prepared_at: None,
             opened: false,
             setup: None,
+            left: Vec::new(),
         });
         Ok(ClaimedSession { session, new: true })
     }
@@ -1154,6 +1207,7 @@ impl RunRepository for FakeRepo {
             return Ok(false);
         };
         if let Some(to) = to {
+            claimed.left.push(claimed.session.session_id);
             claimed.session = to.clone();
             claimed.prepared_at = None;
             claimed.opened = false;
@@ -1564,7 +1618,13 @@ impl RunRepository for FakeRepo {
             .expect("sessions")
             .iter()
             .filter(|claimed| claimed.key.run_id == id)
-            .map(|claimed| claimed.session.session_id)
+            .flat_map(|claimed| {
+                claimed
+                    .left
+                    .iter()
+                    .copied()
+                    .chain([claimed.session.session_id])
+            })
             .collect();
         sessions.sort();
         sessions.dedup();
@@ -1719,6 +1779,13 @@ pub(crate) struct FakeGithubState {
     pub(crate) onto_fails: bool,
     /// The branches pull requests based on them were asked for, in order.
     pub(crate) onto_asked: Vec<String>,
+    /// The repository's open pull requests, as listed.
+    pub(crate) open_pull_requests: Vec<DefinitionPullRequest>,
+    /// Whether listing open pull requests fails, as GitHub down does.
+    pub(crate) open_pull_requests_fail: bool,
+    /// The commit whose files fail to read, as GitHub refusing a person
+    /// not linked to it, or limiting them, does.
+    pub(crate) file_reads_fail_at: Option<String>,
     /// How many times what the owner may do with the repository was read.
     pub(crate) access_reads: usize,
     /// Whether reading what the owner may do with the repository fails.
@@ -1743,6 +1810,9 @@ pub(crate) struct FakeGithubState {
     /// The parents of each commit, by its id; a commit not listed is none
     /// GitHub has.
     pub(crate) parents: BTreeMap<String, Vec<String>>,
+    /// The commits of `parents` someone made by hand; GitHub made the
+    /// others itself.
+    pub(crate) made_by_hand: BTreeSet<String>,
     /// The head commit of each branch that is not a Run's, by its name.
     pub(crate) other_heads: BTreeMap<String, String>,
     /// The heads updates of the Run's branch were asked from, in order.
@@ -1789,6 +1859,7 @@ impl FakeGithub {
             url: "https://github.com/macro/app/pull/7".to_string(),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
+            merge_commit: None,
         });
         github.state().checks = [checks].into();
         github
@@ -1995,6 +2066,9 @@ impl PullRequests for FakeGithub {
         if state.refused_files.contains(path) {
             return Err(FakeGithubError::TooLarge);
         }
+        if state.file_reads_fail_at.as_deref() == Some(branch) {
+            return Err(FakeGithubError::Down);
+        }
         Ok(state.files.get(&file).cloned())
     }
 
@@ -2091,6 +2165,7 @@ impl PullRequests for FakeGithub {
             url: format!("{}/pull/7", repository.url()),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
+            merge_commit: None,
         });
         Ok(Opening::Opened)
     }
@@ -2163,6 +2238,24 @@ impl PullRequests for FakeGithub {
         Ok(state.based_on_branch)
     }
 
+    async fn open_pull_requests(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        limit: usize,
+    ) -> Result<Vec<DefinitionPullRequest>, FakeGithubError> {
+        let state = self.state();
+        if state.open_pull_requests_fail {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(state
+            .open_pull_requests
+            .iter()
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
     /// Deleting the Run's branch leaves it not there for later reads.
     async fn delete_run_branch(
         &self,
@@ -2188,13 +2281,21 @@ impl PullRequests for FakeGithub {
         Ok(BranchDeletion::Deleted)
     }
 
-    async fn commit_parents(
+    async fn commit_made(
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         sha: &str,
-    ) -> Result<Option<Vec<String>>, FakeGithubError> {
-        Ok(self.state().parents.get(sha).cloned())
+    ) -> Result<Option<CommitMade>, FakeGithubError> {
+        let state = self.state();
+        let by_hand = state.made_by_hand.contains(sha);
+        Ok(state.parents.get(sha).map(|parents| CommitMade {
+            parents: parents.clone(),
+            // A commit made by hand may name GitHub's email, and so its
+            // account, as its committer, but GitHub verifies no signature.
+            committer_login: Some(GITHUB_COMMITTER.to_string()),
+            verified: !by_hand,
+        }))
     }
 
     async fn merge_base(

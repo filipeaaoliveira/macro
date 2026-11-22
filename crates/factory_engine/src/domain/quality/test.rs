@@ -4,9 +4,11 @@ use factory_records::domain::insights::RunSummary;
 use factory_records::domain::models::{RunId, RunOutcome};
 use factory_records::domain::quality::{
     BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWaitRecord, QualityRecords, QualityRun,
-    ReviewRoundRecord, ReviewerRecord,
+    QualitySession, ReviewRoundRecord, ReviewerRecord,
 };
-use factory_records::domain::review_rounds::ReviewRoundOutcome;
+use factory_records::domain::review_rounds::{
+    BlockerResolutions, DisputeRuling, FixStatus, ReviewRoundOutcome,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -27,6 +29,18 @@ fn run_id(n: u128) -> RunId {
 
 fn session(n: u128) -> Uuid {
     Uuid::from_u128(1000 + n)
+}
+
+/// A bot whose runtime records its model calls' usage.
+const HOSTED: Uuid = Uuid::from_u128(0xb07);
+
+/// A bot on a machine's runtime under its owner's own login, which records
+/// none.
+const ON_A_MACHINE: Uuid = Uuid::from_u128(0xc0d3);
+
+/// The session `id`, run by `bot`.
+fn on(id: Uuid, bot: Option<Uuid>) -> QualitySession {
+    QualitySession { id, bot }
 }
 
 fn julia() -> MacroUserIdStr<'static> {
@@ -63,7 +77,7 @@ fn run(n: u128) -> QualityRun {
         merged: true,
         person_answered: false,
         steered: false,
-        sessions: vec![session(n)],
+        sessions: vec![on(session(n), Some(HOSTED))],
     }
 }
 
@@ -591,6 +605,9 @@ fn review_rounds_and_blockers_are_counted() {
         seq,
         round_seq,
         problem: problem.to_string(),
+        fix_status: None,
+        ruling: None,
+        dismissed: false,
     };
     let records = QualityRecords {
         runs: vec![run(3), run(2), run(1)],
@@ -666,6 +683,53 @@ fn review_rounds_and_blockers_are_counted() {
     );
 }
 
+/// The Blockers given to a fix are counted fixed, disputed and upheld, or
+/// disputed and dropped; a dispute no round ruled on counts as upheld, and
+/// a Blocker no fix was given counts in none. A dismissed finding counts
+/// only as dismissed.
+#[test]
+fn blockers_fixed_upheld_and_dropped_are_counted() {
+    let blocker = |seq: u16, fix_status, ruling| BlockerRecord {
+        run_id: run_id(1),
+        seq,
+        round_seq: 2,
+        problem: format!("Problem {seq}"),
+        fix_status,
+        ruling,
+        dismissed: false,
+    };
+    let records = QualityRecords {
+        runs: vec![run(1)],
+        blockers: vec![
+            blocker(2, Some(FixStatus::Fixed), None),
+            blocker(3, Some(FixStatus::Fixed), None),
+            blocker(4, Some(FixStatus::Disputed), Some(DisputeRuling::Upheld)),
+            blocker(5, Some(FixStatus::Disputed), None),
+            blocker(6, Some(FixStatus::Disputed), Some(DisputeRuling::Dropped)),
+            blocker(7, None, None),
+            BlockerRecord {
+                dismissed: true,
+                ..blocker(8, None, None)
+            },
+        ],
+        ..QualityRecords::default()
+    };
+
+    let review = summarize_quality(&query(None), records, &[]).review;
+
+    assert_eq!(
+        review.resolutions,
+        BlockerResolutions {
+            fixed: 2,
+            disputed_upheld: 2,
+            disputed_dropped: 1,
+            dismissed: 1,
+        }
+    );
+    // A dismissed finding is no Blocker.
+    assert_eq!(review.blockers, 6);
+}
+
 /// A Run whose Gate a person answered, one its owner steered and one left
 /// to a person are not autonomous; one that merged with none of these is.
 #[test]
@@ -695,6 +759,80 @@ fn a_run_a_person_stepped_into_is_not_autonomous() {
         (delivery.person_answered, delivery.steered, delivery.manual),
         (1, 1, 1)
     );
+}
+
+/// Run `n`, ended `outcome` on day `n`.
+fn ended(n: u128, outcome: RunOutcome, merged: bool) -> QualityRun {
+    let mut run = run(n);
+    run.merged = merged;
+    run.run.end = Some((outcome, at(&format!("2026-11-{n:02}T12:00:00Z"))));
+    run
+}
+
+/// Runs that ended for infrastructure are left out of the autonomy rate,
+/// as they are of the success rate: three autonomous merges beside two
+/// infrastructure endings are every Run whose work ended on its own.
+#[test]
+fn the_autonomy_rate_leaves_out_infrastructure_endings() {
+    let records = QualityRecords {
+        runs: vec![
+            run(1),
+            run(2),
+            run(3),
+            ended(4, RunOutcome::Infrastructure, false),
+            ended(5, RunOutcome::Infrastructure, false),
+        ],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(&query(None), records, &[]).delivery;
+
+    assert_eq!(delivery.ended_runs, 5);
+    assert_eq!(delivery.autonomous, 3);
+    assert_eq!(delivery.autonomy_rate, Some(1.0));
+}
+
+/// A merged Run found flawed afterwards is not autonomous, and counts
+/// against the rate, as it does against the success rate.
+#[test]
+fn a_flawed_merged_run_is_not_autonomous() {
+    let records = QualityRecords {
+        runs: vec![run(1), ended(2, RunOutcome::Flawed, true)],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(&query(None), records, &[]).delivery;
+
+    assert_eq!(delivery.merged, 2);
+    assert_eq!(delivery.autonomous, 1);
+    assert_eq!(delivery.autonomy_rate, Some(0.5));
+}
+
+/// Runs a person cancelled are left out of the autonomy rate, as they are
+/// of the success rate, merged or not; with only those, there is no rate.
+#[test]
+fn the_autonomy_rate_leaves_out_cancelled_runs() {
+    let with_one = QualityRecords {
+        runs: vec![
+            run(1),
+            ended(2, RunOutcome::Cancelled, false),
+            ended(3, RunOutcome::Cancelled, true),
+        ],
+        ..QualityRecords::default()
+    };
+    let only_cancelled = QualityRecords {
+        runs: vec![ended(2, RunOutcome::Cancelled, false)],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(&query(None), with_one, &[]).delivery;
+    let none = summarize_quality(&query(None), only_cancelled, &[]).delivery;
+
+    assert_eq!(delivery.ended_runs, 3);
+    assert_eq!(delivery.merged, 2);
+    assert_eq!(delivery.autonomous, 1);
+    assert_eq!(delivery.autonomy_rate, Some(1.0));
+    assert_eq!(none.autonomy_rate, None);
 }
 
 /// Every Run's usage per merged pull request: in money when every call was
@@ -728,6 +866,102 @@ fn cost_per_merged_pull_request_is_money_where_priced_and_tokens_otherwise() {
     assert_eq!(unpriced.cost_per_merged_usd, None);
     assert_eq!(unpriced.unpriced_calls, 3);
     assert_eq!(unpriced.tokens_per_merged, Some(1500));
+}
+
+/// A Run whose Step ran on a runtime that records no usage (a reviewer on
+/// Codex or Claude Code under the owner's own login, through macrod) spent
+/// what no one knows: its measured Steps still count, but no figure per
+/// merged pull request is given, which would read the unknown as nothing.
+#[test]
+fn cost_per_merged_pull_request_needs_every_run_s_sessions_measured() {
+    let mut mixed = run(2);
+    // The writer's session recorded usage; the reviewer's, on a machine,
+    // did not.
+    mixed
+        .sessions
+        .push(on(Uuid::from_u128(0x5e55), Some(ON_A_MACHINE)));
+    let records = QualityRecords {
+        runs: vec![run(1), mixed],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(
+        &query(None),
+        records,
+        &[tokens(1, 1000, 1.5, 0), tokens(2, 500, 0.5, 0)],
+    )
+    .delivery;
+
+    assert_eq!(delivery.merged, 2);
+    assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.unmeasured_runs, 1);
+    assert_eq!(delivery.tokens.input, 1500);
+    assert_eq!(delivery.cost_usd, 2.0);
+    assert_eq!(delivery.cost_per_merged_usd, None);
+    assert_eq!(delivery.tokens_per_merged, None);
+}
+
+/// A session whose bot's other sessions recorded usage, but which recorded
+/// none, failed before its first model call: it cost nothing, and the
+/// figure per merged pull request is still given. One whose bot is not
+/// known is not measured.
+#[test]
+fn a_session_that_made_no_model_call_costs_nothing() {
+    let mut failed_early = run(2);
+    failed_early
+        .sessions
+        .push(on(Uuid::from_u128(0x5e55), Some(HOSTED)));
+    let records = |second: QualityRun| QualityRecords {
+        runs: vec![run(1), second],
+        ..QualityRecords::default()
+    };
+    let usage = [tokens(1, 1000, 1.5, 0), tokens(2, 500, 0.5, 0)];
+
+    let delivery = summarize_quality(&query(None), records(failed_early.clone()), &usage).delivery;
+
+    assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.unmeasured_runs, 0);
+    assert_eq!(delivery.cost_per_merged_usd, Some(1.0));
+    assert_eq!(delivery.tokens_per_merged, Some(750));
+
+    let mut unknown_bot = run(2);
+    unknown_bot.sessions.push(on(Uuid::from_u128(0x5e55), None));
+    let delivery = summarize_quality(&query(None), records(unknown_bot), &usage).delivery;
+
+    assert_eq!(delivery.cost_per_merged_usd, None);
+    assert_eq!(delivery.tokens_per_merged, None);
+}
+
+/// A writer Step whose first Agent (the owner's own login, which records
+/// no usage) worked, spent tokens and lost its session, then passed to a
+/// hosted Agent whose usage is recorded: the lost session reads with no
+/// bot, so its unrecorded spend is unknown and no figure per merged pull
+/// request is given. Credited to the hosted bot, it would read as a session
+/// that made no model call, and the figure would leave that spend out.
+#[test]
+fn a_session_a_step_left_with_no_usage_makes_the_cost_unknown() {
+    let lost = Uuid::from_u128(0x1057);
+    let mut passed_on = run(2);
+    passed_on.sessions.push(on(lost, None));
+    let records = |second: QualityRun| QualityRecords {
+        runs: vec![run(1), second],
+        ..QualityRecords::default()
+    };
+    let usage = [tokens(1, 1000, 1.5, 0), tokens(2, 500, 0.5, 0)];
+
+    let delivery = summarize_quality(&query(None), records(passed_on), &usage).delivery;
+
+    assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.unmeasured_runs, 1);
+    assert_eq!(delivery.cost_usd, 2.0);
+    assert_eq!(delivery.cost_per_merged_usd, None);
+    assert_eq!(delivery.tokens_per_merged, None);
+
+    // Read as the hosted bot's, the lost session would cost nothing.
+    let mut misread = run(2);
+    misread.sessions.push(on(lost, Some(HOSTED)));
+    let delivery = summarize_quality(&query(None), records(misread), &usage).delivery;
+    assert_eq!(delivery.cost_per_merged_usd, Some(1.0));
 }
 
 /// The service reads the repository asked for, by its URL, and the usage

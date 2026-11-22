@@ -171,6 +171,8 @@ export function toRun(detail: RunDetail): Run {
         }
       : undefined,
     baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
+    // A service older than disputes sends none.
+    blockerResolutions: detail.blockerResolutions ?? undefined,
     // A Run with no budget, and a service older than budgets, send none.
     tokenBudget: detail.tokenBudget
       ? {
@@ -188,6 +190,13 @@ export function toRun(detail: RunDetail): Run {
       standingRole: standing.standingRole,
       at: standing.at,
     })),
+    // A service older than Agent Rules sends none.
+    agentRules: (detail.agentRules ?? []).map((chosen) => ({
+      role: chosen.role,
+      rule: chosen.rule,
+      agent: chosen.agent,
+    })),
+    taskTagsUnread: detail.taskTagsUnread ?? false,
     reviewRounds: detail.reviewRounds.map((round) => ({
       round: round.round,
       visit: round.visit,
@@ -210,6 +219,9 @@ export function toRun(detail: RunDetail): Run {
         blocksAnywhere: finding.blocksAnywhere,
         kind: finding.kind ?? undefined,
         followUpTaskId: finding.followUpTaskId ?? undefined,
+        fixStatus: finding.fixStatus ?? undefined,
+        dispute: finding.dispute ?? undefined,
+        ruling: finding.ruling ?? undefined,
       })),
     })),
   };

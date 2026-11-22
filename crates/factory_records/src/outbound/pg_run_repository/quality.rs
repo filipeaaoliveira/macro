@@ -11,15 +11,17 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::review_rounds::stored_word;
 use super::{PgRunRepository, PgRunRepositoryErr, number};
 use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::insights::{RunSummary, TITLE_CHARS};
 use crate::domain::models::{RunId, RunOutcome};
 use crate::domain::quality::{
     BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWait, CiWaitRecord, LastCiWait, QualityRecords,
-    QualityRun, QualityScope, ReviewRoundRecord, ReviewerRecord, RunQualityRepository,
+    QualityRun, QualityScope, QualitySession, ReviewRoundRecord, ReviewerRecord,
+    RunQualityRepository,
 };
-use crate::domain::review_rounds::ReviewRoundOutcome;
+use crate::domain::review_rounds::{DisputeRuling, FixStatus, ReviewRoundOutcome};
 
 /// Keep `wait`, replacing the one its Step kept unless that read the same
 /// head and verdict: the last attempt's wait is the one the Step routed.
@@ -308,31 +310,49 @@ impl RunQualityRepository for PgRunRepository {
         }
         let ids: Vec<Uuid> = runs.iter().map(|run| run.run.id.as_uuid()).collect();
 
-        // The Runs' agent sessions, through `factory_step`'s primary key; a
-        // Step that went on after a question shares the asking Step's
-        // session, which counts once.
+        // The Runs' agent sessions and the bot that ran each, through
+        // `factory_step`'s primary key; a Step that went on after a question
+        // shares the asking Step's session, which counts once. The sessions
+        // Steps left count too, as the Run's token budget counts them, with
+        // no bot: a Step that moves on records its new Agent's bot, and the
+        // one it left keeps none, so its spend reads as unknown rather than
+        // as the new bot's. A session keeps one bot, which a Step from
+        // before Steps recorded it lacks.
         let sessions = sqlx::query!(
             r#"
-            SELECT DISTINCT run_id, session_id AS "session_id!"
+            SELECT run_id AS "run_id!", session_id AS "session_id!",
+                (array_agg(bot_id) FILTER (WHERE bot_id IS NOT NULL))[1] AS bot_id
             FROM (
-                SELECT run_id, session_id
-                FROM factory_step
-                WHERE run_id = ANY($1)
-                OFFSET 0
+                (
+                    SELECT run_id, session_id, bot_id
+                    FROM factory_step
+                    WHERE run_id = ANY($1)
+                    OFFSET 0
+                )
+                UNION ALL
+                SELECT u.run_id, u.session_id,
+                    CASE WHEN u.session_id = s.session_id THEN s.bot_id END
+                FROM factory_step_used_session u
+                JOIN factory_step s ON s.run_id = u.run_id AND s.seq = u.seq
+                WHERE u.run_id = ANY($1)
             ) steps
             WHERE session_id IS NOT NULL
+            GROUP BY run_id, session_id
             "#,
             &ids,
         )
         .fetch_all(&mut *transaction)
         .await?;
-        let mut by_run: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        let mut by_run: HashMap<Uuid, Vec<QualitySession>> = HashMap::new();
         for row in sessions {
-            by_run.entry(row.run_id).or_default().push(row.session_id);
+            by_run.entry(row.run_id).or_default().push(QualitySession {
+                id: row.session_id,
+                bot: row.bot_id,
+            });
         }
         for run in &mut runs {
             if let Some(mut sessions) = by_run.remove(&run.run.id.as_uuid()) {
-                sessions.sort();
+                sessions.sort_by_key(|session| session.id);
                 run.sessions = sessions;
             }
         }
@@ -438,9 +458,11 @@ impl RunQualityRepository for PgRunRepository {
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
         let blockers = sqlx::query!(
             r#"
-            SELECT run_id, seq, round_seq, problem
+            SELECT
+                run_id, seq, round_seq, problem, fix_status, ruling,
+                kind = 'dismissed' AS "dismissed!"
             FROM factory_review_finding
-            WHERE run_id = ANY($1) AND kind = 'blocker'
+            WHERE run_id = ANY($1) AND kind IN ('blocker', 'dismissed')
             ORDER BY run_id, seq, place
             "#,
             &ids,
@@ -454,6 +476,9 @@ impl RunQualityRepository for PgRunRepository {
                 seq: number(row.seq)?,
                 round_seq: number(row.round_seq)?,
                 problem: row.problem,
+                fix_status: stored_word(row.fix_status, FixStatus::from_word)?,
+                ruling: stored_word(row.ruling, DisputeRuling::from_word)?,
+                dismissed: row.dismissed,
             })
         })
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;

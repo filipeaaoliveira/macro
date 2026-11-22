@@ -231,12 +231,8 @@ where
     }
 
     /// The stand-in's window on the Gate of `key` closed: the notice that
-    /// the stand-in answered is done. A Run without a task sent none, and
-    /// closing one never sent would leave a withdrawal behind.
+    /// the stand-in answered is done, a Run's with a task or without one.
     async fn window_closed(&self, run: &Run, key: StepKey) {
-        if run.task_id.is_none() {
-            return;
-        }
         let id = stand_in_id(key.run_id, key.seq);
         self.notifier.answered(&run.user_id, id).await;
     }

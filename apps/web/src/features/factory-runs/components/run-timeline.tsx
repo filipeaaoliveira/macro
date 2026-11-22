@@ -23,6 +23,7 @@ import {
   type SteerAction,
   steerableSession,
   terminalState,
+  USAGE_LIMIT_REASON,
   WHOLE_CHANGE,
 } from '../core/run';
 import { RULE_NAMES } from '../core/standing-rules';
@@ -221,10 +222,16 @@ function TimelineStep(props: {
             <For each={props.step.passedOver}>
               {(passed) => (
                 <span class="block text-ink-muted">
-                  {t('factoryRuns.passedOver', {
-                    agent: passed.agent,
-                    reason: flowWordText(passed.reason),
-                  })}
+                  {/* An Agent at its usage limit did start: its first
+                      turn ended before it did any work. */}
+                  {passed.reason === USAGE_LIMIT_REASON
+                    ? t('factoryRuns.passedOverUsageLimit', {
+                        agent: passed.agent,
+                      })
+                    : t('factoryRuns.passedOver', {
+                        agent: passed.agent,
+                        reason: flowWordText(passed.reason),
+                      })}
                 </span>
               )}
             </For>
@@ -579,7 +586,24 @@ function findingKind(finding: ReviewFinding): string {
       ? t('factoryRuns.findingFollowUpTask')
       : t('factoryRuns.findingFollowUp');
   }
+  if (finding.kind === 'dismissed') return t('factoryRuns.findingDismissed');
   return t('factoryRuns.findingFound');
+}
+
+/** What the fix said of a blocker, and how the next round ruled on it. */
+function findingResolution(finding: ReviewFinding): string[] {
+  if (finding.fixStatus === 'fixed') return [t('factoryRuns.findingFixed')];
+  if (finding.fixStatus !== 'disputed') return [];
+  const disputed = t('factoryRuns.findingDisputed', {
+    reason: finding.dispute ?? '',
+  });
+  if (finding.ruling === 'upheld') {
+    return [disputed, t('factoryRuns.findingDisputeUpheld')];
+  }
+  if (finding.ruling === 'dropped') {
+    return [disputed, t('factoryRuns.findingDisputeDropped')];
+  }
+  return [disputed];
 }
 
 /**
@@ -624,6 +648,16 @@ function FindingNote(props: { finding: ReviewFinding }) {
           {t('factoryRuns.findingFoundAgain')}
         </span>
       </Show>
+      <Show when={props.finding.kind === 'dismissed'}>
+        <span class="block text-ink-muted">
+          {t('factoryRuns.findingDismissedNote')}
+        </span>
+      </Show>
+      <For each={findingResolution(props.finding)}>
+        {(line) => (
+          <span class="block whitespace-pre-wrap text-ink-muted">{line}</span>
+        )}
+      </For>
     </StepNote>
   );
 }

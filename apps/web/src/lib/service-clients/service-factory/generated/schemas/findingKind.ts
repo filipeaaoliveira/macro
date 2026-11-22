@@ -14,4 +14,5 @@ export type FindingKind = (typeof FindingKind)[keyof typeof FindingKind];
 export const FindingKind = {
   blocker: 'blocker',
   follow_up: 'follow_up',
+  dismissed: 'dismissed',
 } as const;

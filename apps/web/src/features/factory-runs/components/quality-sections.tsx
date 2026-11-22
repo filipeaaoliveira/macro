@@ -6,6 +6,7 @@ import { formatLocale, t } from '@app/lib/i18n';
 import { For, type JSX, Show } from 'solid-js';
 import {
   type BlockerCount,
+  type BlockerResolutions,
   CI_CAUSES,
   type CiCause,
   type CiCauseCounts,
@@ -325,6 +326,38 @@ function BlockerTable(props: { title: string; counts: BlockerCount[] }) {
   );
 }
 
+/** What became of the Blockers given to a fix: fixed, or disputed and then upheld or dropped. */
+export function BlockerResolutionMetrics(props: {
+  resolutions: BlockerResolutions;
+}) {
+  return (
+    <MetricRow>
+      <Metric
+        label={t('factoryQuality.fixedBlockers')}
+        definition={t('factoryQuality.fixedBlockersDefinition')}
+        value={props.resolutions.fixed}
+      />
+      <Metric
+        label={t('factoryQuality.upheldDisputes')}
+        definition={t('factoryQuality.upheldDisputesDefinition')}
+        value={props.resolutions.disputedUpheld}
+        lowerIsBetter
+      />
+      <Metric
+        label={t('factoryQuality.droppedDisputes')}
+        definition={t('factoryQuality.droppedDisputesDefinition')}
+        value={props.resolutions.disputedDropped}
+      />
+      <Metric
+        label={t('factoryQuality.dismissedFindings')}
+        definition={t('factoryQuality.dismissedFindingsDefinition')}
+        value={props.resolutions.dismissed}
+        lowerIsBetter
+      />
+    </MetricRow>
+  );
+}
+
 function ReviewSection(props: {
   review: ReviewQuality;
   onOpenRun: (runId: string) => void;
@@ -367,6 +400,7 @@ function ReviewSection(props: {
           lowerIsBetter
         />
       </MetricRow>
+      <BlockerResolutionMetrics resolutions={props.review.resolutions} />
       <Show
         when={props.review.reviewedRuns > 0}
         fallback={<EmptyNote>{t('factoryQuality.noReviews')}</EmptyNote>}
@@ -422,6 +456,9 @@ function ReviewSection(props: {
 
 function DeliverySection(props: { delivery: DeliveryInsight }) {
   const cost = () => mergedCost(props.delivery);
+  // Some Runs' usage is unknown, so no figure is given, in money or tokens.
+  const unmeasured = () =>
+    props.delivery.merged > 0 && props.delivery.unmeasuredRuns > 0;
 
   return (
     <InsightSection
@@ -480,7 +517,17 @@ function DeliverySection(props: { delivery: DeliveryInsight }) {
           </dd>
         </div>
       </dl>
-      <Show when={props.delivery.unpricedCalls > 0}>
+      <Show when={unmeasured()}>
+        <p
+          class="px-4 pb-3 text-xs text-ink-muted"
+          data-testid="cost-unmeasured"
+        >
+          {t('factoryQuality.unmeasured', {
+            count: props.delivery.unmeasuredRuns,
+          })}
+        </p>
+      </Show>
+      <Show when={!unmeasured() && props.delivery.unpricedCalls > 0}>
         <p class="px-4 pb-3 text-xs text-ink-muted">
           {t('factoryQuality.unpriced', {
             count: props.delivery.unpricedCalls,

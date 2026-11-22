@@ -334,7 +334,8 @@ async fn propagate_request(
     // The routine claim needs no lookup: the token's signature is its authority.
     let attribution = Attribution {
         correlation_id,
-        routine_id: token.and_then(|token| token.routine_id),
+        routine_id: token.as_ref().and_then(|token| token.routine_id),
+        scheduler_run: token.as_ref().and_then(signed_scheduler_run),
         session_id: correlation.map(|(_, correlation)| correlation.session_id),
         scope: narrowest(
             correlation
@@ -352,6 +353,20 @@ async fn propagate_request(
             routine_id = attribution.routine_id.map(|id| id.to_string()),
         ))
         .await
+}
+
+/// The scheduler's proof a token signs: only beside the routine it names,
+/// and never on a code-mode credential, whose session is an agent's.
+fn signed_scheduler_run(token: &MacroApiToken) -> Option<crate::context::SchedulerRun> {
+    if token.routine_id.is_none() || token.agent_correlation_id.is_some() {
+        return None;
+    }
+    token
+        .scheduler_run
+        .map(|claim| crate::context::SchedulerRun {
+            run_id: claim.run_id,
+            revision: claim.revision,
+        })
 }
 
 /// The scope check for a service with no database to look a correlation up

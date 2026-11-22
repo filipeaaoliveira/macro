@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                f.run_id, f.round_seq, f.seq, f.place, s.role, f.path, f.start_line, f.end_line,\n                f.problem, f.why, f.blocks_anywhere, f.kind, f.follow_up_task_id, f.follow_up_key,\n                f.follow_up_commented, f.repeats_dropped, f.fix_status, f.dispute, f.ruling,\n                f.ruled_by\n            FROM factory_review_finding f\n            JOIN factory_step s ON s.run_id = f.run_id AND s.seq = f.seq\n            WHERE f.run_id = ANY($1)\n            ORDER BY f.run_id, f.round_seq, f.seq, f.place\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "round_seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "place",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "start_line",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "end_line",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "problem",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "why",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "blocks_anywhere",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "follow_up_task_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "follow_up_key",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
+        "name": "follow_up_commented",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "repeats_dropped",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "fix_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "dispute",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "ruling",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "ruled_by",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5a0c1ef4b80bdaf84a51d7e27f9506e937f5b2e45feceaec6d27921db2ad6c84"
+}

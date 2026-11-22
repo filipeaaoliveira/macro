@@ -46,6 +46,7 @@ use factory_records::domain::models::{
     Outcome, Role,
 };
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -59,6 +60,7 @@ use crate::domain::flow::StepName;
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
+use crate::domain::review_rounds::fix_answers;
 use crate::domain::setup::{RepositorySetup, SETUP_FILE, redacted};
 
 /// What the agent is told for a round of checks.
@@ -154,7 +156,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository + MergeQueueRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
 {
     /// Have the agent do `step`'s work, then run the repository's checks on
@@ -162,13 +164,17 @@ where
     /// agent's outcome when the work changed nothing or the base declares
     /// no checks it reaches, `done` once they pass, and [`RED`] when the
     /// last round failed, the rounds ran out of time, or the checks file
-    /// does not read.
+    /// does not read. When the work answers the Blockers of the review
+    /// round `answers`, what it says of each, fixed or disputed, is
+    /// recorded on them once it is done, before its checks: a retry that
+    /// finds a round of checks recorded has recorded it already.
     pub(super) async fn work_and_check(
         &self,
         step: &StepName,
         instructions: &str,
         outcomes: Vec<Outcome>,
         input: StepInput<'_>,
+        answers: Option<&ReviewRound>,
     ) -> Result<StepReport, BuiltInStepError> {
         let checks_until = Instant::now() + ATTEMPT_CHECKS_FOR;
         let repo = self.pull_requests.records();
@@ -194,6 +200,15 @@ where
             let work = asked?;
             if work.outcome != Outcome::done() {
                 return Ok(work);
+            }
+            if let Some(round) = answers {
+                repo.record_fix(
+                    input.key.run_id,
+                    round.seq,
+                    &fix_answers(round, &work.output),
+                )
+                .await
+                .map_err(records)?;
             }
             if let Some(ended) = self.first_round(input, &work.output).await? {
                 return Ok(ended);

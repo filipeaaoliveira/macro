@@ -30,13 +30,69 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{HarnessReader, SubagentInput, ToolFrame, generic, has_namespace, namespaced, raw};
-use crate::domain::model::{SubagentResult, ToolName};
+use crate::domain::model::{FailureNotice, FailureNoticeKind, SubagentResult, ToolName};
 
 /// The `_meta` namespace codex-acp writes under.
 pub const NAMESPACE: &str = "codex";
 
 /// Reader for codex-acp's conventions.
 pub struct Codex;
+
+/// The error classes Codex gives a turn its account's usage limit ended:
+/// codex-acp's (`usageLimitExceeded`) and the deprecated Rust adapter's
+/// (`usage_limit_exceeded`).
+const USAGE_LIMIT_EXCEEDED: [&str; 2] = ["usageLimitExceeded", "usage_limit_exceeded"];
+
+/// What codex-acp puts in the `data` of the error it answers a prompt with
+/// when Codex ended the turn in error: Codex's own message and the class of
+/// the error, beside JSON-RPC's bare `Internal error`. The deprecated Rust
+/// adapter wrote the class as `codex_error_info`.
+#[derive(Debug, Deserialize)]
+struct TurnErrorData {
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(rename = "codexErrorInfo", alias = "codex_error_info")]
+    codex_error_info: Value,
+}
+
+/// A turn Codex ended in error, as its prompt error's `data` tells it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexTurnFailure {
+    /// Codex's own message, which the error's message (JSON-RPC's bare
+    /// `Internal error`) leaves out; none when `data` has none.
+    pub message: Option<String>,
+    /// The failure in the person's terms, when it is one they can act on:
+    /// the usage limit of the Codex account the runtime is signed in with.
+    pub notice: Option<FailureNotice>,
+}
+
+/// The turn failure a prompt error's `data` describes, when it is codex-acp's
+/// (`{ message, codexErrorInfo }`): none for any other `data`, which another
+/// runtime's notice or debugging payload may be.
+pub fn turn_failure(data: Option<&Value>) -> Option<CodexTurnFailure> {
+    let data: TurnErrorData = serde_json::from_value(data?.clone()).ok()?;
+    let message = data
+        .message
+        .map(|message| message.trim().to_owned())
+        .filter(|message| !message.is_empty());
+    let usage_limit = data
+        .codex_error_info
+        .as_str()
+        .is_some_and(|class| USAGE_LIMIT_EXCEEDED.contains(&class));
+    let notice = usage_limit.then(|| FailureNotice {
+        kind: FailureNoticeKind::ProviderUsageLimit,
+        title: "Codex usage limit reached".to_owned(),
+        body: format!(
+            "{}The limit is on the Codex account signed in where this agent runs. Send your \
+             message again once it resets, or ask another agent.",
+            message
+                .as_deref()
+                .map_or_else(String::new, |message| format!("{message}\n\n"))
+        ),
+        link: None,
+    });
+    Some(CodexTurnFailure { message, notice })
+}
 
 /// `_meta.codex`, as far as the fold reads it.
 #[derive(Debug, Default, Deserialize)]

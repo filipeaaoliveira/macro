@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_review_finding\n                (run_id, seq, place, round_seq, path, start_line, end_line, problem, why,\n                 blocks_anywhere, repeats_dropped)\n            SELECT\n                $1, $2, f.place, $3, f.path, f.start_line, f.end_line, f.problem, f.why,\n                f.blocks_anywhere, f.repeats_dropped\n            FROM UNNEST(\n                $4::int[], $5::text[], $6::int[], $7::int[], $8::text[], $9::text[], $10::bool[],\n                $11::bool[]\n            ) AS f(place, path, start_line, end_line, problem, why, blocks_anywhere, repeats_dropped)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Int4Array",
+        "TextArray",
+        "Int4Array",
+        "Int4Array",
+        "TextArray",
+        "TextArray",
+        "BoolArray",
+        "BoolArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ce9749a7d20766a63d5e3b03329a33b45f3c5a9f5345147c2cb5b0a6e95c2228"
+}

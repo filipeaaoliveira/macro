@@ -102,6 +102,7 @@ fn failure(reason: RoutineFailureReason) -> &'static str {
         RoutineFailureReason::MaxTokens => "max_tokens",
         RoutineFailureReason::MaxTurnRequests => "max_turn_requests",
         RoutineFailureReason::RuntimeError => "runtime_error",
+        RoutineFailureReason::UsageLimit => "usage_limit",
         RoutineFailureReason::UnknownStopReason => "unknown_stop_reason",
     }
 }

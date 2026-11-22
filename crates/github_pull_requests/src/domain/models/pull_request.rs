@@ -831,6 +831,23 @@ pub struct GithubPullRequestHead {
     pub merged: bool,
     /// The commit its head branch is at.
     pub head_sha: String,
+    /// The commit its merge made on its base branch, once it merged: a
+    /// merge commit, the squashed commit, or the last commit rebased.
+    pub merge_commit_sha: Option<String>,
+}
+
+/// An open pull request as GitHub's pull request list names it: enough to
+/// list and link it, without its discussion or checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubOpenPullRequestItem {
+    /// Its number in its repository.
+    pub number: u64,
+    /// Its title.
+    pub title: String,
+    /// Its page on GitHub.
+    pub html_url: String,
+    /// Whether it is a draft.
+    pub draft: bool,
 }
 
 /// A request to merge one pull request on the user's behalf.

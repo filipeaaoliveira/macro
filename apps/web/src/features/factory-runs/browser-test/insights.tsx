@@ -348,6 +348,9 @@ function insightsFor(params: InsightsParams): RunInsights {
 /** The factory in memory: a read takes a moment, as over the network. */
 function createFixtureInsights(): InsightsContext {
   let failNext = FAIL_FIRST;
+  // The team's last self-improvement run was rejected, dismissing three
+  // failures, which the person may undo.
+  const [undoneAt, setUndoneAt] = createSignal<string>();
   return {
     insights: (params) => {
       const [state, setState] = createSignal<'pending' | 'error' | 'ready'>(
@@ -393,8 +396,31 @@ function createFixtureInsights(): InsightsContext {
         timeZone: params().timeZone,
         scorers: [],
         experiments: [],
+        agentRules: [],
         benchmarks: [],
         suites: [],
+        selfImprovement: {
+          repoUrl: 'https://github.com/macro/factory-definition',
+          enabled: true,
+          failuresThreshold: 25,
+          oldestDays: 7,
+          namer: 'admin',
+          pending: undoneAt() ? 4 : 1,
+          oldestPendingAt: '2026-11-05T09:00:00Z',
+          pendingBySource: [
+            { source: 'correctness', count: undoneAt() ? 4 : 1 },
+          ],
+          last: {
+            id: 'improvement-1',
+            state: 'closed',
+            failures: 3,
+            createdAt: '2026-11-01T09:00:00Z',
+            settledAt: '2026-11-02T09:00:00Z',
+            dismissed: undoneAt() ? 0 : 3,
+            dismissalUndoneAt: undoneAt(),
+            canUndoDismissal: !undoneAt(),
+          },
+        },
       }),
       updating: () => false,
       retry: () => {},
@@ -411,6 +437,11 @@ function createFixtureInsights(): InsightsContext {
       data: () => ['plan', 'reply'],
       retry: () => {},
     }),
+    undoDismissal: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      setUndoneAt(undoneAt() ?? new Date().toISOString());
+      return { ok: true, value: undefined };
+    },
   };
 }
 
@@ -573,6 +604,12 @@ function qualityFixture(params: QualityParams): QualityInsights {
       blockers: 14,
       newBlockers: 11,
       repeatedBlockers: 3,
+      resolutions: {
+        fixed: 4,
+        disputedUpheld: 1,
+        disputedDropped: 2,
+        dismissed: 0,
+      },
       byReviewer: [
         { name: 'correctness-reviewer', reviews: 16, blockers: 9 },
         { name: 'scope-reviewer', reviews: 16, blockers: 3 },
@@ -602,6 +639,7 @@ function qualityFixture(params: QualityParams): QualityInsights {
       steered: 1,
       manual: 2,
       measuredRuns: 10,
+      unmeasuredRuns: 0,
       tokens: {
         input: 820000,
         output: 96000,

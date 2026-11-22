@@ -993,6 +993,74 @@ fn a_prompt_error_with_unrelated_data_fails_its_turn_without_a_notice() {
     );
 }
 
+/// Codex's adapter answers a turn its account's usage limit ended with
+/// JSON-RPC's bare `Internal error`, Codex's message and the error's class in
+/// `data`: the fold keeps Codex's message and reads the class as the usage
+/// limit the person acts on.
+#[test]
+fn a_codex_usage_limit_fails_its_turn_with_codex_words_and_a_usage_limit_notice() {
+    let (prompt, _) = FAILED_PROMPT
+        .split_once('\n')
+        .expect("the fixture has two frames");
+    for class in ["usageLimitExceeded", "usage_limit_exceeded"] {
+        let key = if class.contains('_') {
+            "codex_error_info"
+        } else {
+            "codexErrorInfo"
+        };
+        let error = format!(
+            r#"{{"direction":"to_server","content":{{"type":"acp","jsonrpc":"2.0","id":"p","error":{{"code":-32603,"message":"Internal error","data":{{"message":"You've hit your usage limit. Try again at 3:00 PM.","{key}":"{class}"}}}}}}}}"#
+        );
+
+        let messages = fold(parse_log(&format!("{prompt}\n{error}")));
+
+        let agent = messages.last().expect("an agent message");
+        let Some(StopReason::Failed { message, notice }) = &agent.stop else {
+            panic!("the turn failed, got {:?}", agent.stop);
+        };
+        assert_eq!(
+            message, "You've hit your usage limit. Try again at 3:00 PM.",
+            "{class}"
+        );
+        let notice = notice.as_ref().expect("a usage limit notice");
+        assert_eq!(
+            notice.kind,
+            FailureNoticeKind::ProviderUsageLimit,
+            "{class}"
+        );
+        assert!(
+            notice.body.starts_with("You've hit your usage limit."),
+            "{class}: {}",
+            notice.body
+        );
+    }
+}
+
+/// Any other error Codex ends a turn with keeps Codex's message, with no
+/// notice: it is not one the person acts on outside the session.
+#[test]
+fn another_codex_error_fails_its_turn_with_codex_words_and_no_notice() {
+    let (prompt, _) = FAILED_PROMPT
+        .split_once('\n')
+        .expect("the fixture has two frames");
+    let error = concat!(
+        r#"{"direction":"to_server","content":{"type":"acp","jsonrpc":"2.0","id":"p","error":{"code":-32603,"#,
+        r#""message":"Internal error","data":{"message":"stream disconnected before completion","#,
+        r#""codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":null}}}}}}"#,
+    );
+
+    let messages = fold(parse_log(&format!("{prompt}\n{error}")));
+
+    let agent = messages.last().expect("an agent message");
+    assert_eq!(
+        agent.stop,
+        Some(StopReason::Failed {
+            message: "stream disconnected before completion".to_owned(),
+            notice: None,
+        })
+    );
+}
+
 /// The failure lands on whatever the agent had already said, rather than
 /// opening a second message beside it.
 #[test]

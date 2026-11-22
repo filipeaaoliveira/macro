@@ -327,7 +327,10 @@ async fn a_scheduled_run_tells_the_agent_which_routine_fired_and_on_what_schedul
         .run(
             &action,
             &mut handle,
-            RoutineRun::Scheduled { scheduled_for },
+            RoutineRun::Scheduled {
+                scheduled_for,
+                by_scheduler: true,
+            },
         )
         .await
         .unwrap();
@@ -566,6 +569,7 @@ pub(crate) struct CodeCall {
     pub dry_run: bool,
     pub acts_as: routine_program::CodeIdentity,
     pub routine_id: Uuid,
+    pub scheduler_run: Option<agent_correlation::context::SchedulerRun>,
 }
 
 /// Runs code steps from a script; succeeds with `null` once it runs out.
@@ -611,6 +615,7 @@ impl RoutineCode for Code {
             dry_run: run.dry_run,
             acts_as: run.acts_as,
             routine_id: run.routine_id,
+            scheduler_run: run.scheduler_run,
         });
         self.outcomes
             .lock()
@@ -824,6 +829,49 @@ async fn code_steps_act_as_the_agent_unless_the_routine_operates_as_its_owner() 
         assert_eq!(runs[0].acts_as, identity);
         assert_eq!(Some(runs[0].routine_id), action.id);
         assert_eq!(handle.run.unwrap().code_acts_as, Some(identity));
+    }
+}
+
+/// Code gets the scheduler's proof, the run's id at the routine's
+/// configuration revision, only on a run the scheduler started itself: never
+/// on Run Now, even one that consumed a due schedule.
+#[tokio::test]
+async fn only_a_run_the_scheduler_started_signs_its_proof_on_code() {
+    let scheduled_for = Utc::now();
+    for (firing, signed) in [
+        (
+            RoutineRun::Scheduled {
+                scheduled_for,
+                by_scheduler: true,
+            },
+            true,
+        ),
+        (
+            RoutineRun::Scheduled {
+                scheduled_for,
+                by_scheduler: false,
+            },
+            false,
+        ),
+        (manual(), false),
+    ] {
+        let code = Arc::new(Code::default());
+        let runner = Fixture::new(Agents::default())
+            .runner
+            .with_code(Arc::clone(&code), Arc::new(NoCodeUpgrades));
+        let mut action = action(json!({ "steps": [code_step("fire", "Fire it")] }));
+        action.configuration_revision = action.configuration_revision.next().unwrap();
+        let mut handle = ExecutionHandle::default();
+
+        runner.run(&action, &mut handle, firing).await.unwrap();
+
+        let runs = code.runs.lock().unwrap().clone();
+        let expected = signed.then_some(agent_correlation::context::SchedulerRun {
+            run_id: handle.action_id,
+            revision: 2,
+        });
+        assert_eq!(runs[0].scheduler_run, expected);
+        assert_eq!(runs[0].context["run"]["id"], json!(handle.action_id));
     }
 }
 

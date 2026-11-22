@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT r.definition_commit AS \"commit!\", r.created_at\n            FROM team_user tu\n            CROSS JOIN LATERAL (\n                SELECT run.definition_commit, run.created_at, run.id\n                FROM factory_run run\n                WHERE run.user_id = tu.user_id\n                    AND lower(run.definition_repo_url) = lower($2)\n                ORDER BY run.created_at DESC, run.id DESC\n                LIMIT 1\n            ) r\n            WHERE tu.team_id = $1\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "commit!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "6a21cd5c3f98abf289d8e0b30f2fca638ae5300eae93b90db4c0dce0a0ce6670"
+}

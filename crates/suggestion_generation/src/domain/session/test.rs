@@ -96,6 +96,7 @@ fn every_status_read_ends_the_turn_or_waits() {
         (RoutineFailureReason::MaxTokens, "max_tokens"),
         (RoutineFailureReason::MaxTurnRequests, "max_turn_requests"),
         (RoutineFailureReason::RuntimeError, "runtime_error"),
+        (RoutineFailureReason::UsageLimit, "usage_limit"),
         (
             RoutineFailureReason::UnknownStopReason,
             "unknown_stop_reason",

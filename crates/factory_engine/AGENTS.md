@@ -65,10 +65,12 @@ rather than waits on an answer), lighter:
 not pushed to their phone, one per entry and Run however often its Gate
 tells (`gate_owner::told_id`), and marked done in `factory_end_run`
 (no record says which told, so each visited entry whose Gate the Run's
-Flow makes notify-only, and none for a Run without a task, which sends
-none: `gate_owner::told_entries`). It is sent whatever the definition says, since the Gate
-exists only to tell the owner (`gate_owner::gate_told`); the worker also
-posts the notice to the task thread when that section is on. No built-in
+Flow makes notify-only: `gate_owner::told_entries`). It is about the Run's
+task, or, for a Run started without one, filed under the owner's own User
+as a waiting Gate's is (see below). It is sent whatever the definition
+says, since the Gate exists only to tell the owner
+(`gate_owner::gate_told`); the worker also posts the notice to the task
+thread when that section is on. No built-in
 Flow has one.
 
 An agent may ask the Run's owner a question mid-Step (`src/domain/questions.rs`)
@@ -218,7 +220,13 @@ bots fill it. The Run keeps it with its Agents (`definition_agents`);
 Definition keeps no Agents. The section governs bots. A call not in person
 acts as an agent (`acting_agent` for start, cancel and link, an
 `ActingAgent`, and for a start through a Benchmark suite or a routine
-firing an Automation, `program_agent`; `Answerer::Agent` for an answer): code in an agent session
+firing an Automation, `program_agent`, unless the scheduler's proof makes it
+the Automation's creator, see Automations; `Answerer::Agent` for an answer).
+A schedule or event Automation's firing that Macro's scheduler started
+itself needs no Standing Role for the Macro routine bot: it starts its Run
+as the creator. Any other run of its routine (Run Now, an edited routine, a
+routine writing as its owner) acts as that bot and is checked. Otherwise,
+code in an agent session
 (the correlation layer's session on a person's credential) acts as that
 session, and the service reads its bot (`StandingActRepository::session_bot`,
 the owner's sessions only); code in no session whose credential is signed
@@ -261,6 +269,66 @@ Run that kept an act from a bot in no session no longer reads there.
 Roll back no lower than that code once such an act is kept, or delete
 those rows (`session_id IS NULL`) first.
 
+Agent Rules (`src/domain/agents/rules.rs`) choose another first Agent for
+some Runs. A Factory Definition's `agents.json` may have a `rules` list:
+each rule has a `name`, the `role` it chooses for, what it matches (a `tag`
+of the Run's task, the `repository` the Run works on as `owner/name`, or
+both, all ignoring case) and the `agent` the Role's Steps start with. Rules
+are matched in the order listed, and the first that matches a Role
+chooses; a rule matches only what it names, so one naming neither does not
+read. `start_run` matches them once, before the workflow starts, beside the
+arms (`AgentDefinition::chosen_by_rules`), and keeps the rule that chose
+each Role (`factory_run_agent_rule`, `EvaluationRepository::record_agent_rules`);
+a Run whose rules are not kept does not start. The task's tags are read
+then, as the owner sees them (their own and their team's tag sets,
+`TaskDirectory::task_tags`), only when a rule names a tag; tags that cannot
+be read are taken as none, so no tag rule matches and the Run starts, as
+for its Project, and the Run keeps that they went unread
+(`factory_run_task_tags_unread`), which the Run API shows as
+`taskTagsUnread`, so a silent default is not read as "no rule matched". The workflow never matches: `SessionAgent` reads the kept
+choice with the arms' (`RunAgents::ruled`), so a retry, a replay, a tag
+changed later or a changed Definition does not change a Run under way, and
+no workflow code changed (no patch marker). The order a Step takes its
+Agents in is the arm's choice, then the rule's, then the Role's own, each
+once; the Role's own still take the Step on lack of quota, as before, and
+a rule's Agent the Run's Definition no longer has is passed over and
+logged, as an arm's. An arm comes before a rule because an Experiment
+measures its arms on the Runs it splits: a rule that moved an arm's Runs
+onto its own Agent would count them as fallen back and compare nothing. So
+the start keeps no rule for a Role an arm chose for, and the session order
+only keeps a Run that kept both on its arm. A rule is the Definition's
+standing default for a kind of task; an arm with no choice for the Role
+(an Experiment's control) leaves the rule in place. A Benchmark trial and
+a self-improvement Run take no rules, as they take no arms: a trial runs
+on its suite's configuration only. A rule's Agent must be one its own
+Role lists (`for_role`; `RuleAgentOutsideRole`): tags are set by people,
+so a tag edit must never route a Run onto an Agent kept for something
+else, such as a bot only a Standing Role lists to answer Gates. A rule
+only moves one of the Role's Agents first. Its Agent is also checked where
+the Definition is read as an arm's is (`evaluation::check_choices`,
+refused as `agents.json: agent rule {name} gives role ...`), so any Agent
+an arm could not take is refused for a rule too. A rule naming a Role the
+Definition does not fill, two rules of one name, a rule matching the same
+Runs for the same Role as an earlier one (`RuleShadowed`, which could
+never choose), an empty or too long tag, a repository not `owner/name` as
+a Run keeps it (`CodeRepository::parse`: no `.git` ending, no `.` or `..`
+segment, no trailing slash), and more than `MAX_AGENT_RULES` rules do not
+read, in a Definition and in `factory_definition_check` alike. `FACTORY_AGENTS` takes no rules
+(`RulesOutsideDefinition`): the service holds no deployment agents at a
+Run's start. The Run API lists the kept rules as `agentRules` (Role,
+rule, Agent); the web Run view shows them under the Run's summary.
+
+Deploy order and rollback for Agent Rules: as for Standing Roles, a worker
+from before them reads a Run's kept Agents with `deny_unknown_fields`, so
+it fails every agent Step of a Run that kept a `rules` list. Roll every
+service and worker task onto this code before any team's Definition adds
+the list. `factory_run_agent_rule` (`20261120020000_factory_run_agent_rule.sql`)
+and `factory_run_task_tags_unread`
+(`20261120020100_factory_run_task_tags_unread.sql`) are new tables, so
+code from before them ignores them; rolling back leaves
+its rows unread, and a Run that kept a `rules` list fails its later agent
+Steps on the old worker, as above.
+
 A person's Queue is their Runs waiting on them at a Gate or an agent's
 question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
 Orchestrator Definition, or a Project's own, may set a Queue limit
@@ -301,8 +369,10 @@ agent's question (a reviewer's too) or from the owner's `retry` after
 `no_result`, the workflow asks the worker
 (`factory_check_budget`, behind the `factory-token-budget` patch marker,
 for at most two minutes): the worker reads the sessions of the Run's
-Steps (`step_sessions`, each once) and sums what the usage log recorded
-for them as the Run's owner (`ai_usage`'s `SessionUsageReader`), as
+Steps (`step_sessions`, each once, those a Step left for a new one, as
+when its session was lost after its agent worked in it, included) and
+sums what the usage log recorded for them as the Run's owner
+(`ai_usage`'s `SessionUsageReader`), as
 Insights counts tokens: input, output, and input read from or written to
 the prompt cache, all of which the model bills, so a Run's spend is the
 one Insights shows for it. A Run that used its budget or more keeps why
@@ -328,8 +398,10 @@ definition is quiet.
 
 The budget applies only to measured runtimes: what an agent's model calls
 recorded in the usage log with its session's id. An agent that records
-none (a local or self-hosted runtime) reads as 0 used, and its Run is
-never stopped; when a Run has Step sessions and none recorded any usage,
+none (a local or self-hosted runtime, as Codex or Claude Code through
+macrod on its owner's own login) reads as 0 used, and its Run is never
+stopped; a Run whose Steps ran on both counts only the measured ones' use
+against its budget. When a Run has Step sessions and none recorded any usage,
 the Run API says so (`tokenBudget.measured` false) and the Run view shows
 the budget as not measured. Usage the factory spends outside the Run's
 Step sessions is not counted: the Gate model's reading of the owner's
@@ -350,16 +422,26 @@ unchecked, and a newer worker replays that history without the marker.
 `domain/insights.rs`) sums up how the caller's own Runs went over a period of
 at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step
 durations, Gate waits and answers, the entries that failed or were revisited
-with their newest Runs, and the tokens each agent Step's session used, read
-from the usage log by session id (`ai_usage`'s `SessionUsageReader`). It
+with their newest Runs, and the tokens each agent Step's sessions used
+(its current one and those it left for a new one, the same sessions the
+token budget counts), read from the usage log by session id
+(`ai_usage`'s `SessionUsageReader`). A Step counts once in the agent and
+measured Steps however many sessions it worked in (`StepSessionRef::seq`),
+and is measured when any of them recorded usage; a session counts its
+tokens once for its entry in its Run, however many Steps shared it. It
 reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
 zone or Flow name is 400.
 
 `GET /insights/quality?from=&to=&timeZone=&flow=&repository=`
 (`domain/quality.rs`) reads the same Runs, of one repository
 (`owner/name` or its URL) or of all, for CI health, review quality, cost per
-merged pull request and the autonomy rate. Each wait of `ci` that ends
-`green`, `red` or `timeout` keeps the jobs that finished on its head
+merged pull request and the autonomy rate. The autonomy rate is the share
+of Runs that merged with no person stepping in (no Gate a person answered,
+no Step they steered, no manual end) and were not found flawed, of the
+Runs whose work ended on its own: as the success rate does, it leaves out
+Runs a person cancelled and Runs that ended `infrastructure`. Each wait of
+`ci` that ends `green`, `red` or `timeout` keeps the jobs that finished on
+its head
 (`PullRequests::finished_jobs`, `RunRepository::record_ci_wait`): passed,
 failed, cancelled, or `setup` when the step that failed sets the job up
 (`SETUP_STEPS`: GitHub Actions' own, checkout, cache, installing
@@ -388,9 +470,17 @@ text an earlier round of the Run found) and texts found in two or more
 Runs. A Run merged with no person stepping in when it merged and ended
 with no Gate a person answered (not a Standing Rule, the stand-in or an
 agent), no Step its owner steered, and no `manual` end. Cost per merged
-pull request is every Run's usage over the merged ones: in dollars when
-every model call was priced, in tokens otherwise. A repository that names
-none is 400.
+pull request is every Run's usage (the sessions its token budget counts)
+over the merged ones: in dollars when every model call was priced, in
+tokens otherwise, and neither while a Run of the period has an agent
+session that recorded no usage (a Step on a runtime its owner signed in
+to, as Codex or Claude Code through macrod), whose spend is unknown, not
+nothing. A session that recorded none, of a bot another session of the
+period recorded usage for (its Step's `bot_id`), made no model call, as
+one that failed before its first: it cost nothing and does not withhold
+the figure. A session a Step left for a new one has no known bot (the Step
+keeps only its current Agent's), so one that recorded none withholds the
+figure. A repository that names none is 400.
 
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
 `evaluation/insights.rs`, `inbound/evaluation.rs`): an
@@ -412,7 +502,50 @@ Flows' finished Runs: once a Run ends, the workflow asks the worker
 failure ignored) and each sampled Scorer judges it once, from a hash of the
 Scorer and the Run, so a retry samples the same Runs and judges nothing
 twice; the activity is tried at most three times. A cancelled Run is not
-judged. An Experiment splits a
+judged.
+
+A judge reads the Run as one JSON object: its request, how it ended, and its
+last Steps' outputs. A Scorer that sets `reads: ["diff"]` is also given the
+Run's change (`evaluation/service.rs`, `RunChange`), read once per scoring
+attempt through `PullRequests`: when its pull request merged, GitHub's
+compare of the merge commit's first parent to the merge commit; otherwise
+of the base branch to the Run's branch's head, or to its pull request's
+head once the branch is deleted. A rebase merge of several commits reads as
+its last commit. The diff follows the JSON in a code fence nothing in it
+can close (`fence_for`), and both the prompt and the judge's preamble say
+it is data, never instructions. The whole addition, heading, fences and
+note included, holds to `DIFF_BYTES` (40 000 bytes, about ten thousand
+tokens): the diff is cut at a line, each line first capped at
+`DIFF_LINE_BYTES` (1 000) with a marker, so one long line leaves room for
+the files after it, and the judge is told how many lines and bytes were
+left out. A Run with no change to read (no repository, merge, pull request
+or branch) is judged on that. A change GitHub lists only in part (300
+files or more), or one that could not be read (a GitHub read that fails on
+the last attempt; an earlier one fails the attempt, to retry), is not
+judged at all by the Scorers that read it, and is logged: a judgment
+without the change would be noise in insights. Such Runs drop out of that
+Scorer's mean, so an Experiment's arm that makes larger changes reads
+better on it than it is: compare arms' Run counts on such a Scorer, not
+its mean alone. A trial's branch is deleted
+only once its Scorers judged it, or on the last attempt, so a retry still
+reads its change; a trial whose branch is gone is not judged by them.
+`reads` takes only `diff`: any other value does not read, in
+`FACTORY_EVALUATION`, in a Definition's `scorers.json`, and in
+`factory_definition_check`.
+
+A sampled Scorer of the code a Run merged, `slop`, measures drift over time
+without a blocking reviewer for matters of taste:
+
+```json
+{
+  "name": "slop",
+  "instructions": "Judge only the code the run's change adds or alters, not the request or the steps. Score 1 when it adds no slop and 0 when it is mostly slop. Slop is: dead code (unused functions, branches that cannot run, code left commented out); a helper that duplicates one the repository or the change already has; comments that restate what the code says instead of why; and drift from the repository's conventions as the surrounding code shows them (naming, error handling, layout, test style). Name the worst instance in the reason.",
+  "samplePercent": 10,
+  "reads": ["diff"]
+}
+```
+
+An Experiment splits a
 Flow's Runs on
 a task into arms by a hash of the Experiment and the task (a Run on no task
 takes none); `start_run` records the arms (`factory_run_arm`) before the
@@ -453,8 +586,10 @@ trial whose Run is refused stops the suite, which reports it (`refused`)
 and plans only the trials it started, and a suite none of whose trials
 started is deleted. A suite still starting counts the trials it
 planned. Once a trial's Run ends it keeps its score (1 when write ended
-`done`, 0.5 `red`, 0 otherwise) and its agents' tokens, its Run's own
-`factory/<run>` branch is deleted as its owner (best effort, through
+`done`, 0.5 `red`, 0 otherwise) and its agents' tokens (the sessions its
+Run's token budget counts, `ScoringSubject::sessions`), its Run's own
+`factory/<run>` branch is deleted as its owner once its Scorers judged it,
+or on the scoring's last attempt (best effort, through
 `PullRequests::delete_run_branch`, which takes the Run, never a branch
 name; one found missing counts as deleted), and, unless it was cancelled, the Scorers
 its Benchmark names judge it into the trial's own record. A trial whose Run
@@ -537,7 +672,8 @@ A Run ends `infrastructure`, not `failed`, when it fails for a machine, quota
 or network reason rather than its work. Only what is surely the factory's
 counts; when unsure, the failure is the work's (`workflow/work.rs`,
 `work_failure`). A Step's work failed for infrastructure when every Agent of
-its Role was out of quota (`StepError::OutOfQuota`, type
+its Role was out of quota, or the usage limit of its Agent's own provider
+account ended a turn that did work (`StepError::OutOfQuota`, type
 `FactoryInfrastructure`), or when it timed out because its worker went
 quiet (`Heartbeat`) or no worker took it (`ScheduleToStart`); an attempt
 that ran past its own time (`StartToClose`) may be an agent slower than its
@@ -616,10 +752,49 @@ last is always asked. Neither the harness nor billing tells ahead of a
 session whether a quota is used up, so recovery is found by asking again
 once the cool-down passed: a start forgets the refusal, another refusal
 remembers it anew, and a skip never renews it. The memory is each
-worker's own, and a restart forgets it. An attempt
-prepares, opens and prompts only the session the Step works in now, so an
-overlapping attempt never prompts a session handed on: it deletes the one
-it opened and goes on in the Step's current session. Each session keeps the
+worker's own, and a restart forgets it. A turn the usage limit of its
+runtime's own provider account ended (`RoutineFailureReason::UsageLimit`:
+the routine status reads it from a failed turn the runtime classified as
+`ProviderUsageLimit`, as Codex's adapter's error does, below) is out of
+quota too (`AgentFailure::out_of_quota`), and remembered as a refusal is.
+A first turn that ended so before calling any tool (`RoutineSessions::activity`)
+changed nothing: its session is deleted and the next Agent of the Role
+takes the Step in a new session, the Agent recorded passed over as
+`usage_limit` (`USAGE_LIMIT`). One that called a tool, or whose activity
+cannot be read, or with no Agent after it, ends the Step out of quota
+(`StepError::OutOfQuota`), so its Run ends `infrastructure` rather than
+`failed`.
+
+A Role runs on Codex as on any runtime (`docs/runbooks/factory-codex-role.md`
+sets one up on a bench): its Agent's `bot` is the agent of a machine whose
+macrod runs Codex (`macrod service --agent codex`, the
+`@agentclientprotocol/codex-acp` adapter over the installed `codex` CLI,
+signed in with its owner's own login), and its `model` one `codex` lists
+(`gpt-5.5`), set on the session as Claude Code's is. Its sessions open,
+take the Step's prompt, reach Macro's tools through the MCP servers macrod
+forwards, and hand back with `macro.factory.handBack`, as Claude Code's
+do; its turn's end, no result, last message and Step Terminal are read
+from the same session history. The adapter answers a turn Codex ended in
+error with JSON-RPC's bare `Internal error` and Codex's message and error
+class in `data` (`{ message, codexErrorInfo }`; `codex_error_info` from the
+deprecated Rust adapter): the session's fold keeps Codex's message, and
+reads `usageLimitExceeded` as a `ProviderUsageLimit` notice
+(`agent_fold`'s `harness/codex.rs`), so the Step is out of quota as above.
+Codex's cloud agent (`bot_id::CODEX_BOT_ID`) cannot take a Step: its
+sessions work in a cloud environment of their own and are handed no Macro
+tools, so they never hand back. An agent definition whose work Roles list
+an Agent on it does not read: `FACTORY_AGENTS` stops the service, and a
+Definition's `agents.json` is refused, each naming the Agents on it
+(`AgentDefinitionError::CloudCodex`). An Agent on it that only a Standing
+Role lists reads: it takes no Step, so nothing waits on it. An Experiment
+arm or a Benchmark configuration may not give a Role such an Agent
+(`check_choices`, `EvaluationDefinitionError::CloudCodexAgent`): the
+arm's Definition or `FACTORY_EVALUATION` does not read, and the suite does
+not start. Neither a Codex nor a Claude Code Agent signed in with its
+owner's own login records token use, so their Steps are unmeasured
+(below). An attempt prepares, opens and prompts only the session the
+Step works in now, so an overlapping attempt never prompts a session
+handed on: it deletes the one it opened and goes on in the Step's current session. Each session keeps the
 bot that runs it, so a stop or a release never depends on the agent
 definition; a session claimed before Steps recorded their Agent and bot is
 of the first Agent of its Role. A Step whose Agent its Role no longer lists
@@ -771,8 +946,9 @@ on from. A later prompt refused for lack of quota is not passed to another
 Agent, since the work is in its session: the Step ends `red`, with an open
 round ended failed saying the quota ran out, and the round is kept as
 ended by it (`quota_ran_out`), so a retry ends the Step the same way
-without asking again. A quota that runs out while the agent works on a
-turn is the session's failure, and fails the Step as any other. The agent's work and all
+without asking again. A usage limit that ends the agent's turn on a later
+prompt is out of quota the same way: the Step ends `red`, the round ended
+by it (`quota_ran_out`). The agent's work and all
 rounds run in the Step's one activity: waiting for them stops
 `ROUNDS_END_BY` (105 minutes) after the Step started, short of its two
 hours, and the Step ends `red` saying so, with a round still open ended
@@ -984,7 +1160,39 @@ data: no `<` or `>`, code fence or heading line (ATX or setext) left in it,
 paths included, cut to `BRIEF_BUDGET`. Reviewers' outputs reach every later
 Step's history fenced the same way. A finding's path must be a plain path:
 no control character, backtick or angle bracket. An answer that never read
-is not carried to the next round. In `code`, the review panel
+is not carried to the next round. The fix ends its text with a fenced `json` block that
+says, per Blocker by its number in its brief, `fixed` or `disputed` with a
+`reason` (`review_rounds/fix_answer.rs`); once its work hands back `done`,
+before its checks, that is kept on the Blockers (`fix_status`, `dispute`, cut
+to `MAX_DISPUTE_BYTES`, 2 KiB). A Blocker it leaves out, a dispute with no
+reason, a block that does not read and an answer that never read are
+`fixed`. A reason is kept on one line, with no NUL or other control
+character. In the next round's brief every carried Blocker is listed
+first, within `BRIEF_BUDGET`; the reasons follow in a budget of their own
+(`DISPUTE_BUDGET`), each escaped as findings are and then cut to 2 KiB
+(`fit_findings`), so no reason pushes a Blocker out. The reviewer whose Role
+found the Blocker (the round's first, for a finding of no Role) rules on
+each dispute whose reason the brief carries: it lists it again with
+`previous`, and upholds it, or names it in `"dropped"`, and it blocks
+nothing (`ruling`, by its Step, `ruled_by`). A dispute it does neither for,
+or whose reason the brief had no room for, is upheld, and a carried
+Blocker the brief had no room for stands too: the engine adds each to that
+reviewer's answer, blocking wherever it is, so neither a dispute nor a lack
+of room passes a round. A reviewer that drops a number it does not rule
+on, or one it also lists again, is asked again. A new finding by the
+reviewer that dropped a Blocker, in a later round of the visit (the
+entry's rounds since its last reset), at lines that meet the dropped one's
+and with the same problem once case, punctuation and spacing are set aside,
+is kept `dismissed` (`repeats_dropped`) when it is in the diff under review:
+it blocks nothing. Outside the diff it is a follow-up as any other. A
+finding with no lines, or a dropped Blocker with none, dismisses nothing,
+and nothing is dismissed in the round of the drop. No Standing Rule merges
+a Run with a dismissed finding (`any_dismissed`): its merge Gate waits for
+a person. The Run API counts per Run the Blockers fixed (as the fixer
+says), disputed and upheld, disputed and dropped, and its findings
+dismissed (`blockerResolutions`); Insights' review quality counts them over
+its Runs (`resolutions`). None of this is in the workflow: the fix, the reviewers
+and the round's close are activities, so Runs in flight replay as before. In `code`, the review panel
 runs at most `max_visits` rounds (three, or `FACTORY_REVIEW_ROUNDS`, which
 the service writes into the Flow a Run starts with). Rounds and their
 findings show on the Run (`reviewRounds` in the Run API), numbered across
@@ -1042,8 +1250,10 @@ its Flow does not route above `merge` would fall through to the merge):
   it. Then the repository's checks round runs on the
   branch, as for `write` and `fix`. It ends `done` only when the branch's
   head is a merge commit whose parents are exactly, in order, the Run's
-  reviewed head and the base's commit the update asked GitHub to merge
-  (`PullRequests::commit_parents`, GitHub's git database), the branch's
+  reviewed head and the base's commit the update asked GitHub to merge,
+  that GitHub made itself: committed as its `web-flow` account with a
+  signature GitHub verified (`PullRequests::commit_made`,
+  `CommitMade::made_by_github`), the branch's
   head is still that merge, and the checks passed: only the base came in,
   so the Run goes back through `ci` to the merge Gate, which asks again,
   and the merge becomes the reviewed head, for the next update to merge
@@ -1059,9 +1269,9 @@ its Flow does not route above `merge` would fall through to the merge):
   merged the base itself), a person's resolution GitHub merged a moved
   base into after their `retry`, a branch that already held its base when
   the update started, and a Run that keeps no reviewed head (its review
-  passed before the factory kept one). A merge made by hand with exactly
-  those two parents and changes of its own is the one case the parents do
-  not tell apart from GitHub's. `conflict` when the writer could not resolve it, or what it
+  passed before the factory kept one), and a merge made by hand with
+  exactly those two parents and changes of its own: it may name GitHub's
+  email as its committer, but cannot sign as GitHub. `conflict` when the writer could not resolve it, or what it
   pushed does not hold both the base's head and the branch's former head,
   opens the entry's Gate (no kind, so no rule, stand-in or Orchestrator
   answers it): `stop`, or `retry` once a person resolved it on the branch.
@@ -1090,7 +1300,8 @@ its Flow does not route above `merge` would fall through to the merge):
   again, so the Runs behind it do not merge first and leave it behind
   again. A Run past that goes on without it, and gets its place back when
   it returns. One Run of a base merges at a time: its turn
-  (`MergeQueueRepository::take_merge_turn`, an advisory lock per base) is
+  (`MergeQueueRepository::take_merge_turn`, an advisory lock per base,
+  taken in a transaction that touches no factory table) is
   taken before it reads the Runs ahead and held through GitHub's merge,
   so a Run that comes back to its place just as another passed its turn
   waits for that merge, then finds its head behind the base, rather than
@@ -1468,10 +1679,11 @@ the ingress never creates or pushes it, and the egress drops a push queued
 before the withdrawal; it then marks it done again in case it was created
 in between. So the worker closes only notices that may have gone out
 (`gate_owner::notice_may_be_out`, `stand_in_notice_may_be_out`,
-`told_entries`): none on a quiet Run, none for a Gate a rule or the
-stand-in answered or while the stand-in's answer stood, no notify-only or
-stand-in notice for a Run without a task, and a notify-only notice only for
-the entries the Run's Flow gives a notify-only Gate. A notice marked done
+`told_entries`): no waiting notice on a quiet Run, none for a Gate a rule
+or the stand-in answered or while the stand-in's answer stood, a stand-in
+notice only for a Gate the stand-in answered, and a notify-only notice only
+for the entries the Run's Flow gives a notify-only Gate, with a task or
+without one. A notice marked done
 leaves no row; one closed before the ingress created it leaves one small
 row for good: only the rare notice that lost that race, at most one per
 Gate, notify-only entry and stand-in answer of a Run. A Gate a
@@ -1479,13 +1691,21 @@ Standing Rule or the stand-in answers was never left to a person, so it
 sent no such notification. `GET /runs/waiting` lists the caller's Runs
 waiting at an unanswered Gate, whatever the definition says.
 
-A Run started without a task files its notice under the owner's own User
-entity. The inbox lists a User's notices only to that user (Soup's
-`user_gate`), each such Run on a row of its own (`notification_inbox`'s
-`place_about_the_viewer`), so the notice reaches the owner in the inbox as
-well as live and by push, opens the Run from there, and is marked done or
-withdrawn as a task's is. Its Gate also shows in "Waiting on you" (`GET
-/runs/waiting`), which lists every waiting Run, with a task or without.
+A Run started without a task files its notices under the owner's own User
+entity: a waiting Gate's, a notify-only Gate's and the stand-in's, under
+the same ids as a Run on a task's, which the notification service keeps
+once (`ON CONFLICT DO NOTHING`). The inbox lists a User's notices only to
+that user (Soup's `user_gate`), each such Run on a row of its own
+(`notification_inbox`'s `place_about_the_viewer`), so the notices reach
+the owner in the inbox as well as live (and, for a waiting Gate, by push),
+open the Run from there, and are marked done or withdrawn as a task's are,
+the lighter ones once the Run ends at the latest. Such a Run's waiting Gate
+also shows in "Waiting on you" (`GET /runs/waiting`), which lists every
+waiting Run, with a task or without. A Run without a task that was already
+running when Runs without a task began sending the lighter notices sent
+none before then, so it closes notices it never sent: each leaves one
+harmless withdrawal row, at most one per Gate, notify-only entry and
+stand-in answer.
 
 A team's Orchestrator Definition also has an owner section
 (`owner_gates`, `ownerGates` in `PUT /settings/standing-rules` and its
@@ -1640,7 +1860,8 @@ why, none of them when it did not answer), which the
 Run view shows the owner. A retry returns the answer kept first, with what
 is left of its window. While the window is open the owner is told, lightly,
 whatever the definition says (`gate_owner::stand_in_notice`): a
-notification about the Run's task, of the waiting Gate's kind flagged
+notification about the Run's task (for a Run without one, filed under the
+owner, as above), of the waiting Gate's kind flagged
 `notifyOnly` as a notify-only Gate's, not pushed to their phone, saying
 what the stand-in answered (by the answer's label,
 `gate_owner::answer_label`, which mirrors the web app's `flowWordLabel`:
@@ -1649,7 +1870,7 @@ window closes (the Run view says when),
 one per Gate (`gate_owner::stand_in_id`, apart from the Gate's waiting
 notice); it is marked done once the window closes, the owner answers in
 it or replies in it (words asked back end the window too), or the Run
-ends. A Run with no task tells no one. Run insights count neither its
+ends. Run insights count neither its
 answers nor Rule Answers.
 
 A notice is sent through the notification ingress, a queue, while it is
@@ -1731,20 +1952,38 @@ triggers:
   signed for it (`agent_correlation::context::current_routine`, never the
   body) and fires the Automation of that routine only for its creator.
   A webhook (which carries no login) fires it as its creator, unchecked by
-  Standing Roles. A routine the creator switched, in person, to write as
-  its owner signs no bot, so its runs fire as the creator unchecked too;
-  this is a known limit (a program can Run Now such a routine). A routine run
-  for a bot or in an agent session fires it as that agent
-  (`program_agent`): under a Definition with Standing Roles its bot must
-  fill one that allows `start`, else the firing is skipped as `refused`;
-  the Run keeps the agent as its start. That includes the schedule and
-  events: the routine is made as an `Agent` routine, so the scheduler signs
-  its code step for the Macro routine bot (`MACRO_NEW_BOT_ID`,
-  `00000000-0000-0000-0000-00000000a2a2`), and a Run Now or edited routine
-  code carries the same claims, so they are not told apart; a person's Run Now is checked like the schedule. Under Standing
-  Roles, to keep schedule and event Automations firing, give that bot an
-  Agent in a Standing Role that allows `start`. Known limit, with a
-  follow-up: let only the scheduler's own firing act as the creator. A
+  Standing Roles, through its own secret, never through a routine. The
+  routine is made as an `Agent` routine, so the scheduler signs its code
+  step for the Macro routine bot (`MACRO_NEW_BOT_ID`,
+  `00000000-0000-0000-0000-00000000a2a2`). A run the scheduler started
+  itself (a schedule its dispatch found due, or a watched event; never Run
+  Now) also signs the scheduler's proof
+  (`agent_correlation::context::current_scheduler_run`, the token's
+  `scheduler_run`): the run's id and the routine's configuration revision,
+  which every change to the routine, by anyone, moves. The Automation keeps
+  the revision the factory last wrote the routine at
+  (`factory_automation.routine_revision`: on making it, and on switching it
+  on, which writes the whole routine back, `AutomationTriggers::rewrite`).
+  Only a firing whose proof names this run (its key is the run's id) at
+  that revision, signed for the Macro routine bot, fires it as its creator,
+  unchecked by Standing Roles, with no Role for that bot
+  (`routine_acting`); the firing key makes a proof fire once. Any other run
+  fires it as an agent (`program_agent`): one for another bot or in an
+  agent session as that agent, whatever proof it carries; Run Now (by a
+  person or an agent), a run of a routine changed since, a proof of another
+  run, and a run that signs no bot (a routine switched to write as its
+  owner) as the Macro routine bot. Under a Definition with Standing Roles
+  that agent must fill one that allows `start`, else the firing is skipped
+  as `refused`; the Run keeps the agent as its start. An Automation made
+  before the revision was kept has none: its routine's firings act as the
+  Macro routine bot until its creator switches it off and on. A routine the
+  scheduler's SDK code upgrade rewrote keeps its revision, but its runs carry
+  no proof (`code_rewritten`): code a model rewrote, from a prompt that can
+  hold team-written task content, is no longer the factory's, so its
+  firings act as the Macro routine bot until the creator switches the
+  Automation off and on. The firing key must be the proof's run id exactly
+  as Macro writes it (lower-case, hyphenated): another spelling of the same
+  id is another firing, so it is not the scheduler's own. A
   routine the scheduler refuses (an invalid cron, event routines the
   creator may not have, no linked GitHub account) takes its Automation
   with it, and the refusal says why (400). Only people's actions start
@@ -1757,7 +1996,10 @@ triggers:
   (`own_branch`). A delivery that names no branch, such as a comment, is
   not told apart. The routine is named and described as managed by the
   factory; the Routines page still shows and edits it like any other, and
-  an edit there is not read back.
+  an edit there is not read back: it moves the routine past the
+  Automation's revision, so its firings act as the Macro routine bot until
+  the creator switches the Automation off and on, which writes the routine
+  back.
 - `webhook` is fired by `POST /automations/{id}/webhook`, which carries no
   login: the call is signed with the Automation's secret (shown once, when
   it is made) as Macro signs its own webhooks (`webhook_signature`:
@@ -1821,7 +2063,18 @@ key, ...) does not read. An admin of the team names it, in person, with `PUT
 `factory_team_definition`), which reads it first as them and refuses one that
 does not read (400 `invalidDefinition`, naming the file and the problem, or
 `unreachableDefinition`); `GET` reads it at its head as the caller and says
-why it does not read (`problem`). While a team names one, `POST /runs`, `GET
+why it does not read (`problem`). It also names the commit the newest Run of
+the team's members started under it read (`newestRun`,
+`RunRepository::newest_definition_read`), shows read-only what the
+Definition holds at that commit, or at its head when no Run read it yet or
+that commit does not read as the caller reaches it, for any reason (not
+linked to GitHub, the commit gone, GitHub down or limiting them: logged,
+never the setting's failure; none when the head does not read either)
+(`contents`: Flows with their entries, Roles with their Agents, Standing
+Rules and Scorers), and lists the repository's
+open pull requests (`openPullRequests`, at most
+`DEFINITION_PULL_REQUESTS_LISTED`; null when GitHub fails to list them,
+which does not fail the setting). While a team names one, `POST /runs`, `GET
 /flows` and an Automation's check read it as the Run's owner at the commit its
 default branch is at (`PullRequests::branch_head`, then `file_text` at that
 commit; `service/definition.rs`): the Run walks the Definition's Flow of that
@@ -1958,7 +2211,23 @@ later one by an agent does not undo it, so an agent's cancel sent long after
 still leaves the person's earlier rejection standing); a cancel by
 an agent, a bot under a Standing Role, an internal caller or a program only
 means the Run did not finish, so its failures are pending again. Dismissed failures
-never start another Run; new failures, of the same Scorer too, count. A pull request a person
+never start another Run; new failures, of the same Scorer too, count.
+When the rejection was of the fix and not of the failures,
+`POST /self-improvements/{id}/undo-dismissal` (`EvaluationService::undo_dismissal`,
+in `domain/evaluation/insights.rs`) sends the failures it still holds
+dismissed back to pending, where they count toward the next Run's
+thresholds at the team's next Run end, after the pause the rejection
+started. Only a current admin of the team who named its Definition or
+owns the improvement's Run (who could reject it in Macro) may, as a
+self-improvement Run starts only for an admin namer: a namer or Run owner
+made a member may not. They undo in their own signed-in session and never
+from an agent's account (403 otherwise; 404 for no improvement of their
+team, 409 for one that dismissed nothing). It is kept once with who and
+when, so a repeat answers the first (`restored` 0) and never takes back
+failures a later improvement holds. Nothing kept needs forgetting: the
+worker keeps only the thresholds for `THRESHOLDS_KEPT_FOR`, and reads the
+pending failures afresh at each Run end. Insights show the last improvement's `id`, `dismissed`,
+`dismissalUndoneAt` and whether the caller `canUndoDismissal`. A pull request a person
 merges or closes after its Run ended is seen only at the team's next Run's
 end. Pending failures are matched to the Definition's repository ignoring
 case. `GET /insights/evaluation` shows the team's self-improvement
@@ -2246,8 +2515,10 @@ Definition.
   back first (`infrastructure` to `failed`, `flawed` to `success` with its
   flaw columns cleared), or the older code fails to read them.
 - Known limits of `infrastructure`: an agent whose provider's usage limit
-  ends its turn mid-way (`SessionAgentError::TurnFailed`) cannot be told
-  from any other failed turn, and a round of checks that ends red because
+  ends its turn mid-way is told from any other failed turn only when its
+  runtime classifies it (Codex's adapter, a cloud agent's notice): Claude
+  Code's adapter does not yet, so its usage limit fails the Step as any
+  failed turn, and a round of checks that ends red because
   the fixer's quota ran out (`Red::QuotaRanOut`) is the Step's outcome, not
   a failure of its work: both still end the Run `failed` when the Flow
   routes them there. An edge the other way: when an earlier attempt's
@@ -2292,9 +2563,25 @@ Definition.
 - Renaming or removing an Agent while its Steps run fails their retries
   (`UnknownAgent`: its model and instructions are gone), though stops and
   releases still reach their sessions through the recorded bot.
-- A subscription that runs out mid-turn (a turn that fails with the
-  provider's usage limit) is not a refusal to start: it fails the Step as any
-  failed turn does, and no other Agent takes it.
+- A subscription that runs out mid-turn (a turn the runtime ends with the
+  provider's usage limit) is out of quota but not a refusal to start: once
+  the turn called a tool, no other Agent takes the Step. A worker older
+  than the routine status `usage_limit` does not read it from a newer
+  `agent_harness_service`: the read fails as a transient error, so
+  Temporal retries the attempt until its retries or its time run out, and
+  the Step fails as a failed turn failed it before, only later. Either may
+  deploy first.
+- Deploy `agent_harness_service` signing `scheduler_run` before
+  `factory_service` reads it, and run the
+  `factory_automation_routine_revision` migration first: until both, an
+  Automation's routine firings carry no proof (or the Automation no
+  revision) and act as the Macro routine bot, so under a Definition with
+  Standing Roles each is skipped as `refused`, as before this change.
+  Automations made earlier, and any whose routine an SDK code upgrade
+  rewrote, need switching off and on once. A routine switched to write as
+  its owner (signing no bot) used to fire its Automation as its creator; it
+  is now checked as the Macro routine bot, so under Standing Roles it needs
+  a Role that allows `start` for that bot.
 - Deploy `agent_harness_service` with an SDK that has
   `macro.factory.fireAutomation` before a factory that makes Automations:
   saving the routine type-checks its code step against the harness's SDK.
@@ -2331,6 +2618,16 @@ Definition.
   `named_by_user_id` starts no self-improvement Run until an admin names it
   again. Thresholds are checked only when a team's Run ends: a team whose
   Runs stop starts none, however old its failures.
+- A worker older than a Scorer's `reads` cannot read an evaluation that
+  sets it (`deny_unknown_fields`), nor a Run that kept one: set `reads` in
+  `FACTORY_EVALUATION` or a Definition only after every pod runs this
+  version.
+- Deploy the `factory_review_dispute` migrations, then every worker and
+  the API together: an older binary reads a finding kept `dismissed` as
+  `UnknownReviewWord` and fails the read of
+  the Run's review rounds (the Run API, the Steps of a review panel, the
+  Gates' Standing Rules). Rolling back past them needs the findings set
+  back first (`kind` `dismissed` to `blocker`).
 - A worker older than `selfImprovement` in `scorers.json` cannot read a
   Definition that sets it (`deny_unknown_fields`); one that leaves the
   defaults keeps the JSON it kept before.

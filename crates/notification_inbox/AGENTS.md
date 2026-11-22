@@ -58,7 +58,9 @@ a task, filed under its owner's own User). Built on the shared feed layer, `crat
 - A User is a group only for that user (Soup's `user_gate`): notices about
   the viewer alone are filed under it. Its rows are cut by
   `place_about_the_viewer`, which lists only a factory Run without a task, a
-  row per Run; anything else filed under a User keeps having no row.
+  row per Run holding its waiting, notify-only and stand-in notices; anything
+  else filed under a User, such as an inbox reconnection notice, keeps having
+  no row.
 - Groups use `CandidateKeying::FiledEntity`: a channel's group holds its
   threads, so channel rows partition the whole channel's notifications.
 - Row types, actor kinds and action kinds only grow: add values, never

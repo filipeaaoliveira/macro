@@ -207,8 +207,10 @@ export type RunStep = {
 
 /**
  * What a reviewer found: where, what is wrong and why. Once its round ends
- * it is a `blocker`, in the diff the round reviewed, which the fix gets, or
- * a `follow_up`, outside it, which became a task of its own.
+ * it is a `blocker`, in the diff the round reviewed, which the fix gets, a
+ * `follow_up`, outside it, which became a task of its own, or `dismissed`,
+ * a blocker its reviewer dropped earlier and raised again, which blocks
+ * nothing.
  */
 export type ReviewFinding = {
   /** The reviewer's Step. */
@@ -224,9 +226,27 @@ export type ReviewFinding = {
    * read: it blocks wherever it is. */
   blocksAnywhere: boolean;
   /** Unset while its round reviews. */
-  kind?: 'blocker' | 'follow_up';
+  kind?: 'blocker' | 'follow_up' | 'dismissed';
   /** The task a follow-up became, when it was made. */
   followUpTaskId?: string;
+  /** What the fix said of a blocker it was given. */
+  fixStatus?: 'fixed' | 'disputed';
+  /** Why the fix disputes it, as the fixer wrote it. */
+  dispute?: string;
+  /** How the next round ruled on the dispute, once a reviewer answered. */
+  ruling?: 'upheld' | 'dropped';
+};
+
+/**
+ * What became of a Run's blockers: fixed as the fixer says, or disputed and
+ * then upheld or dropped, and its findings dismissed as repeats of a
+ * dropped blocker. A dispute no round ruled on yet counts as upheld.
+ */
+export type BlockerResolutions = {
+  fixed: number;
+  disputedUpheld: number;
+  disputedDropped: number;
+  dismissed: number;
 };
 
 /**
@@ -264,6 +284,12 @@ export type PassedOver = {
   /** Why, as a code such as `ai_allowance_exhausted`. */
   reason: string;
 };
+
+/**
+ * Why an Agent was passed over when it started and its runtime's own usage
+ * limit ended its first turn before it did any work.
+ */
+export const USAGE_LIMIT_REASON = 'usage_limit';
 
 /** The GitHub repository a Run works on. */
 export type RunRepository = {
@@ -347,6 +373,17 @@ export type RunStandingAct = {
 };
 
 /**
+ * An Agent Rule of a Run's Factory Definition that chose the Agent its
+ * Steps of a Role start with, from its task's tags or its repository, as
+ * the Run started.
+ */
+export type RunAgentRule = {
+  role: string;
+  rule: string;
+  agent: string;
+};
+
+/**
  * Why a Run's token budget ended it: its agents used the budget or more
  * (`used`, counted as Insights counts tokens), or its usage could not be
  * read for too many agent Steps in a row.
@@ -414,8 +451,17 @@ export type Run = {
   reviewRounds?: ReviewRound[];
   /** What agents did to it under its Definition's Standing Roles, in order. */
   standingActs?: RunStandingAct[];
+  /** The Agent Rules that chose its Roles' first Agents, by Role. */
+  agentRules?: RunAgentRule[];
+  /**
+   * Its task's tags couldn't be read as it started, so no Agent Rule on a
+   * tag applied: not the same as a task no rule matched.
+   */
+  taskTagsUnread?: boolean;
   /** Its token budget; none for a Run that keeps none. */
   tokenBudget?: RunTokenBudget;
+  /** What became of its blockers; none from a service older than disputes. */
+  blockerResolutions?: BlockerResolutions;
 };
 
 /** A Flow a person can start a Run of. */
@@ -531,6 +577,18 @@ export function findingsOf(
 }
 
 /** How many of a round's findings block, and how many became follow-ups. */
+/** Whether any of `resolutions`' blockers was fixed or disputed. */
+export function anyResolved(resolutions: BlockerResolutions | undefined) {
+  return (
+    resolutions !== undefined &&
+    resolutions.fixed +
+      resolutions.disputedUpheld +
+      resolutions.disputedDropped +
+      resolutions.dismissed >
+      0
+  );
+}
+
 export function findingCounts(round: ReviewRound): {
   blockers: number;
   followUps: number;

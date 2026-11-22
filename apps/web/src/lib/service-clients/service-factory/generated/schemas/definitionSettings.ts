@@ -5,6 +5,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DefinitionSettingsCommit } from './definitionSettingsCommit';
+import type { DefinitionSettingsContents } from './definitionSettingsContents';
+import type { DefinitionSettingsNewestRun } from './definitionSettingsNewestRun';
+import type { DefinitionSettingsOpenPullRequests } from './definitionSettingsOpenPullRequests';
 import type { DefinitionSettingsProblem } from './definitionSettingsProblem';
 import type { DefinitionSettingsRepoUrl } from './definitionSettingsRepoUrl';
 import type { DefinitionSettingsRequiresPullRequest } from './definitionSettingsRequiresPullRequest';
@@ -20,6 +23,11 @@ export interface DefinitionSettings {
   /** The commit of its default branch a Run started now would read,
 when the Definition reads there as the person reaches it. */
   commit?: DefinitionSettingsCommit;
+  contents?: DefinitionSettingsContents;
+  newestRun?: DefinitionSettingsNewestRun;
+  /** Its repository's open pull requests, the most recently updated first,
+at most 20; none when GitHub could not list them for the person. */
+  openPullRequests?: DefinitionSettingsOpenPullRequests;
   /** Why it does not read now, when it does not: the person cannot reach
 it, or a file of it is wrong. */
   problem?: DefinitionSettingsProblem;

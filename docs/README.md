@@ -38,3 +38,5 @@ post from the TypeScript SDK).
 Agent session activity: [correlation and visibility](architecture/agent-activity-correlation.md).
 
 CRM: [selective email contribution design](design/crm-selective-email-contribution.md).
+
+Factory code quality: [CRAP baseline and what measuring it costs](development/factory-crap.md).

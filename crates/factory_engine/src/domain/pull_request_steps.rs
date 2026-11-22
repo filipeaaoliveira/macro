@@ -1555,12 +1555,14 @@ where
     /// nothing but the base merged into what the Run's review passed on:
     /// a merge commit whose parents are exactly the head the Run keeps as
     /// reviewed and the base's commit `update` asked GitHub to merge, in
-    /// that order, as GitHub's "Update branch" makes it. Otherwise why not,
+    /// that order, that GitHub made itself (committed as `web-flow`, its
+    /// signature verified), as its "Update branch" makes it. Otherwise why not,
     /// for the Step's output: a head the update did not move (the branch
     /// held its base already, through commits someone else made), a merge
     /// from a head no review passed on (a person's resolution, a push while
     /// GitHub's merge was awaited, an update asked again from a pushed
-    /// head), or a Run with no reviewed head kept.
+    /// head), a merge with those parents made by hand, or a Run with no
+    /// reviewed head kept.
     pub(crate) async fn merged_only_base(
         &self,
         input: &StepInput<'_>,
@@ -1585,27 +1587,38 @@ where
             )));
         };
         let (repository, _) = Self::repository(input)?;
-        let parents = self
+        let commit = self
             .github
-            .commit_parents(input.owner, &repository, head)
+            .commit_made(input.owner, &repository, head)
             .await
             .map_err(PullRequestStepError::github)?;
         let expected = [reviewed.as_str(), update.base_sha.as_str()];
-        let only_base = parents.is_some_and(|parents| {
-            parents.len() == expected.len()
-                && parents
+        let Some(commit) = commit.filter(|commit| {
+            commit.parents.len() == expected.len()
+                && commit
+                    .parents
                     .iter()
                     .zip(expected)
                     .all(|(parent, want)| parent == want)
-        });
-        if only_base {
-            return Ok(Ok(()));
+        }) else {
+            return Ok(Err(format!(
+                "The branch's head {head} is not GitHub's merge of the base's {} into \
+                 {reviewed}, the head its review passed on, alone: it holds commits no review \
+                 has seen",
+                update.base_sha
+            )));
+        };
+        // The parents do not tell GitHub's merge from one made by hand
+        // with changes of its own: only GitHub signs as itself.
+        if !commit.made_by_github() {
+            return Ok(Err(format!(
+                "The branch's head {head} merges the base's {} into {reviewed}, the head its \
+                 review passed on, but GitHub did not make it: a merge made by hand may hold \
+                 changes no review has seen",
+                update.base_sha
+            )));
         }
-        Ok(Err(format!(
-            "The branch's head {head} is not GitHub's merge of the base's {} into {reviewed}, \
-             the head its review passed on, alone: it holds commits no review has seen",
-            update.base_sha
-        )))
+        Ok(Ok(()))
     }
 
     /// Keep `head` as the head of the Run's branch its review passed on,

@@ -57,6 +57,18 @@ export default {
   repeatedBlockers: 'Repeated blockers',
   repeatedBlockersDefinition:
     'Blockers an earlier round of the same run found too: they were not fixed.',
+  fixedBlockers: 'Fixed, as the fixer says',
+  fixedBlockersDefinition:
+    'Blockers the fixer said it fixed. The next review round checks each claim.',
+  upheldDisputes: 'Disputed, then upheld',
+  upheldDisputesDefinition:
+    'Blockers the fixer disputed that the next review round upheld, or did not drop: they blocked again.',
+  droppedDisputes: 'Disputed, then dropped',
+  droppedDisputesDefinition:
+    'Blockers the fixer disputed that the next review round dropped: they blocked nothing.',
+  dismissedFindings: 'Dismissed as repeats',
+  dismissedFindingsDefinition:
+    'Findings a reviewer raised again, in a later round, as the same problem at the same lines as a blocker it dropped. A run with one waits for a person to merge.',
   byReviewer: 'Blockers by reviewer',
   byAgent: 'Blockers by agent',
   reviews: 'Reviews',
@@ -73,10 +85,10 @@ export default {
   // Cost and autonomy.
   delivery: 'Cost and autonomy',
   deliveryDescription:
-    'What merging cost, and the share of ended runs that merged with no person stepping in',
+    'What merging cost, and how often runs that ended on their own merged with no person stepping in and weren’t found flawed. Cancelled runs and infrastructure failures are left out.',
   autonomyRate: 'Autonomy rate',
   autonomyRateDefinition:
-    'The share of ended runs that merged with no person stepping in: no gate a person answered, no step they steered, and no manual end.',
+    'Runs that merged with no person stepping in and weren’t found flawed, of those that ended on their own: no gate a person answered, no step they steered, and no manual end. Runs still going, runs you cancelled and runs that failed for infrastructure are left out.',
   merged: 'Merged pull requests',
   mergedDefinition: 'Runs that merged their pull request.',
   costPerMerged: 'Cost per merged pull request',
@@ -99,5 +111,10 @@ export default {
   unpriced: {
     one: '{{count}} model call has no price, so cost reads in tokens.',
     other: '{{count}} model calls have no price, so cost reads in tokens.',
+  },
+  unmeasured: {
+    one: '{{count}} run has no recorded usage, so cost per merged pull request isn’t known.',
+    other:
+      '{{count}} runs have no recorded usage, so cost per merged pull request isn’t known.',
   },
 };

@@ -8,6 +8,7 @@ mod gate_replies;
 pub use evaluation::{JudgeQuestion, JudgeVerdict, RunJudge, ScoringService};
 pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 
+use agent_correlation::context::SchedulerRun;
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::Automation;
@@ -32,10 +33,11 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
-    BranchUpdating, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError,
-    FinishedJob, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
-    RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
-    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    BranchUpdating, CodeRepository, CommitMade, ControlFilesSettings, DefinitionPullRequest,
+    DefinitionSettings, FactoryError, FinishedJob, FlowSummary, HeadChecks, Merging,
+    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
+    RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError,
+    StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -412,15 +414,15 @@ pub trait PullRequests: Send + Sync + 'static {
         head: &str,
     ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
-    /// The parents of the commit `sha` of `repository`, in their order (a
-    /// merge's first is the branch merged into); none when the repository
-    /// has no such commit.
-    fn commit_parents(
+    /// The commit `sha` of `repository`: its parents in their order (a
+    /// merge's first is the branch merged into) and who made it; none when
+    /// the repository has no such commit.
+    fn commit_made(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         sha: &str,
-    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<CommitMade>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(
@@ -458,6 +460,15 @@ pub trait PullRequests: Send + Sync + 'static {
         repository: &CodeRepository,
         branch: &str,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// The open pull requests of `repository`, the most recently updated
+    /// first, at most `limit`.
+    fn open_pull_requests(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<DefinitionPullRequest>, Self::Err>> + Send;
 
     /// Ask GitHub to delete the branch of the Run `run_id` in
     /// `repository` ([`run_branch`](crate::domain::models::run_branch)), or
@@ -711,6 +722,15 @@ pub trait TaskDirectory: Send + Sync + 'static {
         user_id: &MacroUserIdStr<'static>,
         task_id: Uuid,
     ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
+
+    /// The tags the task document `task_id` carries, by label, as `user_id`
+    /// sees them: their own and their team's. None when it carries none,
+    /// or `user_id` no longer sees it.
+    fn task_tags(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<String>, Self::Err>> + Send;
 
     /// Whether `user_id` may edit the Project (an initiative) `project_id`:
     /// one they cannot reach, or that is gone, is a no.
@@ -1130,12 +1150,20 @@ pub trait FactoryService: Send + Sync + 'static {
 /// event's and a Task event's trigger is a routine of the Automation's
 /// creator, whose code step fires it. Every call acts as the creator.
 pub trait AutomationTriggers: Send + Sync + 'static {
-    /// Make the routine that fires `automation`, enabled, and return its
-    /// id.
+    /// Make the routine that fires `automation`, enabled, and return it.
     fn create(
         &self,
         automation: &Automation,
-    ) -> impl Future<Output = Result<Uuid, AutomationTriggerError>> + Send;
+    ) -> impl Future<Output = Result<SavedRoutine, AutomationTriggerError>> + Send;
+
+    /// Write the routine `routine_id` back to what the factory makes for
+    /// `automation`, enabled, whatever it was changed to since, and return
+    /// the configuration revision it is at now.
+    fn rewrite(
+        &self,
+        automation: &Automation,
+        routine_id: Uuid,
+    ) -> impl Future<Output = Result<i64, AutomationTriggerError>> + Send;
 
     /// Switch the routine `routine_id` of `owner` on or off.
     fn set_enabled(
@@ -1152,6 +1180,16 @@ pub trait AutomationTriggers: Send + Sync + 'static {
         owner: &MacroUserIdStr<'static>,
         routine_id: Uuid,
     ) -> impl Future<Output = Result<(), AutomationTriggerError>> + Send;
+}
+
+/// A routine that fires an Automation, as the scheduler saved it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SavedRoutine {
+    /// Its id.
+    pub id: Uuid,
+    /// Its configuration revision: the scheduler makes a new one on every
+    /// change to the routine, and signs the one a run it started runs.
+    pub revision: i64,
 }
 
 /// Why a routine that fires an Automation could not be made or changed.
@@ -1204,11 +1242,15 @@ pub trait AutomationService: Send + Sync + 'static {
 
     /// Fire the Automation the routine `routine_id` fires, from one of its
     /// runs, which acts as `actor`, or as the agent `acting` for them when
-    /// the run is an agent's.
+    /// the run is an agent's. `scheduler_run` is the scheduler's proof, as
+    /// the run's credential signs it, that it started the run itself: only
+    /// a proof for this firing's run, at the revision the factory wrote the
+    /// routine at, fires it as `actor` with no agent.
     fn fire_from_routine(
         &self,
         actor: &MacroUserIdStr<'static>,
         routine_id: Uuid,
+        scheduler_run: Option<SchedulerRun>,
         firing: RoutineFiring,
         acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<FiringResult, FactoryError>> + Send;

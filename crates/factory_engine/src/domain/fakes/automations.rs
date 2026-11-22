@@ -25,6 +25,7 @@ impl AutomationRepository for FakeRepo {
             request_template: new.request_template.to_string(),
             enabled: true,
             routine_id: None,
+            routine_revision: None,
             created_at: Utc::now(),
         };
         self.automations.lock().expect("automations").insert(
@@ -34,9 +35,15 @@ impl AutomationRepository for FakeRepo {
         Ok(automation)
     }
 
-    async fn set_automation_routine(&self, id: Uuid, routine_id: Uuid) -> Result<(), FakeError> {
+    async fn set_automation_routine(
+        &self,
+        id: Uuid,
+        routine_id: Uuid,
+        revision: i64,
+    ) -> Result<(), FakeError> {
         if let Some((automation, _)) = self.automations.lock().expect("automations").get_mut(&id) {
             automation.routine_id = Some(routine_id);
+            automation.routine_revision = Some(revision);
         }
         Ok(())
     }
@@ -92,12 +99,18 @@ impl AutomationRepository for FakeRepo {
             .and_then(|(_, secret)| secret.clone()))
     }
 
-    async fn set_automation_enabled(&self, id: Uuid, enabled: bool) -> Result<bool, FakeError> {
+    async fn set_automation_enabled(
+        &self,
+        id: Uuid,
+        enabled: bool,
+        routine_revision: Option<i64>,
+    ) -> Result<bool, FakeError> {
         let mut automations = self.automations.lock().expect("automations");
         let Some((automation, _)) = automations.get_mut(&id) else {
             return Ok(false);
         };
         automation.enabled = enabled;
+        automation.routine_revision = routine_revision.or(automation.routine_revision);
         Ok(true)
     }
 

@@ -53,7 +53,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   Runs that opened some pull requests.
 - `src/domain/evaluation.rs` and
   `src/outbound/pg_run_repository/evaluation.rs`: `EvaluationRepository`,
-  Experiment arms, Scorers' judgments, Benchmark suites and trials.
+  Experiment arms, the Agent Rules that chose a Run's Agents, Scorers'
+  judgments, Benchmark suites and trials.
 - `src/domain/merge_queue.rs` and
   `src/outbound/pg_run_repository/merge_queue.rs`: `MergeQueueRepository`,
   each base branch's merge queue and merge turn, the updates of Runs'
@@ -122,12 +123,22 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119044000_factory_ci_job_failure.sql`,
   `20261119045000_factory_ci_job_replaced.sql`,
   `20261119050000_factory_token_budget.sql`,
-  `20261119050100_factory_token_budget_validate.sql`), `factory_step_steer`,
-  `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
+  `20261119050100_factory_token_budget_validate.sql`,
+  `20261119080000_factory_step_used_session.sql`,
+  `20261120003000_factory_automation_routine_revision.sql`,
+  `20261120010000_factory_improvement_dismissal_undone.sql`,
+  `20261120010100_factory_improvement_dismissal_undone_validate.sql`,
+  `20261120020000_factory_run_agent_rule.sql`,
+  `20261120020100_factory_run_task_tags_unread.sql`,
+  `20261120030000_factory_review_dispute.sql`,
+  `20261120030100_factory_review_dispute_validate.sql`), `factory_step_steer`,
+  `factory_run_score`, `factory_run_arm`, `factory_run_agent_rule`,
+  `factory_run_task_tags_unread`,
+  `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
-  `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait` and
-  `factory_ci_job`.
+  `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait`,
+  `factory_ci_job` and `factory_step_used_session`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -213,6 +224,18 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   references `"Document"` and is cleared when the task is deleted.
   `mark_follow_up_commented` sets `follow_up_commented` on a round's
   findings linked to a task, and repeating it changes nothing.
+  `record_fix` keeps what the fix said of each Blocker of a round
+  (`fix_status`, and the `dispute` reason, at most 2 KiB), replacing it
+  while no reviewer has ruled on it. `record_answer` is `record_findings`
+  with the reviewer's rulings on the disputes of the round before
+  (`ruling`, `ruled_by`): they replace what an earlier attempt of its Step
+  ruled, in the same transaction, and a dispute another Step ruled on
+  keeps its ruling. A finding that repeats a Blocker its reviewer dropped
+  (`repeats_dropped`) is classified `dismissed` when it is in the diff under
+  review. Insights' Blocker records carry dismissed findings too
+  (`dismissed`), which count only as dismissed. A binary older than these
+  columns fails to read a `dismissed` kind (`UnknownReviewWord`): deploy
+  the migration, then every reader at once.
 - `list_waiting_runs` reads one owner's Runs that have not ended and wait
   on an unanswered Gate, newest first, through `factory_run_user_open_idx`
   (open Runs only) and the Gates' primary key, up to its limit.
@@ -329,7 +352,26 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   why the budget ended a Run (`token_budget_stop`: `spent` with
   `token_budget_used`, or `unread`), only on a Run with a budget and only
   the first time (`BudgetStop` on the Run). `step_sessions` reads the
-  agent sessions a Run's Steps worked in, each once, as Insights does. The
+  agent sessions a Run's Steps worked in, each once, as Insights does.
+  `factory_step.session_id` is only a Step's current session, which
+  `pass_session` replaces when the Step goes on in a new one (its session
+  was lost, or its Agent could not start); `factory_step_used_session`
+  keeps every session a Step worked in, written in the same statement as
+  `claim_session` and `pass_session` (both the session left and the new
+  one), so a session lost after its agent worked in it still counts.
+  `20261119080000_factory_step_used_session.sql` backfilled each Step's
+  current session; the sessions Steps left before it were never kept. The
+  reads (`step_sessions`, Insights' `read_insights` and `read_quality`,
+  and `scoring_subject`'s `sessions` for a Benchmark trial's tokens) take
+  the union of both, so a session counts once however many Steps or rows
+  keep it, and a Step claimed by a build older than the table still
+  counts its current session. `read_insights` returns one
+  `StepSessionRef` per Step and session, with the Step's `seq`, so
+  Insights count Steps apart from sessions. While a build older than the
+  table still runs after the migration (a rolling deploy), its
+  `pass_session` keeps no row, so the session that pass leaves is
+  dropped from the count; the next pass by a newer build keeps the
+  session it leaves. The
   kinds the
   Orchestrator may approve are kept in the same arrays as the rules
   (`orchestrator_plan`, `orchestrator_blockers`), and on the Run.
@@ -387,6 +429,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_automation` belongs to its team and goes with it, and with its
   creator's account; its trigger is kept as JSON beside its kind, and a
   webhook's secret only for a webhook (`factory_automation_webhook`).
+  `routine_revision` (`20261120003000_factory_automation_routine_revision.sql`,
+  nullable, never serialized) is the scheduler's configuration revision the
+  factory last wrote its routine at: `set_automation_routine` sets it with
+  the routine, and `set_automation_enabled` replaces it only when given one.
   `claim_firing` claims a firing's key once, at the database's time, unless
   one that never ended is older than `FIRING_CLAIM_STALE_AFTER`: then it
   first looks for a Run started under the key, and ends the firing with it;
@@ -420,6 +466,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   id and when it was filed (`task_filed_at`), which a deleted task document
   leaves set, so it is not filed again.
 
+- `newest_definition_read` gives the commit the newest Run of a team's
+  members under its Definition read (repository ignoring case), for the
+  Definition setting: one `LATERAL` per member walks their Runs newest first
+  through `factory_run_user_created_idx` until one ran under it, so a
+  member with many Runs under no Definition costs a longer walk.
+
 - Self-improvement (`20261119020000_factory_self_improvement.sql`):
   `factory_team_definition.named_by_user_id` keeps who named a team's
   Definition (`set_team_definition`; null for one named before, or once
@@ -447,7 +499,17 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   (`dismissed_at`, `20261119020100_factory_improvement_failure_dismissed.sql`;
   they keep its `improvement_id`, so they are never pending again), and
   `closed` and `refused` (with why) clear their `improvement_id`, so they
-  are pending again. `failures` keeps how many it claimed. `recent_improvements` reads
+  are pending again. `undo_dismissal` undoes a rejection's dismissal once,
+  in one transaction with the improvement row locked: the failures it
+  still holds dismissed (`improvement_id` and `dismissed_at` set) are
+  pending again, and the improvement keeps who and when
+  (`dismissal_undone_by_user_id`, `dismissal_undone_at`,
+  `20261120010000_factory_improvement_dismissal_undone.sql`); a second undo
+  answers the kept one and changes nothing, so failures a later improvement
+  took stay with it, and one that dismissed nothing is
+  `NothingDismissed`. Reads of an improvement count the failures it holds
+  dismissed (`dismissed`, `factory_improvement_failure_improvement_idx`);
+  `improvement` reads one of a team's by id. `failures` keeps how many it claimed. `recent_improvements` reads
   a team's latest ones, newest first, for the pause after those that did
   not merge (`factory_improvement_team_created_idx`). Neither table decides
   who merges: the `improve` Flow keeps its plan and merge Gates for a
@@ -468,9 +530,16 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   merge or left it within the place kept, all on the database's clock.
   `leave_merge_queue` keeps the first time it left; `drop_from_merge_queue`
   takes a merged Run out, and `end_run` one that ended unmerged.
-  `take_merge_turn` takes a base's merge turn: a transaction holding
-  `pg_try_advisory_xact_lock` on the base as the queue keys it (`None`
-  while another Run holds it; never waited on, so no connection blocks).
+  `take_merge_turn` takes a base's merge turn: it reads the Run's
+  repository and base, outside the turn, as the base's key, then holds a
+  transaction that sets its own `idle_in_transaction_session_timeout`
+  (`set_config(..., true)`) and runs `SELECT pg_try_advisory_xact_lock($key)`
+  (`None` while another Run holds it; never waited on, so no connection
+  blocks). The transaction reads, locks and writes no factory table, so a
+  turn held for minutes holds back no write to a Run nor a migration of
+  its table; the key is the one earlier workers took, so a rolling deploy
+  keeps one turn per base (`a_merge_turn_keeps_the_key_earlier_workers_took`
+  pins it).
   The turn is the transaction: dropping it rolls back, which lets the
   lock go once the pool takes the connection back, on every path, and the
   transaction's `idle_in_transaction_session_timeout` (five minutes) ends

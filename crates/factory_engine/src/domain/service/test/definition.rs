@@ -21,7 +21,9 @@ use crate::domain::evaluation::service::ScoringServiceImpl;
 use crate::domain::fakes::{FakeGithub, FakeJudge, FakeRepo, FakeWatches};
 use crate::domain::flow::StepName;
 use crate::domain::insights::fakes::FakeUsage;
-use crate::domain::models::{FactoryError, StepRequest};
+use crate::domain::models::{
+    DefinitionFlow, DefinitionPullRequest, DefinitionRole, FactoryError, StepRequest,
+};
 use crate::domain::ports::{FactoryService, ScoringService, StepService};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::StepServiceImpl;
@@ -528,6 +530,198 @@ async fn the_settings_say_what_the_definition_decides() {
     assert!(rules.definition_named && !rules.can_edit);
 }
 
+fn fix_pull_request() -> DefinitionPullRequest {
+    DefinitionPullRequest {
+        number: 4,
+        title: "Fix the notes flow".to_string(),
+        url: format!("{DEFINITION_REPO}/pull/4"),
+        draft: false,
+    }
+}
+
+/// The setting shows the Definition as the newest Run read it: that
+/// commit, its Flows, Roles, Standing Rules and Scorers, though its head
+/// moved on since; and the open pull requests changing it.
+#[tokio::test]
+async fn the_settings_show_the_definition_the_newest_run_read() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(
+        &github,
+        FIRST,
+        "Notes, first.",
+        Some(r#"{ "standingRules": { "plan": true, "blockers": false, "merge": false } }"#),
+    );
+    github.state().files.insert(
+        (FIRST.to_string(), "scorers.json".to_string()),
+        r#"{ "scorers": [{ "name": "clear", "instructions": "Is the note clear?", "flows": ["notes"], "samplePercent": 25 }] }"#
+            .to_string(),
+    );
+    github.state().open_pull_requests = vec![fix_pull_request()];
+    let service = code_service(&repo, &workflows, &github);
+
+    let before = service.definition(&teo()).await.expect("settings");
+    service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    // A change merged since moves the head; no Run read it yet.
+    definition_files(&github, SECOND, "Notes, second.", None);
+    github.state().head = Some(SECOND.to_string());
+    let after = service.definition(&julia()).await.expect("settings");
+
+    // Before any Run, the setting shows the Definition at its head.
+    assert_eq!(before.newest_run, None);
+    assert_eq!(
+        before.contents.map(|contents| contents.commit),
+        Some(FIRST.to_string())
+    );
+    assert_eq!(after.commit.as_deref(), Some(SECOND));
+    assert_eq!(
+        after.newest_run.map(|read| read.commit),
+        Some(FIRST.to_string())
+    );
+    let contents = after.contents.expect("the definition's contents");
+    assert_eq!(contents.commit, FIRST);
+    assert_eq!(
+        contents.flows,
+        vec![DefinitionFlow {
+            name: "notes".to_string(),
+            description: "Notes, first.".to_string(),
+            entries: vec!["reply".to_string()],
+        }]
+    );
+    assert_eq!(
+        contents.roles,
+        vec![DefinitionRole {
+            role: "writer".to_string(),
+            agents: vec!["primary".to_string()],
+        }]
+    );
+    assert!(contents.standing_rules.expect("its rules").plan);
+    assert_eq!(contents.scorers.len(), 1);
+    assert_eq!(contents.scorers[0].name, "clear");
+    assert_eq!(contents.scorers[0].sample_percent, 25);
+    assert_eq!(after.open_pull_requests, Some(vec![fix_pull_request()]));
+}
+
+/// A Definition that does not read says why, and still lists the pull
+/// requests that may fix it; GitHub failing to list them does not fail the
+/// setting.
+#[tokio::test]
+async fn a_definition_that_does_not_read_says_why_in_its_settings() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    github
+        .state()
+        .files
+        .remove(&(FIRST.to_string(), "agents.json".to_string()));
+    github.state().open_pull_requests = vec![fix_pull_request()];
+    let service = code_service(&repo, &workflows, &github);
+
+    let broken = service.definition(&teo()).await.expect("settings");
+    github.state().open_pull_requests_fail = true;
+    let unlisted = service.definition(&teo()).await.expect("settings");
+
+    assert_eq!(broken.commit, None);
+    assert_eq!(
+        broken.problem.as_deref(),
+        Some("the team's factory definition does not read: agents.json is missing")
+    );
+    assert_eq!(broken.contents, None);
+    assert_eq!(broken.open_pull_requests, Some(vec![fix_pull_request()]));
+    assert_eq!(unlisted.open_pull_requests, None);
+    assert!(unlisted.problem.is_some());
+}
+
+/// A member GitHub refuses the Definition, as one not linked to it, while a
+/// teammate's Run read it: the setting says why it does not read, as it
+/// does before any Run, rather than failing.
+#[tokio::test]
+async fn a_member_github_refuses_sees_why_though_a_teammate_s_run_read_it() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    let service = code_service(&repo, &workflows, &github);
+    service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    github.state().unreachable = true;
+    github.state().file_reads_fail_at = Some(FIRST.to_string());
+
+    let settings = service.definition(&julia()).await.expect("settings");
+
+    assert_eq!(settings.commit, None);
+    assert_eq!(
+        settings.problem,
+        Some(FactoryError::UnreachableDefinition.to_string())
+    );
+    assert_eq!(
+        settings.newest_run.map(|read| read.commit),
+        Some(FIRST.to_string())
+    );
+    assert_eq!(settings.contents, None);
+}
+
+/// The commit the newest Run read no longer reads, as one GitHub dropped
+/// after a force-push or limits reads of: the setting shows the Definition
+/// at its head.
+#[tokio::test]
+async fn the_settings_show_the_head_when_the_newest_run_s_commit_does_not_read() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes, first.", None);
+    let service = code_service(&repo, &workflows, &github);
+    service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    definition_files(&github, SECOND, "Notes, second.", None);
+    github.state().head = Some(SECOND.to_string());
+    github.state().file_reads_fail_at = Some(FIRST.to_string());
+
+    let settings = service.definition(&julia()).await.expect("settings");
+
+    assert_eq!(settings.problem, None);
+    assert_eq!(
+        settings.newest_run.map(|read| read.commit),
+        Some(FIRST.to_string())
+    );
+    let contents = settings.contents.expect("the definition's contents");
+    assert_eq!(contents.commit, SECOND);
+    assert_eq!(contents.flows[0].description, "Notes, second.");
+}
+
 /// A file GitHub will not give, as one over the 1 MB its contents API
 /// gives, is the Definition's to fix: the Run is refused saying which
 /// file, not failed as an outage.
@@ -753,7 +947,7 @@ async fn a_suite_of_a_definition_s_benchmark_walks_the_benchmark_flow() {
         );
     }
     let deployment_agents: AgentDefinition = serde_json::from_value(serde_json::json!({
-        "agents": { "elsewhere": { "bot": "00000000-0000-0000-0000-00000000c0de" } },
+        "agents": { "elsewhere": { "bot": "00000000-0000-0000-0000-00000000c0d1" } },
         "roles": { "planner": ["elsewhere"], "writer": ["elsewhere"] }
     }))
     .expect("the deployment's agents");

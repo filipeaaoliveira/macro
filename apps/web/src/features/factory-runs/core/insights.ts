@@ -78,7 +78,7 @@ export function successRate(counts: OutcomeCounts): number | undefined {
 }
 
 /**
- * Of the Runs that ended on their own, the share that failed for
+ * Of the Runs that ended and weren't cancelled, the share that failed for
  * infrastructure: a machine, quota or network reason. None while no Run
  * ended that way.
  */

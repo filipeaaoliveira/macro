@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use agent_correlation::context::SchedulerRun;
 use bot_id::BotId;
 use chrono::Utc;
 use factory_records::domain::automations::{
@@ -20,7 +21,7 @@ use crate::domain::automations::{AutomationRequest, GithubFiring, RoutineFiring}
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::models::{ActingAgent, FactoryError};
 use crate::domain::ports::{
-    AutomationService, AutomationTriggerError, AutomationTriggers, FactoryService,
+    AutomationService, AutomationTriggerError, AutomationTriggers, FactoryService, SavedRoutine,
 };
 use crate::domain::service::FactoryServiceImpl;
 
@@ -28,21 +29,35 @@ const TEAM: Uuid = Uuid::from_u128(0x7ea);
 const TASK: Uuid = Uuid::from_u128(0x7a5c);
 const ROUTINE: Uuid = Uuid::from_u128(0x5c4ed);
 
-/// The routines it was asked to make, switch and delete; it refuses every
-/// routine when `refusal` is set.
+/// The routines it was asked to make, write back, switch and delete; it
+/// refuses every routine when `refusal` is set. The routine's configuration
+/// revision is 1 once made, and one more on each change, as the
+/// scheduler's.
 #[derive(Clone, Default)]
 struct FakeTriggers {
     created: Arc<Mutex<Vec<(Uuid, TriggerKind)>>>,
+    rewritten: Arc<Mutex<Vec<Uuid>>>,
     switched: Arc<Mutex<Vec<(Uuid, bool)>>>,
     deleted: Arc<Mutex<Vec<Uuid>>>,
+    revision: Arc<Mutex<i64>>,
     refusal: Option<&'static str>,
+}
+
+impl FakeTriggers {
+    /// Someone changes the routine through the scheduler (its code, its
+    /// trigger), as an agent can: a new revision.
+    fn changed(&self) -> i64 {
+        let mut revision = self.revision.lock().expect("revision");
+        *revision += 1;
+        *revision
+    }
 }
 
 impl AutomationTriggers for FakeTriggers {
     async fn create(
         &self,
         automation: &factory_records::domain::automations::Automation,
-    ) -> Result<Uuid, AutomationTriggerError> {
+    ) -> Result<SavedRoutine, AutomationTriggerError> {
         if let Some(reason) = self.refusal {
             return Err(AutomationTriggerError::Refused(reason.to_string()));
         }
@@ -50,7 +65,20 @@ impl AutomationTriggers for FakeTriggers {
             .lock()
             .expect("created")
             .push((automation.id, automation.trigger.kind()));
-        Ok(ROUTINE)
+        *self.revision.lock().expect("revision") = 1;
+        Ok(SavedRoutine {
+            id: ROUTINE,
+            revision: 1,
+        })
+    }
+
+    async fn rewrite(
+        &self,
+        _automation: &factory_records::domain::automations::Automation,
+        routine_id: Uuid,
+    ) -> Result<i64, AutomationTriggerError> {
+        self.rewritten.lock().expect("rewritten").push(routine_id);
+        Ok(self.changed())
     }
 
     async fn set_enabled(
@@ -63,6 +91,7 @@ impl AutomationTriggers for FakeTriggers {
             .lock()
             .expect("switched")
             .push((routine_id, enabled));
+        self.changed();
         Ok(())
     }
 
@@ -128,12 +157,41 @@ fn status_in_progress() -> AutomationTrigger {
     }
 }
 
+/// The id of the routine run named `key`, which its code fires with.
+fn run_id(key: &str) -> Uuid {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    Uuid::from_u64_pair(hasher.finish(), 0x5c4ed)
+}
+
 fn routine_firing(key: &str, task_id: Option<Uuid>) -> RoutineFiring {
     RoutineFiring {
-        firing: key.to_string(),
+        firing: run_id(key).to_string(),
         task_id,
         github: None,
     }
+}
+
+/// The scheduler's proof, as the credential of the run `key`'s code signs
+/// it, that it started that run itself at the routine's `revision`.
+fn proof(key: &str, revision: i64) -> Option<SchedulerRun> {
+    Some(SchedulerRun {
+        run_id: run_id(key),
+        revision,
+    })
+}
+
+/// The proof of a run the scheduler started of the routine as the factory
+/// made it.
+fn scheduled(key: &str) -> Option<SchedulerRun> {
+    proof(key, 1)
+}
+
+/// What the factory's `Agent` routine's code is signed for: the Macro
+/// routine bot.
+fn routine_bot() -> Option<ActingAgent> {
+    Some(ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID))
 }
 
 /// A schedule's Automation is a routine of its creator's; each run of it
@@ -159,11 +217,23 @@ async fn a_schedule_starts_a_run_each_time_its_routine_runs() {
         .await
         .expect("created");
     let fired = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", None), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", None),
+            routine_bot(),
+        )
         .await
         .expect("fired");
     let retried = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", None), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", None),
+            routine_bot(),
+        )
         .await
         .expect("fired again");
 
@@ -210,11 +280,23 @@ async fn a_task_event_starts_one_run_on_its_task_at_a_time() {
         .expect("created");
 
     let first = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", Some(TASK)), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", Some(TASK)),
+            routine_bot(),
+        )
         .await
         .expect("fired");
     let second = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-2", Some(TASK)), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-2"),
+            routine_firing("run-2", Some(TASK)),
+            routine_bot(),
+        )
         .await
         .expect("fired");
     let run_id = first.run_id.expect("a run started");
@@ -222,7 +304,13 @@ async fn a_task_event_starts_one_run_on_its_task_at_a_time() {
         .await
         .expect("ended");
     let third = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-3", Some(TASK)), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-3"),
+            routine_firing("run-3", Some(TASK)),
+            routine_bot(),
+        )
         .await
         .expect("fired");
 
@@ -267,8 +355,9 @@ async fn a_repository_event_starts_a_run_on_its_repository() {
         .fire_from_routine(
             &julia(),
             ROUTINE,
+            scheduled("run-1"),
             RoutineFiring {
-                firing: "run-1".to_string(),
+                firing: run_id("run-1").to_string(),
                 task_id: None,
                 github: Some(GithubFiring {
                     event: "pull_request".to_string(),
@@ -276,7 +365,7 @@ async fn a_repository_event_starts_a_run_on_its_repository() {
                     branch: Some("fix-login".to_string()),
                 }),
             },
-            None,
+            routine_bot(),
         )
         .await
         .expect("fired");
@@ -285,8 +374,9 @@ async fn a_repository_event_starts_a_run_on_its_repository() {
         .fire_from_routine(
             &julia(),
             ROUTINE,
+            scheduled("run-2"),
             RoutineFiring {
-                firing: "run-2".to_string(),
+                firing: run_id("run-2").to_string(),
                 task_id: None,
                 github: Some(GithubFiring {
                     event: "pull_request".to_string(),
@@ -294,7 +384,7 @@ async fn a_repository_event_starts_a_run_on_its_repository() {
                     branch: Some(format!("factory/{}", fired.run_id.expect("started"))),
                 }),
             },
-            None,
+            routine_bot(),
         )
         .await
         .expect("fired");
@@ -426,7 +516,13 @@ async fn only_its_creator_makes_and_fires_an_automation() {
         .await
         .expect("created");
     let by_someone_else = automations
-        .fire_from_routine(&teo(), ROUTINE, routine_firing("run-1", Some(TASK)), None)
+        .fire_from_routine(
+            &teo(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", Some(TASK)),
+            routine_bot(),
+        )
         .await;
 
     assert!(matches!(by_program, Err(FactoryError::NotAPerson)));
@@ -459,7 +555,13 @@ async fn an_automation_switched_off_starts_nothing() {
         .await
         .expect("switched off");
     let fired = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", Some(TASK)), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", Some(TASK)),
+            routine_bot(),
+        )
         .await
         .expect("fired");
     automations
@@ -535,13 +637,25 @@ async fn a_full_queue_starts_no_run() {
 
     own_start().await.expect("her own run holds one place");
     let fired = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", None), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", None),
+            routine_bot(),
+        )
         .await
         .expect("fired");
     assert!(fired.run_id.is_some(), "under the limit: {fired:?}");
 
     let held = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-2", None), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-2"),
+            routine_firing("run-2", None),
+            routine_bot(),
+        )
         .await
         .expect("fired");
     assert_eq!(held.skipped, Some(FiringSkip::QueueFull));
@@ -569,7 +683,13 @@ async fn a_task_its_creator_cannot_see_gets_no_run() {
         .await
         .expect("created");
     let busy = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", Some(TASK)), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", Some(TASK)),
+            routine_bot(),
+        )
         .await
         .expect("fired");
     assert!(busy.run_id.is_some(), "{busy:?}");
@@ -579,7 +699,13 @@ async fn a_task_its_creator_cannot_see_gets_no_run() {
         .expect("hidden")
         .insert((julia().to_string(), TASK));
     let fired = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-2", Some(TASK)), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-2"),
+            routine_firing("run-2", Some(TASK)),
+            routine_bot(),
+        )
         .await
         .expect("fired");
 
@@ -649,6 +775,9 @@ async fn only_its_creator_switches_an_automation_on() {
     ));
     assert!(matches!(program_starts, Err(FactoryError::NotAPerson)));
     assert!(creator_starts.enabled);
+    // Only the creator's start writes the routine back, at a new revision.
+    assert_eq!(*triggers.rewritten.lock().expect("rewritten"), [ROUTINE]);
+    assert_eq!(creator_starts.routine_revision, Some(3));
 }
 
 /// An Automation acts as its creator only while they are a person on its
@@ -670,13 +799,25 @@ async fn an_automation_whose_creator_left_starts_nothing() {
         .expect("agents")
         .insert(teo().to_string());
     let as_agent = automations
-        .fire_from_routine(&teo(), ROUTINE, routine_firing("run-1", Some(TASK)), None)
+        .fire_from_routine(
+            &teo(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", Some(TASK)),
+            routine_bot(),
+        )
         .await
         .expect("fired");
     repo.agent_accounts.lock().expect("agents").clear();
     repo.teams.lock().expect("teams").remove(&teo().to_string());
     let after_leaving = automations
-        .fire_from_routine(&teo(), ROUTINE, routine_firing("run-2", Some(TASK)), None)
+        .fire_from_routine(
+            &teo(),
+            ROUTINE,
+            scheduled("run-2"),
+            routine_firing("run-2", Some(TASK)),
+            routine_bot(),
+        )
         .await
         .expect("fired");
 
@@ -700,7 +841,13 @@ async fn the_routine_of_a_deleted_automation_is_switched_off() {
     repo.automations.lock().expect("automations").clear();
 
     let fired = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", Some(TASK)), None)
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("run-1"),
+            routine_firing("run-1", Some(TASK)),
+            routine_bot(),
+        )
         .await;
 
     assert!(matches!(fired, Err(FactoryError::NotFound)));
@@ -711,13 +858,14 @@ async fn the_routine_of_a_deleted_automation_is_switched_off() {
     assert!(workflows.started.lock().expect("started").is_empty());
 }
 
-/// An Automation fired by a routine run as its creator starts its Run as
-/// them, unchecked; one fired by a routine run for an agent starts it as
-/// that agent, which under a Definition with Standing Roles must fill one
-/// that allows `start`, or the firing is skipped as refused and nothing
-/// starts; so do code in an agent session and the Automation's own routine,
-/// signed for the Macro routine bot, which no Standing Role here lists. A
-/// webhook call, with no login, fires it as its creator.
+/// Under a Definition with Standing Roles, only the scheduler's own run
+/// fires an Automation as its creator, unchecked, with no Role for the
+/// Macro routine bot. A routine run for another agent starts it as that
+/// agent, which must fill a Standing Role that allows `start`, or the firing
+/// is skipped as refused and nothing starts, whatever proof its credential
+/// carries; so does code in an agent session. Run Now, a person's or an
+/// agent's, carries no proof: it acts as the Macro routine bot, which no
+/// Standing Role here lists.
 #[tokio::test]
 async fn an_agent_fires_an_automation_only_through_a_standing_role() {
     let repo = super::definition::team_repo();
@@ -726,79 +874,50 @@ async fn an_agent_fires_an_automation_only_through_a_standing_role() {
     let triggers = FakeTriggers::default();
     let automations = automations(&repo, code_service(&repo, &workflows, &github), &triggers);
     automations
-        .create_automation(
-            julia(),
-            true,
-            AutomationRequest {
-                name: "Note it".to_string(),
-                trigger: AutomationTrigger::Schedule {
-                    cron: "0 0 9 * * Mon-Fri".to_string(),
-                    timezone: "Europe/Lisbon".to_string(),
-                },
-                flow: "notes".to_string(),
-                repo_url: None,
-                request_template: "Note it".to_string(),
-            },
-        )
+        .create_automation(julia(), true, notes_automation(schedule()))
         .await
         .expect("created");
     let bot = |bot: Uuid| Some(ActingAgent::Bot(BotId::new_from_uuid(bot)));
+    let fire = async |key: &str, proof: Option<SchedulerRun>, acting: Option<ActingAgent>| {
+        automations
+            .fire_from_routine(&julia(), ROUTINE, proof, routine_firing(key, None), acting)
+            .await
+            .expect("fired")
+    };
 
-    let refused = automations
-        .fire_from_routine(
-            &julia(),
-            ROUTINE,
-            routine_firing("run-1", None),
-            bot(super::standing::PRIMARY_BOT),
-        )
-        .await
-        .expect("fired");
-    let intake = automations
-        .fire_from_routine(
-            &julia(),
-            ROUTINE,
-            routine_firing("run-2", None),
-            bot(super::standing::BACKUP_BOT),
-        )
-        .await
-        .expect("fired");
-    let scheduled = automations
-        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-3", None), None)
-        .await
-        .expect("fired");
-    // The factory's own routine is an `Agent` routine: the scheduler signs
-    // its code step for the Macro routine bot, which acts as that bot.
-    let own_routine = automations
-        .fire_from_routine(
-            &julia(),
-            ROUTINE,
-            routine_firing("run-4", None),
-            Some(ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID)),
-        )
-        .await
-        .expect("fired");
-    // Code in an agent session on that routine still acts as its agent.
-    let in_session = automations
-        .fire_from_routine(
-            &julia(),
-            ROUTINE,
-            routine_firing("run-5", None),
-            Some(ActingAgent::Session(super::standing::session_of(
-                &repo,
-                super::standing::PRIMARY_BOT,
-            ))),
-        )
-        .await
-        .expect("fired");
+    // A routine of another agent's, even with a valid proof, acts as it.
+    let refused = fire(
+        "run-1",
+        scheduled("run-1"),
+        bot(super::standing::PRIMARY_BOT),
+    )
+    .await;
+    let intake = fire(
+        "run-2",
+        scheduled("run-2"),
+        bot(super::standing::BACKUP_BOT),
+    )
+    .await;
+    let by_schedule = fire("run-3", scheduled("run-3"), routine_bot()).await;
+    let by_hand = fire("run-4", None, routine_bot()).await;
+    let in_session = fire(
+        "run-5",
+        scheduled("run-5"),
+        Some(ActingAgent::Session(super::standing::session_of(
+            &repo,
+            super::standing::PRIMARY_BOT,
+        ))),
+    )
+    .await;
 
     assert_eq!(refused.run_id, None);
     assert_eq!(refused.skipped, Some(FiringSkip::Refused));
     assert_eq!(in_session.run_id, None);
     assert_eq!(in_session.skipped, Some(FiringSkip::Refused));
-    assert_eq!(own_routine.run_id, None);
-    assert_eq!(own_routine.skipped, Some(FiringSkip::Refused));
+    assert_eq!(by_hand.run_id, None);
+    assert_eq!(by_hand.skipped, Some(FiringSkip::Refused));
     let intake = intake.run_id.expect("the intake starts it");
-    let scheduled = scheduled.run_id.expect("the schedule starts it");
+    let by_schedule = by_schedule.run_id.expect("the schedule starts it");
     assert_eq!(workflows.started.lock().expect("started").len(), 2);
     let acts = repo.standing_acts.lock().expect("standing acts").clone();
     let kept: Vec<_> = acts
@@ -821,13 +940,227 @@ async fn an_agent_fires_an_automation_only_through_a_standing_role() {
             super::standing::BACKUP_BOT
         )]
     );
-    assert!(acts.iter().all(|(run, _)| *run != scheduled));
+    assert!(acts.iter().all(|(run, _)| *run != by_schedule));
 }
 
-/// Julia's schedule Automation of the `notes` Flow fired by its own
-/// routine run: the claims the scheduler signs for an `Agent` routine's
-/// code step, the Macro routine bot on the Automation's routine.
-async fn fire_own_routine(
+fn schedule() -> AutomationTrigger {
+    AutomationTrigger::Schedule {
+        cron: "0 0 9 * * Mon-Fri".to_string(),
+        timezone: "Europe/Lisbon".to_string(),
+    }
+}
+
+/// Julia's Automation of the `notes` Flow on `trigger`.
+fn notes_automation(trigger: AutomationTrigger) -> AutomationRequest {
+    AutomationRequest {
+        name: "Note it".to_string(),
+        trigger,
+        flow: "notes".to_string(),
+        repo_url: None,
+        request_template: "Note it".to_string(),
+    }
+}
+
+/// Under Standing Roles, the scheduler's proof fires an Automation as its
+/// creator only for the run it names, on the routine as the factory last
+/// wrote it. Every forged, replayed or stale proof acts as the Macro routine
+/// bot, which no Standing Role here lists, so it is skipped as refused: a
+/// run with no proof (Run Now by a person or an agent), one whose code
+/// writes as the owner and signs no bot, a proof of another run (an
+/// earlier run's proof sent with a new key), and a proof at a newer
+/// revision (the routine was edited since, by an agent or anyone). The
+/// same proof and key again is the same firing and starts nothing more.
+/// Switching the Automation on writes the routine back and keeps its new
+/// revision: then only a proof at that revision fires it as its creator.
+#[tokio::test]
+async fn only_the_schedulers_proof_of_its_run_fires_as_the_creator() {
+    let repo = super::definition::team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = super::standing::notes_definition();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, code_service(&repo, &workflows, &github), &triggers);
+    let created = automations
+        .create_automation(julia(), true, notes_automation(schedule()))
+        .await
+        .expect("created");
+    let fire = async |key: &str, proof: Option<SchedulerRun>, acting: Option<ActingAgent>| {
+        automations
+            .fire_from_routine(&julia(), ROUTINE, proof, routine_firing(key, None), acting)
+            .await
+            .expect("fired")
+    };
+
+    let own = fire("own", scheduled("own"), routine_bot()).await;
+    let replayed = fire("own", scheduled("own"), routine_bot()).await;
+    let by_hand = fire("run-now", None, routine_bot()).await;
+    let as_owner = fire("as-owner", None, None).await;
+    let proof_as_owner = fire("proof-as-owner", scheduled("proof-as-owner"), None).await;
+    let other_run = fire("other-run", scheduled("own"), routine_bot()).await;
+    let edited_revision = triggers.changed();
+    let edited = fire("edited", proof("edited", edited_revision), routine_bot()).await;
+
+    let own = own
+        .run_id
+        .expect("the scheduler's own run starts it as its creator");
+    assert!(replayed.repeated, "{replayed:?}");
+    assert_eq!(replayed.run_id, Some(own));
+    for refused in [&by_hand, &as_owner, &proof_as_owner, &other_run, &edited] {
+        assert_eq!(refused.run_id, None, "{refused:?}");
+        assert_eq!(refused.skipped, Some(FiringSkip::Refused), "{refused:?}");
+    }
+
+    // Julia switches it off and on, in person: the routine is written back,
+    // past the edit, at a new revision the Automation keeps.
+    for enabled in [false, true] {
+        automations
+            .set_automation_enabled(&julia(), true, created.automation.id, enabled)
+            .await
+            .expect("switched");
+    }
+    let revision = *triggers.revision.lock().expect("revision");
+    let stale = fire("stale", proof("stale", edited_revision), routine_bot()).await;
+    let rewritten = fire("rewritten", proof("rewritten", revision), routine_bot()).await;
+
+    assert_eq!(*triggers.rewritten.lock().expect("rewritten"), [ROUTINE]);
+    assert_eq!(
+        *triggers.switched.lock().expect("switched"),
+        [(ROUTINE, false)]
+    );
+    assert_eq!(stale.skipped, Some(FiringSkip::Refused));
+    let rewritten = rewritten
+        .run_id
+        .expect("the scheduler's run of the rewritten routine starts it as its creator");
+    assert_eq!(workflows.started.lock().expect("started").len(), 2);
+    let acts = repo.standing_acts.lock().expect("standing acts").clone();
+    assert!(
+        acts.iter().all(|(run, _)| *run != own && *run != rewritten),
+        "{acts:?}"
+    );
+}
+
+/// The scheduler's proof keys its firing on the run it names in that run
+/// id's canonical spelling only: the same id posted upper-case, without
+/// hyphens, in braces or as a URN is not the scheduler's own firing, so it
+/// acts as the Macro routine bot, which no Standing Role here lists. One
+/// proof starts one Run, however its run id is spelled.
+#[tokio::test]
+async fn one_proof_fires_once_whatever_the_spelling_of_its_run() {
+    let repo = super::definition::team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = super::standing::notes_definition();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, code_service(&repo, &workflows, &github), &triggers);
+    automations
+        .create_automation(julia(), true, notes_automation(schedule()))
+        .await
+        .expect("created");
+    let id = run_id("own");
+    let spellings = [
+        id.hyphenated().to_string(),
+        id.hyphenated().to_string().to_uppercase(),
+        id.simple().to_string(),
+        id.braced().to_string(),
+        id.urn().to_string(),
+    ];
+
+    let mut started = Vec::new();
+    for firing in spellings {
+        let fired = automations
+            .fire_from_routine(
+                &julia(),
+                ROUTINE,
+                scheduled("own"),
+                RoutineFiring {
+                    firing: firing.clone(),
+                    task_id: None,
+                    github: None,
+                },
+                routine_bot(),
+            )
+            .await
+            .expect("fired");
+        if let Some(run) = fired.run_id {
+            started.push((firing, run));
+        }
+    }
+
+    assert_eq!(started.len(), 1, "{started:?}");
+    assert_eq!(started[0].0, id.to_string());
+    assert_eq!(workflows.started.lock().expect("started").len(), 1);
+}
+
+/// Under Standing Roles, a Task event the scheduler watches fires its
+/// Automation as its creator, with no Role for the routine bot.
+#[tokio::test]
+async fn the_schedulers_event_run_fires_as_the_creator() {
+    let repo = super::definition::team_repo();
+    repo.tasks.lock().expect("tasks").insert(TASK);
+    let workflows = FakeWorkflows::default();
+    let github = super::standing::notes_definition();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, code_service(&repo, &workflows, &github), &triggers);
+    automations
+        .create_automation(julia(), true, notes_automation(status_in_progress()))
+        .await
+        .expect("created");
+
+    let by_event = automations
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            scheduled("event"),
+            routine_firing("event", Some(TASK)),
+            routine_bot(),
+        )
+        .await
+        .expect("fired");
+
+    let run = by_event.run_id.expect("the watched event starts it");
+    assert!(
+        repo.standing_acts
+            .lock()
+            .expect("standing acts")
+            .iter()
+            .all(|(acted, _)| *acted != run)
+    );
+}
+
+/// A webhook can't take the scheduler's path: a call signed for a routine's
+/// Automation (which has no secret) is refused as a bad signature, and a
+/// webhook's Automation has no routine whose run could fire it.
+#[tokio::test]
+async fn a_webhook_never_fires_through_the_scheduler() {
+    let repo = super::definition::team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = super::standing::notes_definition();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, code_service(&repo, &workflows, &github), &triggers);
+    let scheduled_automation = automations
+        .create_automation(julia(), true, notes_automation(schedule()))
+        .await
+        .expect("created");
+    let webhook = automations
+        .create_automation(julia(), true, notes_automation(AutomationTrigger::Webhook))
+        .await
+        .expect("created");
+    let now = Utc::now().timestamp().to_string();
+    let secret = webhook.webhook_secret.expect("a secret");
+    let signature = webhook_signature::sign(&secret, &now, b"").expect("signed");
+
+    let to_schedule = automations
+        .fire_webhook(scheduled_automation.automation.id, &now, &signature, b"")
+        .await;
+
+    assert!(matches!(to_schedule, Err(FactoryError::BadSignature)));
+    assert_eq!(webhook.automation.routine_id, None);
+    assert_eq!(webhook.automation.routine_revision, None);
+    assert!(workflows.started.lock().expect("started").is_empty());
+}
+
+/// Julia's schedule Automation of the `notes` Flow fired by Run Now on its
+/// routine: the routine bot the scheduler signs an `Agent` routine's code
+/// for, and no scheduler's proof.
+async fn run_now(
     repo: &FakeRepo,
     workflows: &FakeWorkflows,
     github: &FakeGithub,
@@ -835,38 +1168,26 @@ async fn fire_own_routine(
     let triggers = FakeTriggers::default();
     let automations = automations(repo, code_service(repo, workflows, github), &triggers);
     automations
-        .create_automation(
-            julia(),
-            true,
-            AutomationRequest {
-                name: "Note it".to_string(),
-                trigger: AutomationTrigger::Schedule {
-                    cron: "0 0 9 * * Mon-Fri".to_string(),
-                    timezone: "Europe/Lisbon".to_string(),
-                },
-                flow: "notes".to_string(),
-                repo_url: None,
-                request_template: "Note it".to_string(),
-            },
-        )
+        .create_automation(julia(), true, notes_automation(schedule()))
         .await
         .expect("created");
     automations
         .fire_from_routine(
             &julia(),
             ROUTINE,
+            None,
             routine_firing("run-1", None),
-            Some(ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID)),
+            routine_bot(),
         )
         .await
         .expect("fired")
 }
 
-/// Under Standing Roles, an Automation's own routine run starts its Run
+/// Under Standing Roles, Run Now on an Automation's routine starts its Run
 /// once the Definition gives the Macro routine bot a Role that allows
 /// `start`, and the Run keeps that bot's standing act.
 #[tokio::test]
-async fn a_standing_role_for_the_routine_bot_lets_its_own_routine_fire() {
+async fn a_standing_role_for_the_routine_bot_lets_run_now_fire() {
     let repo = super::definition::team_repo();
     let workflows = FakeWorkflows::default();
     let github = super::standing::notes_definition_with(serde_json::json!({
@@ -880,7 +1201,7 @@ async fn a_standing_role_for_the_routine_bot_lets_its_own_routine_fire() {
         }
     }));
 
-    let fired = fire_own_routine(&repo, &workflows, &github).await;
+    let fired = run_now(&repo, &workflows, &github).await;
 
     let run = fired.run_id.expect("the routine bot's Role starts it");
     assert_eq!(fired.skipped, None);
@@ -910,10 +1231,10 @@ async fn a_standing_role_for_the_routine_bot_lets_its_own_routine_fire() {
     );
 }
 
-/// Without Standing Roles, an Automation's own routine run starts its Run
-/// unchecked, keeping no standing act.
+/// Without Standing Roles, Run Now on an Automation's routine starts its
+/// Run unchecked, keeping no standing act.
 #[tokio::test]
-async fn without_standing_roles_its_own_routine_fires() {
+async fn without_standing_roles_run_now_fires() {
     let repo = super::definition::team_repo();
     let workflows = FakeWorkflows::default();
     let github = super::standing::notes_definition_with(serde_json::json!({
@@ -921,7 +1242,7 @@ async fn without_standing_roles_its_own_routine_fires() {
         "roles": { "writer": ["primary"] }
     }));
 
-    let fired = fire_own_routine(&repo, &workflows, &github).await;
+    let fired = run_now(&repo, &workflows, &github).await;
 
     assert!(fired.run_id.is_some(), "it starts unchecked");
     assert_eq!(fired.skipped, None);

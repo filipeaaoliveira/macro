@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::{
     NOTES_BUDGET, OwnerNote, factory_signed, gate_notice, gate_told, is_factory_comment,
-    notes_since, owner_notes_brief, stand_in_notice,
+    notes_since, owner_notes_brief, stand_in_id, stand_in_notice, told_id,
 };
 
 fn outcome(name: &str) -> Outcome {
@@ -202,26 +202,86 @@ fn no_notice_when_quiet_or_without_a_waiting_gate() {
 
 /// A notify-only Gate's notice and the stand-in's stay as they were: sent
 /// whether the definition is quiet or not, lighter (not pushed, flagged
-/// notify-only), and only for a Run on a task.
+/// notify-only), and none once the Run ended.
 #[test]
 fn the_lighter_notices_are_sent_whatever_the_definition_says() {
     let waiting = gated(2, GateKind::Flow, 5, None);
     for quiet in [true, false] {
         let told = gate_told(&run(quiet), &waiting, "Shipped").expect("told");
         assert!(!told.push && told.metadata.notify_only);
+        assert_eq!(told.task_id, Some(TASK));
+        assert_eq!(told.metadata.task_id, TASK.to_string());
         let stood_in =
             stand_in_notice(&run(quiet), &waiting, &outcome("approve")).expect("stood in");
         assert!(!stood_in.push && stood_in.metadata.notify_only);
+        assert_eq!(stood_in.task_id, Some(TASK));
     }
-    let no_task = Run {
-        task_id: None,
+    let ended = Run {
+        end: Some(RunEnd {
+            outcome: RunOutcome::Cancelled,
+            ended_at: Utc::now(),
+            flaw: None,
+        }),
         ..run(false)
     };
-    assert_eq!(gate_told(&no_task, &waiting, "Shipped"), None);
-    assert_eq!(
-        stand_in_notice(&no_task, &waiting, &outcome("approve")),
-        None
-    );
+    assert_eq!(gate_told(&ended, &waiting, "Shipped"), None);
+    assert_eq!(stand_in_notice(&ended, &waiting, &outcome("approve")), None);
+}
+
+/// A Run started without a task sends both lighter notices too, as it does
+/// a waiting Gate's: to its owner alone, about no task, so they are filed
+/// under the owner, under the same ids as a Run on a task's, lighter, and
+/// whatever the definition says. None once it ended.
+#[test]
+fn a_run_without_a_task_sends_the_lighter_notices_to_its_owner() {
+    let waiting = gated(2, GateKind::Flow, 5, None);
+    for quiet in [true, false] {
+        let no_task = Run {
+            task_id: None,
+            ..run(quiet)
+        };
+        let told = gate_told(&no_task, &waiting, "Shipped").expect("told");
+        assert_eq!(told.owner, owner());
+        assert_eq!(told.task_id, None);
+        assert_eq!(told.metadata.task_id, "");
+        assert_eq!(told.metadata.run_id, no_task.id.as_uuid());
+        assert_eq!(told.metadata.question, "Shipped");
+        assert!(!told.push && told.metadata.notify_only);
+        assert_eq!(
+            told.notification_id,
+            told_id(no_task.id, &waiting.entry),
+            "one per entry and Run"
+        );
+        assert_eq!(
+            gate_told(&no_task, &waiting, "Shipped again").map(|again| again.notification_id),
+            Some(told.notification_id),
+            "a retried notice is the same notification"
+        );
+
+        let stood_in = stand_in_notice(&no_task, &waiting, &outcome("approve")).expect("stood in");
+        assert_eq!(stood_in.owner, owner());
+        assert_eq!(stood_in.task_id, None);
+        assert_eq!(stood_in.metadata.task_id, "");
+        assert!(!stood_in.push && stood_in.metadata.notify_only);
+        assert_eq!(stood_in.notification_id, stand_in_id(no_task.id, 2));
+        assert!(
+            stood_in
+                .metadata
+                .question
+                .starts_with("The stand-in answered Approve")
+        );
+    }
+    let ended = Run {
+        task_id: None,
+        end: Some(RunEnd {
+            outcome: RunOutcome::Cancelled,
+            ended_at: Utc::now(),
+            flaw: None,
+        }),
+        ..run(false)
+    };
+    assert_eq!(gate_told(&ended, &waiting, "Shipped"), None);
+    assert_eq!(stand_in_notice(&ended, &waiting, &outcome("approve")), None);
 }
 
 #[test]

@@ -10,7 +10,7 @@ pub(crate) mod fakes;
 #[cfg(test)]
 mod test;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use ai_usage::domain::session_usage::{SessionTokens, SessionUsageReader};
 use chrono::{DateTime, Days, NaiveDate, TimeZone, Utc};
@@ -23,6 +23,7 @@ use factory_records::domain::models::{RunId, RunOutcome, checked_name};
 use factory_records::domain::quality::RunQualityRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
+use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::flow::StepUse;
@@ -366,10 +367,11 @@ pub struct RunTokens {
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageInsight {
-    /// Steps an agent worked on, in a session.
+    /// Steps an agent worked on, in a session: once each, however many
+    /// sessions the Step worked in.
     pub agent_steps: u32,
-    /// Those whose session has usage recorded. An agent that runs on a
-    /// person's own computer records none.
+    /// Those with usage recorded in any of their sessions. An agent that
+    /// runs on a person's own computer records none.
     pub measured_steps: u32,
     /// Runs with any usage recorded.
     pub measured_runs: u32,
@@ -456,11 +458,14 @@ where
         let scope = query.scope(actor)?;
         let records = self.repo.read_insights(&scope).await.map_err(internal)?;
 
-        let session_ids: Vec<_> = records
+        // A session several Steps worked in is read once.
+        let mut session_ids: Vec<_> = records
             .sessions
             .iter()
             .map(|session| session.session_id)
             .collect();
+        session_ids.sort_unstable();
+        session_ids.dedup();
         let mut tokens = Vec::new();
         for sessions in session_ids.chunks(SESSIONS_PER_READ) {
             let read = self
@@ -485,7 +490,7 @@ where
         let sessions: Vec<_> = records
             .runs
             .iter()
-            .flat_map(|run| run.sessions.iter().copied())
+            .flat_map(|run| run.sessions.iter().map(|session| session.id))
             .collect();
         let tokens = read_usage(&self.usage, actor, &sessions)
             .await
@@ -592,12 +597,24 @@ fn summarize(
     let mut entry_tokens: HashMap<&str, TokenCounts> = HashMap::new();
     let mut run_tokens: HashMap<RunId, TokenCounts> = HashMap::new();
     let mut usage_total = TokenCounts::default();
-    let mut measured_steps = 0;
+    // A Step counts once however many sessions it worked in, and is
+    // measured when any of them recorded usage. A session counts once for
+    // its entry in its Run, however many of its Steps worked in it.
+    let agent_steps: HashSet<(RunId, u16)> = records
+        .sessions
+        .iter()
+        .map(|session| (session.run_id, session.seq))
+        .collect();
+    let mut measured_steps: HashSet<(RunId, u16)> = HashSet::new();
+    let mut counted: HashSet<(RunId, &str, Uuid)> = HashSet::new();
     for session in &records.sessions {
         let Some(used) = tokens_by_session.get(&session.session_id) else {
             continue;
         };
-        measured_steps += 1;
+        measured_steps.insert((session.run_id, session.seq));
+        if !counted.insert((session.run_id, session.entry.as_str(), session.session_id)) {
+            continue;
+        }
         usage_total.add(used);
         entry_tokens
             .entry(session.entry.as_str())
@@ -705,8 +722,8 @@ fn summarize(
         run_duration: duration_stats(run_seconds),
         entries,
         usage: UsageInsight {
-            agent_steps: u32::try_from(records.sessions.len()).unwrap_or(u32::MAX),
-            measured_steps,
+            agent_steps: u32::try_from(agent_steps.len()).unwrap_or(u32::MAX),
+            measured_steps: u32::try_from(measured_steps.len()).unwrap_or(u32::MAX),
             measured_runs: u32::try_from(run_tokens.len()).unwrap_or(u32::MAX),
             tokens: usage_total,
             heaviest,

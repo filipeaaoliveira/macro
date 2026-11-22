@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use agent_correlation::context::{Attribution, scope_attribution};
+use agent_correlation::context::{Attribution, SchedulerRun, scope_attribution};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -85,6 +85,7 @@ struct FakeAutomations {
     created_in_person: Mutex<Vec<bool>>,
     routine_firings: Mutex<Vec<(String, Uuid)>>,
     acting: Mutex<Vec<Option<ActingAgent>>>,
+    proofs: Mutex<Vec<Option<SchedulerRun>>>,
     webhook_calls: Mutex<Vec<WebhookCall>>,
 }
 
@@ -142,10 +143,12 @@ impl AutomationService for FakeAutomations {
         &self,
         actor: &MacroUserIdStr<'static>,
         routine_id: Uuid,
+        scheduler_run: Option<SchedulerRun>,
         _firing: RoutineFiring,
         acting: Option<ActingAgent>,
     ) -> Result<FiringResult, FactoryError> {
         self.acting.lock().expect("acting").push(acting);
+        self.proofs.lock().expect("proofs").push(scheduler_run);
         self.routine_firings
             .lock()
             .expect("firings")
@@ -285,6 +288,34 @@ async fn a_routine_run_for_an_agent_fires_as_that_agent() {
             Some(ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID)),
         ]
     );
+}
+
+/// The service gets the scheduler's proof only as the credential signs it,
+/// beside the routine: a call whose credential signs none hands over none,
+/// whatever its body says.
+#[tokio::test]
+async fn the_schedulers_proof_comes_from_the_credential_only() {
+    let service = Arc::new(FakeAutomations::default());
+    let proof = SchedulerRun {
+        run_id: Uuid::from_u128(0x9),
+        revision: 2,
+    };
+    let fire = |scheduler_run: Option<SchedulerRun>| {
+        scope_attribution(
+            Attribution {
+                routine_id: Some(ROUTINE),
+                scheduler_run,
+                ..Attribution::default()
+            },
+            router(&service).oneshot(post("/automations/fire", Some("routine-macro"), FIRING)),
+        )
+    };
+
+    for response in [fire(Some(proof)).await, fire(None).await] {
+        assert_eq!(response.expect("response").status(), StatusCode::OK);
+    }
+
+    assert_eq!(*service.proofs.lock().expect("proofs"), [Some(proof), None]);
 }
 
 /// A webhook call needs no login, but a call without its signature and

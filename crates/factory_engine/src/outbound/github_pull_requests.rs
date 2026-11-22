@@ -17,9 +17,10 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitStatus,
-    FailureAnnotation, FinishedJob, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
-    PullRequestState, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
+    CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, Merging,
+    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
+    RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -261,6 +262,7 @@ fn pull_request(found: GithubPullRequestHead) -> PullRequest {
         url: found.html_url,
         state,
         head_sha: found.head_sha,
+        merge_commit: found.merge_commit_sha,
     }
 }
 
@@ -606,17 +608,22 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
-    async fn commit_parents(
+    async fn commit_made(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         sha: &str,
-    ) -> Result<Option<Vec<String>>, GithubPullRequestsErr> {
+    ) -> Result<Option<CommitMade>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
-        Ok(self
+        let commit = self
             .github
-            .commit_parents(&token, repository.owner(), repository.name(), sha)
-            .await?)
+            .commit_made(&token, repository.owner(), repository.name(), sha)
+            .await?;
+        Ok(commit.map(|commit| CommitMade {
+            parents: commit.parents,
+            committer_login: commit.committer_login,
+            verified: commit.verified,
+        }))
     }
 
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]
@@ -728,6 +735,29 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .github
             .has_open_pull_request_onto(&token, repository.owner(), repository.name(), branch)
             .await?)
+    }
+
+    #[tracing::instrument(skip(self, owner))]
+    async fn open_pull_requests(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        limit: usize,
+    ) -> Result<Vec<DefinitionPullRequest>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let open = self
+            .github
+            .list_open_pull_requests(&token, repository.owner(), repository.name(), limit)
+            .await?;
+        Ok(open
+            .into_iter()
+            .map(|pull_request| DefinitionPullRequest {
+                number: pull_request.number,
+                title: pull_request.title,
+                url: pull_request.html_url,
+                draft: pull_request.draft,
+            })
+            .collect())
     }
 
     /// The Step that asks logs a failure, so it is not logged here too.

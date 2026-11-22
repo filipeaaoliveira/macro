@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory_automation SET routine_id = $2, routine_revision = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d07d1662b6f70fc38c3d1c1021a2c555188e40bec1b8fa40f4985677548ed99e"
+}

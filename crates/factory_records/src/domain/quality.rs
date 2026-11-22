@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::insights::{InsightsScope, RunSummary};
 use crate::domain::models::{RunId, StepKey};
-use crate::domain::review_rounds::ReviewRoundOutcome;
+use crate::domain::review_rounds::{DisputeRuling, FixStatus, ReviewRoundOutcome};
 
 /// How a wait on a pull request's checks ended, as its `ci` Step routes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,8 +163,20 @@ pub struct QualityRun {
     /// Whether its owner steered one of its Steps in the Step Terminal: a
     /// note, a pause, a resume or a stop.
     pub steered: bool,
-    /// The agent sessions its Steps worked in.
-    pub sessions: Vec<Uuid>,
+    /// The agent sessions its Steps worked in, each once, those they left
+    /// for a new one included.
+    pub sessions: Vec<QualitySession>,
+}
+
+/// An agent session a Run's Steps worked in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QualitySession {
+    /// The session.
+    pub id: Uuid,
+    /// The bot that ran it; none for a session a Step left for a new one
+    /// (the Step records only its current bot), or for a Step from before
+    /// Steps recorded their bot.
+    pub bot: Option<Uuid>,
 }
 
 /// A wait of a `ci` Step, as read back.
@@ -212,7 +224,8 @@ pub struct ReviewerRecord {
     pub agent: Option<String>,
 }
 
-/// A Blocker a reviewer found.
+/// A Blocker a reviewer found, or a finding dismissed as the repeat of
+/// one it dropped.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockerRecord {
     /// The Run.
@@ -223,6 +236,13 @@ pub struct BlockerRecord {
     pub round_seq: u16,
     /// What is wrong, as the reviewer wrote it.
     pub problem: String,
+    /// What the fix said of it, when a fix was given it.
+    pub fix_status: Option<FixStatus>,
+    /// How the next round ruled on it, when the fix disputed it.
+    pub ruling: Option<DisputeRuling>,
+    /// Whether it was dismissed rather than a Blocker: it counts only as
+    /// dismissed.
+    pub dismissed: bool,
 }
 
 /// What CI health, review quality, cost and autonomy read about the Runs

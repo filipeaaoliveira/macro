@@ -31,7 +31,7 @@ const MANIFEST: &str = r#"{ "version": 1, "description": "Ours.", "flows": ["rep
 const AGENTS: &str = r#"{
     "agents": {
         "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0", "model": "large-model" },
-        "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+        "backup": { "bot": "00000000-0000-0000-0000-00000000c0d1" }
     },
     "roles": { "planner": ["primary", "backup"], "writer": ["primary"] }
 }"#;
@@ -155,7 +155,7 @@ impl DefinitionFiles for Customized {
 
 const PRIMARY_BOT: &str = "00000000-0000-0000-0000-00000000c1a0";
 
-const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0de";
+const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0d1";
 
 #[tokio::test]
 async fn the_starter_definition_reads() {
@@ -180,10 +180,29 @@ async fn the_starter_definition_reads() {
         .standing_rules
         .is_some_and(|rules| rules.merge);
     assert!(!merge_by_rule, "a person merges in the starter definition");
-    // Every judgment is a model call: the starter's Scorers judge no Run.
-    let scorers = definition.evaluation.scorers();
-    assert!(!scorers.is_empty());
-    assert!(scorers.iter().all(|scorer| scorer.sample_percent == 0));
+    // The starter's two Scorers judge a quarter of the code Flow's Runs:
+    // whether the change delivered the Done-when clauses, and whether the
+    // review's Blockers can be acted on.
+    let scorers: Vec<(&str, &[String], u8)> = definition
+        .evaluation
+        .scorers()
+        .iter()
+        .map(|scorer| {
+            (
+                scorer.name.as_str(),
+                scorer.flows.as_slice(),
+                scorer.sample_percent,
+            )
+        })
+        .collect();
+    let code = ["code".to_string()];
+    assert_eq!(
+        scorers,
+        [
+            ("delivers-done-when", &code[..], 25),
+            ("blockers-actionable", &code[..], 25),
+        ]
+    );
     // The starter documents Standing Roles without turning them on.
     assert!(!definition.agents.has_standing_roles());
 }
@@ -335,8 +354,8 @@ async fn a_token_budget_in_range_reads() {
 
 /// `scorers.json` is refused when its Scorers do not hold together, when
 /// they or its Experiments name a Flow or an Agent the Definition does not
-/// have (a built-in Flow among them), and when it names a key twice or is
-/// in another shape.
+/// have (a built-in Flow among them), and when it names a key twice, is in
+/// another shape, or has a Scorer read what no judge is given.
 #[tokio::test]
 async fn scorers_that_do_not_fit_the_definition_do_not_read() {
     let unreadable = |error: Result<FactoryDefinition, DefinitionError>| match error {
@@ -392,6 +411,14 @@ async fn scorers_that_do_not_fit_the_definition_do_not_read() {
         .await,
     );
     assert!(error.contains("settings"), "{error}");
+    let (_, error) = unreadable(
+        read(with(
+            "scorers.json",
+            r#"{ "scorers": [{ "name": "slop", "instructions": "Slop?", "samplePercent": 5, "reads": ["logs"] }] }"#,
+        ))
+        .await,
+    );
+    assert!(error.contains("unknown variant `logs`"), "{error}");
 }
 
 /// The improve Flow is the factory's own, which only a self-improvement
@@ -753,7 +780,7 @@ async fn every_placeholder_bot_is_named_in_the_file_s_order() {
     let agents = r#"{
         "agents": {
             "primary": { "bot": "00000000-0000-0000-0000-000000000001" },
-            "spare": { "bot": "00000000-0000-0000-0000-00000000c0de" },
+            "spare": { "bot": "00000000-0000-0000-0000-00000000c0d1" },
             "backup": { "bot": "00000000-0000-0000-0000-000000000002" }
         },
         "roles": { "planner": ["primary"], "writer": ["primary"] }
@@ -765,6 +792,96 @@ async fn every_placeholder_bot_is_named_in_the_file_s_order() {
         Err(DefinitionError::Agents(
             AgentDefinitionError::PlaceholderBots(vec![name("primary"), name("backup")])
         ))
+    );
+}
+
+/// An Agent on Codex's cloud agent does not read, named in the file's
+/// order; one on a machine's agent with a Codex model reads like any other.
+#[tokio::test]
+async fn an_agent_on_the_codex_cloud_agent_does_not_read() {
+    let agents = r#"{
+        "agents": {
+            "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+            "zeta": { "bot": "00000000-0000-0000-0000-00000000c0de", "model": "gpt-5.5" },
+            "alpha": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+        },
+        "roles": { "planner": ["zeta", "primary"], "writer": ["primary", "alpha"] }
+    }"#;
+    let name = |name: &str| AgentName::try_from(name.to_string()).expect("an agent");
+
+    assert_eq!(
+        read(with("agents.json", agents)).await,
+        Err(DefinitionError::Agents(AgentDefinitionError::CloudCodex(
+            vec![name("zeta"), name("alpha")]
+        )))
+    );
+    let on_a_machine = agents.replace(
+        "00000000-0000-0000-0000-00000000c0de",
+        "6f1c2a9e-4b7d-4e2a-9c3f-0d8e5b1a7c42",
+    );
+    assert!(read(with("agents.json", &on_a_machine)).await.is_ok());
+}
+
+/// An Agent on Codex's cloud agent that only a Standing Role lists reads:
+/// it takes no Step, so nothing waits on it to hand back.
+#[tokio::test]
+async fn an_agent_on_the_codex_cloud_agent_reads_in_a_standing_role_only() {
+    let agents = r#"{
+        "agents": {
+            "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+        },
+        "roles": { "planner": ["primary"], "writer": ["primary"] },
+        "standing": {
+            "intake": { "acts": ["start", "link"], "agents": ["backup"] }
+        }
+    }"#;
+
+    let definition = read(with("agents.json", agents))
+        .await
+        .expect("a cloud agent in a standing role only reads");
+    assert!(definition.agents.has_standing_roles());
+    assert!(definition.agents.cloud_codex_agents().is_empty());
+}
+
+/// An arm of `scorers.json` that gives a Role an Agent on Codex's cloud
+/// agent does not read, though only a Standing Role lists the Agent: the
+/// arm gives it the Role's Step, which it could never hand back.
+#[tokio::test]
+async fn an_arm_choosing_an_agent_on_the_codex_cloud_agent_does_not_read() {
+    let mut files = with(
+        "agents.json",
+        r#"{
+            "agents": {
+                "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+                "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+            },
+            "roles": { "planner": ["primary"], "writer": ["primary"] },
+            "standing": {
+                "intake": { "acts": ["start", "link"], "agents": ["backup"] }
+            }
+        }"#,
+    );
+    files.insert(
+        "scorers.json".to_string(),
+        r#"{ "experiments": [{
+            "name": "other-writer", "flow": "plan",
+            "arms": [{ "name": "usual" }, { "name": "other", "agents": { "writer": "backup" } }]
+        }] }"#
+            .to_string(),
+    );
+
+    let Err(DefinitionError::Evaluation(error @ EvaluationDefinitionError::CloudCodexAgent { .. })) =
+        read(files).await
+    else {
+        panic!("an arm choosing an Agent on the cloud agent is refused");
+    };
+    assert_eq!(
+        error.to_string(),
+        "arm other of experiment other-writer gives role writer agent backup, which runs on \
+         the Codex cloud agent, whose sessions cannot hand back a step's result: run Codex \
+         with macrod on a machine (`macrod service --agent codex`) and use the bot id of \
+         that machine's agent"
     );
 }
 
@@ -1015,7 +1132,7 @@ fn standing_agents(standing: &str) -> String {
         r#"{{
             "agents": {{
                 "primary": {{ "bot": "00000000-0000-0000-0000-00000000c1a0" }},
-                "backup": {{ "bot": "00000000-0000-0000-0000-00000000c0de" }}
+                "backup": {{ "bot": "00000000-0000-0000-0000-00000000c0d1" }}
             }},
             "roles": {{ "planner": ["primary", "backup"], "writer": ["primary"] }},
             "standing": {standing}
@@ -1092,4 +1209,168 @@ async fn standing_roles_that_do_not_hold_together_do_not_read() {
             "{why}: {read:?}"
         );
     }
+}
+
+/// `agents.json` with the Definition's Agents, a `scribe` Agent only a
+/// Standing Role lists (as a bot that answers Gates), and `rules` as its
+/// Agent Rules.
+fn ruled_agents(rules: &str) -> String {
+    format!(
+        r#"{{
+            "agents": {{
+                "primary": {{ "bot": "00000000-0000-0000-0000-00000000c1a0" }},
+                "backup": {{ "bot": "00000000-0000-0000-0000-00000000c0d1" }},
+                "scribe": {{ "bot": "00000000-0000-0000-0000-00000000d0c5" }}
+            }},
+            "roles": {{ "planner": ["primary", "backup"], "writer": ["primary", "backup"] }},
+            "standing": {{ "intake": {{ "acts": ["start"], "agents": ["scribe"] }} }},
+            "rules": {rules}
+        }}"#
+    )
+}
+
+/// A Definition reads with Agent Rules on a tag, a repository or both,
+/// each choosing one of its Role's own Agents.
+#[tokio::test]
+async fn a_definition_reads_with_agent_rules() {
+    let agents = ruled_agents(
+        r#"[
+            { "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" },
+            { "name": "site", "role": "planner", "repository": "acme/site", "agent": "backup" },
+            { "name": "site-docs", "role": "writer", "tag": "Docs", "repository": "acme/site", "agent": "primary" }
+        ]"#,
+    );
+
+    let definition = read(with("agents.json", &agents))
+        .await
+        .expect("a definition with agent rules");
+
+    let names: Vec<&str> = definition
+        .agents
+        .rules()
+        .iter()
+        .map(|rule| rule.name.as_str())
+        .collect();
+    assert_eq!(names, ["docs", "site", "site-docs"]);
+}
+
+/// The validator refuses an Agent Rule whose Agent the Definition does not
+/// have (as an arm's, through `check_choices`), one whose Agent its Role
+/// does not list (one only a Standing Role lists among them), one for a
+/// Role it does not fill, one that matches nothing, one whose repository is
+/// not `owner/name` as a Run keeps it, one with an empty tag, one an
+/// earlier rule shadows, and two rules of one name, naming the file, the
+/// rule and the problem.
+#[tokio::test]
+async fn agent_rules_that_do_not_hold_together_do_not_read() {
+    let unknown_agent = read(with(
+        "agents.json",
+        &ruled_agents(r#"[{ "name": "docs", "role": "writer", "tag": "docs", "agent": "ghost" }]"#),
+    ))
+    .await;
+    assert!(
+        matches!(
+            &unknown_agent,
+            Err(DefinitionError::AgentRule(EvaluationDefinitionError::UnknownAgent { whose, agent, .. }))
+                if whose == "agent rule docs" && agent == "ghost"
+        ),
+        "{unknown_agent:?}"
+    );
+    assert_eq!(
+        unknown_agent.expect_err("refused").to_string(),
+        "agents.json: agent rule docs gives role writer agent ghost, which the agent definition \
+         does not have"
+    );
+
+    let refused = [
+        (
+            r#"[{ "name": "docs", "role": "writer", "tag": "docs", "agent": "scribe" }]"#,
+            "agent rule docs chooses agent scribe, which role writer does not list",
+        ),
+        (
+            r#"[{ "name": "plans", "role": "planner", "tag": "docs", "agent": "scribe" }]"#,
+            "agent rule plans chooses agent scribe, which role planner does not list",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "acme/site.git", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "acme/..", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "./site", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "acme/site/", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[
+                { "name": "docs", "role": "writer", "tag": "docs", "repository": "acme/site", "agent": "backup" },
+                { "name": "docs-again", "role": "writer", "tag": " Docs ", "repository": "Acme/Site", "agent": "primary" }
+            ]"#,
+            "agent rule docs-again matches the same runs for the same role as agent rule docs",
+        ),
+        (
+            r#"[{ "name": "docs", "role": "publisher", "tag": "docs", "agent": "backup" }]"#,
+            "agent rule docs chooses for role publisher, which the definition does not fill",
+        ),
+        (
+            r#"[{ "name": "docs", "role": "writer", "agent": "backup" }]"#,
+            "agent rule docs must name a tag, a repository, or both",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "https://github.com/acme/site", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[{ "name": "docs", "role": "writer", "tag": " ", "agent": "backup" }]"#,
+            "agent rule docs must name a tag of 1 to 64 characters",
+        ),
+        (
+            r#"[{ "name": "Docs Rule", "role": "writer", "tag": "docs", "agent": "backup" }]"#,
+            r#"agent rule name "Docs Rule" must be 1 to 64"#,
+        ),
+        (
+            r#"[
+                { "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" },
+                { "name": "docs", "role": "planner", "tag": "docs", "agent": "backup" }
+            ]"#,
+            "two agent rules are named docs",
+        ),
+        (
+            r#"[{ "name": "docs", "role": "writer", "tag": "docs", "agent": "backup", "model": "small" }]"#,
+            "unknown field `model`",
+        ),
+    ];
+
+    for (rules, why) in refused {
+        let read = read(with("agents.json", &ruled_agents(rules))).await;
+        assert!(
+            matches!(&read, Err(DefinitionError::Unreadable { path, error }) if path == "agents.json" && error.contains(why)),
+            "{why}: {read:?}"
+        );
+    }
+}
+
+/// Rules that differ in their Role or in what they match read: only one
+/// that an earlier rule always beats is refused.
+#[tokio::test]
+async fn agent_rules_that_differ_in_role_or_match_read() {
+    let agents = ruled_agents(
+        r#"[
+            { "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" },
+            { "name": "docs-plans", "role": "planner", "tag": "docs", "agent": "backup" },
+            { "name": "site-docs", "role": "writer", "tag": "docs", "repository": "acme/site", "agent": "primary" },
+            { "name": "site", "role": "writer", "repository": "acme/site", "agent": "backup" }
+        ]"#,
+    );
+
+    let definition = read(with("agents.json", &agents))
+        .await
+        .expect("rules that differ read");
+    assert_eq!(definition.agents.rules().len(), 4);
 }

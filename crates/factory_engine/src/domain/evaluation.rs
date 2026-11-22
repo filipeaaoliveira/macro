@@ -45,9 +45,28 @@ pub struct ScorerDefinition {
     pub flows: Vec<String>,
     /// The percentage of those finished Runs it judges, from 0 to 100.
     pub sample_percent: u8,
+    /// What its judge reads beside the request, the outcome and the Steps'
+    /// outputs; nothing more when empty. A value not listed in
+    /// [`ScorerRead`] does not read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<ScorerRead>,
+}
+
+/// Something more a Scorer's judge reads of a Run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScorerRead {
+    /// The change the Run merged, or its branch's head proposes when it
+    /// merged nothing, as a unified diff cut to a budget.
+    Diff,
 }
 
 impl ScorerDefinition {
+    /// Whether its judge reads the Run's change.
+    pub fn reads_diff(&self) -> bool {
+        self.reads.contains(&ScorerRead::Diff)
+    }
+
     /// Whether it judges `run_id`, a finished Run of `flow`: a Run of one of
     /// its Flows, in its sample.
     pub fn samples(&self, flow: Option<&str>, run_id: RunId) -> bool {
@@ -311,6 +330,23 @@ pub enum EvaluationDefinitionError {
         /// The Agent.
         agent: String,
     },
+    /// An arm or a configuration gives a Role an Agent whose bot is Codex's
+    /// cloud agent ([`bot_id::CODEX_BOT_ID`]): its sessions cannot hand a
+    /// Step's result back, so the Role's Step would never end. Whether a
+    /// Role lists the Agent does not matter: the choice gives it the Step.
+    #[error(
+        "{whose} gives role {role} agent {agent}, which runs on the Codex cloud agent, whose \
+         sessions cannot hand back a step's result: run Codex with macrod on a machine \
+         (`macrod service --agent codex`) and use the bot id of that machine's agent"
+    )]
+    CloudCodexAgent {
+        /// The arm or configuration.
+        whose: String,
+        /// The Role.
+        role: Role,
+        /// The Agent.
+        agent: String,
+    },
 }
 
 /// Fails when two of `names` are the same.
@@ -436,15 +472,24 @@ impl TryFrom<EvaluationDefinitionFields> for EvaluationDefinition {
     }
 }
 
-/// Fails unless `agents` names only Agents of the agent definition.
+/// Fails unless `agents` names only Agents of the agent definition, none
+/// of them on Codex's cloud agent: a choice gives its Agent the Role's
+/// Step, which that agent could never hand back.
 pub fn check_choices(
     whose: &str,
     choices: &AgentChoices,
     agents: Option<&AgentDefinition>,
 ) -> Result<(), EvaluationDefinitionError> {
     for (role, agent) in choices {
-        if agents.and_then(|agents| agents.agent(agent)).is_none() {
+        let Some(defined) = agents.and_then(|agents| agents.agent(agent)) else {
             return Err(EvaluationDefinitionError::UnknownAgent {
+                whose: whose.to_string(),
+                role: role.clone(),
+                agent: agent.as_str().to_string(),
+            });
+        };
+        if defined.bot == bot_id::CODEX_BOT_ID {
+            return Err(EvaluationDefinitionError::CloudCodexAgent {
                 whose: whose.to_string(),
                 role: role.clone(),
                 agent: agent.as_str().to_string(),

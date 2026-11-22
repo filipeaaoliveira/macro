@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { BlockerCount } from './blockerCount';
+import type { BlockerResolutions } from './blockerResolutions';
 import type { RecurringBlocker } from './recurringBlocker';
 import type { ReviewQualityCleanFirstRate } from './reviewQualityCleanFirstRate';
 import type { ReviewQualityRoundsPerRun } from './reviewQualityRoundsPerRun';
@@ -46,6 +47,10 @@ export interface ReviewQuality {
    * @minimum 0
    */
   repeatedBlockers: number;
+  /** What became of the Blockers given to a fix: fixed as the fixer
+says, or disputed and then upheld or dropped, and the findings
+dismissed, over every reviewed Run. */
+  resolutions: BlockerResolutions;
   /**
    * Runs with one or more review rounds.
    * @minimum 0

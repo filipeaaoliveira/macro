@@ -270,7 +270,8 @@ fn a_routine_token_signs_its_routine_and_scope() {
         SignedClaims::routine(
             None,
             routine,
-            Some(agent_correlation::scope::SessionScope::DryRun)
+            Some(agent_correlation::scope::SessionScope::DryRun),
+            None,
         ),
         SignedClaims {
             agent_id: None,
@@ -279,6 +280,21 @@ fn a_routine_token_signs_its_routine_and_scope() {
             agent_correlation_id: None,
             agent_scope: Some(agent_correlation::scope::SessionScope::DryRun),
             routine_id: Some(routine),
+            scheduler_run: None,
         }
+    );
+}
+
+/// A run the scheduler started signs its proof beside the routine.
+#[test]
+fn a_scheduler_run_token_signs_the_schedulers_proof() {
+    let routine = macro_uuid::Uuid::from_u128(7);
+    let run = agent_correlation::context::SchedulerRun {
+        run_id: uuid::Uuid::from_u128(8),
+        revision: 3,
+    };
+    assert_eq!(
+        SignedClaims::routine(None, routine, None, Some(run)).scheduler_run,
+        Some(run)
     );
 }

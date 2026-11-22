@@ -16,7 +16,9 @@
 //!   format. It must fill every Role its Flows name. Its optional
 //!   `standing` section holds the Standing Roles: which Agents' bots may
 //!   start, cancel or link a Run, or answer its plan or Blockers Gate, for
-//!   its owner (`agents::standing`).
+//!   its owner (`agents::standing`). Its optional `rules` section holds the
+//!   Agent Rules: the Agent a Role's Steps start with when a Run's task
+//!   carries a tag or the Run works on a repository (`agents::rules`).
 //! - `rules.json` (optional): the Standing Rules (`standingRules`, an
 //!   Orchestrator Definition) and the Control File patterns
 //!   (`controlFiles`). Left out, the factory's defaults apply.
@@ -34,7 +36,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
 use factory_records::domain::evaluation::BENCHMARK_FLOW;
-use factory_records::domain::models::Role;
+use factory_records::domain::models::{AgentName, Role};
 use factory_records::domain::self_improvement::IMPROVE_FLOW;
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MAX_TOKEN_BUDGET, MIN_QUEUE_LIMIT, MIN_TOKEN_BUDGET, OrchestratorDefinition,
@@ -44,7 +46,7 @@ use serde::Deserialize;
 use crate::domain::agents::{AgentDefinition, AgentDefinitionError};
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::control_files::{ControlFiles, ControlFilesError, MAX_PATTERNS};
-use crate::domain::evaluation::{EvaluationDefinition, EvaluationDefinitionError};
+use crate::domain::evaluation::{EvaluationDefinition, EvaluationDefinitionError, check_choices};
 use crate::domain::flow::{Flow, FlowError, StepName, StepUse};
 
 /// The file that names the Definition's format and its Flows.
@@ -265,6 +267,9 @@ pub enum DefinitionError {
     /// The Agents do not fill a Role a Flow names.
     #[error("{AGENTS_FILE}: {0}")]
     Agents(AgentDefinitionError),
+    /// An Agent Rule chooses an Agent an Experiment arm could not.
+    #[error("{AGENTS_FILE}: {0}")]
+    AgentRule(EvaluationDefinitionError),
     /// The Control File patterns do not hold together.
     #[error("{RULES_FILE}: {0}")]
     ControlFiles(ControlFilesError),
@@ -605,21 +610,29 @@ pub async fn read_definition<F: DefinitionFiles>(
     // Run would start and then fail at its first Step. The error lists
     // them as the file does, which only its text still holds.
     let mut placeholders = agents.placeholder_bots();
-    if !placeholders.is_empty() {
+    // An Agent on Codex's cloud agent would start, then never hand a
+    // Step's result back.
+    let mut cloud_codex = agents.cloud_codex_agents();
+    if !placeholders.is_empty() || !cloud_codex.is_empty() {
         let listed = text(files, AGENTS_FILE)
             .await?
             .and_then(|text| serde_json::from_str::<ListedAgents>(&text).ok())
             .map(|listed| listed.agents.0)
             .unwrap_or_default();
-        placeholders.sort_by_key(|name| {
+        let place = |name: &AgentName| {
             listed
                 .iter()
                 .position(|listed| listed == name.as_str())
                 .unwrap_or(usize::MAX)
-        });
-        return Err(
-            DefinitionError::Agents(AgentDefinitionError::PlaceholderBots(placeholders)).into(),
-        );
+        };
+        if !placeholders.is_empty() {
+            placeholders.sort_by_key(place);
+            return Err(
+                DefinitionError::Agents(AgentDefinitionError::PlaceholderBots(placeholders)).into(),
+            );
+        }
+        cloud_codex.sort_by_key(place);
+        return Err(DefinitionError::Agents(AgentDefinitionError::CloudCodex(cloud_codex)).into());
     }
     let roles: BTreeSet<&Role> = flows
         .values()
@@ -627,6 +640,14 @@ pub async fn read_definition<F: DefinitionFiles>(
         .flat_map(|entry| entry.role.iter().chain(&entry.reviewers))
         .collect();
     agents.fills(roles).map_err(DefinitionError::Agents)?;
+    // An Agent Rule gives its Role's Step its Agent as an arm does, so it
+    // is checked as an arm's choice is: an Agent of the Definition, never
+    // one an arm could not take. Reading `agents.json` already held it to
+    // the Agents its Role lists.
+    for (name, choice) in agents.rule_choices() {
+        check_choices(&format!("agent rule {name}"), &choice, Some(&agents))
+            .map_err(DefinitionError::AgentRule)?;
+    }
 
     let rules: DefinitionRules = json(files, RULES_FILE).await?.unwrap_or_default();
     if let Some(patterns) = &rules.control_files {

@@ -12,8 +12,9 @@ use uuid::Uuid;
 use super::{PgRunRepository, PgRunRepositoryErr, number};
 use crate::domain::models::{Role, RunId, StepKey};
 use crate::domain::review_rounds::{
-    Finding, FindingClass, FindingKind, Lines, ReviewFinding, ReviewRound, ReviewRoundEnd,
-    ReviewRoundFailure, ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart, number_rounds,
+    DisputeRuling, Finding, FindingClass, FindingKind, FixAnswer, FixStatus, Lines, ReviewFinding,
+    ReviewRound, ReviewRoundEnd, ReviewRoundFailure, ReviewRoundOutcome, ReviewRoundRepository,
+    ReviewRoundStart, Ruling, number_rounds,
 };
 
 struct RoundRow {
@@ -81,6 +82,11 @@ struct FindingRow {
     follow_up_task_id: Option<String>,
     follow_up_key: Option<Uuid>,
     follow_up_commented: bool,
+    repeats_dropped: bool,
+    fix_status: Option<String>,
+    dispute: Option<String>,
+    ruling: Option<String>,
+    ruled_by: Option<i32>,
 }
 
 fn line(stored: i32) -> Result<u32, PgRunRepositoryErr> {
@@ -89,6 +95,15 @@ fn line(stored: i32) -> Result<u32, PgRunRepositoryErr> {
 
 fn stored_line(line: u32) -> Result<i32, PgRunRepositoryErr> {
     i32::try_from(line).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::MAX))
+}
+
+/// The kept `word`, read by `read`: none when none was kept.
+pub(super) fn stored_word<T>(
+    word: Option<String>,
+    read: fn(&str) -> Option<T>,
+) -> Result<Option<T>, PgRunRepositoryErr> {
+    word.map(|word| read(&word).ok_or(PgRunRepositoryErr::UnknownReviewWord(word)))
+        .transpose()
 }
 
 impl TryFrom<FindingRow> for ReviewFinding {
@@ -107,8 +122,11 @@ impl TryFrom<FindingRow> for ReviewFinding {
             None => None,
             Some("blocker") => Some(FindingKind::Blocker),
             Some("follow_up") => Some(FindingKind::FollowUp),
+            Some("dismissed") => Some(FindingKind::Dismissed),
             Some(other) => return Err(PgRunRepositoryErr::UnknownReviewWord(other.to_string())),
         };
+        let fix_status = stored_word(row.fix_status, FixStatus::from_word)?;
+        let ruling = stored_word(row.ruling, DisputeRuling::from_word)?;
         Ok(ReviewFinding {
             seq: number(row.seq)?,
             place: number(row.place)?,
@@ -118,6 +136,11 @@ impl TryFrom<FindingRow> for ReviewFinding {
             problem: row.problem,
             why: row.why,
             blocks_anywhere: row.blocks_anywhere,
+            repeats_dropped: row.repeats_dropped,
+            fix_status,
+            dispute: row.dispute,
+            ruling,
+            ruled_by: row.ruled_by.map(number).transpose()?,
             kind,
             follow_up_task_id: row
                 .follow_up_task_id
@@ -155,7 +178,8 @@ impl PgRunRepository {
             SELECT
                 f.run_id, f.round_seq, f.seq, f.place, s.role, f.path, f.start_line, f.end_line,
                 f.problem, f.why, f.blocks_anywhere, f.kind, f.follow_up_task_id, f.follow_up_key,
-                f.follow_up_commented
+                f.follow_up_commented, f.repeats_dropped, f.fix_status, f.dispute, f.ruling,
+                f.ruled_by
             FROM factory_review_finding f
             JOIN factory_step s ON s.run_id = f.run_id AND s.seq = f.seq
             WHERE f.run_id = ANY($1)
@@ -290,12 +314,13 @@ impl ReviewRoundRepository for PgRunRepository {
         self.rounds_of(&ids).await
     }
 
-    #[tracing::instrument(err, skip(self, findings), fields(run_id = %key.run_id, seq = key.seq, findings = findings.len()))]
-    async fn record_findings(
+    #[tracing::instrument(err, skip(self, findings, rulings), fields(run_id = %key.run_id, seq = key.seq, findings = findings.len(), rulings = rulings.len()))]
+    async fn record_answer(
         &self,
         key: StepKey,
         round_seq: u16,
         findings: &[Finding],
+        rulings: &[Ruling],
     ) -> Result<bool, Self::Err> {
         // The Step's row is locked while its findings are replaced, so its
         // end, which takes the same lock, comes before or after them.
@@ -331,6 +356,7 @@ impl ReviewRoundRepository for PgRunRepository {
         let mut problems = Vec::with_capacity(findings.len());
         let mut whys = Vec::with_capacity(findings.len());
         let mut anywhere = Vec::with_capacity(findings.len());
+        let mut repeats = Vec::with_capacity(findings.len());
         for (place, finding) in (1_i32..).zip(findings) {
             let (start, end) = match finding.lines {
                 Some(lines) => (
@@ -346,18 +372,20 @@ impl ReviewRoundRepository for PgRunRepository {
             problems.push(finding.problem.clone());
             whys.push(finding.why.clone());
             anywhere.push(finding.blocks_anywhere);
+            repeats.push(finding.repeats_dropped);
         }
         sqlx::query!(
             r#"
             INSERT INTO factory_review_finding
                 (run_id, seq, place, round_seq, path, start_line, end_line, problem, why,
-                 blocks_anywhere)
+                 blocks_anywhere, repeats_dropped)
             SELECT
                 $1, $2, f.place, $3, f.path, f.start_line, f.end_line, f.problem, f.why,
-                f.blocks_anywhere
+                f.blocks_anywhere, f.repeats_dropped
             FROM UNNEST(
-                $4::int[], $5::text[], $6::int[], $7::int[], $8::text[], $9::text[], $10::bool[]
-            ) AS f(place, path, start_line, end_line, problem, why, blocks_anywhere)
+                $4::int[], $5::text[], $6::int[], $7::int[], $8::text[], $9::text[], $10::bool[],
+                $11::bool[]
+            ) AS f(place, path, start_line, end_line, problem, why, blocks_anywhere, repeats_dropped)
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
@@ -369,6 +397,49 @@ impl ReviewRoundRepository for PgRunRepository {
             &problems,
             &whys,
             &anywhere,
+            &repeats,
+        )
+        .execute(&mut *transaction)
+        .await?;
+
+        // The Step's rulings replace the ones an earlier attempt made; a
+        // dispute another Step ruled on keeps its ruling.
+        sqlx::query!(
+            r#"
+            UPDATE factory_review_finding
+            SET ruling = NULL, ruled_by = NULL
+            WHERE run_id = $1 AND ruled_by = $2
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        let ruled_seqs: Vec<i32> = rulings.iter().map(|ruling| i32::from(ruling.seq)).collect();
+        let ruled_places: Vec<i32> = rulings
+            .iter()
+            .map(|ruling| i32::from(ruling.place))
+            .collect();
+        let words: Vec<String> = rulings
+            .iter()
+            .map(|ruling| ruling.ruling.as_str().to_string())
+            .collect();
+        sqlx::query!(
+            r#"
+            UPDATE factory_review_finding f
+            SET ruling = r.ruling, ruled_by = $2
+            FROM UNNEST($3::int[], $4::int[], $5::text[]) AS r(seq, place, ruling)
+            WHERE f.run_id = $1
+              AND f.seq = r.seq
+              AND f.place = r.place
+              AND f.fix_status = 'disputed'
+              AND f.ruling IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            &ruled_seqs,
+            &ruled_places,
+            &words,
         )
         .execute(&mut *transaction)
         .await?;
@@ -386,6 +457,51 @@ impl ReviewRoundRepository for PgRunRepository {
         .await?;
         transaction.commit().await?;
         Ok(true)
+    }
+
+    #[tracing::instrument(err, skip(self, answers), fields(answers = answers.len()))]
+    async fn record_fix(
+        &self,
+        run_id: RunId,
+        round_seq: u16,
+        answers: &[FixAnswer],
+    ) -> Result<(), Self::Err> {
+        let seqs: Vec<i32> = answers.iter().map(|answer| i32::from(answer.seq)).collect();
+        let places: Vec<i32> = answers
+            .iter()
+            .map(|answer| i32::from(answer.place))
+            .collect();
+        let statuses: Vec<String> = answers
+            .iter()
+            .map(|answer| answer.status.as_str().to_string())
+            .collect();
+        let disputes: Vec<Option<String>> = answers
+            .iter()
+            .map(|answer| answer.dispute.clone())
+            .collect();
+        sqlx::query!(
+            r#"
+            UPDATE factory_review_finding f
+            SET fix_status = a.status, dispute = a.dispute
+            FROM UNNEST($3::int[], $4::int[], $5::text[], $6::text[])
+                AS a(seq, place, status, dispute)
+            WHERE f.run_id = $1
+              AND f.round_seq = $2
+              AND f.seq = a.seq
+              AND f.place = a.place
+              AND f.kind = 'blocker'
+              AND f.ruling IS NULL
+            "#,
+            run_id.as_uuid(),
+            i32::from(round_seq),
+            &seqs,
+            &places,
+            &statuses,
+            &disputes as &[Option<String>],
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]

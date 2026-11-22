@@ -38,6 +38,7 @@ fn facts(kind: RuleGateKind) -> GateFacts {
         tampered: false,
         held: false,
         repeated_blockers: false,
+        dismissed: false,
     }
 }
 
@@ -166,6 +167,28 @@ fn no_rule_merges_through_a_main_hold() {
     assert_eq!(
         rule_answer(Some(EVERY_RULE), &held, &approve_or_revise()),
         None
+    );
+}
+
+/// A Run whose review dismissed a finding as a dropped Blocker's repeat
+/// waits for a person at its merge Gate.
+#[test]
+fn no_rule_merges_a_run_with_a_dismissed_finding() {
+    let dismissed = GateFacts {
+        dismissed: true,
+        ..facts(RuleGateKind::Merge)
+    };
+    assert_eq!(
+        rule_answer(Some(EVERY_RULE), &dismissed, &approve_or_revise()),
+        None
+    );
+    assert!(
+        rule_answer(
+            Some(EVERY_RULE),
+            &facts(RuleGateKind::Merge),
+            &approve_or_revise()
+        )
+        .is_some()
     );
 }
 

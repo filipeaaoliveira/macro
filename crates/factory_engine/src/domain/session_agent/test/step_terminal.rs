@@ -372,7 +372,7 @@ async fn the_terminal_reaches_the_step_s_session() {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
         agent: None,
-        bot: Some(Uuid::from_u128(0xc0de)),
+        bot: Some(Uuid::from_u128(0xc0d1)),
     };
     let key = StepKey {
         run_id: factory_records::domain::models::RunId::generate(),
@@ -394,7 +394,7 @@ async fn the_terminal_reaches_the_step_s_session() {
         .await
         .expect("stopped");
     let sent = sessions.follow_ups.lock().expect("follow-ups")[0].clone();
-    assert_eq!(sent.action.bot_id.as_uuid(), Uuid::from_u128(0xc0de));
+    assert_eq!(sent.action.bot_id.as_uuid(), Uuid::from_u128(0xc0d1));
     assert_eq!(sent.action.owner, julia());
     assert_eq!(sessions.cancels(), 1);
 

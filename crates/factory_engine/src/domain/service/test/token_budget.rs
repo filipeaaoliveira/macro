@@ -3,7 +3,8 @@
 //! and shown by the Run API with what the Run used of it.
 
 use factory_records::domain::models::{
-    BudgetStop, NewRun, RunId, RunInsert, RunOutcome, TeamMembership,
+    AgentName, BudgetStop, NewRun, PassedOver, Role, RunId, RunInsert, RunOutcome, StepKey,
+    StepSession, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules};
@@ -14,6 +15,7 @@ use crate::domain::fakes::{FakeGithub, FakeNotifier, FakeRepo, FakeRunTokens, Fa
 use crate::domain::models::{FactoryError, RunFinish};
 use crate::domain::ports::{FactoryService, StepService};
 use crate::domain::service::StepServiceImpl;
+use crate::domain::session_agent::SESSION_LOST;
 use crate::domain::token_budget::{BudgetCheck, BudgetVerdict, MAX_UNREAD_CHECKS, notice_id};
 
 const BUDGET: u64 = 100_000;
@@ -403,4 +405,60 @@ async fn a_run_whose_agents_record_no_usage_reads_as_not_measured() {
         .token_budget
         .expect("a budget");
     assert_eq!((shown.used, shown.measured), (Some(7), true));
+}
+
+/// A Step whose first session was lost after its agent worked in it goes
+/// on in a second: the budget counts what both used, once each, and stops
+/// the Run once together they reach it, though neither does alone.
+#[tokio::test]
+async fn the_budget_counts_the_session_a_step_lost() {
+    let repo = FakeRepo::default();
+    let run_id = run_with(&repo, budgeted(Some(BUDGET), false)).await;
+    let step = StepKey { run_id, seq: 1 };
+    let planner = Role::try_from("planner".to_string()).expect("valid role");
+    let primary = AgentName::try_from("primary".to_string()).expect("valid agent");
+    let session = |session_id| StepSession {
+        session_id,
+        action_id: Uuid::now_v7(),
+        agent: Some(primary.clone()),
+        bot: None,
+    };
+    let (lost, second) = (Uuid::now_v7(), Uuid::now_v7());
+    let usage = FakeRunTokens::by_session([(lost, BUDGET / 2), (second, BUDGET / 2 - 1)]);
+    let checker = worker(&repo, &usage, &FakeNotifier::default());
+
+    repo.claim_session(step, session(lost), &planner, &[])
+        .await
+        .expect("claim");
+    let within = checker.check_budget(check(run_id, 0)).await.expect("check");
+    assert_eq!(within, BudgetVerdict::Within);
+
+    assert!(
+        repo.pass_session(
+            step,
+            lost,
+            &planner,
+            &PassedOver {
+                agent: primary.clone(),
+                reason: SESSION_LOST.to_string(),
+            },
+            Some(&session(second)),
+        )
+        .await
+        .expect("pass")
+    );
+    // Together a token short of the budget: the Run goes on.
+    let short = checker.check_budget(check(run_id, 0)).await.expect("check");
+    assert_eq!(short, BudgetVerdict::Within);
+    assert_eq!(stop_of(&repo, run_id).await, None);
+
+    // One more token in the session that went on reaches it.
+    let usage = FakeRunTokens::by_session([(lost, BUDGET / 2), (second, BUDGET / 2)]);
+    let checker = worker(&repo, &usage, &FakeNotifier::default());
+    let stopped = checker.check_budget(check(run_id, 0)).await.expect("check");
+    assert_eq!(stopped, BudgetVerdict::Stopped);
+    assert_eq!(
+        stop_of(&repo, run_id).await,
+        Some(BudgetStop::Spent { used: BUDGET })
+    );
 }
