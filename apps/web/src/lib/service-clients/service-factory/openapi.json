@@ -3939,6 +3939,7 @@
           "steered",
           "manual",
           "measuredRuns",
+          "unmeasuredRuns",
           "tokens",
           "costUsd",
           "unpricedCalls"
@@ -3958,7 +3959,7 @@
           "costPerMergedUsd": {
             "type": ["number", "null"],
             "format": "double",
-            "description": "What every Run cost per merged pull request, in US dollars; none\nunless every call was priced."
+            "description": "What every Run cost per merged pull request, in US dollars; none\nunless every Run's agent sessions recorded their usage and every\ncall was priced."
           },
           "costUsd": {
             "type": "number",
@@ -4008,7 +4009,13 @@
           "tokensPerMerged": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "The tokens every Run used per merged pull request.",
+            "description": "The tokens every Run used per merged pull request; none unless every\nRun's agent sessions recorded their usage.",
+            "minimum": 0
+          },
+          "unmeasuredRuns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs with an agent session whose usage is not known: one on a\nruntime that records none, as Codex or Claude Code on its owner's\nown login. While any, no figure per merged pull request is given.",
             "minimum": 0
           },
           "unpricedCalls": {

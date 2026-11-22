@@ -422,6 +422,9 @@ function ReviewSection(props: {
 
 function DeliverySection(props: { delivery: DeliveryInsight }) {
   const cost = () => mergedCost(props.delivery);
+  // Some Runs' usage is unknown, so no figure is given, in money or tokens.
+  const unmeasured = () =>
+    props.delivery.merged > 0 && props.delivery.unmeasuredRuns > 0;
 
   return (
     <InsightSection
@@ -480,7 +483,17 @@ function DeliverySection(props: { delivery: DeliveryInsight }) {
           </dd>
         </div>
       </dl>
-      <Show when={props.delivery.unpricedCalls > 0}>
+      <Show when={unmeasured()}>
+        <p
+          class="px-4 pb-3 text-xs text-ink-muted"
+          data-testid="cost-unmeasured"
+        >
+          {t('factoryQuality.unmeasured', {
+            count: props.delivery.unmeasuredRuns,
+          })}
+        </p>
+      </Show>
+      <Show when={!unmeasured() && props.delivery.unpricedCalls > 0}>
         <p class="px-4 pb-3 text-xs text-ink-muted">
           {t('factoryQuality.unpriced', {
             count: props.delivery.unpricedCalls,

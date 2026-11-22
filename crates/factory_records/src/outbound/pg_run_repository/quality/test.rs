@@ -9,7 +9,7 @@ use crate::domain::models::{RunId, StepKey};
 use crate::domain::ports::RunRepository;
 use crate::domain::quality::{
     CiJob, CiJobResult, CiVerdict, CiWait, LastCiWait, QualityRecords, QualityScope,
-    RunQualityRepository,
+    QualitySession, RunQualityRepository,
 };
 use crate::domain::review_rounds::ReviewRoundOutcome;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -96,13 +96,20 @@ async fn the_persons_runs_say_whether_they_merged_and_whether_a_person_stepped_i
         records.runs[3].pull_request.as_deref(),
         Some("https://github.com/macro/app/pull/1")
     );
+    // Each session once, with the bot that ran it; the scope reviewer's
+    // Step is from before Steps recorded their bot.
+    let session = |id: &str, bot: Option<&str>| QualitySession {
+        id: Uuid::parse_str(id).unwrap(),
+        bot: bot.map(|bot| Uuid::parse_str(bot).unwrap()),
+    };
+    let bot = Some("00000000-0000-7000-8000-000000000a01");
     assert_eq!(
         records.runs[3].sessions,
         vec![
-            Uuid::parse_str("00000000-0000-7000-8000-000000000501").unwrap(),
-            Uuid::parse_str("00000000-0000-7000-8000-000000000502").unwrap(),
-            Uuid::parse_str("00000000-0000-7000-8000-000000000503").unwrap(),
-            Uuid::parse_str("00000000-0000-7000-8000-000000000504").unwrap(),
+            session("00000000-0000-7000-8000-000000000501", bot),
+            session("00000000-0000-7000-8000-000000000502", bot),
+            session("00000000-0000-7000-8000-000000000503", None),
+            session("00000000-0000-7000-8000-000000000504", bot),
         ]
     );
     assert_eq!(
@@ -348,4 +355,45 @@ async fn the_last_ci_wait_is_the_latest_before_a_step_with_its_heads_jobs(pool: 
     );
     assert_eq!(before_any, None);
     assert_eq!(spaces.map(|wait| wait.jobs), Some(vec!["test".to_string()]));
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "quality"))
+)]
+async fn a_session_over_several_steps_keeps_the_bot_one_of_them_recorded(pool: PgPool) {
+    // One session asked a question and went on over three Steps: the first
+    // from before Steps recorded their bot, the next with it, the last
+    // without it again.
+    sqlx::query(
+        "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at,
+                                   session_id, action_id, offered, role, agent, bot_id)
+         SELECT $1, seq, 'write', 1, '2026-11-11 09:00Z', 'done', 'Written', '2026-11-11 09:05Z',
+                '00000000-0000-7000-8000-000000000506', action_id, '{done}', 'writer', 'primary', bot_id
+         FROM (VALUES
+             (3, '00000000-0000-7000-8000-000000000606'::uuid, NULL::uuid),
+             (4, '00000000-0000-7000-8000-000000000607'::uuid, '00000000-0000-7000-8000-000000000a02'::uuid),
+             (5, '00000000-0000-7000-8000-000000000608'::uuid, NULL::uuid)
+         ) AS steps (seq, action_id, bot_id)",
+    )
+    .bind(Uuid::parse_str(SPACES).expect("valid run id"))
+    .execute(&pool)
+    .await
+    .expect("steps");
+    let repo = PgRunRepository::new(pool);
+
+    let records = repo.read_quality(&julia(None)).await.expect("read");
+
+    let spaces = records
+        .runs
+        .iter()
+        .find(|record| record.run.id == run(SPACES))
+        .expect("the run");
+    assert_eq!(
+        spaces.sessions,
+        vec![QualitySession {
+            id: Uuid::parse_str("00000000-0000-7000-8000-000000000506").unwrap(),
+            bot: Some(Uuid::parse_str("00000000-0000-7000-8000-000000000a02").unwrap()),
+        }]
+    );
 }

@@ -6,9 +6,9 @@ use agent_session::domain::error::AiAdmissionError;
 use agent_session::domain::model::SessionVisibility;
 use agent_session::domain::routines::{
     ExecRoutineSession, PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession,
-    RoutineActionStatus, RoutineFailureReason, RoutinePendingReason, RoutinePromptAccepted,
-    RoutineSessionAction, RoutineSessionError, RoutineSessions, ValidateRoutineSession,
-    ValidatedRoutineSession,
+    RoutineActionStatus, RoutineActivity, RoutineFailureReason, RoutinePendingReason,
+    RoutinePromptAccepted, RoutineSessionAction, RoutineSessionError, RoutineSessions,
+    ValidateRoutineSession, ValidatedRoutineSession,
 };
 use agent_session::domain::session_command::SessionCommandOutput;
 use ai_billing::DenyReason;
@@ -35,6 +35,7 @@ mod reminder;
 mod run_check;
 mod setup;
 mod step_terminal;
+mod usage_limit;
 
 /// What happens to one call: it works, or fails with this error. A call
 /// that fails ambiguously may still take effect (`lands`).
@@ -112,6 +113,17 @@ struct FakeSessions {
     last_words: Option<String>,
     /// What the agent last said in its first prompt's turn.
     first_words: Option<String>,
+    /// First prompts whose turn the usage limit of the runtime's own
+    /// provider account ends, as Codex's does: each landing takes one, its
+    /// agent hands nothing back, and its session's turn ends failed so.
+    usage_limits: Arc<Mutex<usize>>,
+    /// Whether the open session's turn ended at its usage limit.
+    limited: Arc<Mutex<bool>>,
+    /// The tool calls the session reads as made: none for a turn that
+    /// ended at once.
+    tool_calls: u32,
+    /// Reads of the session's activity.
+    activity_reads: Arc<Mutex<usize>>,
 }
 
 impl FakeSessions {
@@ -147,7 +159,17 @@ impl FakeSessions {
             lost: Arc::default(),
             last_words: None,
             first_words: None,
+            usage_limits: Arc::default(),
+            limited: Arc::default(),
+            tool_calls: 0,
+            activity_reads: Arc::default(),
         }
+    }
+
+    /// The first `count` first prompts that land end at the usage limit.
+    fn limiting(self, count: usize) -> Self {
+        *self.usage_limits.lock().expect("usage limits") = count;
+        self
     }
 
     fn preparing(self, replies: &[Reply]) -> Self {
@@ -219,7 +241,7 @@ impl RoutineSessions for FakeSessions {
                 session_id: Uuid::now_v7(),
                 action_id: Uuid::now_v7(),
                 agent: Some(AgentName::try_from("backup".to_string()).expect("valid")),
-                bot: Some(Uuid::from_u128(0xc0de)),
+                bot: Some(Uuid::from_u128(0xc0d1)),
             };
             let passed = self
                 .repo
@@ -274,9 +296,16 @@ impl RoutineSessions for FakeSessions {
         if reply.lands {
             *self.prompted.lock().expect("prompted") = true;
             *self.landed.lock().expect("landed") += 1;
+            let limited = {
+                let mut left = self.usage_limits.lock().expect("usage limits");
+                let limited = *left > 0;
+                *left = left.saturating_sub(1);
+                limited
+            };
+            *self.limited.lock().expect("limited") = limited;
             // The agent works and hands back from the session, as code mode
             // would through the Run API.
-            if let Some(handed) = &self.handed {
+            if let Some(handed) = self.handed.as_ref().filter(|_| !limited) {
                 self.repo
                     .hand_back(session_id, handed)
                     .await
@@ -373,6 +402,10 @@ impl RoutineSessions for FakeSessions {
             ))
         } else if stops > self.ignored_stops {
             Ok(RoutineActionStatus::Failed(RoutineFailureReason::Cancelled))
+        } else if *self.limited.lock().expect("limited") {
+            Ok(RoutineActionStatus::Failed(
+                RoutineFailureReason::UsageLimit,
+            ))
         } else if *self.prompted.lock().expect("prompted") {
             Ok(self.ending)
         } else if self.disconnected {
@@ -431,7 +464,19 @@ impl RoutineSessions for FakeSessions {
         *open = false;
         *self.prompted.lock().expect("prompted") = false;
         *self.lost.lock().expect("lost") = false;
+        *self.limited.lock().expect("limited") = false;
         Ok(())
+    }
+
+    async fn activity(
+        &self,
+        _command: RoutineSessionAction,
+    ) -> Result<RoutineActivity, RoutineSessionError> {
+        *self.activity_reads.lock().expect("activity reads") += 1;
+        Ok(RoutineActivity {
+            tool_calls: self.tool_calls,
+            turns: 1,
+        })
     }
 }
 
@@ -512,7 +557,7 @@ fn name(agent: &str) -> AgentName {
 const PRIMARY: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc1a0));
 
 /// The bot whose sessions `backup` runs in.
-const BACKUP: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc0de));
+const BACKUP: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc0d1));
 
 /// The bot whose sessions `spare` runs in.
 const SPARE: BotId = BotId::new_from_uuid(Uuid::from_u128(0x5a5e));
@@ -527,7 +572,7 @@ fn agents() -> AgentDefinition {
                 "model": "large-model",
                 "instructions": "Keep each commit small."
             },
-            "backup": { "bot": Uuid::from_u128(0xc0de) },
+            "backup": { "bot": Uuid::from_u128(0xc0d1) },
             "spare": { "bot": Uuid::from_u128(0x5a5e) }
         },
         "roles": { "planner": ["primary", "backup"] }

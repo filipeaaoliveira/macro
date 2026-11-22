@@ -35,6 +35,11 @@ to the browser via `inbound/wasm`.
   the presented `PresentView` to `ToolDetail::View`, the `dynamic_ui::View`
   their result carries, decoded. Their arguments are the model's, streamed
   undecoded, and are never read.
+- `src/domain/fold/turn.rs` (`fail_turn`): a prompt answered with an error
+  ends its turn `Failed`, with the runtime's message and a `FailureNotice`
+  its `data` carries; Codex's adapter instead puts Codex's own message and
+  error class in `data` (`harness/codex.rs`, `turn_failure`), whose
+  `usageLimitExceeded` reads as a `ProviderUsageLimit` notice.
 - `src/domain/log.rs`: the raw log vocabulary folds consume.
 - `src/domain/ports.rs`: `FoldedMessageRepo`, the driving port services call
   directly — there is no HTTP adapter; only the browser gets `inbound/wasm`.

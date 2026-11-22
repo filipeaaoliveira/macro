@@ -753,7 +753,7 @@ async fn a_suite_of_a_definition_s_benchmark_walks_the_benchmark_flow() {
         );
     }
     let deployment_agents: AgentDefinition = serde_json::from_value(serde_json::json!({
-        "agents": { "elsewhere": { "bot": "00000000-0000-0000-0000-00000000c0de" } },
+        "agents": { "elsewhere": { "bot": "00000000-0000-0000-0000-00000000c0d1" } },
         "roles": { "planner": ["elsewhere"], "writer": ["elsewhere"] }
     }))
     .expect("the deployment's agents");

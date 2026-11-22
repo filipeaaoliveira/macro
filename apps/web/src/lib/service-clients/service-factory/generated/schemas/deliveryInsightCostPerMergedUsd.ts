@@ -7,6 +7,7 @@
 
 /**
  * What every Run cost per merged pull request, in US dollars; none
-unless every call was priced.
+unless every Run's agent sessions recorded their usage and every
+call was priced.
  */
 export type DeliveryInsightCostPerMergedUsd = number | null;

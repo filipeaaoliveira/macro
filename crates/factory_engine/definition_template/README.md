@@ -46,7 +46,17 @@ Outside the files, all must be done:
   agent each member who starts Runs may use. The zero ids name no agent:
   until you replace them, the validator fails, naming `agents.json` and
   the Agent, team settings refuse the Definition, and no Run starts.
-- `model` (may): left out, the agent's own default model.
+- `model` (may): left out, the agent's own default model. It must be one
+  the agent's runtime offers: a Claude Code agent's (`opus`, `sonnet`), a
+  Codex agent's (`gpt-5.5`, as `codex` lists it). A model the runtime does
+  not offer fails the Step.
+- A Role can run on Codex: run macrod on a machine with Codex signed in
+  (`macrod service --agent codex`, or a second profile beside a Claude
+  Code one), and give an Agent that machine's agent's `bot` id. Codex's
+  cloud agent (`00000000-0000-0000-0000-00000000c0de`) cannot take a Step:
+  its sessions cannot hand a result back, and the validator refuses an
+  Agent on it that a Role lists (one only a Standing Role lists reads)
+  and an Experiment arm in `scorers.json` that chooses one.
 - `instructions` (may): what every session of the Agent is told before the
   Step's prompt. Left as is, `primary` is told to work in small commits.
 - `roles` (may): the Agents of each Role, in order. A Step works with the
@@ -290,9 +300,11 @@ It leaves off:
   only the Runs that start after the change merges. A Run whose usage
   cannot be read for three agent Steps in a row ends too, as its budget
   cannot be checked. The budget applies only to agents whose model calls
-  Macro measures: an agent that runs locally or on its own runtime records
-  no token use, its run page says the budget is not measured, and the
-  budget never stops it. The check refuses a budget out of that range.
+  Macro measures: an agent that runs locally or on its own runtime (Claude
+  Code or Codex through macrod, signed in with its owner's own login)
+  records no token use, its run page says the budget is not measured, and
+  the budget never stops it. A Run that mixes both counts only the
+  measured Agents' Steps. The check refuses a budget out of that range.
 
 ## Scorers, Experiments and Benchmarks
 
@@ -442,6 +454,9 @@ every such Agent, in the order `agents.json` lists them:
 ```text
 .: agents.json: agents primary, backup have the template's placeholder bot ids: replace them with the ids of Macro agents each member who starts runs may use
 ```
+
+An Agent on Codex's cloud agent that a Role lists does not read either,
+each named the same way, with how to run Codex through macrod instead.
 
 The validator has no mode that lets them through: the template as shipped
 fails it on purpose. Team settings and a Run read the Definition the same

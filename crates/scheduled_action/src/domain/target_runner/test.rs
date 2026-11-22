@@ -627,6 +627,9 @@ async fn all_terminal_failures_and_authorization_errors_fail_without_retry() {
         Ok(RoutineActionStatus::Failed(
             RoutineFailureReason::UnknownStopReason,
         )),
+        Ok(RoutineActionStatus::Failed(
+            RoutineFailureReason::UsageLimit,
+        )),
         Err(RoutineSessionError::Forbidden),
         Err(RoutineSessionError::SessionMismatch),
     ];

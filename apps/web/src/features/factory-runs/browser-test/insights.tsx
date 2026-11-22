@@ -602,6 +602,7 @@ function qualityFixture(params: QualityParams): QualityInsights {
       steered: 1,
       manual: 2,
       measuredRuns: 10,
+      unmeasuredRuns: 0,
       tokens: {
         input: 820000,
         output: 96000,

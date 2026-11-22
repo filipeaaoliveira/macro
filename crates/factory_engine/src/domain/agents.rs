@@ -9,7 +9,7 @@ mod test;
 
 use std::collections::BTreeMap;
 
-use bot_id::BotId;
+use bot_id::{BotId, CODEX_BOT_ID};
 use factory_records::domain::models::{AgentName, Role};
 use factory_records::domain::standing_acts::{StandingAct, StandingRoleName};
 use serde::{Deserialize, Serialize};
@@ -198,6 +198,32 @@ pub enum AgentDefinitionError {
     /// definition lists them.
     #[error("{}", placeholder_bots_message(.0))]
     PlaceholderBots(Vec<AgentName>),
+    /// Agents a work Role lists whose bot is Codex's cloud agent
+    /// ([`CODEX_BOT_ID`]), in the order the definition lists them: its
+    /// sessions work in a cloud environment of their own, outside the Run's
+    /// checkout, and are handed no Macro tools, so they can never hand a
+    /// Step's result back. Codex takes a Role through macrod on a machine
+    /// (`--agent codex`).
+    #[error("{}", cloud_codex_message(.0))]
+    CloudCodex(Vec<AgentName>),
+}
+
+/// What [`AgentDefinitionError::CloudCodex`] says about `agents`.
+fn cloud_codex_message(agents: &[AgentName]) -> String {
+    let names = agents
+        .iter()
+        .map(AgentName::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let (agents, run) = match agents {
+        [_] => (format!("agent {names}"), "runs"),
+        _ => (format!("agents {names}"), "run"),
+    };
+    format!(
+        "{agents} {run} on the Codex cloud agent, whose sessions cannot hand back a step's \
+         result: run Codex with macrod on a machine (`macrod service --agent codex`) and \
+         use the bot id of that machine's agent"
+    )
 }
 
 /// What [`AgentDefinitionError::PlaceholderBots`] says about `agents`.
@@ -306,6 +332,20 @@ impl AgentDefinition {
             .collect()
     }
 
+    /// The Agents, by name, that a work Role lists and whose bot is Codex's
+    /// cloud agent ([`CODEX_BOT_ID`]), which cannot do a Step
+    /// ([`AgentDefinitionError::CloudCodex`]). An Agent only a Standing Role
+    /// lists takes no Step, so nothing waits on it to hand back.
+    pub fn cloud_codex_agents(&self) -> Vec<AgentName> {
+        self.agents
+            .iter()
+            .filter(|(name, agent)| {
+                agent.bot == CODEX_BOT_ID && self.roles.values().any(|listed| listed.contains(name))
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     /// Whether the definition has a `standing` section, so an agent acting
     /// for a Run's owner does only the acts its bot's Standing Roles allow.
     pub fn has_standing_roles(&self) -> bool {
@@ -356,6 +396,10 @@ impl AgentDefinition {
             (Some(agents), _) => {
                 if agents.standing.is_some() {
                     return Err(AgentDefinitionError::StandingOutsideDefinition);
+                }
+                let cloud_codex = agents.cloud_codex_agents();
+                if !cloud_codex.is_empty() {
+                    return Err(AgentDefinitionError::CloudCodex(cloud_codex));
                 }
                 agents.fills_built_in_flows()?;
                 Ok(Some(agents))

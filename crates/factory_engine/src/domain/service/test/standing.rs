@@ -30,7 +30,7 @@ use crate::domain::ports::{FactoryService, StepService};
 use crate::domain::service::StepServiceImpl;
 
 pub(super) const PRIMARY_BOT: Uuid = Uuid::from_u128(0xc1a0);
-pub(super) const BACKUP_BOT: Uuid = Uuid::from_u128(0xc0de);
+pub(super) const BACKUP_BOT: Uuid = Uuid::from_u128(0xc0d1);
 
 /// The Agents `primary` and `backup`, with `standing` as their Standing
 /// Roles when given.

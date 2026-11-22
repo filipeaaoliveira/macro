@@ -38,7 +38,8 @@ export function repositoryName(url: string): string {
 
 /**
  * Cost per merged pull request as it reads: money when every model call was
- * priced, tokens otherwise, or none before a pull request merged.
+ * priced, tokens otherwise, or none before a pull request merged or while
+ * some Runs' usage is unknown (`unmeasuredRuns`).
  */
 export function mergedCost(
   delivery: DeliveryInsight

@@ -20,7 +20,7 @@
 #[cfg(test)]
 mod test;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use ai_usage::domain::session_usage::{SessionTokens, SessionUsageReader};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -523,6 +523,10 @@ pub struct DeliveryInsight {
     pub manual: u32,
     /// Runs with usage recorded.
     pub measured_runs: u32,
+    /// Runs with an agent session whose usage is not known: one on a
+    /// runtime that records none, as Codex or Claude Code on its owner's
+    /// own login. While any, no figure per merged pull request is given.
+    pub unmeasured_runs: u32,
     /// The tokens every Run's agents used.
     pub tokens: TokenCounts,
     /// What their priced model calls cost, in US dollars.
@@ -530,9 +534,11 @@ pub struct DeliveryInsight {
     /// Their model calls with no price.
     pub unpriced_calls: u64,
     /// What every Run cost per merged pull request, in US dollars; none
-    /// unless every call was priced.
+    /// unless every Run's agent sessions recorded their usage and every
+    /// call was priced.
     pub cost_per_merged_usd: Option<f64>,
-    /// The tokens every Run used per merged pull request.
+    /// The tokens every Run used per merged pull request; none unless every
+    /// Run's agent sessions recorded their usage.
     pub tokens_per_merged: Option<u64>,
 }
 
@@ -1048,7 +1054,22 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
     let mut person_answered = 0;
     let mut steered = 0;
     let mut manual = 0;
+    // The bots one of whose sessions recorded usage: their runtime records
+    // it, so a session of theirs that recorded none made no model call (it
+    // failed before its first) and cost nothing.
+    let measured_bots: HashSet<Uuid> = records
+        .runs
+        .iter()
+        .flat_map(|run| &run.sessions)
+        .filter(|session| by_session.contains_key(&session.id))
+        .filter_map(|session| session.bot)
+        .collect();
     let mut measured_runs = 0;
+    // Runs with an agent session that recorded no usage on a runtime that
+    // records none: one on someone's own login (Codex or Claude Code
+    // through macrod), so what those Runs spent is not known. A session
+    // whose bot is not known counts too.
+    let mut unmeasured_runs = 0;
     let mut used = TokenCounts::default();
     let mut cost_usd = 0.0;
     let mut unpriced_calls = 0;
@@ -1076,21 +1097,28 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
             }
         }
         let mut measured = false;
+        let mut unmeasured = false;
         for session in &run.sessions {
-            if let Some(session) = by_session.get(session) {
-                measured = true;
-                used.input += session.input;
-                used.output += session.output;
-                used.cache_read += session.cache_read;
-                used.cache_write += session.cache_write;
-                cost_usd += session.cost_usd;
-                unpriced_calls += session.unpriced_calls;
-            }
+            let Some(session) = by_session.get(&session.id) else {
+                unmeasured |= !session.bot.is_some_and(|bot| measured_bots.contains(&bot));
+                continue;
+            };
+            measured = true;
+            used.input += session.input;
+            used.output += session.output;
+            used.cache_read += session.cache_read;
+            used.cache_write += session.cache_write;
+            cost_usd += session.cost_usd;
+            unpriced_calls += session.unpriced_calls;
         }
         measured_runs += u32::from(measured);
+        unmeasured_runs += u32::from(unmeasured);
     }
     let total_tokens = used.input + used.output + used.cache_read + used.cache_write;
-    let priced = measured_runs > 0 && unpriced_calls == 0;
+    // A figure per merged pull request is every Run's spend over the
+    // merges: only known when every Run's agent sessions recorded theirs.
+    let whole = measured_runs > 0 && unmeasured_runs == 0;
+    let priced = whole && unpriced_calls == 0;
     DeliveryInsight {
         ended_runs,
         merged,
@@ -1100,11 +1128,11 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
         steered,
         manual,
         measured_runs,
+        unmeasured_runs,
         tokens: used,
         cost_usd,
         unpriced_calls,
         cost_per_merged_usd: (merged > 0 && priced).then(|| cost_usd / f64::from(merged)),
-        tokens_per_merged: (merged > 0 && measured_runs > 0)
-            .then(|| total_tokens / u64::from(merged)),
+        tokens_per_merged: (merged > 0 && whole).then(|| total_tokens / u64::from(merged)),
     }
 }

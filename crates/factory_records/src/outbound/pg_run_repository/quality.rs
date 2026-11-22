@@ -17,7 +17,8 @@ use crate::domain::insights::{RunSummary, TITLE_CHARS};
 use crate::domain::models::{RunId, RunOutcome};
 use crate::domain::quality::{
     BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWait, CiWaitRecord, LastCiWait, QualityRecords,
-    QualityRun, QualityScope, ReviewRoundRecord, ReviewerRecord, RunQualityRepository,
+    QualityRun, QualityScope, QualitySession, ReviewRoundRecord, ReviewerRecord,
+    RunQualityRepository,
 };
 use crate::domain::review_rounds::ReviewRoundOutcome;
 
@@ -308,31 +309,37 @@ impl RunQualityRepository for PgRunRepository {
         }
         let ids: Vec<Uuid> = runs.iter().map(|run| run.run.id.as_uuid()).collect();
 
-        // The Runs' agent sessions, through `factory_step`'s primary key; a
-        // Step that went on after a question shares the asking Step's
-        // session, which counts once.
+        // The Runs' agent sessions and the bot that ran each, through
+        // `factory_step`'s primary key; a Step that went on after a question
+        // shares the asking Step's session, which counts once. A session
+        // keeps one bot, which a Step from before Steps recorded it lacks.
         let sessions = sqlx::query!(
             r#"
-            SELECT DISTINCT run_id, session_id AS "session_id!"
+            SELECT run_id, session_id AS "session_id!",
+                (array_agg(bot_id) FILTER (WHERE bot_id IS NOT NULL))[1] AS bot_id
             FROM (
-                SELECT run_id, session_id
+                SELECT run_id, session_id, bot_id
                 FROM factory_step
                 WHERE run_id = ANY($1)
                 OFFSET 0
             ) steps
             WHERE session_id IS NOT NULL
+            GROUP BY run_id, session_id
             "#,
             &ids,
         )
         .fetch_all(&mut *transaction)
         .await?;
-        let mut by_run: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        let mut by_run: HashMap<Uuid, Vec<QualitySession>> = HashMap::new();
         for row in sessions {
-            by_run.entry(row.run_id).or_default().push(row.session_id);
+            by_run.entry(row.run_id).or_default().push(QualitySession {
+                id: row.session_id,
+                bot: row.bot_id,
+            });
         }
         for run in &mut runs {
             if let Some(mut sessions) = by_run.remove(&run.run.id.as_uuid()) {
-                sessions.sort();
+                sessions.sort_by_key(|session| session.id);
                 run.sessions = sessions;
             }
         }

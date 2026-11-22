@@ -201,7 +201,9 @@ skips the turn before any model call; unset or unreadable, summaries run.
   when an agent stops without handing back a result); `follow_up`
   sends a later prompt to a session that took its first, under its own
   action id, which `status` then reads (the software factory's checks
-  rounds). A prompt the session already holds under that id is a conflict.
+  rounds). `status` reads a failed turn whose notice is
+  `ProviderUsageLimit` (a cloud agent's, or Codex's adapter's error) as
+  `usage_limit`, never with the provider's words. A prompt the session already holds under that id is a conflict.
   `exec` runs one command in the session's checkout, beside its agent, for
   its owner (`domain/session_command.rs`), through the harness
   (`AgentSessionNotificationRecipient::run_command`), and answers its exit

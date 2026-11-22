@@ -79,6 +79,7 @@ export default {
   stepAgent: '{{role}} · {{agent}}',
   stepNoAgent: '{{role}} · no agent could start',
   passedOver: '{{agent}} couldn’t start: {{reason}}',
+  passedOverUsageLimit: '{{agent}} hit its usage limit',
   showOutput: 'Show output for {{step}}',
   checksRound: 'Checks, round {{round}}',
   checksRunning: 'Checks running…',

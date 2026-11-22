@@ -963,6 +963,14 @@ describe('RunView', () => {
             { agent: 'backup', reason: 'ai_overage_limit_reached' },
           ],
         },
+        {
+          ...first,
+          seq: 3,
+          visit: 1,
+          role: 'writer',
+          agent: 'backup',
+          passedOver: [{ agent: 'primary', reason: 'usage_limit' }],
+        },
       ],
     });
 
@@ -975,6 +983,9 @@ describe('RunView', () => {
     expect(
       screen.getByText('backup couldn’t start: AI overage limit reached')
     ).toBeTruthy();
+    // An Agent at its usage limit did start: its first turn ran out.
+    expect(screen.getByText('Writer · backup')).toBeTruthy();
+    expect(screen.getByText('primary hit its usage limit')).toBeTruthy();
   });
 
   it('says so when an answer fails for another reason', async () => {

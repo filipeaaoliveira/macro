@@ -185,6 +185,11 @@ pub enum RoutineFailureReason {
     MaxTurnRequests,
     /// The runtime answered the prompt with an error.
     RuntimeError,
+    /// The usage limit of the provider account the runtime works with (a
+    /// subscription signed in on the runtime's machine, or a cloud agent's
+    /// own account) ended the turn, as the runtime classified it. Any work
+    /// the turn did before stays in the session.
+    UsageLimit,
     /// An unrecognized stop reason is never success.
     UnknownStopReason,
 }

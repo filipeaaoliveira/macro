@@ -42,7 +42,7 @@ fn agents() -> AgentDefinition {
     serde_json::from_value(json!({
         "agents": {
             "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
-            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0d1" }
         },
         "roles": { "writer": ["primary", "backup"], "planner": ["primary"] }
     }))
@@ -171,6 +171,40 @@ fn a_definition_is_checked_as_a_whole() {
         Err(EvaluationDefinitionError::UnknownAgent { .. })
     ));
     assert!(EvaluationDefinition::configured(Some(definition()), Some(&agents())).is_ok());
+
+    // Nor an Agent of `FACTORY_AGENTS` on Codex's cloud agent, though no
+    // Role lists it (so the agent definition itself is configured).
+    let deployment = AgentDefinition::configured(
+        Some(
+            serde_json::from_value(json!({
+                "agents": {
+                    "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+                    "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+                },
+                "roles": {
+                    "planner": ["primary"],
+                    "writer": ["primary"],
+                    "reviewer": ["primary"],
+                    "fixer": ["primary"]
+                }
+            }))
+            .expect("an agent definition"),
+        ),
+        None,
+    )
+    .expect("an unlisted cloud agent leaves the agent definition configured")
+    .expect("configured");
+    let cloud = read(json!({ "experiments": [
+        { "name": "e", "flow": "code", "arms": [
+            { "name": "a" }, { "name": "b", "agents": { "writer": "backup" } }
+        ]}
+    ]}))
+    .expect("readable");
+    assert!(matches!(
+        EvaluationDefinition::configured(Some(cloud), Some(&deployment)),
+        Err(EvaluationDefinitionError::CloudCodexAgent { ref whose, ref agent, .. })
+            if whose == "arm b of experiment e" && agent == "backup"
+    ));
     assert_eq!(
         EvaluationDefinition::configured(None, None),
         Ok(EvaluationDefinition::default())

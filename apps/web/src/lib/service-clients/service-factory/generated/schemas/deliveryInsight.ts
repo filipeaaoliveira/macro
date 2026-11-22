@@ -26,7 +26,8 @@ that ended for infrastructure are left out. None while no Run ended
 that way. */
   autonomyRate?: DeliveryInsightAutonomyRate;
   /** What every Run cost per merged pull request, in US dollars; none
-unless every call was priced. */
+unless every Run's agent sessions recorded their usage and every
+call was priced. */
   costPerMergedUsd?: DeliveryInsightCostPerMergedUsd;
   /** What their priced model calls cost, in US dollars. */
   costUsd: number;
@@ -63,10 +64,18 @@ unless every call was priced. */
   /** The tokens every Run's agents used. */
   tokens: TokenCounts;
   /**
-   * The tokens every Run used per merged pull request.
+   * The tokens every Run used per merged pull request; none unless every
+Run's agent sessions recorded their usage.
    * @minimum 0
    */
   tokensPerMerged?: DeliveryInsightTokensPerMerged;
+  /**
+   * Runs with an agent session whose usage is not known: one on a
+runtime that records none, as Codex or Claude Code on its owner's
+own login. While any, no figure per merged pull request is given.
+   * @minimum 0
+   */
+  unmeasuredRuns: number;
   /**
    * Their model calls with no price.
    * @minimum 0
