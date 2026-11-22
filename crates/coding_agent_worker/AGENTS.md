@@ -81,6 +81,17 @@ the local ACP process (Claude Code, Codex, ...), and drives native
   and byte counts.
 - `src/trigger.rs` + `src/dispatch.rs`: agent-trigger broker events → session
   create/dial/prompt against the live harness service.
+- `src/branch_worktrees.rs`: without Herdr, a requested session that names
+  its `work_branch` (a factory Run's `factory/<run id>`) works in that
+  branch's git worktree of the workspace,
+  `<workspace>/.macrod-worktrees/<branch, / as +>`, not in the workspace
+  itself: made detached at origin's branch (else origin's default), shared
+  by every session naming the branch, left out of the workspace's status
+  (`info/exclude`), and never moving the workspace's `HEAD`. Each prepare
+  removes worktrees no session asked for in 14 days, and those whose branch
+  origin had and deleted, idle for an hour. A workspace that is no git
+  checkout serves the session itself, with a warning; a worktree that cannot
+  be made fails the request (`workspace preparation failed`).
 - `src/daemon.rs` `watch_presence`: each minute a connection has held, asks
   `GET /harnesses/me` with `RUNTIME_CONNECTED_HEADER`. A service that reads the
   harness offline logs `harness_presence_disagreement`, macrod warns, and the TUI

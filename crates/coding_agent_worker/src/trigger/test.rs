@@ -27,6 +27,22 @@ fn repository_selection_survives_dispatch_and_older_events_still_decode() {
     );
 }
 
+#[test]
+fn the_work_branch_survives_dispatch_and_older_events_have_none() {
+    let mut wire = serde_json::json!({"bot_id": bot_id::BotId::TEST_A, "session_id": test_session(), "owner": sender().to_string()});
+    let old: AgentSessionRequestedEvent = serde_json::from_value(wire.clone()).unwrap();
+    assert!(old.work_branch.is_none());
+    wire["work_branch"] = serde_json::json!("factory/run");
+    let event: AgentSessionRequestedEvent = serde_json::from_value(wire).unwrap();
+    let work = trigger_to_work(AgentTriggerTopicEvent::New(
+        NewAgentSessionEvent::Requested(event),
+    ))
+    .unwrap();
+    assert!(
+        matches!(work, TriggerWork::OpenRequested { work_branch: Some(branch), .. } if branch == "factory/run")
+    );
+}
+
 fn test_session() -> AgentSessionId {
     AgentSessionId::new_from_uuid(Uuid::from_u128(0xA))
 }

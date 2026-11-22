@@ -57,6 +57,9 @@ pub enum TriggerWork {
     OpenRequested {
         /// Remote repository supplied by Macro, if selected.
         repo_url: Option<String>,
+        /// The branch the session works on, in a worktree of its own
+        /// (`crate::branch_worktrees`), when its requester names one.
+        work_branch: Option<String>,
         /// The id to create the session under.
         session: AgentSessionId,
         /// The agent the session runs for.
@@ -101,6 +104,7 @@ pub fn trigger_to_work(event: AgentTriggerTopicEvent) -> Result<TriggerWork, Ski
         AgentTriggerTopicEvent::New(NewAgentSessionEvent::Requested(
             AgentSessionRequestedEvent {
                 repo_url,
+                work_branch,
                 bot_id,
                 session_id,
                 owner,
@@ -112,6 +116,7 @@ pub fn trigger_to_work(event: AgentTriggerTopicEvent) -> Result<TriggerWork, Ski
             let sender = MacroUserIdStr::try_from(owner).map_err(|_| Skipped::NotFromUser)?;
             Ok(TriggerWork::OpenRequested {
                 repo_url,
+                work_branch,
                 session: session_id,
                 bot: bot_id,
                 sender,
