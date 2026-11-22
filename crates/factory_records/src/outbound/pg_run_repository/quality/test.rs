@@ -365,7 +365,7 @@ async fn a_session_over_several_steps_keeps_the_bot_one_of_them_recorded(pool: P
     // One session asked a question and went on over three Steps: the first
     // from before Steps recorded their bot, the next with it, the last
     // without it again.
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at,
                                    session_id, action_id, offered, role, agent, bot_id)
          SELECT $1, seq, 'write', 1, '2026-11-11 09:00Z', 'done', 'Written', '2026-11-11 09:05Z',
@@ -375,8 +375,8 @@ async fn a_session_over_several_steps_keeps_the_bot_one_of_them_recorded(pool: P
              (4, '00000000-0000-7000-8000-000000000607'::uuid, '00000000-0000-7000-8000-000000000a02'::uuid),
              (5, '00000000-0000-7000-8000-000000000608'::uuid, NULL::uuid)
          ) AS steps (seq, action_id, bot_id)",
+        Uuid::parse_str(SPACES).expect("valid run id"),
     )
-    .bind(Uuid::parse_str(SPACES).expect("valid run id"))
     .execute(&pool)
     .await
     .expect("steps");
