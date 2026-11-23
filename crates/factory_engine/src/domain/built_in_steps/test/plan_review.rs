@@ -158,6 +158,7 @@ fn review_input<'a>(
         task_id: task,
         repository: Some(&REPOSITORY),
         routes,
+        max_visits: Some(3),
         ..input(earlier)
     }
 }
@@ -411,6 +412,10 @@ async fn split_files_each_child_task_once_linked_to_the_run_s_task() {
         ended(2, "plan-review", 1, "oversized", "Too big"),
     ];
     let split = key(3);
+    repo.task_names
+        .lock()
+        .expect("task names")
+        .insert(parent, "Clean up slugs".to_string());
 
     let report = run_visit(
         &reviewer,
@@ -446,6 +451,14 @@ async fn split_files_each_child_task_once_linked_to_the_run_s_task() {
     );
     assert!(filed.iter().all(|made| made.of == Some(parent)));
     assert!(filed[0].task.markdown.contains(&parent.to_string()));
+    assert!(
+        filed[0]
+            .task
+            .markdown
+            .contains("\"documentName\":\"Clean up slugs\""),
+        "{}",
+        filed[0].task.markdown
+    );
     for made in &filed {
         assert!(
             report.output.contains(&made.id.to_string()),
@@ -471,4 +484,225 @@ async fn split_where_no_task_is_filed_fails_saying_so() {
 
     assert_eq!(report.outcome, Outcome::failed());
     assert!(report.output.contains("files no tasks"));
+}
+
+/// A team's Flow that gives its review two rounds puts the plan to its
+/// Gate at the second, as the Run's own Flow bounds it.
+#[tokio::test]
+async fn the_run_s_own_flow_bounds_the_review_s_rounds() {
+    let reviewer = Reviewer::answering(vec![(
+        "blockers",
+        "```json\n{\"blockers\": [{\"problem\": \"Still no test\"}]}\n```".to_string(),
+    )]);
+    let repo = FakeRepo::default();
+    let earlier = [ended(3, "plan", 2, "done", &plan_editing("src/slug.rs"))];
+    let input = StepInput {
+        max_visits: Some(2),
+        ..review_input(key(4), &earlier, None, &ROUTES)
+    };
+
+    let report = run_visit(&reviewer, &github(), &repo, "plan_review", input, 2)
+        .await
+        .expect("reviewed");
+
+    assert_eq!(report.outcome.as_str(), "reviewed");
+    assert!(
+        crate::domain::plan_review::blockers_left(&report.output),
+        "{}",
+        report.output
+    );
+}
+
+/// A child task that failed to be filed is filed when the Step is tried
+/// again, and the one filed before is not filed twice.
+#[tokio::test]
+async fn a_split_retried_after_a_failure_files_what_is_missing_once() {
+    let reviewer = Reviewer::answering(Vec::new());
+    let repo = FakeRepo::default();
+    let earlier = [ended(1, "plan", 1, "done", OVERSIZED)];
+    let split = key(2);
+    // The first child is filed; the second fails, as an outage would.
+    repo.failing
+        .lock()
+        .expect("failing")
+        .insert("create_follow_up", (1, 1));
+
+    let failed = run_visit(
+        &reviewer,
+        &github(),
+        &repo,
+        "split",
+        review_input(split, &earlier, None, &[]),
+        1,
+    )
+    .await;
+    let retried = run_visit(
+        &reviewer,
+        &github(),
+        &repo,
+        "split",
+        review_input(split, &earlier, None, &[]),
+        1,
+    )
+    .await
+    .expect("split");
+
+    let Err(error) = failed else {
+        panic!("the first attempt fails");
+    };
+    assert!(error.retryable(), "{error}");
+    assert_eq!(retried.outcome, Outcome::done());
+    let names: Vec<String> = repo
+        .follow_ups
+        .lock()
+        .expect("follow ups")
+        .iter()
+        .map(|made| made.task.name.clone())
+        .collect();
+    assert_eq!(names, ["Add the slug API", "Show slugs on the page"]);
+}
+
+/// Files every child task under another id than it is asked for.
+#[derive(Clone)]
+struct ElsewhereTasks;
+
+impl crate::domain::ports::ChildTasks for ElsewhereTasks {
+    type Err = FakeError;
+
+    async fn file_child(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        _of: Option<Uuid>,
+        _task: &crate::domain::ports::FollowUpTask,
+        _task_id: Uuid,
+    ) -> Result<Option<crate::domain::ports::FollowUpMade>, FakeError> {
+        Ok(Some(crate::domain::ports::FollowUpMade::OtherId(
+            Uuid::now_v7().to_string(),
+        )))
+    }
+
+    async fn task_name(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        _task_id: Uuid,
+    ) -> Result<Option<String>, FakeError> {
+        Ok(None)
+    }
+}
+
+/// A child task made under another id stops the Step for good: a retry
+/// would make another.
+#[tokio::test]
+async fn a_child_task_made_under_another_id_stops_the_split() {
+    let repo = FakeRepo::default();
+    let earlier = [ended(1, "plan", 1, "done", OVERSIZED)];
+    let steps = BuiltInSteps::new(
+        Reviewer::default(),
+        PullRequestSteps::new(github(), repo.clone(), FakeWatches::default()),
+    )
+    .with_child_tasks(ElsewhereTasks);
+
+    let ran = steps
+        .run(&step("split"), review_input(key(2), &earlier, None, &[]))
+        .await;
+
+    let Err(error) = ran else {
+        panic!("the split stops");
+    };
+    assert!(!error.retryable(), "{error}");
+}
+
+/// A size block holding a child request with a code fence reads whole,
+/// and the plan is split.
+#[tokio::test]
+async fn a_child_request_with_a_code_fence_still_splits() {
+    let reviewer = Reviewer::answering(Vec::new());
+    let repo = FakeRepo::default();
+    let fenced = "Too big.\n\n```json\n{\"size\": \"oversized\", \"why\": \"Two parts\", \"children\": [{\"name\": \"Add the API\", \"request\": \"Add it:\\n\\n```rust\\nfn slug() {}\\n```\\n\\n## Done when\\n\\n- It answers\"}, {\"name\": \"Show it\", \"request\": \"Show it.\"}]}\n```";
+    let earlier = [ended(1, "plan", 1, "done", fenced)];
+
+    let report = run_visit(
+        &reviewer,
+        &github(),
+        &repo,
+        "plan_review",
+        review_input(key(2), &earlier, None, &ROUTES),
+        1,
+    )
+    .await
+    .expect("reviewed");
+
+    assert_eq!(report.outcome.as_str(), "oversized", "{}", report.output);
+}
+
+/// A person's note on the plan Gate stays in the planner's prompt after
+/// the review, its rounds started over, sends the plan back again.
+#[test]
+fn a_revise_note_stays_in_the_history_after_the_review_sends_the_plan_back() {
+    let mut answered = ended(6, "plan-review", 3, "reviewed", "Blockers left");
+    answered.gate = Some(Gate {
+        kind: GateKind::Flow,
+        question: "Approve this plan?".to_string(),
+        answers: vec![
+            Outcome::try_from("approve".to_string()).expect("valid"),
+            Outcome::try_from("revise".to_string()).expect("valid"),
+        ],
+        opened_at: Utc::now(),
+        answer: Some(GateAnswer {
+            answer: Outcome::try_from("revise".to_string()).expect("valid"),
+            note: Some("Keep the old slugs working".to_string()),
+            user_id: Some(JULIA.clone()),
+            rule: None,
+            approved_control_files: None,
+            reply_confidence: None,
+            by_stand_in: false,
+            agent_session_id: None,
+            answered_at: Utc::now(),
+        }),
+        asked_back: None,
+        stand_in: None,
+        stand_in_declined: None,
+    });
+    let earlier = [
+        ended(5, "plan", 3, "done", "Plan three"),
+        answered,
+        ended(7, "plan", 4, "done", "Plan four"),
+        ended(8, "plan-review", 1, "blockers", "A new blocker"),
+    ];
+
+    let history = super::super::history(&earlier);
+
+    assert!(history.contains("A new blocker"), "{history}");
+    assert!(history.contains("Keep the old slugs working"), "{history}");
+    assert!(!history.contains("Plan three"), "{history}");
+}
+
+/// A path with characters a URL reads is asked of GitHub encoded, and
+/// found.
+#[tokio::test]
+async fn a_planned_path_is_read_from_github_encoded() {
+    let reviewer = Reviewer::answering(vec![(
+        "pass",
+        "```json\n{\"blockers\": []}\n```".to_string(),
+    )]);
+    let repo = FakeRepo::default();
+    let github = github();
+    github.state().files.insert(
+        ("main".to_string(), "app/%5Bslug%5D.tsx".to_string()),
+        "export default 1".to_string(),
+    );
+    let earlier = [ended(1, "plan", 1, "done", &plan_editing("app/[slug].tsx"))];
+
+    let report = run_visit(
+        &reviewer,
+        &github,
+        &repo,
+        "plan_review",
+        review_input(key(2), &earlier, None, &ROUTES),
+        1,
+    )
+    .await
+    .expect("reviewed");
+
+    assert_eq!(report.outcome.as_str(), "reviewed", "{}", report.output);
 }

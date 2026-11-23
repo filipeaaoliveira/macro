@@ -1167,3 +1167,25 @@ fn an_oversized_plan_is_split_and_the_run_ends_for_a_person() {
     assert_eq!(steps, ["plan#1", "plan-review#1", "split#1"]);
     assert_eq!(end, Ok(RunOutcome::Manual));
 }
+
+/// A plan sent back again and again ends the Run for a person at its
+/// tenth visit, past its nine.
+#[test]
+fn a_plan_past_its_nine_visits_ends_the_run_for_a_person() {
+    let mut outcomes = Vec::new();
+    for _ in 0..3 {
+        outcomes.extend(["done", "blockers", "done", "blockers", "done", "revise"]);
+    }
+
+    let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
+
+    assert_eq!(
+        steps
+            .iter()
+            .filter(|step| step.starts_with("plan#"))
+            .count(),
+        9
+    );
+    assert_eq!(steps.last().map(String::as_str), Some("plan-review#3"));
+    assert_eq!(end, Ok(RunOutcome::Manual));
+}

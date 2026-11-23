@@ -226,6 +226,8 @@ pub(crate) struct FakeRepo {
     pub(crate) projects: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The Project each task is in.
     pub(crate) task_projects: Arc<Mutex<BTreeMap<Uuid, Uuid>>>,
+    /// The name of each task, by its id.
+    pub(crate) task_names: Arc<Mutex<BTreeMap<Uuid, String>>>,
     /// The tags each task carries.
     pub(crate) task_tags: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
     /// Whether reading a task's Project fails, as an outage would.
@@ -310,6 +312,19 @@ impl crate::domain::ports::ChildTasks for FakeRepo {
         self.create_follow_up(user_id, of, task, task_id)
             .await
             .map(Some)
+    }
+
+    async fn task_name(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Option<String>, FakeError> {
+        Ok(self
+            .task_names
+            .lock()
+            .expect("task names")
+            .get(&task_id)
+            .cloned())
     }
 }
 

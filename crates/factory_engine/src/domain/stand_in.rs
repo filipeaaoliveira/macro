@@ -85,6 +85,9 @@ pub struct StandInFacts {
     /// round before's, unchanged after a fix
     /// ([`repeated_blockers`](crate::domain::standing_rules::repeated_blockers)).
     pub repeated_blockers: bool,
+    /// For a plan Gate, whether its plan review's last round left Blockers:
+    /// a person reads them; false for other Gates.
+    pub plan_blockers_left: bool,
 }
 
 /// Whether the stand-in may answer a Gate that offers `offered`, given the
@@ -109,6 +112,7 @@ pub fn may_stand_in(
         && !facts.tampered
         && !facts.held
         && !owners_blockers
+        && !(facts.kind == RuleGateKind::Plan && facts.plan_blockers_left)
 }
 
 /// What the stand-in reads to answer a Gate.

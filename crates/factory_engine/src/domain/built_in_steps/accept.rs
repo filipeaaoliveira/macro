@@ -36,9 +36,8 @@ use factory_records::domain::review_rounds::ReviewRoundRepository;
 use super::checks_round::{ATTEMPT_CHECKS_FOR, Checked, fit, lost, records};
 use super::{BuiltInStepError, BuiltInSteps, cut, outcomes};
 use crate::domain::acceptance::{AcceptanceCheck, AcceptanceChecks};
-use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::checks::RepositoryCheck;
-use crate::domain::flow::{StepName, StepUse};
+use crate::domain::flow::StepName;
 use crate::domain::models::{StepInput, StepReport};
 use crate::domain::ports::{ChildTasks, MainWatches, PullRequests, StepAgent};
 use crate::domain::review_rounds::escape;
@@ -209,7 +208,7 @@ where
             Some(round)
         };
 
-        let last_visit = self.at_last_visit(input, "accept").await?;
+        let last_visit = self.at_last_visit(input).await?;
         Ok(verdict(
             &target,
             &checks,
@@ -220,15 +219,14 @@ where
         ))
     }
 
-    /// Whether this Step, of the built-in Step `step`, is its entry's last
-    /// visit, as the `code` Flow bounds it: a failure then ends the Run's
-    /// acceptance, or puts a plan to its Gate with its Blockers.
+    /// Whether this Step is its entry's last visit, as the Flow the Run
+    /// walks bounds it: a failure then ends the Run's acceptance, or puts a
+    /// plan to its Gate with its Blockers.
     pub(super) async fn at_last_visit(
         &self,
         input: StepInput<'_>,
-        step: &str,
     ) -> Result<bool, BuiltInStepError> {
-        let Some(most) = code_visits(step) else {
+        let Some(most) = input.max_visits else {
             return Ok(false);
         };
         let steps = self
@@ -324,18 +322,6 @@ where
                 .await?;
         }
     }
-}
-
-/// The most visits the `code` Flow gives its entry of the Step `step`.
-fn code_visits(step: &str) -> Option<u16> {
-    let flow = BuiltInFlow::named("code")?
-        .read(|_| Some(StepUse::Work))
-        .ok()?;
-    let entry = flow
-        .entries
-        .iter()
-        .find(|entry| entry.step.as_str() == step)?;
-    entry.max_visits.map(|most| u16::from(most.get()))
 }
 
 /// What the verifier is told: the Step's instructions, where the change

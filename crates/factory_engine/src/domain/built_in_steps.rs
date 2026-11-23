@@ -25,7 +25,7 @@ mod test;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{
-    CheckRoundOutcome, Outcome, Repository, Role, Step, StepKey, StepSession,
+    CheckRoundOutcome, GateKind, Outcome, Repository, Role, Step, StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -276,6 +276,10 @@ pub enum BuiltInStepError {
     /// A child task could not be filed now: asking again may file it.
     #[error("a child task could not be filed: {0:?}")]
     ChildTask(rootcause::Report),
+    /// Document storage made a child task under another id than asked:
+    /// asking again would make another.
+    #[error("{0}")]
+    ChildTaskElsewhere(String),
 }
 
 impl BuiltInStepError {
@@ -300,6 +304,7 @@ impl Retryable for BuiltInStepError {
             | BuiltInStepError::NoRepository(_)
             | BuiltInStepError::UnexpectedOutcome { .. }
             | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::ChildTaskElsewhere(_)
             | BuiltInStepError::Setup(_) => false,
         }
     }
@@ -316,6 +321,7 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::PullRequest(_)
             | BuiltInStepError::Unanswered(_)
             | BuiltInStepError::ChildTask(_)
+            | BuiltInStepError::ChildTaskElsewhere(_)
             | BuiltInStepError::Setup(_) => false,
         }
     }
@@ -330,6 +336,7 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::PullRequest(_)
             | BuiltInStepError::Unanswered(_)
             | BuiltInStepError::ChildTask(_)
+            | BuiltInStepError::ChildTaskElsewhere(_)
             | BuiltInStepError::Setup(_) => false,
         }
     }
@@ -861,7 +868,10 @@ fn workplace(repository: &Repository, branch: &str, base_commit: Option<&str>) -
 /// in [`HISTORY_BUDGET`]; of a review panel's entry, its latest Step of each
 /// Role. A loop that visits an entry again and again adds
 /// nothing but its latest round. The newest Step is never left out: when it
-/// alone is past the budget, its end is cut.
+/// alone is past the budget, its end is cut. A person's answers to the
+/// Flow's Gates of the Steps left out follow, newest first, as many as fit:
+/// a note sent with a plan's `revise` stays in the planner's prompt after a
+/// review sends the plan back again.
 fn history(earlier: &[Step]) -> String {
     let mut latest: Vec<&Step> = Vec::new();
     for step in earlier.iter().rev() {
@@ -873,6 +883,7 @@ fn history(earlier: &[Step]) -> String {
         }
     }
 
+    let latest_seqs: Vec<u16> = latest.iter().map(|step| step.seq).collect();
     let mut history = String::new();
     let mut left_out = 0;
     for step in latest {
@@ -886,12 +897,64 @@ fn history(earlier: &[Step]) -> String {
             left_out += 1;
         }
     }
+
+    let answers = earlier_answers(earlier, &latest_seqs);
+    if !answers.is_empty() {
+        let heading = "\n## Earlier answers at the run's gates\n\n";
+        let mut section = String::from(heading);
+        let mut answers_left_out = 0;
+        for answer in answers {
+            if history.len() + section.len() + answer.len() <= HISTORY_BUDGET {
+                section.push_str(&answer);
+            } else {
+                answers_left_out += 1;
+            }
+        }
+        if section.len() > heading.len() {
+            history.push_str(&section);
+        }
+        left_out += answers_left_out;
+    }
     if left_out > 0 {
         history.push_str(&format!(
             "\n({left_out} earlier steps are left out: the prompt has no room for them.)\n"
         ));
     }
     history
+}
+
+/// The longest note of an earlier answer a prompt carries, in bytes.
+const ANSWER_NOTE_BUDGET: usize = 2048;
+
+/// How a person answered the Flow's Gates of the `earlier` Steps not in
+/// `shown`, newest first, one line each: their words are escaped, as in a
+/// Step's section.
+fn earlier_answers(earlier: &[Step], shown: &[u16]) -> Vec<String> {
+    earlier
+        .iter()
+        .rev()
+        .filter(|step| !shown.contains(&step.seq))
+        .filter_map(|step| {
+            let gate = step
+                .gate
+                .as_ref()
+                .filter(|gate| gate.kind == GateKind::Flow)?;
+            let answer = gate.answer.as_ref()?;
+            let note = answer
+                .note
+                .as_deref()
+                .map_or("(no note)".to_string(), |note| {
+                    escape(cut(note, ANSWER_NOTE_BUDGET)).replace('\n', " ")
+                });
+            Some(format!(
+                "- Step {}, visit {}: a person was asked \"{}\" and answered `{}`: {note}\n",
+                step.entry,
+                step.visit,
+                escape(&gate.question).replace('\n', " "),
+                answer.answer
+            ))
+        })
+        .collect()
 }
 
 /// What ends a section cut to fit the prompt.

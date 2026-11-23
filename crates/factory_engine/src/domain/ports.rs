@@ -751,6 +751,14 @@ pub trait ChildTasks: Send + Sync + 'static {
         task: &FollowUpTask,
         task_id: Uuid,
     ) -> impl Future<Output = Result<Option<FollowUpMade>, Self::Err>> + Send;
+
+    /// The name of the task document `task_id`, as `user_id` reads it;
+    /// none when it is gone, or nothing files tasks.
+    fn task_name(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 }
 
 /// Where nothing files child tasks: a `split` Step fails, saying so.
@@ -767,6 +775,14 @@ impl ChildTasks for NoChildTasks {
         _task: &FollowUpTask,
         _task_id: Uuid,
     ) -> Result<Option<FollowUpMade>, Self::Err> {
+        Ok(None)
+    }
+
+    async fn task_name(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        _task_id: Uuid,
+    ) -> Result<Option<String>, Self::Err> {
         Ok(None)
     }
 }

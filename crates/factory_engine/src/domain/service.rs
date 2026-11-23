@@ -59,6 +59,7 @@ use crate::domain::models::{
     FlowSummary, PersonOnly, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
+use crate::domain::plan_review::blockers_left;
 use crate::domain::ports::{
     AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoQuarantineTasks,
     NoTaskThread, PullRequests, QuarantineTasks, Retryable, RunWorkflows, RunWorkflowsError,
@@ -2425,18 +2426,27 @@ where
         // outcome a pull request Step must ask about (`behind`, `queued`),
         // so they go on as before. An outcome its Flow does not route goes
         // to the entry below, which above `merge` would merge unasked.
-        let routes: Vec<Outcome> = self
+        // How many visits the entry has comes from the Flow the Run walks,
+        // the built-in one of its name for a Run that kept none.
+        let kept = self
             .repo
             .run_flow(request.key.run_id)
             .await
-            .map_err(internal)?
-            .filter(|kept| kept.definition.is_some())
+            .map_err(internal)?;
+        let kept_definition = kept.as_ref().is_some_and(|kept| kept.definition.is_some());
+        let entry = kept
             .and_then(|kept| walked_flow(request.key.run_id, kept))
             .and_then(|flow| {
                 flow.entries
                     .into_iter()
                     .find(|entry| entry.id == request.entry)
-            })
+            });
+        let max_visits = entry
+            .as_ref()
+            .and_then(|entry| entry.max_visits)
+            .map(|most| u16::from(most.get()));
+        let routes: Vec<Outcome> = entry
+            .filter(|_| kept_definition)
             .map(|entry| entry.on.into_keys().collect())
             .unwrap_or_default();
         let input = StepInput {
@@ -2461,6 +2471,7 @@ where
             owner_notes: &owner_notes,
             base_commit: base_commit.as_deref(),
             routes: &routes,
+            max_visits,
         };
         let report = self
             .executor
@@ -2695,6 +2706,12 @@ where
             ),
             _ => false,
         };
+        let plan_blockers_left = ruling.kind == RuleGateKind::Plan
+            && steps
+                .iter()
+                .find(|step| step.seq == key.seq)
+                .and_then(|step| step.end.as_ref())
+                .is_some_and(|end| blockers_left(&end.output));
         let facts = GateFacts {
             kind: ruling.kind,
             fix_rounds: ruling.fix_rounds,
@@ -2705,6 +2722,7 @@ where
                 .is_some_and(|changes| changes.is_tampered()),
             held,
             repeated_blockers: repeated,
+            plan_blockers_left,
             dismissed,
         };
         let Some(ruled) = rule_answer(Some(rules.definition), &facts, &ruling.answers) else {

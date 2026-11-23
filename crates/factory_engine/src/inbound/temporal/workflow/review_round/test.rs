@@ -152,6 +152,7 @@ impl Work for Script {
                 tampered: false,
                 held: false,
                 repeated_blockers: false,
+                plan_blockers_left: false,
                 dismissed: false,
             };
             if let Some(ruled) = rule_answer(self.rules, &facts, &opening.answers) {

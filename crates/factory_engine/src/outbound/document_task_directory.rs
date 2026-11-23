@@ -252,6 +252,22 @@ impl<A: EntityAccessService> ChildTasks for DocumentTaskDirectory<A> {
             .await
             .map(Some)
     }
+
+    /// The Run's own task, which its owner reads: the Run was made on it.
+    async fn task_name(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Option<String>, Self::Err> {
+        let document = self
+            .documents
+            .get_document_basic(&task_id.to_string())
+            .await
+            .map_err(documents)?;
+        Ok(document
+            .filter(|document| document.deleted_at.is_none())
+            .map(|document| document.document_name))
+    }
 }
 
 impl<A> DocumentTaskDirectory<A> {

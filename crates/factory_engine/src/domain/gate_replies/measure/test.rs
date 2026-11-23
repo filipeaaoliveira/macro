@@ -17,7 +17,7 @@ fn plan_gate(answer: &str, note: Option<&str>, kind: GateKind) -> AnsweredGate {
     AnsweredGate {
         run_id: RunId::generate(),
         seq: 2,
-        entry: EntryId::try_from("plan-review".to_string()).expect("valid"),
+        entry: EntryId::try_from("plan".to_string()).expect("valid"),
         owner: MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid"),
         flow: Some("code".to_string()),
         flow_definition: None,
@@ -191,4 +191,24 @@ async fn a_threshold_needs_enough_gates_answered_at_it() {
     assert_eq!(row(&report.replies, 95).decided, ENOUGH_DECIDED - 1);
     assert_eq!(row(&report.replies, 95).wrong, 0);
     assert_eq!(report.replies.threshold(), None);
+}
+
+/// A plan Gate of the built-in `code` Flow is measured whether it was
+/// asked at `plan`, before plans were reviewed, or at `plan-review`.
+#[test]
+fn a_plan_gate_is_measured_at_plan_and_at_plan_review() {
+    let old = plan_gate("approve", None, GateKind::Flow);
+    let reviewed = AnsweredGate {
+        entry: EntryId::try_from("plan-review".to_string()).expect("valid"),
+        ..old.clone()
+    };
+    let write = AnsweredGate {
+        entry: EntryId::try_from("write".to_string()).expect("valid"),
+        ..old.clone()
+    };
+
+    let plan = Some(factory_records::domain::standing_rules::RuleGateKind::Plan);
+    assert_eq!(super::stand_in_kind(&old), plan);
+    assert_eq!(super::stand_in_kind(&reviewed), plan);
+    assert_eq!(super::stand_in_kind(&write), None);
 }

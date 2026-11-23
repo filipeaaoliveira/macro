@@ -39,6 +39,7 @@ fn facts(kind: RuleGateKind) -> GateFacts {
         tampered: false,
         held: false,
         repeated_blockers: false,
+        plan_blockers_left: false,
         dismissed: false,
     }
 }
@@ -317,5 +318,19 @@ fn the_built_in_flows_name_their_gates_kinds() {
     assert_eq!(
         kinds("plan"),
         [("plan".to_string(), Some(RuleGateKind::Plan))]
+    );
+}
+
+/// No rule approves a plan its review's last round left Blockers in.
+#[test]
+fn no_rule_approves_a_plan_with_blockers_left() {
+    let left = GateFacts {
+        plan_blockers_left: true,
+        ..facts(RuleGateKind::Plan)
+    };
+
+    assert_eq!(
+        rule_answer(Some(EVERY_RULE), &left, &approve_or_revise()),
+        None
     );
 }

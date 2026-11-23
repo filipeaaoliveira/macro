@@ -30,8 +30,8 @@ use crate::domain::control_files::ControlFiles;
 use crate::domain::flow::StepName;
 use crate::domain::models::{StepInput, StepReport};
 use crate::domain::plan_review::{
-    PlanSize, child_task, child_task_id, control_file_flags, done_when_items, latest_plan,
-    misplaced_files, task_mention, unmapped_items,
+    BLOCKERS_LEFT, PlanSize, child_task, child_task_id, control_file_flags, done_when_items,
+    latest_plan, misplaced_files, task_mention, unmapped_items,
 };
 use crate::domain::ports::{ChildTasks, FollowUpMade, MainWatches, PullRequests, StepAgent};
 use crate::domain::review_rounds::json_block;
@@ -52,9 +52,6 @@ const REVIEWED: &str = "reviewed";
 
 /// The outcome of a plan that splits the task into child tasks.
 const OVERSIZED: &str = "oversized";
-
-/// The built-in Step whose entry's visits bound the review.
-const PLAN_REVIEW_STEP: &str = "plan_review";
 
 /// The most bytes of one Blocker's text the report keeps.
 const MAX_BLOCKER_BYTES: usize = 2048;
@@ -137,7 +134,7 @@ where
         }
 
         let mechanical = self.check_plan(input, size).await?;
-        let last_visit = self.at_last_visit(input, PLAN_REVIEW_STEP).await?;
+        let last_visit = self.at_last_visit(input).await?;
         if !mechanical.blockers.is_empty() {
             return Ok(verdict(&mechanical, None, last_visit));
         }
@@ -236,24 +233,45 @@ where
             });
         };
 
+        let unavailable =
+            |error| BuiltInStepError::ChildTask(rootcause::Report::new(error).into_dynamic());
+        // Each child links the task it was split from by its name, as the
+        // owner sees it.
+        let parent = match input.task_id {
+            Some(task_id) => {
+                let name = self
+                    .child_tasks
+                    .task_name(input.owner, task_id)
+                    .await
+                    .map_err(unavailable)?;
+                Some((
+                    task_id,
+                    name.unwrap_or_else(|| "the run's task".to_string()),
+                ))
+            }
+            None => None,
+        };
+
         let mut filed = Vec::new();
         let mut refused = Vec::new();
         for (index, child) in children.iter().enumerate() {
             let task_id = child_task_id(input.key.run_id, input.key.seq, index);
-            let task = child_task(child, input.task_id, input.key.run_id);
+            let of = parent.as_ref().map(|(id, name)| (*id, name.as_str()));
+            let task = child_task(child, of, input.key.run_id);
             let made = self
                 .child_tasks
                 .file_child(input.owner, input.task_id, &task, task_id)
                 .await
-                .map_err(|error| {
-                    BuiltInStepError::ChildTask(rootcause::Report::new(error).into_dynamic())
-                })?;
+                .map_err(unavailable)?;
             match made {
                 Some(FollowUpMade::Made) => filed.push(task_mention(task_id, &child.name)),
-                Some(FollowUpMade::OtherId(made)) => match uuid::Uuid::parse_str(&made) {
-                    Ok(id) => filed.push(task_mention(id, &child.name)),
-                    Err(_) => refused.push(child.name.clone()),
-                },
+                // A task made under another id would be made again by every
+                // retry: a fault to stop at, as for a follow-up task.
+                Some(FollowUpMade::OtherId(made)) => {
+                    return Err(BuiltInStepError::ChildTaskElsewhere(format!(
+                        "document storage made child task {task_id} as {made}"
+                    )));
+                }
                 Some(FollowUpMade::Refused) => refused.push(child.name.clone()),
                 None => {
                     return Ok(StepReport {
@@ -353,7 +371,8 @@ fn verdict(
             .to_string()
     } else if last_visit {
         format!(
-            "The plan review still finds {count} blockers at its last round: the plan goes to its Gate with them."
+            "{BLOCKERS_LEFT} {count} blockers at its last round: the plan goes to its Gate with them, \
+             and no standing rule or stand-in approves it."
         )
     } else {
         format!("The plan review found {count} blockers: the planner revises the plan.")

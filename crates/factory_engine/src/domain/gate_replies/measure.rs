@@ -30,6 +30,7 @@ use factory_records::domain::standing_rules::RuleGateKind;
 
 use super::{percent, reply_question};
 use crate::domain::built_in_flows::walked_flow;
+use crate::domain::plan_review::later_gate_entry;
 use crate::domain::ports::{GateModel, ModelPick};
 use crate::domain::stand_in::{PAST_ANSWERS_READ, StandInContext, stand_in_question};
 use crate::domain::standing_rules::offers_kind_answers;
@@ -141,13 +142,17 @@ pub fn stand_in_kind(gate: &AnsweredGate) -> Option<RuleGateKind> {
             definition: gate.flow_definition.clone(),
         },
     )?;
-    let kind = flow
-        .entries
-        .iter()
-        .find(|entry| entry.id == gate.entry)?
-        .gate
-        .as_ref()?
-        .kind?;
+    // A plan Gate recorded at `plan`, before plans were reviewed, of a Run
+    // that walks the built-in Flow, is the Gate `plan-review` asks now.
+    let gated = |id: &str| {
+        flow.entries
+            .iter()
+            .find(|entry| entry.id.as_str() == id)
+            .and_then(|entry| entry.gate.as_ref())
+    };
+    let gate_asked = gated(gate.entry.as_str())
+        .or_else(|| later_gate_entry(gate.entry.as_str()).and_then(gated))?;
+    let kind = gate_asked.kind?;
     let routine = matches!(kind, RuleGateKind::Plan | RuleGateKind::Blockers);
     (routine && offers_kind_answers(kind, &gate.answers)).then_some(kind)
 }

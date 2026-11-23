@@ -189,6 +189,9 @@ pub struct StepInput<'a> {
     /// only when its entry routes it, so a Run on an older Flow goes on as
     /// that Flow did.
     pub routes: &'a [Outcome],
+    /// The most visits the Step's entry has in the Flow the Run walks;
+    /// none when it is unbounded or the Flow does not read.
+    pub max_visits: Option<u16>,
 }
 
 impl StepInput<'_> {
