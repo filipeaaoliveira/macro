@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT run_id, seq, started_at, outcome\n            FROM factory_review_round rr\n            WHERE run_id = ANY($1) AND seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = rr.run_id)\n            ORDER BY run_id, seq\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "outcome",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "b064153e527516e06a1fe3b9a4a4a84a8bc04a6de20f9ad9c779723adf0b2549"
+}

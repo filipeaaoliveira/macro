@@ -1707,6 +1707,106 @@
         }
       }
     },
+    "/runs/{id}/retry": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Retry one of the caller's Runs that ended `failed`, `infrastructure` or\n`blocked`: a new Run of the same task, Flow and Factory Definition\ncommit, on the same branch, that keeps the Steps the Run took before the\nentry it stopped at, with their outputs, and starts there; its\n`retry.retriedFrom` names the Run it retries. A Run is retried once: a\nsecond retry, a running Run, a Run that ended otherwise, a Benchmark\ntrial and a self-improvement Run are refused (409), as is a retry past\nthe caller's Queue limit (`queueFull`). An agent acting for the owner\nneeds a Standing Role that allows `start`, as a new Run does.",
+        "operationId": "retry_factory_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{id}/scores": {
       "get": {
         "tags": ["factory"],
@@ -5634,7 +5734,8 @@
           "failed",
           "cancelled",
           "infrastructure",
-          "flawed"
+          "flawed",
+          "retried"
         ],
         "properties": {
           "blocked": {
@@ -5671,6 +5772,12 @@
             "type": "integer",
             "format": "int32",
             "description": "Runs that ended for a person to take over.",
+            "minimum": 0
+          },
+          "retried": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Of the Runs counted above by how they ended, those a retry took\nover: their attempt went on in the retry, a Run of its own, counted\nby how it went. A failed Run and its successful retry are one\nfailure, here as retried, and one success.",
             "minimum": 0
           },
           "running": {
@@ -6491,6 +6598,17 @@
             "type": "string",
             "description": "What the Run was asked to do."
           },
+          "retry": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunRetry",
+                "description": "The Run it retries, and what it keeps of it; none for a Run that\nretries none."
+              }
+            ]
+          },
           "standingRules": {
             "oneOf": [
               {
@@ -6877,6 +6995,27 @@
           "infrastructure",
           "flawed"
         ]
+      },
+      "RunRetry": {
+        "type": "object",
+        "description": "What a Run that retries another keeps of it: the Run it retries, the\nbranch it works on, and the Steps before its own.",
+        "required": ["retriedFrom", "branchOf", "firstSeq"],
+        "properties": {
+          "branchOf": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "The Run whose branch it works on, pushes to and proposes from: the\nfirst of the Runs it retries, so a retry of a retry keeps the one\nbranch."
+          },
+          "firstSeq": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The place its own first Step takes. The Steps before it are those\nthe retried Run took before the entry it stopped at, kept with\ntheir outputs and answered Gates.",
+            "minimum": 0
+          },
+          "retriedFrom": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "The Run it retries."
+          }
+        }
       },
       "RunRules": {
         "type": "object",

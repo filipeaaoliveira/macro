@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_run_arm (run_id, experiment, arm, agents)\n            SELECT $1, experiment, arm, agents FROM factory_run_arm WHERE run_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a540762ef2d1659798aad3ce4bb81b7738e3a3c9dd4f4bba6d4427bf3e1fafa"
+}

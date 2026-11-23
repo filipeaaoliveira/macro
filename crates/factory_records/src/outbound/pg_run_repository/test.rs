@@ -14,6 +14,7 @@ use crate::domain::ports::RunRepository;
 
 mod control_files;
 mod definition;
+mod retry;
 mod used_sessions;
 mod waiting;
 

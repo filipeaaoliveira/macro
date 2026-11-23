@@ -100,6 +100,7 @@ const outcomes = (
   cancelled: 0,
   infrastructure: 0,
   flawed: 0,
+  retried: 0,
   ...changes,
 });
 

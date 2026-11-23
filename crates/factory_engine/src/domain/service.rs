@@ -4,6 +4,7 @@
 mod board;
 mod definition;
 pub(crate) mod quarantine;
+pub(crate) mod retry;
 mod standing;
 #[cfg(test)]
 mod test;
@@ -41,12 +42,12 @@ use uuid::Uuid;
 
 use crate::domain::agents::{AgentDefinition, RuleSubject};
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
-use crate::domain::built_in_flows::{BUILT_IN_FLOWS, walked_flow};
+use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow, walked_flow};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::{DEFINITION_FILE_PATTERNS, DefinitionError};
 use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
 use crate::domain::flaws::mark_flawed;
-use crate::domain::flow::Flow;
+use crate::domain::flow::{Entry, Flow, StepName, StepUse};
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate, StandingAnswer,
 };
@@ -59,6 +60,7 @@ use crate::domain::models::{
     FlowSummary, PersonOnly, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
+use crate::domain::plan_review::blockers_left;
 use crate::domain::ports::{
     AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoQuarantineTasks,
     NoTaskThread, PullRequests, QuarantineTasks, Retryable, RunWorkflows, RunWorkflowsError,
@@ -1193,6 +1195,7 @@ where
             run_id,
             flow,
             token_budget: budget_of(&run).is_some(),
+            start_at: None,
         };
         if let Err(error) = self.workflows.start(&start).await {
             self.forget_unstarted(run_id).await;
@@ -2109,6 +2112,16 @@ where
         }
     }
 
+    async fn retry_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        acting: Option<ActingAgent>,
+        in_person: bool,
+    ) -> Result<RunDetail, FactoryError> {
+        self.retry(actor, id, acting, in_person).await
+    }
+
     #[tracing::instrument(skip(self, actor, reason))]
     async fn mark_run_flawed(
         &self,
@@ -2158,6 +2171,25 @@ fn valid_token_budget(definition: Option<&OrchestratorDefinition>) -> Result<(),
         });
     }
     Ok(())
+}
+
+/// The most visits of the entry `entry` of the Flow a Run walks, which runs
+/// `step`: its own bound, none when it has none; or, when the Run's Flow is
+/// unknown (a Run that kept none and names no built-in Flow, or whose Flow
+/// does not read), the built-in `code` Flow's bound of its entry of `step`,
+/// as such Runs were bounded before Runs kept their Flows.
+pub(crate) fn visits_bound(entry: Option<&Entry>, step: &StepName) -> Option<u16> {
+    let bound = |entry: &Entry| entry.max_visits.map(|most| u16::from(most.get()));
+    match entry {
+        Some(entry) => bound(entry),
+        None => BuiltInFlow::named("code")?
+            .read(|_| Some(StepUse::Work))
+            .ok()?
+            .entries
+            .iter()
+            .find(|entry| entry.step == *step)
+            .and_then(bound),
+    }
 }
 
 /// How many questions an agent Step may ask the Run's owner, unless the
@@ -2382,15 +2414,26 @@ where
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
     async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError> {
         // A Run cancelled before its workflow started takes no Step.
-        if let Some(end) = self.run_of(&request).await?.end {
+        let run = self.run_of(&request).await?;
+        if let Some(end) = run.end {
             return Ok(StepStart::RunEnded(end.outcome));
+        }
+        // A retry's Steps say which branch they work on, so a worker that
+        // cannot read that never takes one; a request that names another
+        // branch than the Run's is not the Run's workflow's.
+        if request.branch_of != run.retry.map(|retry| retry.branch_of) {
+            return Err(StepError::Final(rootcause::report!(
+                "the step's branch is not its run's"
+            )));
         }
         self.repo
             .start_step(request.key, &request.entry, request.visit)
             .await
             .map_err(internal)?;
-        // The Run's first Step starting is the Run starting.
-        if request.key.seq == 1 {
+        // The Run's first Step starting is the Run starting: for a retry,
+        // the first past the Steps it kept.
+        let first_seq = run.retry.map_or(1, |retry| retry.first_seq);
+        if request.key.seq == first_seq {
             self.post(request.key.run_id, RunUpdate::Started).await;
         }
         Ok(StepStart::Started)
@@ -2436,18 +2479,24 @@ where
         // outcome a pull request Step must ask about (`behind`, `queued`),
         // so they go on as before. An outcome its Flow does not route goes
         // to the entry below, which above `merge` would merge unasked.
-        let routes: Vec<Outcome> = self
+        // How many visits the entry has comes from the Flow the Run walks,
+        // the built-in one of its name for a Run that kept none.
+        let kept = self
             .repo
             .run_flow(request.key.run_id)
             .await
-            .map_err(internal)?
-            .filter(|kept| kept.definition.is_some())
+            .map_err(internal)?;
+        let kept_definition = kept.as_ref().is_some_and(|kept| kept.definition.is_some());
+        let entry = kept
             .and_then(|kept| walked_flow(request.key.run_id, kept))
             .and_then(|flow| {
                 flow.entries
                     .into_iter()
                     .find(|entry| entry.id == request.entry)
-            })
+            });
+        let max_visits = visits_bound(entry.as_ref(), &request.step);
+        let routes: Vec<Outcome> = entry
+            .filter(|_| kept_definition)
             .map(|entry| entry.on.into_keys().collect())
             .unwrap_or_default();
         let input = StepInput {
@@ -2472,6 +2521,8 @@ where
             owner_notes: &owner_notes,
             base_commit: base_commit.as_deref(),
             routes: &routes,
+            max_visits,
+            retry: run.retry,
         };
         let report = self
             .executor
@@ -2706,6 +2757,12 @@ where
             ),
             _ => false,
         };
+        let plan_blockers_left = ruling.kind == RuleGateKind::Plan
+            && steps
+                .iter()
+                .find(|step| step.seq == key.seq)
+                .and_then(|step| step.end.as_ref())
+                .is_some_and(|end| blockers_left(&end.output));
         let facts = GateFacts {
             kind: ruling.kind,
             fix_rounds: ruling.fix_rounds,
@@ -2716,6 +2773,7 @@ where
                 .is_some_and(|changes| changes.is_tampered()),
             held,
             repeated_blockers: repeated,
+            plan_blockers_left,
             dismissed,
         };
         let Some(ruled) = rule_answer(Some(rules.definition), &facts, &ruling.answers) else {

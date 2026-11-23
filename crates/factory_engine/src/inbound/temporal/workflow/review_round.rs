@@ -38,6 +38,8 @@ pub(super) struct Panel<'a> {
     /// Whether its reviewers may ask the Run's owner questions, and how
     /// many each.
     pub(super) questions: Questions,
+    /// For a retry, the Run whose branch its reviewers review.
+    pub(super) branch_of: Option<RunId>,
 }
 
 /// What a review round, or a Step's walk, came to.
@@ -170,10 +172,11 @@ async fn walk_round<W: Work>(
                 run_id: panel.run_id,
                 seq,
             };
-            panel.questions.offer(
-                StepRequest::reviewer(key, panel.entry, panel.visit, role, panel.seq),
-                0,
-            )
+            let request = StepRequest {
+                branch_of: panel.branch_of,
+                ..StepRequest::reviewer(key, panel.entry, panel.visit, role, panel.seq)
+            };
+            panel.questions.offer(request, 0)
         })
         .collect();
     for request in &requests {

@@ -430,6 +430,34 @@ pub struct Run {
     /// Why its token budget ended it, when it did; none for a Run it did
     /// not end, or that has none.
     pub budget_stop: Option<BudgetStop>,
+    /// The Run it retries, and what it keeps of it; none for a Run that
+    /// retries none.
+    pub retry: Option<RunRetry>,
+}
+
+/// What a Run that retries another keeps of it: the Run it retries, the
+/// branch it works on, and the Steps before its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunRetry {
+    /// The Run it retries.
+    pub retried_from: RunId,
+    /// The Run whose branch it works on, pushes to and proposes from: the
+    /// first of the Runs it retries, so a retry of a retry keeps the one
+    /// branch.
+    pub branch_of: RunId,
+    /// The place its own first Step takes. The Steps before it are those
+    /// the retried Run took before the entry it stopped at, kept with
+    /// their outputs and answered Gates.
+    pub first_seq: u16,
+}
+
+impl Run {
+    /// The Run whose branch this one works on: its own, unless it retries
+    /// another.
+    pub fn branch_of(&self) -> RunId {
+        self.retry.map_or(self.id, |retry| retry.branch_of)
+    }
 }
 
 /// Why a Run's token budget ended it, before an agent Step.
@@ -600,6 +628,39 @@ pub struct NewRunDefinition<'a> {
     /// Its Scorers, Experiments and Benchmarks, as written, which judge the
     /// Run once it ends.
     pub evaluation: &'a serde_json::Value,
+}
+
+/// A new Run that retries `retried`, an ended Run, to keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewRetry {
+    /// The new Run's id.
+    pub id: RunId,
+    /// The Run it retries.
+    pub retried: RunId,
+    /// The place its own first Step takes: the retried Run's Steps before
+    /// it that ended are kept as its own, with their answered Gates and the
+    /// review rounds that ended before it.
+    pub first_seq: u16,
+    /// Whether its owner retried it in their own signed-in session, from
+    /// an account that is not an agent's: only then does its request ask
+    /// for the Control Files it names, whoever created the Run it retries.
+    pub created_in_person: bool,
+}
+
+/// What keeping a retry came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RetryInsert {
+    /// The retry is kept.
+    Inserted(Box<Run>),
+    /// The Run is missing, or has not ended, so nothing was kept.
+    NotEnded,
+    /// The Run was retried already, so nothing was kept: a Run is retried
+    /// at most once, so two retries never work on one branch.
+    Retried,
+    /// Its owner already held as many places in their Queue as the Queue
+    /// limit of the rules the Run keeps, so nothing was kept: the places
+    /// they held, counted up to the limit.
+    QueueFull(QueuePlaces),
 }
 
 /// What keeping a new Run came to.

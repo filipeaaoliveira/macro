@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_gate (\n                run_id, seq, question, answers, opened_at, answer, note, user_id, answered_at,\n                approved_control_files, rule, reply_confidence, asked_back_reply, asked_back_at,\n                stand_in_answer, stand_in_reason, stand_in_confidence, stand_in_until,\n                by_stand_in, agent_session_id, stand_in_declined_pick,\n                stand_in_declined_confidence, stand_in_declined_reason, asked_back_pick,\n                asked_back_confidence, asked_back_reason, asked_back_refused_tampered\n            )\n            SELECT\n                $1, g.seq, g.question, g.answers, g.opened_at, g.answer, g.note, g.user_id,\n                g.answered_at, g.approved_control_files, g.rule, g.reply_confidence,\n                g.asked_back_reply, g.asked_back_at, g.stand_in_answer, g.stand_in_reason,\n                g.stand_in_confidence, g.stand_in_until, g.by_stand_in, g.agent_session_id,\n                g.stand_in_declined_pick, g.stand_in_declined_confidence,\n                g.stand_in_declined_reason, g.asked_back_pick, g.asked_back_confidence,\n                g.asked_back_reason, g.asked_back_refused_tampered\n            FROM factory_gate g\n            JOIN factory_step s ON s.run_id = g.run_id AND s.seq = g.seq\n            WHERE g.run_id = $2 AND g.seq < $3 AND g.answer IS NOT NULL\n                AND s.ended_at IS NOT NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "73d7ea138dbe5cbcf082c51aaab8d9cafd6ded71f1a975d29d9d56f7ddb6cc4a"
+}

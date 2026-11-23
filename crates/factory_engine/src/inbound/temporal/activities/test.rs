@@ -141,6 +141,7 @@ fn plan_request() -> StepRequest {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        branch_of: None,
     }
 }
 

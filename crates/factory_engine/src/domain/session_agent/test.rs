@@ -527,6 +527,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         resumes: None,
         afresh: None,
         setup: None,
+        branch_of: None,
     }
 }
 

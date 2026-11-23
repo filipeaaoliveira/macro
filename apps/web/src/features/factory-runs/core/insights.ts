@@ -16,8 +16,12 @@ export type {
   TroubleRun,
 } from '@service-factory/generated/schemas';
 
-/** A Run's state in insights: how it ended, or `running` while it goes. */
-export type InsightOutcome = keyof OutcomeCounts;
+/**
+ * A Run's state in insights: how it ended, or `running` while it goes.
+ * `retried` is no state of its own: it counts those of the ended Runs a
+ * retry took over.
+ */
+export type InsightOutcome = Exclude<keyof OutcomeCounts, 'retried'>;
 
 /** Every state, in the order charts stack and legends list them. */
 export const INSIGHT_OUTCOMES: readonly InsightOutcome[] = [

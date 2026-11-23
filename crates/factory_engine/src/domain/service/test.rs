@@ -32,6 +32,7 @@ mod definition_changes;
 mod evaluation;
 mod gate_owner;
 mod orchestrator;
+mod retry;
 mod self_improvement;
 mod standing;
 mod standing_rules;
@@ -291,6 +292,7 @@ fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        branch_of: None,
     }
 }
 
@@ -1559,4 +1561,32 @@ async fn a_run_s_read_lists_its_break_records() {
     // A list of Runs reads no break records: they are a Run's own read's.
     assert_eq!(listed.len(), 2);
     assert!(listed.iter().all(|detail| detail.break_records.is_empty()));
+}
+
+/// A Step's entry bounds its visits; a Run whose Flow is unknown is
+/// bounded as the built-in `code` Flow bounds the Step.
+#[test]
+fn a_step_s_visits_are_bounded_by_its_entry_or_the_code_flow() {
+    let step =
+        |name: &str| crate::domain::flow::StepName::try_from(name.to_string()).expect("valid");
+    let code = crate::domain::built_in_flows::BuiltInFlow::named("code")
+        .expect("built in")
+        .read(|_| Some(StepUse::Work))
+        .expect("valid flow");
+    let write = code
+        .entries
+        .iter()
+        .find(|entry| entry.id.as_str() == "write")
+        .expect("write");
+    let accept = code
+        .entries
+        .iter()
+        .find(|entry| entry.id.as_str() == "accept")
+        .expect("accept");
+
+    assert_eq!(super::visits_bound(Some(accept), &step("accept")), Some(3));
+    assert_eq!(super::visits_bound(Some(write), &step("write")), None);
+    assert_eq!(super::visits_bound(None, &step("accept")), Some(3));
+    assert_eq!(super::visits_bound(None, &step("plan_review")), Some(3));
+    assert_eq!(super::visits_bound(None, &step("reply")), None);
 }

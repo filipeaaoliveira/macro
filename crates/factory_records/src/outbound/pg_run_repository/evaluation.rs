@@ -298,7 +298,7 @@ impl EvaluationRepository for PgRunRepository {
         let Some(run) = sqlx::query!(
             r#"
             SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome,
-                r.definition_evaluation
+                r.definition_evaluation, COALESCE(r.branch_run_id, r.id) AS "branch_of!"
             FROM factory_run r
             WHERE r.id = $1
             "#,
@@ -366,6 +366,7 @@ impl EvaluationRepository for PgRunRepository {
             run_id,
             user_id: MacroUserIdStr::try_from(run.user_id.clone())
                 .map_err(|_| PgRunRepositoryErr::InvalidUserId(run.user_id))?,
+            branch_of: RunId::from_uuid(run.branch_of),
             flow: run.flow,
             request: run.request,
             repo_url: run.repo_url,
@@ -610,6 +611,12 @@ impl EvaluationRepository for PgRunRepository {
         })
         .collect();
 
+        // A retry keeps the arms and Agent Rules of the Run it retries, so
+        // a Run and its retries are one attempt of an arm or a rule: it is
+        // counted once, as its newest Run among those read, and the Steps
+        // that Run kept count with it. A Run whose retry falls outside the
+        // period counts the attempt itself, so no attempt is lost.
+        //
         // An arm's Agents are the same for each of its Runs while the
         // Experiment is unchanged; the newest Run's are shown. A Run fell
         // back when one of its Steps of a Role the arm chooses for was
@@ -639,6 +646,7 @@ impl EvaluationRepository for PgRunRepository {
             FROM factory_run_arm a
             JOIN factory_run r ON r.id = a.run_id
             WHERE a.run_id = ANY($1)
+              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = a.run_id AND n.id = ANY($1))
             GROUP BY a.experiment, a.arm
             ORDER BY a.experiment, a.arm
             "#,
@@ -668,6 +676,7 @@ impl EvaluationRepository for PgRunRepository {
             FROM factory_run_arm a
             JOIN factory_run_score s ON s.run_id = a.run_id
             WHERE a.run_id = ANY($1)
+              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = a.run_id AND n.id = ANY($1))
             GROUP BY a.experiment, a.arm, s.scorer
             ORDER BY a.experiment, a.arm, s.scorer
             "#,
@@ -707,6 +716,7 @@ impl EvaluationRepository for PgRunRepository {
             FROM factory_run_agent_rule g
             JOIN factory_run r ON r.id = g.run_id
             WHERE g.run_id = ANY($1)
+              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = g.run_id AND n.id = ANY($1))
             GROUP BY g.role, g.rule
             ORDER BY g.role, g.rule
             "#,

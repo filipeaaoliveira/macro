@@ -194,8 +194,8 @@ async fn only_a_bot_in_a_standing_role_that_allows_it_answers_a_gate() {
     let plan = waiting_run(
         &repo,
         Some(agents(Some(split_roles()))),
-        "plan",
-        "done",
+        "plan-review",
+        "reviewed",
         &["approve", "revise"],
     )
     .await;
@@ -335,12 +335,19 @@ async fn without_standing_roles_an_agent_answers_as_before() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let service = code_service(&repo, &workflows, &FakeGithub::default());
-    let no_definition = waiting_run(&repo, None, "plan", "done", &["approve", "revise"]).await;
+    let no_definition = waiting_run(
+        &repo,
+        None,
+        "plan-review",
+        "reviewed",
+        &["approve", "revise"],
+    )
+    .await;
     let no_section = waiting_run(
         &repo,
         Some(agents(None)),
-        "plan",
-        "done",
+        "plan-review",
+        "reviewed",
         &["approve", "revise"],
     )
     .await;

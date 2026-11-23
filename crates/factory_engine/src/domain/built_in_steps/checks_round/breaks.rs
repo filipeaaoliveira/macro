@@ -24,7 +24,7 @@ use crate::domain::breaks::{BreakRun, MARKER, MAX_BREAKS, Reported, reported};
 use crate::domain::check_context::CheckContext;
 use crate::domain::checks::kept_output;
 use crate::domain::models::StepInput;
-use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
+use crate::domain::ports::{ChildTasks, MainWatches, PullRequests, StepAgent};
 
 /// How long one run of a break's test may take: it runs twice, without
 /// the break and with it.
@@ -63,12 +63,13 @@ pub(super) struct BreakPlace<'a> {
     pub(super) environment: &'a str,
 }
 
-impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+impl<A, G, R, M, C> BuiltInSteps<A, G, R, M, C>
 where
     A: StepAgent,
     G: PullRequests,
     R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
+    C: ChildTasks,
 {
     /// Run each break the Step `input.key`'s agent reported across its
     /// rounds and not recorded yet, at `place`, recording how each went.

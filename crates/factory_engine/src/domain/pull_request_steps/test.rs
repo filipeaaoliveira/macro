@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use chrono::Utc;
 
-use factory_records::domain::models::{Repository, RunId, StepKey};
+use factory_records::domain::models::{Repository, RunId, RunRetry, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -19,7 +19,7 @@ mod page;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches, ci, suite};
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CommitStatus, HeadChecks, PullRequestState, RequiredCheck,
-    RequiredChecks, StepInput, StepReport,
+    RequiredChecks, StepInput, StepReport, run_branch,
 };
 
 static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
@@ -51,6 +51,8 @@ fn input(run_id: RunId) -> StepInput<'static> {
         owner_notes: &[],
         base_commit: None,
         routes: &[],
+        max_visits: None,
+        retry: None,
     }
 }
 
@@ -86,6 +88,28 @@ async fn publishing_again_finds_the_pull_request_it_opened() {
     assert_eq!(outcome(&again), "published");
     assert!(first.output.contains("https://github.com/macro/app/pull/7"));
     assert_eq!(github.state().opened, 1);
+}
+
+/// A retry's publish proposes from the branch of the Run it retries, which
+/// holds the work that Run's Steps pushed, not from a branch of its own.
+#[tokio::test]
+async fn a_retry_publishes_from_the_branch_of_the_run_it_retries() {
+    let github = FakeGithub::default();
+    let repo = FakeRepo::default();
+    let retried = RunId::generate();
+    let retry = StepInput {
+        retry: Some(RunRetry {
+            retried_from: retried,
+            branch_of: retried,
+            first_seq: 3,
+        }),
+        ..input(RunId::generate())
+    };
+
+    let published = steps(&github, &repo).publish(retry).await.expect("publish");
+
+    assert_eq!(outcome(&published), "published");
+    assert_eq!(github.state().opened_from, [run_branch(retried)]);
 }
 
 /// GitHub refusing a pull request another attempt opened first still

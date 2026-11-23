@@ -3,12 +3,13 @@ use std::sync::{Arc, LazyLock, Mutex};
 use chrono::Utc;
 use factory_records::domain::models::{
     CheckRoundOutcome, CheckRoundStart, EntryId, Gate, GateAnswer, GateKind, Outcome, Repository,
-    Role, RunId, Step, StepEnd, StepKey,
+    Role, RunId, RunRetry, Step, StepEnd, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
 use macro_user_id::user_id::MacroUserIdStr;
 
+mod plan_review;
 mod update;
 
 use super::{BuiltInStepError, BuiltInSteps};
@@ -130,6 +131,8 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         owner_notes: &[],
         base_commit: None,
         routes: &[],
+        max_visits: None,
+        retry: None,
     }
 }
 
@@ -318,6 +321,48 @@ async fn an_agent_step_works_in_the_run_s_repository_on_its_branch() {
             Outcome::try_from("changes".to_string()).expect("valid"),
         ]
     );
+}
+
+/// A retry's first Step works on the branch of the Run it retries, and is
+/// told its checkout may hold the failed Step's unfinished changes; a later
+/// Step of the retry is not.
+#[tokio::test]
+async fn a_retry_s_first_step_is_told_it_takes_over_a_failed_step_s_checkout() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "trunk".to_string(),
+    };
+    let retried = RunId::generate();
+    let retry = RunRetry {
+        retried_from: retried,
+        branch_of: retried,
+        first_seq: 2,
+    };
+    let mut first = input(&[]);
+    first.repository = Some(&repository);
+    first.retry = Some(retry);
+    let later = StepInput {
+        key: StepKey {
+            run_id: first.key.run_id,
+            seq: 3,
+        },
+        ..first
+    };
+
+    steps.run(&step("plan"), first).await.expect("plan");
+    steps.run(&step("plan"), later).await.expect("plan");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    assert!(tasks[0].prompt.contains(super::RESUMED_RUN_NOTE));
+    assert!(
+        tasks[0]
+            .prompt
+            .contains(&format!("git push origin factory/{retried}"))
+    );
+    assert_eq!(tasks[0].branch_of, Some(retried));
+    assert!(!tasks[1].prompt.contains(super::RESUMED_RUN_NOTE));
 }
 
 /// A Benchmark trial's branch starts from the commit its suite pinned, not

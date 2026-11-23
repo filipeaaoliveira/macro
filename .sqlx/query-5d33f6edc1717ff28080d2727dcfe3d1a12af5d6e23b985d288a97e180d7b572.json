@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT run_id AS \"run_id!\", seq AS \"seq!\", entry AS \"entry!\",\n                session_id AS \"session_id!\"\n            FROM (\n                SELECT run_id, seq, entry, session_id\n                FROM factory_step\n                WHERE run_id = ANY($1)\n                OFFSET 0\n            ) steps\n            WHERE session_id IS NOT NULL AND seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = steps.run_id)\n            UNION\n            SELECT u.run_id, u.seq, s.entry, u.session_id\n            FROM factory_step_used_session u\n            JOIN factory_step s ON s.run_id = u.run_id AND s.seq = u.seq\n            WHERE u.run_id = ANY($1) AND u.seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = u.run_id)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "entry!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "5d33f6edc1717ff28080d2727dcfe3d1a12af5d6e23b985d288a97e180d7b572"
+}
