@@ -848,7 +848,8 @@ path; a list GitHub cannot give in full passes), or, for a fix that says it
 fixed a Blocker of its review round, is still at the commit that round
 reviewed. Either is read again after 2 s before the Step fails. A branch
 GitHub does not have, even after 2 s, fails the attempt for a retry, as a
-round's read of it does. Like the
+round's read of it does, until the Step's time for rounds (105 minutes) is
+up: then the Step fails saying the branch is not on GitHub. Like the
 checks, this runs in the Step's activity, behind no patch marker. The pull request Steps act on GitHub as the Run's owner, with
 the token of the GitHub account they linked to Macro, which the
 authentication service gives (`outbound/github_pull_requests.rs`, over the

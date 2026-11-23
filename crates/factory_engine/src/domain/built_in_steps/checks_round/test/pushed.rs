@@ -55,6 +55,37 @@ async fn a_write_whose_branch_is_not_on_github_is_left_to_a_retry() {
     assert!(rounds(&repo, input).await.is_empty());
 }
 
+/// A branch still missing when the Step's time for rounds is up ends the
+/// Step `failed`, saying why, instead of a last retry that says nothing.
+#[tokio::test]
+async fn a_branch_still_missing_at_the_step_s_end_fails_saying_so() {
+    let agent = ScriptedAgent::new("done", Vec::new());
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    github.state().head = None;
+    let repo = FakeRepo::default();
+    let input = input();
+    let steps = BuiltInSteps::new(
+        agent.clone(),
+        PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
+    );
+    let entry = EntryId::try_from("write".to_string()).expect("valid");
+    repo.start_step(input.key, &entry, 1).await.expect("start");
+    age(&repo, input.key);
+    let step = StepName::try_from("write".to_string()).expect("valid");
+
+    let report = steps.run(&step, input).await.expect("write");
+
+    assert_eq!(report.outcome, Outcome::failed());
+    assert!(
+        report.output.starts_with(&format!(
+            "The agent said its work was done and pushed, but the run's branch `factory/{}` is not on GitHub",
+            input.key.run_id
+        )),
+        "{}",
+        report.output
+    );
+}
+
 /// A branch GitHub shows only after a moment holds the work: its checks
 /// run, and pass.
 #[tokio::test]

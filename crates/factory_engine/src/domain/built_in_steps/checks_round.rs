@@ -792,7 +792,9 @@ where
     /// or, for a fix that says it fixed a Blocker of the review round
     /// `answers`, is still at the commit that round reviewed; read again
     /// after [`BRANCH_HEAD_LAG`] before it fails. A branch GitHub does not
-    /// have is left to a retry, as a round's read of it is. None when the
+    /// have is left to a retry, as a round's read of it is, until the
+    /// Step's time for rounds is up: then the Step fails saying so. None
+    /// when the
     /// work is there, or when GitHub cannot list the branch's changes in
     /// full. An agent that committed on another branch, or in a checkout
     /// another Run moved, ends so rather than `done`.
@@ -832,7 +834,8 @@ where
 
     /// One read of [`Self::unpushed`]: why the Run's branch does not hold
     /// the work, or none when it does. A branch GitHub does not have, even
-    /// after [`BRANCH_HEAD_LAG`], fails the attempt for a retry.
+    /// after [`BRANCH_HEAD_LAG`], fails the attempt for a retry, until the
+    /// Step's time for rounds ([`ROUNDS_END_BY`]) is up: then it is why.
     async fn not_on_branch(
         &self,
         input: StepInput<'_>,
@@ -844,10 +847,17 @@ where
             Some(head) => head,
             None => {
                 tokio::time::sleep(BRANCH_HEAD_LAG).await;
-                self.pull_requests
-                    .branch_head(&input)
-                    .await?
-                    .ok_or_else(|| retry("the run's branch is not on GitHub".to_string()))?
+                match self.pull_requests.branch_head(&input).await? {
+                    Some(head) => head,
+                    // The Step's last chance: it fails, saying why, rather
+                    // than run out its retries and fail saying nothing.
+                    None if Utc::now() >= self.rounds_end_by(input).await? => {
+                        return Ok(Some(format!(
+                            "the run's branch `{branch}` is not on GitHub"
+                        )));
+                    }
+                    None => return Err(retry("the run's branch is not on GitHub".to_string())),
+                }
             }
         };
         let fixed = answers.filter(|round| {
