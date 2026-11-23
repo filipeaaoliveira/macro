@@ -582,12 +582,14 @@ async fn a_lone_or_doubled_marker_leaves_one_section() {
     assert_eq!(body.matches("## Factory run").count(), 1);
 }
 
-/// Only comments by the pull request's author are the report's: one by
-/// someone else that holds a marker is left alone, and a second comment of
-/// one number says it is not needed.
+/// Only comments by the account whose token writes them are the report's,
+/// even on a pull request someone else opened: one by someone else, or by
+/// no known account, that holds a marker is left alone, and a second
+/// comment of one number says it is not needed.
 #[tokio::test]
-async fn only_the_owner_s_comments_are_the_report_s() {
+async fn only_the_writer_s_comments_are_the_report_s() {
     let github = FakeGithub::default();
+    github.state().opened_by = Some(9);
     let run_id = RunId::generate();
     let forged = format!("{}\nWritten by someone else.", part_marker(run_id, 1));
     let stale = format!("{}\nAn older part.", part_marker(run_id, 1));
@@ -595,7 +597,12 @@ async fn only_the_owner_s_comments_are_the_report_s() {
         PullRequestComment {
             id: 50,
             body: forged.to_string(),
-            author_id: Some(2),
+            author_id: Some(9),
+        },
+        PullRequestComment {
+            id: 49,
+            body: forged.to_string(),
+            author_id: None,
         },
         PullRequestComment {
             id: 51,
@@ -625,11 +632,12 @@ async fn only_the_owner_s_comments_are_the_report_s() {
         .iter()
         .map(|comment| comment.body.as_str())
         .collect();
-    assert_eq!(bodies.len(), 3);
+    assert_eq!(bodies.len(), 4);
     assert_eq!(bodies[0], forged);
-    assert!(bodies[1].contains("The rest of the request:"));
+    assert_eq!(bodies[1], forged);
+    assert!(bodies[2].contains("The rest of the request:"));
     assert_eq!(
-        bodies[2],
+        bodies[3],
         format!(
             "{}\n(Nothing more: the whole report fits in the description now.)",
             part_marker(run_id, 1)
@@ -699,4 +707,30 @@ async fn a_plan_that_just_fits_is_not_marked_cut() {
     let body = github.state().description.clone().expect("opened");
     assert!(body.contains(&format!("> {}\n", "y".repeat(100))));
     assert!(!body.contains("(The rest of the plan is on the run's plan step.)"));
+}
+
+/// When the account the comments are written as cannot be read, none is
+/// written, rather than new ones on every visit; the description still is.
+#[tokio::test]
+async fn no_comment_is_written_when_its_author_is_unknown() {
+    let github = FakeGithub::default();
+    github.state().writer_unread = true;
+    let request: String = (0..2_500)
+        .map(|line| format!("Line {line}: collapse the dashes.\n"))
+        .collect();
+    let run_id = RunId::generate();
+    let mut long = input(run_id);
+    long.request = &request;
+
+    for _ in 0..2 {
+        steps(&github, &FakeRepo::default())
+            .publish(long)
+            .await
+            .expect("publish");
+    }
+
+    let state = github.state();
+    assert_eq!(state.opened, 1);
+    assert!(state.comments.is_empty());
+    assert_eq!(state.comment_writes, 0);
 }

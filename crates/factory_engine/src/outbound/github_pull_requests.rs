@@ -691,6 +691,15 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
+    async fn writer_account(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<u64, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self.github.token_account_id(&token).await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
     async fn pull_request_comments(
         &self,
         owner: &MacroUserIdStr<'static>,

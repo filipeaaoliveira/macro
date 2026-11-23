@@ -883,8 +883,10 @@ request is kept whole lines (cut by characters only when its first line
 alone does not fit), and the rest of it, then what does not fit of the
 report, go into numbered comments, each found again by its marker and
 edited in place; one no longer needed, or a second of one number, says so.
-Only comments by the pull request's author, the Run's owner, count: a
-marker anyone else writes is never edited. Every marker names the Run
+Only comments by the GitHub account the owner's token acts as (`GET
+/user`) count, whoever opened the pull request: a marker anyone else writes
+is never edited, and when that account cannot be read no comment is
+written. Every marker names the Run
 (`run=<id>`), and only this Run's count: the section is the first of its
 start markers that its end marker closes, and its other sections and lone
 markers are removed until none is left. The request and what agents wrote

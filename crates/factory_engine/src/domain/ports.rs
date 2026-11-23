@@ -451,6 +451,13 @@ pub trait PullRequests: Send + Sync + 'static {
         body: &str,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// The id of the GitHub account the pull request Steps act as for
+    /// `owner`: the author of the comments they write.
+    fn writer_account(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<u64, Self::Err>> + Send;
+
     /// The comments in the conversation of pull request `number` of
     /// `repository`, oldest first: all of them, or an error when there are
     /// more than are read.

@@ -14,8 +14,8 @@
 //! A description holds a little less than GitHub's 65,536 characters
 //! ([`ROOM_CHARS`]): what does not fit goes into numbered comments on the
 //! pull request, each found again by its marker and edited in place. Only
-//! comments by the pull request's author, the Run's owner, count: a marker
-//! anyone else writes is not the report's. The request is kept whole lines
+//! comments by the account whose token writes them count: a marker anyone
+//! else writes is not the report's. The request is kept whole lines
 //! first; the rest of the request, then the rest of the report, go into the
 //! comments, never cut mid-line unless one line alone does not fit.
 //!
@@ -717,12 +717,24 @@ where
                 .map_err(PullRequestStepError::github)?;
         }
 
-        // Each comment is found by its marker, among those the pull
-        // request's author wrote, as the factory writes them as the Run's
-        // owner: a marker anyone else writes is not the report's, and is
-        // never edited. One that says something else now is edited, one
-        // missing is added, and one no longer needed, or a second of the
-        // same number, says it is not needed.
+        // Each comment is found by its marker, among those the account
+        // whose token writes them wrote: a marker anyone else writes, the
+        // pull request's opener included, is not the report's, and is never
+        // edited. Without that account no comment could be found again, and
+        // each visit would add its comments anew, so none is written. One
+        // that says something else now is edited, one missing is added, and
+        // one no longer needed, or a second of the same number, says it is
+        // not needed.
+        let writer = match self.github.writer_account(input.owner).await {
+            Ok(writer) => writer,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "the report's comments are not written: their author is unknown"
+                );
+                return Ok(());
+            }
+        };
         let existing = self
             .github
             .pull_request_comments(input.owner, repository, pull_request.number)
@@ -730,7 +742,7 @@ where
             .map_err(PullRequestStepError::github)?;
         let mut found: Vec<(usize, u64, String)> = existing
             .into_iter()
-            .filter(|comment| text.author_id.is_some() && comment.author_id == text.author_id)
+            .filter(|comment| comment.author_id == Some(writer))
             .filter_map(|comment| {
                 Some((
                     markers.part_number(&comment.body)?,

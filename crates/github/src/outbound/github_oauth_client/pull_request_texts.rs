@@ -113,6 +113,21 @@ impl GithubOauthImpl {
         Err(refusal(status).unwrap_or_else(|| unexpected(status, &headers, text, context)))
     }
 
+    /// The id of the GitHub account `access_token` acts as: the author of
+    /// what it writes.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn token_account_id(&self, access_token: &str) -> Result<u64, GithubError> {
+        let account: Account = self
+            .read(
+                access_token,
+                "/user",
+                &[],
+                "failed to read the token's account",
+            )
+            .await?;
+        Ok(account.id)
+    }
+
     /// The description of pull request `number`, and who opened it.
     #[tracing::instrument(skip(self, access_token), err)]
     pub async fn pull_request_text(
