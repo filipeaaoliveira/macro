@@ -44,8 +44,7 @@ async fn a_rerun_github_cannot_make_is_declined_with_its_message() {
     assert_eq!(
         rerun,
         GithubJobRerun::Declined(
-            "Unable to retry this workflow run because it was created over a month ago"
-                .to_string()
+            "Unable to retry this workflow run because it was created over a month ago".to_string()
         )
     );
     server.finish();
