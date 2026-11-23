@@ -4007,6 +4007,81 @@
         "description": "Where a Run is, as the board groups it.",
         "enum": ["running", "waiting", "held", "stopped", "finished"]
       },
+      "BreakRecord": {
+        "type": "object",
+        "description": "One break a Step's agent reported, and how it went.",
+        "required": [
+          "seq",
+          "test",
+          "file",
+          "oldText",
+          "newText",
+          "command",
+          "status",
+          "output",
+          "recordedAt"
+        ],
+        "properties": {
+          "checkedCommit": {
+            "type": ["string", "null"],
+            "description": "The commit it ran on; none when it did not run."
+          },
+          "command": {
+            "type": "string",
+            "description": "The command that runs the test, from the repository's root."
+          },
+          "file": {
+            "type": "string",
+            "description": "The file the break edits, from the repository's root."
+          },
+          "newText": {
+            "type": "string",
+            "description": "What it puts in its place."
+          },
+          "oldText": {
+            "type": "string",
+            "description": "The text the break replaces: its first place in the file."
+          },
+          "output": {
+            "type": "string",
+            "description": "The end of what the test printed with the break, or without it when\nthat run failed; or why it did not run."
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was recorded."
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The Step whose agent reported it.",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/BreakStatus",
+            "description": "How it went."
+          },
+          "test": {
+            "type": "string",
+            "description": "The test, as the agent named it; the whole line for one that does\nnot read."
+          }
+        }
+      },
+      "BreakStatus": {
+        "type": "string",
+        "description": "How a break went.",
+        "enum": [
+          "verified",
+          "not_reproduced",
+          "hung",
+          "not_run",
+          "not_applied",
+          "unreadable",
+          "dropped",
+          "unchecked",
+          "interrupted"
+        ]
+      },
       "BudgetStop": {
         "oneOf": [
           {
@@ -6695,7 +6770,8 @@
           "blockerResolutions",
           "standingActs",
           "agentRules",
-          "taskTagsUnread"
+          "taskTagsUnread",
+          "breakRecords"
         ],
         "properties": {
           "agentRules": {
@@ -6719,6 +6795,13 @@
           "blockerResolutions": {
             "$ref": "#/components/schemas/BlockerResolutions",
             "description": "What became of its Blockers: fixed, or disputed and then upheld or\ndropped."
+          },
+          "breakRecords": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakRecord"
+            },
+            "description": "The breaks its write and fix Steps reported for the tests they\nadded, by Step, each with how the factory's run of it went: in a\nRun's own read (`GET /runs/{id}`) only, empty in a list of Runs."
           },
           "mainHold": {
             "oneOf": [
