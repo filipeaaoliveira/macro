@@ -16,6 +16,8 @@ import {
   MAX_CHANGE_TITLE_BYTES,
   type SentChange,
   sendUnder,
+  sentUnchanged,
+  startedBefore,
   startsAfresh,
 } from '../core/definition-change';
 import {
@@ -126,7 +128,15 @@ export function DefinitionChangeEditor(props: {
   const [refused, setRefused] = createSignal<string>();
   const [opened, setOpened] = createSignal<DefinitionPullRequest>();
   const [passed, setPassed] = createSignal<DefinitionChangeCheck>();
-  const [reading, setReading] = createSignal<ReadonlySet<number>>(new Set());
+  // The reads in flight, each by its own id, with the row it fills.
+  const [reads, setReads] = createSignal<ReadonlyMap<number, number>>(
+    new Map()
+  );
+  let nextRead = 0;
+  const reading = (index: number) => [...reads().values()].includes(index);
+  // The files that started from an older commit than the head the factory
+  // last checked against, once said: sending again goes ahead.
+  const [moved, setMoved] = createSignal<{ commit: string; paths: string[] }>();
 
   const draft = () => ({
     title: title(),
@@ -143,6 +153,7 @@ export function DefinitionChangeEditor(props: {
     setChecked(false);
     setRefused(undefined);
     setPassed(undefined);
+    setMoved(undefined);
   };
 
   const updateFile = (index: number, change: Partial<DraftFile>) => {
@@ -152,11 +163,15 @@ export function DefinitionChangeEditor(props: {
     );
   };
 
-  const markReading = (index: number, on: boolean) =>
-    setReading((current) => {
-      const next = new Set(current);
-      if (on) next.add(index);
-      else next.delete(index);
+  const startRead = (index: number) => {
+    const id = nextRead++;
+    setReads((current) => new Map(current).set(id, index));
+    return id;
+  };
+  const endRead = (id: number) =>
+    setReads((current) => {
+      const next = new Map(current);
+      next.delete(id);
       return next;
     });
 
@@ -168,40 +183,58 @@ export function DefinitionChangeEditor(props: {
     const path = value.trim();
     const file = files()[index];
     if (!file || !isDefinitionFile(path) || !startsAfresh(file)) return;
-    if (file.start?.path === path) return;
     const current = () => files()[index];
     const stillPicked = () => {
       const now = current();
       return !!now && now.path.trim() === path && startsAfresh(now);
     };
-    markReading(index, true);
+    const id = startRead(index);
     try {
       const read = await readFile(path);
       if (!stillPicked()) return;
+      const text = read.text ?? null;
       updateFile(index, {
-        text: read.text ?? '',
-        start: { path, text: read.text },
+        text: text ?? '',
+        start: { path, commit: read.commit, text },
       });
     } catch (error) {
       if (!stillPicked()) return;
       updateFile(index, { readProblem: readFailure(error) });
     } finally {
-      markReading(index, false);
+      endRead(id);
     }
   };
 
   // Asks the factory whether the Definition reads with the draft, writing
   // nothing; says why when it doesn't.
-  const checkWithFactory = async (): Promise<boolean> => {
+  const checkWithFactory = async (): Promise<
+    DefinitionChangeCheck | undefined
+  > => {
     try {
-      setPassed(await checking.mutateAsync(checkRequest(draft())));
-      return true;
+      const passing = await checking.mutateAsync(checkRequest(draft()));
+      setPassed(passing);
+      return passing;
     } catch (error) {
       const answer = refusal(error);
       setRefused(answer.text);
       if (answer.newChange) setSent(undefined);
+      return undefined;
+    }
+  };
+
+  // Whether files read at an older commit than `head` are newly found:
+  // said once, after which sending goes ahead.
+  const warnMoved = (head: string): boolean => {
+    const paths = startedBefore(files(), head);
+    const said = moved();
+    if (paths.length === 0) {
+      setMoved(undefined);
       return false;
     }
+    const known =
+      said?.commit === head && said.paths.join('\n') === paths.join('\n');
+    setMoved({ commit: head, paths });
+    return !known;
   };
 
   const check = async () => {
@@ -209,16 +242,23 @@ export function DefinitionChangeEditor(props: {
     setRefused(undefined);
     setPassed(undefined);
     if (!checkDraft(draft()).ready || busy()) return;
-    await checkWithFactory();
+    const passing = await checkWithFactory();
+    if (passing) warnMoved(passing.commit);
   };
 
   const send = async () => {
     setChecked(true);
     setRefused(undefined);
     if (!checkDraft(draft()).ready || busy()) return;
-    // The draft is checked before it is sent, so a change that doesn't
-    // read never takes a change id.
-    if (!(await checkWithFactory())) return;
+    // A change sent again unchanged, as after a lost answer, goes as it is:
+    // the factory answers its pull request, though it may since have
+    // merged, which a check would refuse as changing nothing. Any other
+    // draft is checked first, so one that doesn't read never takes a
+    // change id, and one written from an older head is said to be.
+    if (!sentUnchanged(sent(), draft())) {
+      const passing = await checkWithFactory();
+      if (!passing || warnMoved(passing.commit)) return;
+    }
     const change = sendUnder(sent(), draft(), () => crypto.randomUUID());
     setSent(change.sent);
     try {
@@ -341,7 +381,7 @@ export function DefinitionChangeEditor(props: {
                       {t(FILE_PROBLEMS[problem() ?? 'path'])}
                     </TextField.ErrorMessage>
                   </TextField>
-                  <Show when={reading().has(index)}>
+                  <Show when={reading(index)}>
                     <p class="text-xs text-ink-muted" role="status">
                       {t('factoryRuns.definitionChangeReading')}
                     </p>
@@ -422,6 +462,16 @@ export function DefinitionChangeEditor(props: {
               <p class="text-xs" role="status">
                 {t('factoryRuns.definitionChangeChecked', {
                   commit: check().commit.slice(0, 7),
+                })}
+              </p>
+            )}
+          </Show>
+          <Show when={moved()}>
+            {(behind) => (
+              <p class="text-xs text-failure" role="alert">
+                {t('factoryRuns.definitionChangeMoved', {
+                  commit: behind().commit.slice(0, 7),
+                  paths: behind().paths.join(', '),
                 })}
               </p>
             )}

@@ -7,6 +7,8 @@ import {
   definitionFileUrl,
   isDefinitionFile,
   sendUnder,
+  sentUnchanged,
+  startedBefore,
   startsAfresh,
 } from './definition-change';
 
@@ -27,6 +29,7 @@ describe('isDefinitionFile', () => {
       'rules.json',
       'scorers.json',
       'flows/code.json',
+      'flows/fix-ci_2.json',
     ]) {
       expect(isDefinitionFile(path)).toBe(true);
     }
@@ -36,6 +39,9 @@ describe('isDefinitionFile', () => {
       'flows/nested/code.json',
       'flows/.json',
       'flows/my flow.json',
+      'flows/Code.json',
+      'flows/notes.v2.json',
+      `flows/${'a'.repeat(65)}.json`,
       '/agents.json',
       'src/agents.json',
     ]) {
@@ -177,14 +183,14 @@ describe('startsAfresh', () => {
       startsAfresh({
         path: 'rules.json',
         text: '{"a": 1}',
-        start: { path: 'agents.json', text: '{"a": 1}' },
+        start: { path: 'agents.json', commit: 'c1', text: '{"a": 1}' },
       })
     ).toBe(true);
     expect(
       startsAfresh({
         path: 'flows/new.json',
         text: '',
-        start: { path: 'flows/new.json', text: null },
+        start: { path: 'flows/new.json', commit: 'c1', text: null },
       })
     ).toBe(true);
     expect(startsAfresh({ path: 'agents.json', text: '{}' })).toBe(false);
@@ -192,8 +198,41 @@ describe('startsAfresh', () => {
       startsAfresh({
         path: 'agents.json',
         text: '{"a": 2}',
-        start: { path: 'agents.json', text: '{"a": 1}' },
+        start: { path: 'agents.json', commit: 'c1', text: '{"a": 1}' },
       })
     ).toBe(false);
+  });
+});
+
+describe('startedBefore', () => {
+  it('names the files read at another commit than the head, under the path they were read at', () => {
+    const files = [
+      {
+        path: 'agents.json',
+        text: '{}',
+        start: { path: 'agents.json', commit: 'old', text: '{}' },
+      },
+      {
+        path: 'rules.json',
+        text: '{}',
+        start: { path: 'rules.json', commit: 'head', text: '{}' },
+      },
+      {
+        path: 'scorers.json',
+        text: '{}',
+        start: { path: 'agents.json', commit: 'old', text: '{}' },
+      },
+      { path: 'factory.json', text: '{}' },
+    ];
+    expect(startedBefore(files, 'head')).toEqual(['agents.json']);
+  });
+});
+
+describe('sentUnchanged', () => {
+  it('is the change last sent, unedited since', () => {
+    const first = sendUnder(undefined, draft(), () => 'change-1');
+    expect(sentUnchanged(first.sent, draft())).toBe(true);
+    expect(sentUnchanged(first.sent, draft({ title: 'Other' }))).toBe(false);
+    expect(sentUnchanged(undefined, draft())).toBe(false);
   });
 });

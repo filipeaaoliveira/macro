@@ -306,6 +306,8 @@ export default {
   definitionChangeReadFailed:
     'Couldn’t read the file as it is now: {{message}}',
   definitionChangeCheck: 'Check',
+  definitionChangeMoved:
+    'The definition moved to {{commit}} since you read {{paths}}: sending overwrites what merged since. Empty a file and pick its path again to start from it as it is now, or send again to go ahead.',
   definitionChangeChecked:
     'The definition reads with this change at {{commit}}. Nothing was sent.',
   definitionChangePathProblem:

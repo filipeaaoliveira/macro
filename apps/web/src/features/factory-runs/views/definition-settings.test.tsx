@@ -545,6 +545,121 @@ describe('DefinitionSettings', () => {
       expect(factoryClient.proposeDefinitionChange).not.toHaveBeenCalled();
     });
 
+    it('sends a change again unchanged without checking it, so a merged one answers its pull request', async () => {
+      vi.mocked(factoryClient.proposeDefinitionChange)
+        .mockResolvedValueOnce(
+          err([{ code: 'SERVER_ERROR', message: 'Internal server error' }])
+        )
+        .mockResolvedValueOnce(
+          ok({
+            number: 12,
+            title: 'Add a review step',
+            url: `${REPO}/pull/12`,
+            draft: false,
+          })
+        );
+      // Once its pull request merged, the change changes nothing.
+      vi.mocked(factoryClient.checkDefinitionChange)
+        .mockResolvedValueOnce(ok({ commit: HEAD }))
+        .mockResolvedValue(
+          err([
+            {
+              code: 'INVALID_DEFINITION_CHANGE',
+              message: 'the change leaves every file as it is',
+            },
+          ])
+        );
+      mount(admin);
+      await write({});
+      send();
+      await screen.findByText(
+        'The change couldn’t be sent. Send it again: if its pull request was opened, you’ll get it back.'
+      );
+      send();
+
+      await screen.findByRole('link', {
+        name: '#12 Add a review step (opens in a new tab)',
+      });
+      expect(factoryClient.checkDefinitionChange).toHaveBeenCalledTimes(1);
+      const ids = vi
+        .mocked(factoryClient.proposeDefinitionChange)
+        .mock.calls.map(([request]) => request.changeId);
+      expect(ids).toHaveLength(2);
+      expect(ids[1]).toBe(ids[0]);
+    });
+
+    it('says when a file was read before the head moved, and sends on a second go', async () => {
+      vi.mocked(factoryClient.getDefinitionFile).mockResolvedValueOnce(
+        ok({
+          path: 'flows/notes.json',
+          commit: READ,
+          text: '{"entries": ["reply"]}',
+        })
+      );
+      vi.mocked(factoryClient.proposeDefinitionChange).mockResolvedValue(
+        ok({
+          number: 13,
+          title: 'Add a review step',
+          url: `${REPO}/pull/13`,
+          draft: false,
+        })
+      );
+      mount(admin);
+      await pick('flows/notes.json');
+      await waitFor(() => expect(fileText()).toBe('{"entries": ["reply"]}'));
+      fireEvent.input(
+        screen.getByRole('textbox', { name: 'What it changes' }),
+        { target: { value: 'Add a review step' } }
+      );
+      fireEvent.input(
+        screen.getByRole('textbox', { name: 'File 1’s new text' }),
+        { target: { value: '{"entries": ["review"]}' } }
+      );
+      send();
+
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'The definition moved to bbbbbbb since you read flows/notes.json: sending overwrites what merged since. Empty a file and pick its path again to start from it as it is now, or send again to go ahead.'
+      );
+      // Nothing goes until the person sends again.
+      await new Promise((settle) => setTimeout(settle, 20));
+      expect(factoryClient.proposeDefinitionChange).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole('link', {
+          name: '#13 Add a review step (opens in a new tab)',
+        })
+      ).toBeNull();
+      send();
+      await screen.findByRole('link', {
+        name: '#13 Add a review step (opens in a new tab)',
+      });
+    });
+
+    it('shows a file is being read until its last read ends', async () => {
+      const answers: (() => void)[] = [];
+      mount(admin);
+      // Each read waits until the test answers it.
+      vi.mocked(factoryClient.getDefinitionFile).mockImplementation(
+        (path) =>
+          new Promise((resolve) => {
+            answers.push(() => resolve(ok({ path, commit: HEAD, text: null })));
+          })
+      );
+      await pick('agents.json');
+      await screen.findByText('Reading the file as it is now…');
+      fireEvent.input(screen.getByRole('textbox', { name: 'File 1' }), {
+        target: { value: 'rules.json' },
+      });
+      await waitFor(() => expect(answers).toHaveLength(2));
+
+      answers[0]?.();
+      await new Promise((settle) => setTimeout(settle, 0));
+      expect(screen.getByText('Reading the file as it is now…')).toBeTruthy();
+      answers[1]?.();
+      await waitFor(() =>
+        expect(screen.queryByText('Reading the file as it is now…')).toBeNull()
+      );
+    });
+
     it('offers no change to a member who doesn’t administer the team', async () => {
       mount(named);
 

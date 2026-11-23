@@ -155,6 +155,22 @@ describe('factoryClient routes', () => {
     ).toEqual({ code: 'INVALID_DEFINITION_CHANGE', message: 'bad' });
   });
 
+  it('names a path that is no Definition file', async () => {
+    await factoryClient.getDefinitionFile('README.md');
+    const handler = vi
+      .mocked(fetchWithToken)
+      .mock.calls.at(-1)?.[1]?.errorResponseHandler;
+    if (!handler) throw new Error('No error response handler');
+    expect(
+      await handler(
+        new Response(
+          JSON.stringify({ code: 'notADefinitionFile', message: 'no' }),
+          { status: 400 }
+        )
+      )
+    ).toEqual({ code: 'NOT_A_DEFINITION_FILE', message: 'no' });
+  });
+
   it('starts a Run from a Flow’s name on a task', async () => {
     await factoryClient.startRun({
       flow: 'plan',

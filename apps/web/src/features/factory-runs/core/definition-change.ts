@@ -14,21 +14,50 @@ const DEFINITION_FILES = [
   'scorers.json',
 ] as const;
 
-/** A Flow's file: `flows/{name}.json`, one level down. */
-const FLOW_FILE = /^flows\/[^/\s]+\.json$/;
+/**
+ * A Flow's file: `flows/{name}.json`, one level down, named as the factory
+ * keeps a Flow's name: 1 to 64 lowercase ASCII letters, digits, `-` and `_`.
+ */
+const FLOW_FILE = /^flows\/[a-z0-9_-]{1,64}\.json$/;
 
 /**
  * A file of a change being written: its path and its whole new text, and
- * what it started from: the file as it was at the Definition's head when
- * its path was picked (`text` null when there was no file there yet), or
- * why that couldn't be read.
+ * what it started from: the file as it was at the commit of the
+ * Definition's head it was read at when its path was picked (`text` null
+ * when there was no file there yet), or why that couldn't be read.
  */
 export type DraftFile = {
   path: string;
   text: string;
-  start?: { path: string; text: string | null };
+  start?: { path: string; commit: string; text: string | null };
   readProblem?: string;
 };
+
+/**
+ * The files of a change that started from the Definition at another
+ * commit than `head`: sent as they are, each overwrites whatever merged
+ * into it since.
+ */
+export function startedBefore(files: DraftFile[], head: string): string[] {
+  return files
+    .filter(
+      (file) =>
+        file.start !== undefined &&
+        file.start.path === file.path.trim() &&
+        file.start.commit !== head
+    )
+    .map((file) => file.path.trim());
+}
+
+/** Whether `draft` is the change `last` sent, unchanged since. */
+export function sentUnchanged(
+  last: SentChange | undefined,
+  draft: DefinitionChangeDraft
+): boolean {
+  return (
+    last !== undefined && last.body === JSON.stringify(changeRequest(draft, ''))
+  );
+}
 
 /**
  * Whether picking a path may fill a file's text with the file as it is

@@ -88,8 +88,8 @@ const host = () => SERVER_HOSTS.factory;
 export type DefinitionFile = {
   path: string;
   commit: string;
-  /** Its whole text; `null` when the repository holds no file there yet. */
-  text: string | null;
+  /** Its whole text; absent or `null` when the repository holds no file there yet. */
+  text?: string | null;
 };
 
 /**
@@ -127,6 +127,8 @@ type StartRunRefusal = Exclude<
   | 'invalidDefinitionChange'
   | 'definitionChangeNotOpened'
   | 'definitionChangeClosed'
+  // Not in the generated codes until the client is regenerated.
+  | 'notADefinitionFile'
 >;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
@@ -226,7 +228,8 @@ export type DefinitionChangeErrorCode =
   | 'INVALID_DEFINITION_CHANGE'
   | 'DEFINITION_CHANGE_NOT_OPENED'
   | 'DEFINITION_CHANGE_CLOSED'
-  | 'NO_PUSH_ACCESS';
+  | 'NO_PUSH_ACCESS'
+  | 'NOT_A_DEFINITION_FILE';
 
 const DEFINITION_CHANGE_ERROR_CODES = {
   noDefinition: 'NO_DEFINITION',
@@ -236,7 +239,12 @@ const DEFINITION_CHANGE_ERROR_CODES = {
   definitionChangeNotOpened: 'DEFINITION_CHANGE_NOT_OPENED',
   definitionChangeClosed: 'DEFINITION_CHANGE_CLOSED',
   noPushAccess: 'NO_PUSH_ACCESS',
-} as const satisfies Partial<Record<RunErrorCode, DefinitionChangeErrorCode>>;
+  notADefinitionFile: 'NOT_A_DEFINITION_FILE',
+} as const satisfies Partial<
+  // `notADefinitionFile` is in the generated codes once the client is
+  // regenerated with `GET /settings/definition/file`.
+  Record<RunErrorCode | 'notADefinitionFile', DefinitionChangeErrorCode>
+>;
 
 function isDefinitionChangeRefusal(
   code: unknown
@@ -564,7 +572,7 @@ export const factoryClient = {
   /**
    * One file of the team's Factory Definition as it is at its default
    * branch's head, to start a change from. A path the Definition doesn't
-   * hold fails `HTTP_ERROR` (400); a team that names none fails
+   * hold fails `NOT_A_DEFINITION_FILE`; a team that names none fails
    * `NO_DEFINITION`, and a repository the person doesn't reach
    * `DEFINITION_UNREACHABLE`, each with the service's message.
    */
