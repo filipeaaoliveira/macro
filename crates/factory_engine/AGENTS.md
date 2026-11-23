@@ -926,7 +926,11 @@ work on the branch on GitHub ends `failed`, saying why, before its checks
 the branch changes nothing against the Run's base (GitHub lists no changed
 path; a list GitHub cannot give in full passes), or, for a fix that says it
 fixed a Blocker of its review round, is still at the commit that round
-reviewed. Either is read again after 2 s before the Step fails. A branch
+reviewed. A Blocker of the `tests-reviewer` that speaks of a test's break
+(`asks_for_break`) needs no commit once the fix reported a readable break:
+the next round reviews the whole change again, on the same commit, with
+the new record; any other Blocker it says it fixed still needs one. Either
+is read again after 2 s before the Step fails. A branch
 GitHub does not have, even after 2 s, fails the attempt for a retry, as a
 round's read of it does, until the Step's time for rounds (105 minutes) is
 up: then the Step fails saying the branch is not on GitHub. Like the
@@ -1108,7 +1112,10 @@ space, no `..`, `.`, `.git` in any case, not absolute) and a quoted old text
 follow; the texts are split at their one `" -> "` (a line with more does
 not read), and the new one is never the old. The prompt's own form is not a
 break. The lines are read from every hand back of the Step's rounds (its
-work and each fix of a failed round), a later line for a test replacing an
+work and each fix of a failed round), where a session agent adds each
+readable break line of the agent's reply (`RoutineSessions::reply`, the
+last text of each turn it waited on) whose test the hand back names no
+break for (`session_agent/said_breaks.rs`), a later line for a test replacing an
 earlier one, at most 50 readable tests (`MAX_REPORTED`; an unreadable
 line only while there is room). Once the factory's own run
 of a round's checks passes, before the round ends, each break not yet
@@ -1149,8 +1156,9 @@ breaks still to run; one that would not end in the attempt, finds the lock
 held, or was interrupted for the first time fails the attempt for a retry,
 with the round still open. The `tests-reviewer` of a review panel reads
 the Run's records, the latest of each test, in a block marked as data
-(`review_rounds::breaks_brief`, 8 KiB), which says which statuses block (a
-new test with no record, or `not_reproduced`, `hung`, `not_run`,
+(`review_rounds::breaks_brief`, 8 KiB), which opens with the rule that a
+new test with no record blocks and how many tests the records name, then
+says which statuses block (a new test with no record, or `not_reproduced`, `hung`, `not_run`,
 `not_applied`, `unreadable`), which do not by themselves (`dropped`,
 `unchecked`, `interrupted`), and that a break that only stops compiling or
 a command that does not run the test alone is no proof. A retry keeps the
