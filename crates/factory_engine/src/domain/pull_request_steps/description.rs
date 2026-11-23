@@ -137,7 +137,11 @@ fn plan(earlier: &[Step]) -> Option<String> {
     let mut chars = 0;
     let mut cut = false;
     for line in plan.lines() {
-        chars += line.chars().count() + 1;
+        // The newline before each line but the first counts too.
+        if !kept.is_empty() {
+            chars += 1;
+        }
+        chars += line.chars().count();
         if chars > PLAN_CHARS {
             cut = true;
             if kept.is_empty() {

@@ -647,3 +647,27 @@ async fn the_request_mentions_no_one_from_the_description() {
         "Ask @\u{2060}alice &lt;b&gt;now&lt;/b&gt;\n\nF\u{2060}ixes https://github.com/o/r/issues/3\n\n"
     ));
 }
+
+/// A plan exactly as long as the report quotes shows whole, with no mark
+/// that it was cut.
+#[tokio::test]
+async fn a_plan_that_just_fits_is_not_marked_cut() {
+    let github = FakeGithub::default();
+    // Twenty-nine lines of 99 characters, a newline after each, then 100
+    // more: 3,000 characters.
+    let mut plan = vec!["x".repeat(99); 29].join("\n");
+    plan.push_str(&format!("\n{}", "y".repeat(100)));
+    assert_eq!(plan.chars().count(), 3_000);
+    let earlier = vec![step(1, "plan", "approve", plan, Vec::new())];
+    let mut publishing: StepInput<'_> = input(RunId::generate());
+    publishing.earlier = &earlier;
+
+    steps(&github, &FakeRepo::default())
+        .publish(publishing)
+        .await
+        .expect("publish");
+
+    let body = github.state().description.clone().expect("opened");
+    assert!(body.contains(&format!("> {}\n", "y".repeat(100))));
+    assert!(!body.contains("(The rest of the plan is on the run's plan step.)"));
+}
