@@ -21,7 +21,7 @@ use uuid::Uuid;
 use super::{EvaluationRouterState, evaluation_router};
 use crate::domain::evaluation::EvaluationDefinitionError;
 use crate::domain::evaluation::insights::calibration::{
-    RunScores, ScorerLabelError, ScorerLabelService,
+    RunScore, RunScores, ScorerCalibration, ScorerLabelError, ScorerLabelService,
 };
 use crate::domain::evaluation::insights::{
     DismissalUndoneResponse, EvaluationInsights, EvaluationService, SuiteError, SuiteStarted,
@@ -167,16 +167,37 @@ impl EvaluationService for Arc<FakeEvaluation> {
     }
 }
 
-/// Only [`JUDGED`] judged the Run; any Run is the caller's.
+/// Only [`JUDGED`] judged the Run; any Run but [`NOT_A_RUN_OF_YOURS`] is
+/// the caller's.
 const JUDGED: &str = "correctness";
+const NOT_A_RUN_OF_YOURS: Uuid = Uuid::from_u128(14);
 
 impl ScorerLabelService for Arc<FakeEvaluation> {
     async fn run_scores(
         &self,
-        _actor: &MacroUserIdStr<'static>,
-        _run_id: RunId,
+        actor: &MacroUserIdStr<'static>,
+        run_id: RunId,
     ) -> Result<RunScores, ScorerLabelError> {
-        Ok(RunScores { scores: Vec::new() })
+        self.read_by
+            .lock()
+            .expect("read")
+            .push(actor.as_ref().to_string());
+        if run_id.as_uuid() == NOT_A_RUN_OF_YOURS {
+            return Err(ScorerLabelError::NotFound);
+        }
+        Ok(RunScores {
+            scores: vec![RunScore {
+                scorer: JUDGED.to_string(),
+                score: 0.9,
+                passed: true,
+                reason: "It does what was asked.".to_string(),
+                model: "anthropic/claude-haiku-5-5".to_string(),
+                judged_at: chrono::Utc::now(),
+                label: None,
+                by_current_judge: true,
+                calibration: ScorerCalibration::of(None),
+            }],
+        })
     }
 
     async fn label_score(
@@ -478,4 +499,55 @@ async fn only_a_person_in_their_session_labels_a_judgment() {
             (ALICE.to_string(), run_id, "tidiness".to_string(), false),
         ]
     );
+}
+
+fn scores(run_id: Uuid) -> axum::http::request::Builder {
+    Request::builder().uri(format!("/runs/{run_id}/scores"))
+}
+
+/// A Run's judgments are read for its owner however they call, as the
+/// insights are: no caller is 401, a Run not theirs 404, and their own
+/// session or an internal caller for them reads them.
+#[tokio::test]
+async fn the_owner_reads_a_runs_judgments_however_they_call() {
+    let (app, service) = app();
+    let run_id = Uuid::from_u128(7);
+
+    let nobody = scores(run_id).body(Body::empty()).expect("request");
+    assert_eq!(status(&app, nobody).await, StatusCode::UNAUTHORIZED);
+    assert!(service.read_by.lock().expect("read").is_empty());
+
+    let not_yours = scores(NOT_A_RUN_OF_YOURS)
+        .header("authorization", "Bearer alice")
+        .body(Body::empty())
+        .expect("request");
+    assert_eq!(status(&app, not_yours).await, StatusCode::NOT_FOUND);
+
+    let internal = scores(run_id)
+        .header(INTERNAL_API_KEY_HEADER, KEY)
+        .header(INTERNAL_MACRO_USER_ID_HEADER, EVE)
+        .body(Body::empty())
+        .expect("request");
+    assert_eq!(status(&app, internal).await, StatusCode::OK);
+
+    let in_person = scores(run_id)
+        .header("authorization", "Bearer alice")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.clone().oneshot(in_person).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body"),
+    )
+    .expect("json");
+    let score = &body["scores"][0];
+    assert_eq!(score["scorer"], JUDGED);
+    assert_eq!(score["passed"], true);
+    assert_eq!(score["byCurrentJudge"], true);
+    assert_eq!(score["label"], serde_json::Value::Null);
+    assert_eq!(score["calibration"]["needed"], 20);
+    assert_eq!(score["calibration"]["calibrated"], false);
+    assert_eq!(*service.read_by.lock().expect("read"), [ALICE, EVE, ALICE]);
 }
