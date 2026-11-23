@@ -2,20 +2,27 @@
 //! with whether it should have passed, and a Scorer counts as calibrated
 //! once its judge agrees with the person's labels often enough. Until then
 //! its numbers are shown, and nothing should act on them.
+//!
+//! A judge is the model the Scorers judge with and the Scorer's
+//! instructions (with what it reads), as a judgment keeps them. Only the
+//! labels of judgments its current judge made calibrate a Scorer: a new
+//! model or new instructions start it again from none.
 
 #[cfg(test)]
 mod test;
 
 use chrono::{DateTime, Utc};
 use factory_records::domain::evaluation::{
-    CalibrationTally, EvaluationRepository, PASS_SCORE, ScorerLabel,
+    CalibrationTally, EvaluationRepository, PASS_SCORE, ScorerJudge, ScorerLabel,
 };
-use factory_records::domain::models::RunId;
+use factory_records::domain::models::{InvalidName, RunId, checked_name};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 
 use super::{EvaluationServiceImpl, internal};
+use crate::domain::evaluation::EvaluationDefinition;
+use crate::domain::ports::FactoryService;
 
 /// The judgments a person labels before a Scorer can be calibrated.
 pub const CALIBRATION_LABELS: u32 = 20;
@@ -61,6 +68,20 @@ impl ScorerCalibration {
     }
 }
 
+/// The current judge of each of `definition`'s Scorers, judging with
+/// `model`. A Scorer no longer defined has none, so it is never calibrated.
+pub fn current_judges(definition: &EvaluationDefinition, model: &str) -> Vec<ScorerJudge> {
+    definition
+        .scorers()
+        .iter()
+        .map(|scorer| ScorerJudge {
+            scorer: scorer.name.clone(),
+            model: model.to_string(),
+            instructions_digest: scorer.instructions_digest(),
+        })
+        .collect()
+}
+
 /// A live Scorer's judgment of one Run, as the Run view shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -79,7 +100,10 @@ pub struct RunScore {
     pub judged_at: DateTime<Utc>,
     /// The Run's owner's label of it, if they gave one.
     pub label: Option<ScorerLabel>,
-    /// How far the Scorer agrees with the owner's labels.
+    /// Whether the Scorer's current judge made it: only then does its
+    /// label count toward the Scorer's calibration.
+    pub by_current_judge: bool,
+    /// How far the Scorer's current judge agrees with the owner's labels.
     pub calibration: ScorerCalibration,
 }
 
@@ -94,6 +118,9 @@ pub struct RunScores {
 /// Why reading or labelling a Run's judgments was refused.
 #[derive(Debug, thiserror::Error)]
 pub enum ScorerLabelError {
+    /// The Scorer's name breaks the name rules.
+    #[error(transparent)]
+    InvalidScorer(#[from] InvalidName),
     /// The caller has no Run of that id.
     #[error("run not found")]
     NotFound,
@@ -155,7 +182,7 @@ where
 impl<R, F> ScorerLabelService for EvaluationServiceImpl<R, F>
 where
     R: EvaluationRepository + RunRepository,
-    F: Send + Sync + 'static,
+    F: FactoryService,
 {
     #[tracing::instrument(skip(self, actor))]
     async fn run_scores(
@@ -169,17 +196,33 @@ where
             .run_judgments(run_id)
             .await
             .map_err(label_internal)?;
+        // The Scorers judge as the team's Definition says now, as in the
+        // insights.
+        let team = self
+            .team_definition(actor)
+            .await
+            .map_err(ScorerLabelError::Internal)?;
+        let judges = current_judges(
+            team.as_ref().unwrap_or(&self.definition),
+            &self.scorer_model,
+        );
         let tallies = self
             .repo
-            .calibrations(actor)
+            .calibrations(actor, &judges)
             .await
             .map_err(label_internal)?;
         let scores = judgments
             .into_iter()
             .map(|judgment| {
                 let tally = tallies.iter().find(|tally| tally.scorer == judgment.scorer);
+                let by_current_judge = judges.iter().any(|judge| {
+                    judge.scorer == judgment.scorer
+                        && judge.model == judgment.model
+                        && judgment.instructions_digest.as_ref() == Some(&judge.instructions_digest)
+                });
                 RunScore {
                     passed: judgment.score >= PASS_SCORE,
+                    by_current_judge,
                     calibration: ScorerCalibration::of(tally),
                     scorer: judgment.scorer,
                     score: judgment.score,
@@ -201,6 +244,7 @@ where
         scorer: &str,
         passed: bool,
     ) -> Result<ScorerLabel, ScorerLabelError> {
+        let scorer = checked_name("scorer", scorer.to_string())?;
         // A label says what a person judged: an agent's account signs in as
         // a person does, yet never is one.
         if self
@@ -213,9 +257,9 @@ where
         }
         self.own_run(actor, run_id).await?;
         self.repo
-            .label_judgment(run_id, scorer, passed)
+            .label_judgment(run_id, &scorer, passed)
             .await
             .map_err(label_internal)?
-            .ok_or_else(|| ScorerLabelError::NotJudged(scorer.to_string()))
+            .ok_or(ScorerLabelError::NotJudged(scorer))
     }
 }

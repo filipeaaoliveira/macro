@@ -15,8 +15,8 @@ use crate::domain::evaluation::{
     AgentChoices, ArmScore, ArmTally, BENCHMARK_FLOW, CalibrationTally, EvaluationRecords,
     EvaluationRepository, Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE,
     RuleTally, RunAgentRule, RunAgents, RunArm, RunJudgment, SUITE_STARTING_SECS, SUITES_READ,
-    ScorerLabel, ScorerTally, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert, SuiteRecord,
-    TrialKey, TrialRecord, TrialResult, TrialTokens,
+    ScorerJudge, ScorerLabel, ScorerTally, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert,
+    SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
 };
 use crate::domain::insights::InsightsScope;
 use crate::domain::models::{AgentName, EntryId, Outcome, Role, RunId, RunOutcome};
@@ -383,8 +383,8 @@ impl EvaluationRepository for PgRunRepository {
     async fn record_run_score(&self, run_id: RunId, judgment: &Judgment) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
-            INSERT INTO factory_run_score (run_id, scorer, score, reason, model)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO factory_run_score (run_id, scorer, score, reason, model, instructions_sha256)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (run_id, scorer) DO NOTHING
             "#,
             run_id.as_uuid(),
@@ -392,6 +392,7 @@ impl EvaluationRepository for PgRunRepository {
             judgment.score,
             kept_reason(&judgment.reason),
             judgment.model,
+            judgment.instructions_digest,
         )
         .execute(&self.pool)
         .await?;
@@ -728,7 +729,6 @@ impl EvaluationRepository for PgRunRepository {
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
 
         let suites = self.read_suites(&mut transaction, scope).await?;
-        let calibrations = calibrations_of(&mut transaction, scope.user_id.as_ref()).await?;
 
         transaction.commit().await?;
         Ok(EvaluationRecords {
@@ -737,7 +737,6 @@ impl EvaluationRepository for PgRunRepository {
             arm_scores,
             rules,
             suites,
-            calibrations,
         })
     }
 
@@ -745,7 +744,7 @@ impl EvaluationRepository for PgRunRepository {
     async fn run_judgments(&self, run_id: RunId) -> Result<Vec<RunJudgment>, Self::Err> {
         let rows = sqlx::query!(
             r#"
-            SELECT s.scorer, s.score, s.reason, s.model, s.judged_at,
+            SELECT s.scorer, s.score, s.reason, s.model, s.instructions_sha256, s.judged_at,
                    l.passed AS "passed?", l.labelled_at AS "labelled_at?"
             FROM factory_run_score s
             LEFT JOIN factory_scorer_label l ON l.run_id = s.run_id AND l.scorer = s.scorer
@@ -763,6 +762,7 @@ impl EvaluationRepository for PgRunRepository {
                 score: row.score,
                 reason: row.reason,
                 model: row.model,
+                instructions_digest: row.instructions_sha256,
                 judged_at: row.judged_at,
                 label: row
                     .passed
@@ -806,48 +806,52 @@ impl EvaluationRepository for PgRunRepository {
         }))
     }
 
-    #[tracing::instrument(err, skip_all)]
+    #[tracing::instrument(err, skip_all, fields(judges = judges.len()))]
     async fn calibrations(
         &self,
         user_id: &MacroUserIdStr<'static>,
+        judges: &[ScorerJudge],
     ) -> Result<Vec<CalibrationTally>, Self::Err> {
-        let mut connection = self.pool.acquire().await?;
-        calibrations_of(&mut connection, user_id.as_ref()).await
+        let scorers: Vec<&str> = judges.iter().map(|judge| judge.scorer.as_str()).collect();
+        let models: Vec<&str> = judges.iter().map(|judge| judge.model.as_str()).collect();
+        let digests: Vec<&str> = judges
+            .iter()
+            .map(|judge| judge.instructions_digest.as_str())
+            .collect();
+        // Only a Run's owner labels it, so a person's labels are those of
+        // their Runs. A label counts only on a judgment its Scorer's current
+        // judge made: its model and its instructions' fingerprint.
+        let rows = sqlx::query!(
+            r#"
+            SELECT l.scorer,
+                   count(*) AS "labelled!",
+                   count(*) FILTER (WHERE (s.score >= $2) = l.passed) AS "agreed!"
+            FROM factory_scorer_label l
+            JOIN factory_run r ON r.id = l.run_id
+            JOIN factory_run_score s ON s.run_id = l.run_id AND s.scorer = l.scorer
+            JOIN unnest($3::text[], $4::text[], $5::text[]) AS j (scorer, model, digest)
+                ON j.scorer = s.scorer AND j.model = s.model AND j.digest = s.instructions_sha256
+            WHERE r.user_id = $1
+            GROUP BY l.scorer
+            ORDER BY l.scorer
+            "#,
+            user_id.as_ref(),
+            PASS_SCORE,
+            &scorers as &[&str],
+            &models as &[&str],
+            &digests as &[&str],
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| CalibrationTally {
+                scorer: row.scorer,
+                labelled: count(row.labelled),
+                agreed: count(row.agreed),
+            })
+            .collect())
     }
-}
-
-/// How each Scorer's judgments agree with `user_id`'s labels of them, over
-/// all their Runs. Only a Run's owner labels it, so their labels are those
-/// of their Runs, read through `factory_run_user_created_idx`.
-async fn calibrations_of(
-    connection: &mut sqlx::PgConnection,
-    user_id: &str,
-) -> Result<Vec<CalibrationTally>, PgRunRepositoryErr> {
-    let rows = sqlx::query!(
-        r#"
-        SELECT l.scorer,
-               count(*) AS "labelled!",
-               count(*) FILTER (WHERE (s.score >= $2) = l.passed) AS "agreed!"
-        FROM factory_run r
-        JOIN factory_scorer_label l ON l.run_id = r.id
-        JOIN factory_run_score s ON s.run_id = l.run_id AND s.scorer = l.scorer
-        WHERE r.user_id = $1
-        GROUP BY l.scorer
-        ORDER BY l.scorer
-        "#,
-        user_id,
-        PASS_SCORE,
-    )
-    .fetch_all(connection)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| CalibrationTally {
-            scorer: row.scorer,
-            labelled: count(row.labelled),
-            agreed: count(row.agreed),
-        })
-        .collect())
 }
 
 impl PgRunRepository {

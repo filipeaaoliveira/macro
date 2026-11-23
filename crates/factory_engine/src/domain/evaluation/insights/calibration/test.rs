@@ -42,8 +42,9 @@ fn a_scorer_is_calibrated_once_enough_labels_agree_often_enough() {
     assert!(!unlabelled.calibrated);
 }
 
-/// Insights give each Scorer, defined or retired, its calibration from the
-/// person's labels, and an unlabelled one reads uncalibrated.
+/// Insights give each defined Scorer its calibration from the person's
+/// labels; an unlabelled one, and a retired one, which has no current
+/// judge, read uncalibrated.
 #[test]
 fn insights_give_each_scorer_its_calibration() {
     let definition: EvaluationDefinition = serde_json::from_value(json!({
@@ -62,11 +63,11 @@ fn insights_give_each_scorer_its_calibration() {
             passed: 1,
             mean_score: 0.5,
         }],
-        calibrations: vec![tally("correctness", 20, 17), tally("retired", 3, 1)],
         ..Default::default()
     };
+    let calibrations = vec![tally("correctness", 20, 17)];
 
-    let insights = evaluation_insights(&definition, &query, records);
+    let insights = evaluation_insights(&definition, &query, records, calibrations);
 
     let calibrations: Vec<_> = insights
         .scorers
@@ -85,7 +86,7 @@ fn insights_give_each_scorer_its_calibration() {
         [
             ("correctness", 20, 17, true),
             ("tidiness", 0, 0, false),
-            ("retired", 3, 1, false),
+            ("retired", 0, 0, false),
         ]
     );
 }

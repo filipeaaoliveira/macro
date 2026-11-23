@@ -6,11 +6,22 @@
 -- the label's person is the Run's. It goes with the judgment it labels,
 -- and so with its Run.
 --
--- The new table references factory_run_score, so creating it takes a SHARE
--- ROW EXCLUSIVE lock on factory_run_score until this transaction ends. No
--- existing row is rewritten. Give up rather than queue behind a long
--- transaction.
+-- A label calibrates only the judge that made the judgment: the model and
+-- the Scorer's instructions as it judged. A judgment keeps the SHA-256 of
+-- its Scorer's instructions and reads (instructions_sha256, lowercase hex);
+-- judgments made before have none, and calibrate no judge.
+--
+-- The new column and the new table's reference take an ACCESS EXCLUSIVE
+-- lock on factory_run_score until this transaction ends. No existing row is
+-- rewritten: the column has no default, and its check is validated apart
+-- (factory_run_score_instructions_validate). Give up rather than queue
+-- behind a long transaction.
 SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE factory_run_score
+    ADD COLUMN instructions_sha256 text,
+    ADD CONSTRAINT factory_run_score_instructions_sha256
+        CHECK (instructions_sha256 ~ '^[0-9a-f]{64}$') NOT VALID;
 
 CREATE TABLE factory_scorer_label (
     run_id uuid NOT NULL,

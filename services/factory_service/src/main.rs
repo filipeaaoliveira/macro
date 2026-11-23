@@ -178,15 +178,14 @@ async fn run() -> Result<(), rootcause::Report> {
         config.factory_evaluation,
         agents.as_ref(),
     )?);
+    let scorer_model = checked_scorer_model(config.factory_scorer_model.clone())?;
     let parts = Parts {
         port: config.port,
         gates,
         // Scorers judge with a small model on Macro's model router, as the
         // Gate model does, billed to no one.
-        judge: ModelRunJudge::new(
-            checked_scorer_model(config.factory_scorer_model.clone())?,
-            recorder,
-        ),
+        judge: ModelRunJudge::new(scorer_model.clone(), recorder),
+        scorer_model,
         evaluation,
         agents: agents.clone(),
         review_rounds: config.factory_review_rounds,
@@ -275,6 +274,8 @@ struct Parts {
     port: u16,
     gates: GateRepliesImpl<PgRunRepository, FastGateModel>,
     judge: ModelRunJudge,
+    /// The model the Scorers judge with: only its judgments calibrate them.
+    scorer_model: String,
     evaluation: Arc<EvaluationDefinition>,
     agents: Option<AgentDefinition>,
     review_rounds: Option<std::num::NonZeroU8>,
@@ -403,6 +404,7 @@ async fn serve<A: StepAgent + Clone>(
         service.clone(),
         parts.evaluation,
         parts.agents,
+        parts.scorer_model,
     ));
     // Automations start their Runs through the Run API, as their creators,
     // which holds each creator's Queue to its limit.

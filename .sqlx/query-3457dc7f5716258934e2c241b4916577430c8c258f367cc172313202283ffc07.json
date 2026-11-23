@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT l.scorer,\n                   count(*) AS \"labelled!\",\n                   count(*) FILTER (WHERE (s.score >= $2) = l.passed) AS \"agreed!\"\n            FROM factory_scorer_label l\n            JOIN factory_run r ON r.id = l.run_id\n            JOIN factory_run_score s ON s.run_id = l.run_id AND s.scorer = l.scorer\n            JOIN unnest($3::text[], $4::text[], $5::text[]) AS j (scorer, model, digest)\n                ON j.scorer = s.scorer AND j.model = s.model AND j.digest = s.instructions_sha256\n            WHERE r.user_id = $1\n            GROUP BY l.scorer\n            ORDER BY l.scorer\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scorer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "labelled!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "agreed!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Float8",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "3457dc7f5716258934e2c241b4916577430c8c258f367cc172313202283ffc07"
+}

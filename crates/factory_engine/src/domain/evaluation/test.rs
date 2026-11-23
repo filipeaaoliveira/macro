@@ -958,7 +958,7 @@ fn a_suite_counts_its_trials_lost_to_infrastructure_apart() {
         ..Default::default()
     };
 
-    let insights = evaluation_insights(&definition(), &query, records);
+    let insights = evaluation_insights(&definition(), &query, records, Vec::new());
 
     let suite = &insights.suites[0];
     assert_eq!(suite.scored, 2);
@@ -1071,10 +1071,9 @@ fn evaluation_insights_list_defined_and_retired_scorers_and_arms() {
             fell_back: 1,
         }],
         suites: Vec::new(),
-        calibrations: Vec::new(),
     };
 
-    let insights = evaluation_insights(&definition(), &query, records);
+    let insights = evaluation_insights(&definition(), &query, records, Vec::new());
 
     let scorers: Vec<_> = insights
         .scorers

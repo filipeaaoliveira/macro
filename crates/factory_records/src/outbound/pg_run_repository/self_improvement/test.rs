@@ -280,6 +280,7 @@ async fn a_runs_failure_facts_read_its_judgments(pool: PgPool) {
             score: 0.25,
             reason: "No test covers it".to_string(),
             model: "judge".to_string(),
+            instructions_digest: "0".repeat(64),
         },
     )
     .await

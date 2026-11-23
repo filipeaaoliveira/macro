@@ -8,7 +8,8 @@ use chrono::{DateTime, Utc};
 use factory_records::domain::evaluation::{
     AgentChoices, CalibrationTally, EvaluationRecords, EvaluationRepository, Judgment,
     MAX_OPEN_TRIALS, NewSuite, PASS_SCORE, RunAgentRule, RunAgents, RunArm, RunJudgment,
-    ScorerLabel, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert, TrialKey, TrialResult,
+    ScorerJudge, ScorerLabel, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert, TrialKey,
+    TrialResult,
 };
 use factory_records::domain::insights::InsightsScope;
 use factory_records::domain::models::RunId;
@@ -375,6 +376,7 @@ impl EvaluationRepository for FakeRepo {
                 score: judgment.score,
                 reason: judgment.reason.clone(),
                 model: judgment.model.clone(),
+                instructions_digest: Some(judgment.instructions_digest.clone()),
                 judged_at: DateTime::<Utc>::UNIX_EPOCH,
                 label: kept.labels.get(&(run_id, judgment.scorer.clone())).copied(),
             })
@@ -408,6 +410,7 @@ impl EvaluationRepository for FakeRepo {
     async fn calibrations(
         &self,
         user_id: &MacroUserIdStr<'static>,
+        judges: &[ScorerJudge],
     ) -> Result<Vec<CalibrationTally>, FakeError> {
         let runs = self.runs.lock().expect("runs").clone();
         let kept = self.evaluation.lock().expect("evaluation");
@@ -421,6 +424,14 @@ impl EvaluationRepository for FakeRepo {
             let (true, Some(judgment)) = (owned, judgment) else {
                 continue;
             };
+            let by_current_judge = judges.iter().any(|judge| {
+                judge.scorer == judgment.scorer
+                    && judge.model == judgment.model
+                    && judge.instructions_digest == judgment.instructions_digest
+            });
+            if !by_current_judge {
+                continue;
+            }
             let tally = tallies
                 .entry(scorer.clone())
                 .or_insert_with(|| CalibrationTally {

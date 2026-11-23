@@ -11,7 +11,9 @@ use uuid::Uuid;
 
 use super::{FakeExecutor, FakeWorkflows, code_service, julia, julia_s_run, teo};
 use crate::domain::agents::AgentDefinition;
-use crate::domain::evaluation::insights::calibration::{ScorerLabelError, ScorerLabelService};
+use crate::domain::evaluation::insights::calibration::{
+    RunScores, ScorerLabelError, ScorerLabelService,
+};
 use crate::domain::evaluation::insights::{EvaluationService, EvaluationServiceImpl, SuiteError};
 use crate::domain::evaluation::{EvaluationDefinition, EvaluationDefinitionError};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
@@ -197,6 +199,7 @@ fn suites(
         Arc::new(code_service(repo, &FakeWorkflows::default(), github)),
         Arc::new(definition),
         Some(agents),
+        "anthropic/claude-haiku-5-5".to_string(),
     )
 }
 
@@ -328,12 +331,53 @@ async fn a_refused_trial_stops_the_suite_and_a_suite_with_none_started_is_not_ke
     );
 }
 
+const HAIKU: &str = "anthropic/claude-haiku-5-5";
+
+/// A definition with a correctness and a tidiness Scorer.
+fn scorers() -> Arc<EvaluationDefinition> {
+    Arc::new(
+        serde_json::from_value(json!({ "scorers": [
+            { "name": "correctness", "instructions": "Did it work?", "samplePercent": 100 },
+            { "name": "tidiness", "instructions": "Is it tidy?", "samplePercent": 100 }
+        ]}))
+        .expect("a definition"),
+    )
+}
+
+/// The evaluation service over `repo`, its Scorers judging with `model`.
+fn labels_service(
+    repo: &FakeRepo,
+    model: &str,
+) -> EvaluationServiceImpl<
+    FakeRepo,
+    FactoryServiceImpl<FakeRepo, FakeWorkflows, FakeExecutor, FakeRepo, FakeRepo, FakeGithub>,
+> {
+    EvaluationServiceImpl::new(
+        repo.clone(),
+        Arc::new(code_service(
+            repo,
+            &FakeWorkflows::default(),
+            &FakeGithub::default(),
+        )),
+        scorers(),
+        None,
+        model.to_string(),
+    )
+}
+
+/// `scorer`'s judgment on [`HAIKU`], with its instructions in [`scorers`].
 fn judgment(scorer: &str, score: f64) -> Judgment {
+    let defined = scorers();
+    let instructions_digest = defined
+        .scorer(scorer)
+        .expect("a defined scorer")
+        .instructions_digest();
     Judgment {
         scorer: scorer.to_string(),
         score,
         reason: "It does what was asked.".to_string(),
-        model: "anthropic/claude-haiku-5-5".to_string(),
+        model: HAIKU.to_string(),
+        instructions_digest,
     }
 }
 
@@ -345,16 +389,7 @@ fn judgment(scorer: &str, score: f64) -> Judgment {
 #[tokio::test]
 async fn a_runs_owner_labels_its_judgments_and_reads_the_scorers_agreement() {
     let repo = FakeRepo::default();
-    let service = EvaluationServiceImpl::new(
-        repo.clone(),
-        Arc::new(code_service(
-            &repo,
-            &FakeWorkflows::default(),
-            &FakeGithub::default(),
-        )),
-        Arc::new(EvaluationDefinition::default()),
-        None,
-    );
+    let service = labels_service(&repo, HAIKU);
     let run_id = julia_s_run(&repo).await;
     repo.record_run_score(run_id, &judgment("correctness", 0.9))
         .await
@@ -427,4 +462,56 @@ async fn a_runs_owner_labels_its_judgments_and_reads_the_scorers_agreement() {
     assert!(matches!(by_agent, ScorerLabelError::NotAPerson));
     let kept = service.run_scores(&julia(), run_id).await.expect("read");
     assert_eq!(kept.scores[0].label.map(|label| label.passed), Some(true));
+}
+
+/// A Scorer judging with a new model starts its calibration again: the
+/// labels of its old model's judgments no longer count, and the Run view
+/// says those judgments are not its current judge's.
+#[tokio::test]
+async fn a_new_scorer_model_starts_calibration_again() {
+    let repo = FakeRepo::default();
+    let run_id = julia_s_run(&repo).await;
+    repo.record_run_score(run_id, &judgment("correctness", 0.9))
+        .await
+        .expect("scored");
+    labels_service(&repo, HAIKU)
+        .label_score(&julia(), run_id, "correctness", true)
+        .await
+        .expect("labelled");
+
+    let before = labels_service(&repo, HAIKU)
+        .run_scores(&julia(), run_id)
+        .await
+        .expect("read");
+    let after = labels_service(&repo, "anthropic/claude-sonnet-5-5")
+        .run_scores(&julia(), run_id)
+        .await
+        .expect("read");
+
+    let read = |scores: &RunScores| {
+        let score = &scores.scores[0];
+        (
+            score.by_current_judge,
+            score.calibration.labelled,
+            score.calibration.agreed,
+        )
+    };
+    assert_eq!(read(&before), (true, 1, 1));
+    assert_eq!(read(&after), (false, 0, 0));
+    assert_eq!(after.scores[0].label.map(|label| label.passed), Some(true));
+}
+
+/// A Scorer name outside the name rules is refused before anything is
+/// read.
+#[tokio::test]
+async fn a_label_of_a_badly_named_scorer_is_refused() {
+    let repo = FakeRepo::default();
+    let run_id = julia_s_run(&repo).await;
+
+    let refused = labels_service(&repo, HAIKU)
+        .label_score(&julia(), run_id, "Not A Scorer", true)
+        .await
+        .expect_err("refused");
+
+    assert!(matches!(refused, ScorerLabelError::InvalidScorer(_)));
 }

@@ -79,6 +79,10 @@ pub struct Judgment {
     pub reason: String,
     /// The model that judged.
     pub model: String,
+    /// The fingerprint of the Scorer's instructions and what its judge
+    /// reads, as it judged: with the model, the judge a label calibrates.
+    /// Kept only with a live judgment, never a trial's.
+    pub instructions_digest: String,
 }
 
 /// One trial of a Benchmark suite: one frozen task, by name.
@@ -337,9 +341,6 @@ pub struct EvaluationRecords {
     /// The person's suites started in the period, newest first, at most
     /// [`SUITES_READ`].
     pub suites: Vec<SuiteRecord>,
-    /// Each Scorer the person labelled a judgment of, over all their Runs,
-    /// not only the period's.
-    pub calibrations: Vec<CalibrationTally>,
 }
 
 /// A person's label of a live Scorer's judgment of one of their Runs:
@@ -364,13 +365,29 @@ pub struct RunJudgment {
     pub reason: String,
     /// The model that judged.
     pub model: String,
+    /// The fingerprint of the Scorer as it judged; none for a judgment
+    /// made before fingerprints were kept.
+    pub instructions_digest: Option<String>,
     /// When it judged.
     pub judged_at: DateTime<Utc>,
     /// The Run's owner's label of it, if they gave one.
     pub label: Option<ScorerLabel>,
 }
 
-/// How one Scorer's judgments agree with one person's labels of them.
+/// A Scorer's current judge: its model and the fingerprint of its
+/// instructions. Only the labels of its judgments calibrate it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScorerJudge {
+    /// The Scorer.
+    pub scorer: String,
+    /// The model it judges with.
+    pub model: String,
+    /// The fingerprint of its instructions and what its judge reads.
+    pub instructions_digest: String,
+}
+
+/// How one Scorer's judgments by its current judge agree with one
+/// person's labels of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalibrationTally {
     /// The Scorer.
@@ -530,10 +547,12 @@ pub trait EvaluationRepository: Send + Sync + 'static {
         passed: bool,
     ) -> impl Future<Output = Result<Option<ScorerLabel>, Self::Err>> + Send;
 
-    /// How each Scorer's judgments agree with `user_id`'s labels of them,
-    /// over all their Runs.
+    /// How the judgments each of `judges` made agree with `user_id`'s
+    /// labels of them, over all their Runs. A judgment of a Scorer's earlier
+    /// model or instructions is left out, as is a Scorer not among them.
     fn calibrations(
         &self,
         user_id: &MacroUserIdStr<'static>,
+        judges: &[ScorerJudge],
     ) -> impl Future<Output = Result<Vec<CalibrationTally>, Self::Err>> + Send;
 }

@@ -67,6 +67,22 @@ impl ScorerDefinition {
         self.reads.contains(&ScorerRead::Diff)
     }
 
+    /// The fingerprint of its judge's instructions: the SHA-256, in
+    /// lowercase hex, of its instructions and what it reads. A judgment
+    /// keeps it, so a label calibrates only the judge that made it.
+    pub fn instructions_digest(&self) -> String {
+        let mut hash = Sha256::new();
+        hash.update(self.instructions.as_bytes());
+        for read in &self.reads {
+            let name = match read {
+                ScorerRead::Diff => "diff",
+            };
+            hash.update([0]);
+            hash.update(name.as_bytes());
+        }
+        hex::encode(hash.finalize())
+    }
+
     /// Whether it judges `run_id`, a finished Run of `flow`: a Run of one of
     /// its Flows, in its sample.
     pub fn samples(&self, flow: Option<&str>, run_id: RunId) -> bool {

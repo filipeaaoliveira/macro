@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::evaluation::{
     AgentChoices, CalibrationTally, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite,
-    RunAgentRule, RunAgents, RunArm, SuiteInsert, TrialKey, TrialResult, TrialTokens,
+    RunAgentRule, RunAgents, RunArm, ScorerJudge, SuiteInsert, TrialKey, TrialResult, TrialTokens,
 };
 use crate::domain::insights::{InsightsScope, RunInsightsRepository};
 use crate::domain::models::{AgentName, Role, RunId};
@@ -17,6 +17,8 @@ const IMPORT: &str = "00000000-0000-7000-8000-000000000402";
 const TYPO_TRIAL: &str = "00000000-0000-7000-8000-000000000403";
 const SUITE: &str = "00000000-0000-7000-8000-000000000601";
 const BASE: &str = "1111111111111111111111111111111111111111";
+const HAIKU: &str = "anthropic/claude-haiku-5-5";
+const INSTRUCTIONS: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn run(id: &str) -> RunId {
     RunId::from_uuid(Uuid::parse_str(id).expect("valid run id"))
@@ -64,7 +66,17 @@ fn judgment(scorer: &str, score: f64) -> Judgment {
         scorer: scorer.to_string(),
         score,
         reason: "It does what was asked.".to_string(),
-        model: "anthropic/claude-haiku-5-5".to_string(),
+        model: HAIKU.to_string(),
+        instructions_digest: INSTRUCTIONS.to_string(),
+    }
+}
+
+/// `scorer`'s judge on `model`, with the instructions [`judgment`] keeps.
+fn judge(scorer: &str, model: &str) -> ScorerJudge {
+    ScorerJudge {
+        scorer: scorer.to_string(),
+        model: model.to_string(),
+        instructions_digest: INSTRUCTIONS.to_string(),
     }
 }
 
@@ -755,7 +767,8 @@ async fn labels_replace_the_last_and_count_the_judges_agreement(pool: PgPool) {
         .expect("labelled")
         .expect("the scorer judged the run");
     assert!(replaced.passed);
-    assert!(replaced.labelled_at >= first.labelled_at);
+    // Each label is its own transaction, so the later one is later.
+    assert!(replaced.labelled_at > first.labelled_at);
     let unjudged = repo
         .label_judgment(run(IMPORT), "tidiness", true)
         .await
@@ -812,9 +825,91 @@ async fn labels_replace_the_last_and_count_the_judges_agreement(pool: PgPool) {
             agreed: 0,
         },
     ];
-    assert_eq!(repo.calibrations(&julia()).await.expect("read"), expected);
-    let read = repo.read_evaluation(&november()).await.expect("read");
-    assert_eq!(read.calibrations, expected);
+    let judges = [judge("correctness", HAIKU), judge("tidiness", HAIKU)];
+    assert_eq!(
+        repo.calibrations(&julia(), &judges).await.expect("read"),
+        expected
+    );
+}
+
+/// Only the labels of judgments its current judge made calibrate a Scorer:
+/// a new model, or new instructions, start it again from none.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn a_new_model_or_new_instructions_start_calibration_again(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    repo.record_run_score(run(EXPORT), &judgment("correctness", 0.9))
+        .await
+        .expect("score recorded");
+    let rewritten = Judgment {
+        instructions_digest: "b".repeat(64),
+        ..judgment("correctness", 0.2)
+    };
+    repo.record_run_score(run(IMPORT), &rewritten)
+        .await
+        .expect("score recorded");
+    for run_id in [run(EXPORT), run(IMPORT)] {
+        repo.label_judgment(run_id, "correctness", true)
+            .await
+            .expect("labelled")
+            .expect("the scorer judged the run");
+    }
+
+    let haiku = repo
+        .calibrations(&julia(), &[judge("correctness", HAIKU)])
+        .await
+        .expect("read");
+    let sonnet = repo
+        .calibrations(
+            &julia(),
+            &[judge("correctness", "anthropic/claude-sonnet-5-5")],
+        )
+        .await
+        .expect("read");
+    let retired = repo.calibrations(&julia(), &[]).await.expect("read");
+
+    assert_eq!(
+        haiku,
+        vec![CalibrationTally {
+            scorer: "correctness".to_string(),
+            labelled: 1,
+            agreed: 1,
+        }]
+    );
+    assert_eq!(sonnet, Vec::new());
+    assert_eq!(retired, Vec::new());
+}
+
+/// A Run's labels go with it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn deleting_a_run_deletes_its_labels(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    repo.record_run_score(run(EXPORT), &judgment("correctness", 0.9))
+        .await
+        .expect("score recorded");
+    repo.label_judgment(run(EXPORT), "correctness", true)
+        .await
+        .expect("labelled")
+        .expect("the scorer judged the run");
+
+    sqlx::query!(
+        "DELETE FROM factory_run WHERE id = $1",
+        Uuid::parse_str(EXPORT).expect("valid run id"),
+    )
+    .execute(&pool)
+    .await
+    .expect("run deleted");
+
+    let labels = sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM factory_scorer_label"#)
+        .fetch_one(&pool)
+        .await
+        .expect("counted");
+    assert_eq!(labels, 0);
 }
 
 /// Each trial reads when its Run started and ended, for the time it took.

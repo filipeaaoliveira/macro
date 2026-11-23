@@ -308,8 +308,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   (`factory_run_score`), so only a judgment that exists is labelled
   (`label_judgment` inserts from it) and the label goes with it. It keeps
   no person: only a Run's owner labels it, so `calibrations` reads a
-  person's labels through their Runs (`factory_run_user_created_idx`), over
-  all of them, not only a period's.
+  person's labels joined to their Runs, over all of them, not only a
+  period's. It counts only judgments whose model and
+  `instructions_sha256` are a given Scorer's current judge's; a judgment
+  kept before that column has none and counts for no judge.
 - A Run's or Step's end columns are all null or all set (`factory_*_end`
   checks); the row mappings refuse anything else.
 - A Run that works on code keeps its repository and base branch together

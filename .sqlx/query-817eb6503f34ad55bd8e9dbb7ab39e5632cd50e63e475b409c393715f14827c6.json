@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT s.scorer, s.score, s.reason, s.model, s.judged_at,\n                   l.passed AS \"passed?\", l.labelled_at AS \"labelled_at?\"\n            FROM factory_run_score s\n            LEFT JOIN factory_scorer_label l ON l.run_id = s.run_id AND l.scorer = s.scorer\n            WHERE s.run_id = $1\n            ORDER BY s.scorer\n            ",
+  "query": "\n            SELECT s.scorer, s.score, s.reason, s.model, s.instructions_sha256, s.judged_at,\n                   l.passed AS \"passed?\", l.labelled_at AS \"labelled_at?\"\n            FROM factory_run_score s\n            LEFT JOIN factory_scorer_label l ON l.run_id = s.run_id AND l.scorer = s.scorer\n            WHERE s.run_id = $1\n            ORDER BY s.scorer\n            ",
   "describe": {
     "columns": [
       {
@@ -25,16 +25,21 @@
       },
       {
         "ordinal": 4,
+        "name": "instructions_sha256",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
         "name": "judged_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "passed?",
         "type_info": "Bool"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "labelled_at?",
         "type_info": "Timestamptz"
       }
@@ -49,10 +54,11 @@
       false,
       false,
       false,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "035b7e551d8df9d1eaa2280145d963cea813fe267c7dd034cebe60dc6e21b3e7"
+  "hash": "817eb6503f34ad55bd8e9dbb7ab39e5632cd50e63e475b409c393715f14827c6"
 }

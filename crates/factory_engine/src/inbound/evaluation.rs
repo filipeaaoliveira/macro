@@ -329,11 +329,14 @@ impl IntoResponse for UndoDismissalError {
 }
 
 /// The live Scorers' judgments of one of the caller's Runs, by Scorer, each
-/// with whether it passed, the caller's label of it, and how far the Scorer
-/// agrees with the caller's labels over all of their Runs: a Scorer is
-/// `calibrated` once they labelled `needed` of its judgments and it agreed
-/// with at least `threshold` of them. Only the Run's owner reads it (404
-/// otherwise).
+/// with whether it passed, the caller's label of it, whether the Scorer's
+/// current judge (its model and instructions now) made it, and how far that
+/// judge agrees with the caller's labels over all of their Runs: a Scorer
+/// is `calibrated` once they labelled `needed` of its current judge's
+/// judgments and it agreed with at least `threshold` of them. Only the
+/// Run's owner reads it (404 otherwise). As `GET /insights/evaluation`, it
+/// reads for the owner however they call: their own session, an API key or
+/// token, an agent session acting for them, or an internal caller for them.
 #[utoipa::path(
     get,
     tag = "factory",
@@ -357,6 +360,8 @@ where
     S: ScorerLabelService,
     Auth: MacroAuthorizationService,
 {
+    // Reading is open to whoever acts for the owner, as the insights are;
+    // only a label, which says what a person judged, needs the person.
     let actor = caller.authorization.user.macro_user_id;
     Ok(Json(state.service.run_scores(&actor, path.id).await?))
 }
@@ -376,6 +381,7 @@ pub struct RunScorerPath {
     /// The Run's id.
     pub id: RunId,
     /// The Scorer's name.
+    #[param(pattern = "^[a-z0-9_-]{1,64}$")]
     pub scorer: String,
 }
 
@@ -384,7 +390,8 @@ pub struct RunScorerPath {
 /// Insights compare the labels with the judge's passes to calibrate the
 /// Scorer. Only the Run's owner labels it, in their own signed-in session
 /// and never from an agent's account (403 otherwise); a Run that is not
-/// theirs, or a Scorer that did not judge it, is 404.
+/// theirs, or a Scorer that did not judge it, is 404, and a Scorer name
+/// outside the name rules is 400.
 #[utoipa::path(
     put,
     tag = "factory",
@@ -439,6 +446,7 @@ impl IntoResponse for ScorerLabelError {
             }
             ScorerLabelError::NotFound | ScorerLabelError::NotJudged(_) => StatusCode::NOT_FOUND,
             ScorerLabelError::NotAPerson => StatusCode::FORBIDDEN,
+            ScorerLabelError::InvalidScorer(_) => StatusCode::BAD_REQUEST,
         };
         (
             status_code,
