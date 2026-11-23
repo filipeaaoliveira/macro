@@ -16,7 +16,9 @@ repository section below says.
 For each test you add or change, and each test a blocker says has no break
 or a break that did not fail, report a break: an edit to the code the test
 covers that makes it fail, which you ran and then undid. Commit no break.
-Give each as one line of your text:
+Give each as one line in the `text` you hand back with
+`macro.factory.handBack`, not only in your chat reply; the factory reads
+breaks from that text:
 
     BREAK <test>: <file> "<old text>" -> "<new text>" run `<command>`
 
@@ -24,6 +26,9 @@ Give each as one line of your text:
 first place in it the break replaces with `<new text>` (each on one line),
 and `<command>` runs that test alone from the repository's root, with no
 backtick in it. The factory runs each break again on the commit you push: the
-test must pass without it and fail with it.
+test must pass without it and fail with it. A blocker that only asks for a
+test's break needs no commit: its `BREAK` line answers it, and the next
+review reads the new record on the same commit. Every other blocker you
+fix needs a pushed commit.
 
 End with `done` once the fix is pushed.

@@ -270,7 +270,18 @@ pub fn breaks_brief(records: &[BreakRecord]) -> String {
             None => latest.push(record),
         }
     }
-    let intro = "## Break records\n\nEach write or fix step reports a break for each test it \
+    let named = latest
+        .iter()
+        .filter(|record| record.status != BreakStatus::Unreadable)
+        .count();
+    let rule = format!(
+        "## Break records\n\nFirst, a rule: every test the change adds needs a break record \
+         below, and a test with none is a blocker. The run's records name {named} tests. \
+         List each test the diff adds, by name, and check it against the block: \
+         raise one blocker for each that the block does not name, naming the test. When \
+         the diff adds more than {named} tests, at least the extra ones have no record.\n\n"
+    );
+    let intro = "Each write or fix step reports a break for each test it \
                  adds: an edit to the code the test covers, which the factory runs on the \
                  commit whose checks passed. A break is `verified` only when the test passed \
                  without it and failed with it.\n\n\
@@ -278,10 +289,11 @@ pub fn breaks_brief(records: &[BreakRecord]) -> String {
                  latest record is `not reproduced`, `hung`, `not run`, `not applied` or \
                  `unreadable`. \
                  A `dropped`, `unchecked` or `interrupted` record is no blocker by itself: the \
-                 factory could not run the break, so judge the test from the diff as you would \
-                 any claim. Even a `verified` break proves nothing when it only stops the code \
-                 compiling, or when its command does not run that test alone: raise a blocker \
+                 factory could not run the break, but it still counts as the test's record: \
+                 judge the test from the diff as you would any claim. Even a `verified` break \
+                 proves nothing when it only stops the code compiling, or when its command does not run that test alone: raise a blocker \
                  then too.\n\n";
+    let intro = format!("{rule}{intro}");
     if latest.is_empty() {
         return format!("{intro}No step of this run reported a break: no test it adds has one.\n");
     }

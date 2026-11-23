@@ -353,3 +353,34 @@ fn the_brief_says_which_records_block() {
         "1. interrupted: its run ended before it said how the test went (step 2). Test `toggle 'x'`. Break: in `src/'a'.rs`"
     ));
 }
+
+/// The brief opens with the rule that a new test with no record blocks,
+/// and says how many tests the records name, so the reviewer compares the
+/// tests the diff adds with them; an `unchecked` record still counts as
+/// the test's record and blocks nothing by itself.
+#[test]
+fn the_brief_opens_with_how_many_tests_have_a_record() {
+    let records = [
+        break_record(2, "toggle_saves", BreakStatus::Unchecked, ""),
+        break_record(2, "toggle_keeps", BreakStatus::Unchecked, ""),
+        break_record(5, "toggle_saves", BreakStatus::Unchecked, ""),
+        break_record(5, "BREAK nonsense", BreakStatus::Unreadable, ""),
+    ];
+
+    let brief = breaks_brief(&records);
+
+    let rule = brief
+        .find("every test the change adds needs a break record")
+        .expect("the rule");
+    let count = brief
+        .find("The run's records name 2 tests.")
+        .expect("the count");
+    assert!(rule < count, "{brief}");
+    assert!(count < brief.find("<break-records>").expect("the block"));
+    assert!(brief.contains("raise one blocker for each that the block does not name"));
+    assert!(brief.contains("When the diff adds more than 2 tests"));
+    assert!(brief.contains("but it still counts as the test's record"));
+    assert!(
+        brief.contains("1. unchecked: the factory could not run it (step 5). Test `toggle_saves`.")
+    );
+}
