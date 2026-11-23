@@ -470,6 +470,21 @@ async fn split_files_each_child_task_once_linked_to_the_run_s_task() {
             report.output
         );
     }
+    // The Run's read lists each child filed once, by place, as filed.
+    let kept: Vec<(u16, u16, Uuid, String)> = repo
+        .run_split_tasks(split.run_id)
+        .await
+        .expect("split tasks")
+        .into_iter()
+        .map(|task| (task.seq, task.place, task.task_id, task.name))
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            (3, 0, filed[0].id, "Add the slug API".to_string()),
+            (3, 1, filed[1].id, "Show slugs on the page".to_string()),
+        ]
+    );
     assert_eq!(reviewer.asked(), 0);
 }
 

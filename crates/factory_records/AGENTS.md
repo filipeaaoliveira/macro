@@ -140,7 +140,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261123100012_factory_scorer_label.sql`,
   `20261123100332_factory_run_repo_url_index.sql`,
   `20261123100336_factory_ci_wait_recorded_index.sql`,
-  `20261123130000_factory_break_record.sql`), `factory_break_record`,
+  `20261123130000_factory_break_record.sql`,
+  `20261123221318_factory_run_scored.sql`,
+  `20261123221322_factory_split_task.sql`), `factory_break_record`,
+  `factory_split_task`,
   `factory_step_steer`,
   `factory_run_score`, `factory_scorer_label`, `factory_run_arm`, `factory_run_agent_rule`,
   `factory_run_task_tags_unread`,
@@ -244,6 +247,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   break once (an `interrupted` record is replaced by the next run's).
   `runs_break_records` reads some Runs' records, by Step. A retry copies
   the records of the Steps it keeps.
+- A `split` Step's child tasks (`factory_split_task`,
+  `src/domain/split_tasks.rs`, `src/outbound/pg_run_repository/split_tasks.rs`)
+  keep each child's task id and name by Step and place in the plan:
+  `record_split_task` keeps the first, so a retried Step keeps each child
+  once, and `run_split_tasks` reads a Run's, by Step then place. A retry
+  copies none: a Run that split ended there.
 - A review round (`factory_review_round`) is keyed by the place of its first
   Step and recorded before its Steps start, so it references the Run, not a
   Step; `start_review_round` keeps its first record. `record_findings`
@@ -502,7 +511,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `known`, `quarantined` or `record`) and, once it settles, its `result`
   (`passed`, `failed` or `refused`) with `settled_at`. `request_ci_retries`
   returns only the rows it added, so of two attempts only the first asks
-  GitHub; `settle_ci_retries` keeps the first result. `ci_flakes` reads a
+  GitHub; `settle_ci_retries` keeps the first result. `run_ci_reruns`
+  reads a Run's reruns, by Step then job, and the quarantines it made
+  (through `factory_ci_quarantine_run_idx`), for its read. `ci_flakes` reads a
   Run's known flakes, its repository's live quarantines and the failures
   other pull requests proved flaky (a passed rerun, or the same head green
   later), each counted once per pull request, through

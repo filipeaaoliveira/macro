@@ -22,6 +22,7 @@
 //! ended, and lists the jobs quarantined once their reruns passed often
 //! enough.
 
+pub mod reruns;
 #[cfg(test)]
 mod test;
 
@@ -923,16 +924,7 @@ fn ci_health(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) -> Ci
         quarantined: records
             .ci_quarantines
             .iter()
-            .map(|quarantine| CiQuarantined {
-                repository: quarantine.repository.clone(),
-                job: quarantine.failure.name.clone(),
-                step: quarantine.failure.failed_step.clone(),
-                failure: quarantine.failure.failure.clone(),
-                passed_retries: quarantine.passed_retries,
-                quarantined_at: quarantine.quarantined_at,
-                last_passed_at: quarantine.last_passed_at,
-                task_id: quarantine.filed.then_some(quarantine.task_id),
-            })
+            .map(CiQuarantined::from)
             .collect(),
     }
 }

@@ -66,6 +66,7 @@ use crate::domain::ports::{
     NoTaskThread, PullRequests, QuarantineTasks, Retryable, RunWorkflows, RunWorkflowsError,
     StepExecutor, StepService, TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
+use crate::domain::quality::reruns::RunReruns;
 use crate::domain::standing_rules::{
     GateFacts, RuleAnswer, any_dismissed, kind_answers, offers_kind_answers, repeated_blockers,
     rule_answer, rule_fix_limit,
@@ -566,6 +567,8 @@ where
             .map_err(internal)?
             .remove(&run.id)
             .unwrap_or_default();
+        let reruns = RunReruns::from(self.repo.run_ci_reruns(run.id).await.map_err(internal)?);
+        let split_tasks = self.repo.run_split_tasks(run.id).await.map_err(internal)?;
         Ok(RunDetail {
             run,
             steps: with_pause_ends(steps),
@@ -578,6 +581,9 @@ where
             task_tags_unread,
             token_budget,
             break_records,
+            ci_reruns: reruns.reruns,
+            ci_quarantines: reruns.quarantines,
+            split_tasks,
         })
     }
 
@@ -644,7 +650,8 @@ where
             let standing_acts = standing_acts.remove(&run.id).unwrap_or_default();
             let agent_rules = agent_rules.remove(&run.id).unwrap_or_default();
             let task_tags_unread = tags_unread.contains(&run.id);
-            // Break records are read for one Run's detail only.
+            // Break records, CI reruns and split tasks are read for one
+            // Run's detail only.
             let break_records = Vec::new();
             // A list shows each Run's budget, not its use: reading the
             // usage log for every Run listed would cost a read each.
@@ -666,6 +673,9 @@ where
                 task_tags_unread,
                 token_budget,
                 break_records,
+                ci_reruns: Vec::new(),
+                ci_quarantines: Vec::new(),
+                split_tasks: Vec::new(),
             });
         }
         Ok(details)

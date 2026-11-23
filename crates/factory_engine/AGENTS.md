@@ -1169,7 +1169,13 @@ new test with no record, or `not_reproduced`, `hung`, `not_run`,
 a command that does not run the test alone is no proof. A retry keeps the
 break records of the Steps it keeps (`retry_run`). The Run API lists them
 on a Run's own read (`breakRecords` on `GET /runs/{id}`); a list of Runs
-leaves them out. A round the agent runs (no `exec`) and a red Step run no
+leaves them out. The same read lists the Run's flaky CI reruns
+(`ciReruns`, `domain/quality/reruns.rs`: each `ci` Step's rerun of a job
+under `rerun_flaky_ci`, by Step then job, with its job, failed step, test,
+`attempt` among the job's reruns in the Run, why it was taken for flaky,
+and how it ended) and the quarantines its passed reruns made
+(`ciQuarantines`), and the child tasks its `split` Step filed
+(`splitTasks`); a list of Runs leaves them out too. A round the agent runs (no `exec`) and a red Step run no
 break.
 
 Each check the engine runs is told the change it checks
@@ -1666,7 +1672,9 @@ list must add it).
   linking that task), with an id fixed by the Run, the Step and the child
   (`child_task_id`; for a retry, by the Run whose branch it works on), so
   a retried `split`, or a retry of a Run that failed at it, files no
-  second task; it ends
+  second task; each child filed is kept with its id, name and place
+  (`record_split_task`), so the Run's read lists them (`splitTasks`)
+  without document storage or the Step's text; it ends
   `done` with their links, and the Run ends `manual`. Where nothing files
   tasks (`NoChildTasks`), `split` ends `failed`.
 - Trust: the checks live in the plan Step's recorded output, never in the

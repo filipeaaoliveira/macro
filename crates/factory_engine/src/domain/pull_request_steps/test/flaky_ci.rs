@@ -396,6 +396,7 @@ async fn a_failure_whose_reruns_keep_passing_is_quarantined_with_a_task() {
                 matched: CiRetryMatch::Record,
                 result: Some(CiRetryResult::Passed),
                 requested_at: Utc::now(),
+                settled_at: Some(Utc::now()),
             },
         ));
     }

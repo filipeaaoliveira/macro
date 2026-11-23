@@ -16,6 +16,7 @@ pub use merge_queue::PgMergeTurn;
 mod quality;
 mod review_rounds;
 mod self_improvement;
+mod split_tasks;
 mod standing_acts;
 mod standing_rules;
 mod steering;
@@ -1216,6 +1217,14 @@ impl RunRepository for PgRunRepository {
         since: DateTime<Utc>,
     ) -> Result<crate::domain::quality::CiFlakes, Self::Err> {
         ci_retries::ci_flakes(&self.pool, id, repository, pull_request, since).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn run_ci_reruns(
+        &self,
+        id: RunId,
+    ) -> Result<crate::domain::quality::RunCiReruns, Self::Err> {
+        ci_retries::run_ci_reruns(&self.pool, id).await
     }
 
     #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
@@ -2545,6 +2554,25 @@ impl RunRepository for PgRunRepository {
     #[tracing::instrument(err, skip(self))]
     async fn runs_break_records(&self, ids: &[RunId]) -> Result<RunsBreakRecords, Self::Err> {
         self.select_runs_breaks(ids).await
+    }
+
+    #[tracing::instrument(err, skip(self, name))]
+    async fn record_split_task(
+        &self,
+        key: StepKey,
+        place: u16,
+        task_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Err> {
+        self.insert_split_task(key, place, task_id, name).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn run_split_tasks(
+        &self,
+        id: RunId,
+    ) -> Result<Vec<crate::domain::split_tasks::SplitTask>, Self::Err> {
+        self.select_split_tasks(id).await
     }
 
     #[tracing::instrument(err, skip(self))]
