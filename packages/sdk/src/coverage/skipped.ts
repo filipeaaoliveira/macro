@@ -549,7 +549,5 @@ export const factoryExcluded = [
   'undoFactoryImprovementDismissal',
 ] as const satisfies readonly (keyof FactorySdk)[];
 
-export const factoryBacklog = [
-  // Retrying a failed Run gets a `run.retry()` of its own.
-  'retryFactoryRun',
-] as const satisfies readonly (keyof FactorySdk)[];
+export const factoryBacklog =
+  [] as const satisfies readonly (keyof FactorySdk)[];

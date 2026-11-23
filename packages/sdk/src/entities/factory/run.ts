@@ -105,6 +105,29 @@ export class FactoryRun {
   }
 
   /**
+   * Retry the Run, if it ended `failed`, `infrastructure` or `blocked`: a
+   * new Run of the same task, Flow and Factory Definition commit, on the
+   * same branch, that keeps the Steps taken before the entry the Run
+   * stopped at, with their outputs (its plan, its branch), and starts
+   * there. The new Run's `retry.retriedFrom` names this one. A Run is
+   * retried once: a second retry, a Run that is still going or ended
+   * otherwise, and a retry past the person's Queue limit (code
+   * `queueFull`) are refused (409). Retry the newest retry instead.
+   *
+   * @example
+   * const retry = await run.retry();
+   * const { run: started } = await retry.read();
+   *
+   * @write
+   */
+  async retry(): Promise<FactoryRun> {
+    const detail = unwrap(
+      await this.client.factory.retryFactoryRun({ path: { id: this.id } }),
+    );
+    return FactoryRun.byId(this.client, detail.run.id);
+  }
+
+  /**
    * Link the Run to the task it works on, replacing any task it had.
    *
    * @write

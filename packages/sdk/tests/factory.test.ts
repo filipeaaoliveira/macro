@@ -133,3 +133,47 @@ test('the queue and the runs yet to ask anything are read apart', async () => {
     '/runs/waiting',
   ]);
 });
+
+test('a retry starts a new run and hands it back', async () => {
+  const RETRY = '01960000-0000-7000-8000-000000000003';
+  const requests: Request[] = [];
+  globalThis.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      const retried = run([], { outcome: 'infrastructure' });
+      return Response.json(
+        {
+          ...retried,
+          run: {
+            ...retried.run,
+            id: RETRY,
+            end: null,
+            retry: { retriedFrom: RUN, branchOf: RUN, firstSeq: 3 },
+          },
+        },
+        { status: 201 },
+      );
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+
+  const retry = await macro().factory.byId(RUN).retry();
+
+  expect(retry.id).toBe(RETRY);
+  expect(requests.map((request) => request.method)).toEqual(['POST']);
+  expect(requests[0]?.url).toBe(`https://factory.test/runs/${RUN}/retry`);
+});
+
+test('a run retried already is refused', async () => {
+  globalThis.fetch = Object.assign(
+    async () =>
+      Response.json(
+        { message: 'the run was retried already' },
+        { status: 409 },
+      ),
+    { preconnect: originalFetch.preconnect },
+  );
+
+  await expect(macro().factory.byId(RUN).retry()).rejects.toThrow();
+});
