@@ -112,10 +112,10 @@ const methods: Record<string, Partial<Record<SdkVerb, string>>> = {
     submitted: 'handBackFactoryStep answerFactoryGate',
     read: 'getFactoryRun',
     listed: 'listFactoryFlows listFactoryWaitingRuns listFactoryTaskRuns',
-    created: 'createFactoryRun',
+    created: 'createFactoryRun startFactoryBenchmarkSuite',
     cancelled: 'cancelFactoryRun',
     linked: 'linkFactoryRunTask',
-    ran: 'fireFactoryAutomation startFactoryBenchmarkSuite',
+    ran: 'fireFactoryAutomation',
   },
   auth: {
     read: 'macroApiToken getReferralCode getTeam getUserInfo postProfilePictures',
