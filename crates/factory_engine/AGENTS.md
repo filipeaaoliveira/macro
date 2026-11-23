@@ -278,7 +278,9 @@ branch of `branchOf` (`StepInput::branch`, `AgentTask::branch`), so it
 pushes to, reviews and proposes from the retried Run's branch and pull
 request; Scorers read its change there too (`ScoringSubject::branch_of`).
 Its first own Step's prompt says it takes over a failed Step's checkout,
-which may hold that Step's unfinished changes (`RESUMED_RUN_NOTE`). A Run
+which may hold that Step's unfinished changes (`RESUMED_RUN_NOTE`), unless
+its Role only reads its checkout (`reads_only`: the planner, a reviewer,
+the verifier, the plan reviewer). A Run
 is retried at most once (`AlreadyRetried`, 409; retry the newest retry
 instead); a retry is held to the Queue limit a new Run would be, and an
 agent acting for the owner needs a Standing Role that allows `start`. The
