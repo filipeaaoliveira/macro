@@ -85,3 +85,56 @@ fn only_a_commit_github_signed_as_itself_is_github_s() {
     assert!(!commit(Some("julia"), true).made_by_github());
     assert!(!commit(None, true).made_by_github());
 }
+
+/// What a worker from before retries read of a Run's start: its fields
+/// then, with `flow` required.
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct StartBeforeRetries {
+    run_id: factory_records::domain::models::RunId,
+    flow: crate::domain::flow::Flow,
+    #[serde(default)]
+    token_budget: bool,
+}
+
+/// A retry's start writes its Flow as `retry_flow`, so a worker from before
+/// retries cannot read it and leaves it to one that can, rather than walk
+/// the retry from its first entry; a new worker reads it whole. Any other
+/// start writes `flow`, as before, and both workers read it.
+#[test]
+fn a_worker_from_before_retries_cannot_read_a_retry_s_start() {
+    let flow = crate::domain::flow::Flow::parse(
+        serde_json::json!({ "entries": [{ "id": "reply", "step": "reply" }] }),
+        |_| Some(crate::domain::flow::StepUse::Work),
+    )
+    .expect("a flow");
+    let plain = super::RunStart {
+        run_id: factory_records::domain::models::RunId::generate(),
+        flow,
+        token_budget: true,
+        start_at: None,
+    };
+    let retry = super::RunStart {
+        start_at: Some(super::StartAt {
+            entry: factory_records::domain::models::EntryId::try_from("reply".to_string())
+                .expect("valid"),
+            first_seq: 3,
+        }),
+        ..plain.clone()
+    };
+
+    let plain_json = serde_json::to_value(&plain).expect("serializes");
+    let retry_json = serde_json::to_value(&retry).expect("serializes");
+
+    assert!(plain_json.get("flow").is_some() && plain_json.get("start_at").is_none());
+    assert!(serde_json::from_value::<StartBeforeRetries>(plain_json.clone()).is_ok());
+    assert!(serde_json::from_value::<StartBeforeRetries>(retry_json.clone()).is_err());
+    assert_eq!(
+        serde_json::from_value::<super::RunStart>(plain_json).expect("reads"),
+        plain
+    );
+    assert_eq!(
+        serde_json::from_value::<super::RunStart>(retry_json).expect("reads"),
+        retry
+    );
+}

@@ -1077,8 +1077,12 @@ where
     Auth: MacroAuthorizationService,
 {
     let acting = acting_agent(&caller.authorization, &headers);
+    let in_person = is_in_person(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
-    let detail = state.service.retry_run(&actor, params.id, acting).await?;
+    let detail = state
+        .service
+        .retry_run(&actor, params.id, acting, in_person)
+        .await?;
     Ok((StatusCode::CREATED, Json(detail)))
 }
 

@@ -9,7 +9,7 @@ use factory_records::domain::evaluation::RunAgentRule;
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
     DefinitionRead, EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome,
-    SteerRefusal, Step, StepKey,
+    RunRetry, SteerRefusal, Step, StepKey,
 };
 use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRound};
 use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
@@ -27,11 +27,19 @@ use crate::domain::token_budget::RunTokenBudget;
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// A retry's start (one with [`Self::start_at`]) writes its Flow as
+/// `retry_flow`, not `flow`: a worker that predates retries requires
+/// `flow`, so it cannot read a retry's start and fails its workflow task,
+/// which Temporal tries again until a worker that reads it takes it,
+/// rather than walk the retry from its Flow's first entry. Every other
+/// start writes `flow`, as before.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RunStart {
     /// The Run, already recorded.
     pub run_id: RunId,
     /// The Flow it walks.
+    #[serde(alias = "retry_flow")]
     pub flow: Flow,
     /// Whether the Run keeps a token budget, which the workflow checks
     /// before each agent Step. Left out when it keeps none, so the start of
@@ -39,11 +47,29 @@ pub struct RunStart {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub token_budget: bool,
     /// Where a retry starts: none for a Run that starts at its Flow's first
-    /// entry, and left out then, so its start reads as before. A worker
-    /// that predates it would start a retry at the first entry, so every
-    /// worker is deployed before the API starts one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// entry, and left out then, so its start reads as before.
+    #[serde(default)]
     pub start_at: Option<StartAt>,
+}
+
+impl Serialize for RunStart {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let fields = 2 + usize::from(self.token_budget) + usize::from(self.start_at.is_some());
+        let mut start = serializer.serialize_struct("RunStart", fields)?;
+        start.serialize_field("run_id", &self.run_id)?;
+        match &self.start_at {
+            None => start.serialize_field("flow", &self.flow)?,
+            Some(_) => start.serialize_field("retry_flow", &self.flow)?,
+        }
+        if self.token_budget {
+            start.serialize_field("token_budget", &self.token_budget)?;
+        }
+        if let Some(at) = &self.start_at {
+            start.serialize_field("start_at", at)?;
+        }
+        start.end()
+    }
 }
 
 /// Where a retry's workflow starts: at the entry the Run it retries stopped
@@ -206,16 +232,29 @@ pub struct StepInput<'a> {
     /// only when its entry routes it, so a Run on an older Flow goes on as
     /// that Flow did.
     pub routes: &'a [Outcome],
-    /// The Run whose branch the Step works on, when it is not its own Run's:
-    /// a retry works on the branch of the first Run it retries.
-    pub branch_of: Option<RunId>,
+    /// The retry the Step's Run is, if it is one: the Run it retries, the
+    /// one whose branch it works on, and the place of its first own Step.
+    pub retry: Option<RunRetry>,
 }
 
 impl StepInput<'_> {
+    /// The Run whose branch the Step works on: its own Run, or for a
+    /// retry, the first Run it retries.
+    pub fn branch_run(&self) -> RunId {
+        self.retry.map_or(self.key.run_id, |retry| retry.branch_of)
+    }
+
     /// The branch the Step's Run pushes to and proposes from: its own
     /// Run's, or for a retry, the one of the Run it retries.
     pub fn branch(&self) -> String {
-        run_branch(self.branch_of.unwrap_or(self.key.run_id))
+        run_branch(self.branch_run())
+    }
+
+    /// Whether the Step is a retry's first own Step, which takes over the
+    /// branch, and the checkout, where the retried Run's Step failed.
+    pub fn resumes_failed_run(&self) -> bool {
+        self.retry
+            .is_some_and(|retry| retry.first_seq == self.key.seq)
     }
 
     /// Whether the Step's entry routes `outcome`.

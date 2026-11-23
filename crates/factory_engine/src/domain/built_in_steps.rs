@@ -401,7 +401,7 @@ where
             prompt: asked_prompt,
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
-            branch_of: input.branch_of,
+            branch_of: input.retry.map(|retry| retry.branch_of),
             answer_by,
             resumes: input.resumes,
             // Should the asking Step's session be gone, a new one is told
@@ -779,6 +779,11 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
         .repository
         .map(|repository| workplace(repository, &input.branch(), input.base_commit))
         .unwrap_or_default();
+    let workplace = if input.repository.is_some() && input.resumes_failed_run() {
+        format!("{workplace}{RESUMED_RUN_NOTE}")
+    } else {
+        workplace
+    };
     format!(
         "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{ask}{workplace}\n\
          ## Request\n\n{}\n{}{}{}",
@@ -788,6 +793,13 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
         history(input.earlier)
     )
 }
+
+/// What the first Step of a retry is told of its checkout: the retried
+/// Run's Step failed in it, and may have left unfinished changes behind.
+pub(crate) const RESUMED_RUN_NOTE: &str = "\nThis run retries a run that failed at this step: \
+the branch already holds what that run's earlier steps pushed, and your working tree may \
+still hold the failed step's unfinished, uncommitted changes. Run `git status` and \
+`git log` first, and keep, finish or discard those changes on purpose before you go on.\n";
 
 /// Where the agent works: a checkout of the Run's repository, on the Run's
 /// branch `branch`, made from `base_commit` when the Run pins one, else

@@ -2105,8 +2105,9 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         acting: Option<ActingAgent>,
+        in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
-        self.retry(actor, id, acting).await
+        self.retry(actor, id, acting, in_person).await
     }
 
     #[tracing::instrument(skip(self, actor, reason))]
@@ -2475,7 +2476,7 @@ where
             owner_notes: &owner_notes,
             base_commit: base_commit.as_deref(),
             routes: &routes,
-            branch_of: run.retry.map(|retry| retry.branch_of),
+            retry: run.retry,
         };
         let report = self
             .executor

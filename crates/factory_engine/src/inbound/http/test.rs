@@ -413,6 +413,7 @@ impl FactoryService for FakeService {
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
         acting: Option<ActingAgent>,
+        _in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
         self.acting.lock().expect("acting").push(acting);
         Err(self.refusing(actor))

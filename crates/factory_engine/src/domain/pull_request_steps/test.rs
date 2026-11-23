@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use chrono::Utc;
 
-use factory_records::domain::models::{Repository, RunId, StepKey};
+use factory_records::domain::models::{Repository, RunId, RunRetry, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -51,7 +51,7 @@ fn input(run_id: RunId) -> StepInput<'static> {
         owner_notes: &[],
         base_commit: None,
         routes: &[],
-        branch_of: None,
+        retry: None,
     }
 }
 
@@ -97,7 +97,11 @@ async fn a_retry_publishes_from_the_branch_of_the_run_it_retries() {
     let repo = FakeRepo::default();
     let retried = RunId::generate();
     let retry = StepInput {
-        branch_of: Some(retried),
+        retry: Some(RunRetry {
+            retried_from: retried,
+            branch_of: retried,
+            first_seq: 3,
+        }),
         ..input(RunId::generate())
     };
 

@@ -784,11 +784,7 @@ where
 
         let deletion = self
             .github
-            .delete_run_branch(
-                input.owner,
-                &repository,
-                input.branch_of.unwrap_or(input.key.run_id),
-            )
+            .delete_run_branch(input.owner, &repository, input.branch_run())
             .await
             .map_err(PullRequestStepError::github)?;
         if deletion == BranchDeletion::Deleted {

@@ -164,6 +164,7 @@ async fn a_run_stopped_by_a_lost_session_is_retried_and_merges_without_planning_
                     id: RunId::generate(),
                     retried: run.id,
                     first_seq,
+                    created_in_person: false,
                 },
                 QueueHold::UNLIMITED,
             )

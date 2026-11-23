@@ -38,24 +38,31 @@ pub(crate) fn retriable(outcome: RunOutcome) -> bool {
 }
 
 /// Where a retry of a Run that took `steps` in `flow` starts: the entry of
-/// its latest Step, and the place of that entry's latest visit's first
-/// Step (a review panel's first reviewer, or the Step an agent's question
-/// went on from), so that visit runs again whole. The Steps before it are
-/// kept. A Run that took no Step starts again at the Flow's first entry,
-/// keeping nothing. None when its latest Step's entry is not in the Flow.
+/// its latest Step, and the place of that visit's first Step (a review
+/// panel's first reviewer, or the Step an agent's question went on from),
+/// so that visit runs again whole. The visit is the run of Steps right
+/// before the latest, at consecutive places, of the same entry and visit
+/// number: a visit number alone does not name a visit, since a reset
+/// counts an entry's visits from 1 again. The Steps before it are kept. A
+/// Run that took no Step starts again at the Flow's first entry, keeping
+/// nothing. None when its latest Step's entry is not in the Flow.
 pub(crate) fn retry_start(flow: &Flow, steps: &[Step]) -> Option<(EntryId, u16)> {
-    let Some(latest) = steps.iter().max_by_key(|step| step.seq) else {
+    let mut taken: Vec<&Step> = steps.iter().collect();
+    taken.sort_by_key(|step| step.seq);
+    let Some(latest) = taken.last() else {
         return flow.entries.first().map(|entry| (entry.id.clone(), 1));
     };
     if !flow.entries.iter().any(|entry| entry.id == latest.entry) {
         return None;
     }
-    let first_seq = steps
-        .iter()
-        .filter(|step| step.entry == latest.entry && step.visit == latest.visit)
-        .map(|step| step.seq)
-        .min()
-        .unwrap_or(latest.seq);
+    let mut first_seq = latest.seq;
+    for step in taken.iter().rev().skip(1) {
+        let same_visit = step.entry == latest.entry && step.visit == latest.visit;
+        if !same_visit || step.seq.checked_add(1) != Some(first_seq) {
+            break;
+        }
+        first_seq = step.seq;
+    }
     Some((latest.entry.clone(), first_seq))
 }
 
@@ -85,6 +92,7 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         acting: Option<ActingAgent>,
+        in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
         let run = self.owned_run(actor, id).await?;
         // A retry starts a Run: an agent retries one under a Definition
@@ -135,12 +143,20 @@ where
             limit: rules.definition.queue_limit,
             asking_flows: &asking_flows,
         };
+        // Whether the retry's request asks for the Control Files it names
+        // is the retrier's to say, as a new Run's is its creator's: an
+        // agent's account, or an agent acting, is never its owner in
+        // person.
+        let created_in_person = in_person
+            && acting.is_none()
+            && !self.repo.is_agent_account(actor).await.map_err(internal)?;
         let retry_id = RunId::generate();
         tracing::Span::current().record("retry_id", tracing::field::display(retry_id));
         let retry = NewRetry {
             id: retry_id,
             retried: id,
             first_seq,
+            created_in_person,
         };
         let retried = match self.repo.retry_run(retry, hold).await.map_err(internal)? {
             RetryInsert::Inserted(retried) => *retried,

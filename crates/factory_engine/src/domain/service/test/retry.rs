@@ -113,7 +113,7 @@ async fn a_run_that_lost_a_session_is_retried_at_the_entry_it_stopped_at() {
     let lost = lost_at_write(&repo).await;
 
     let retried = service
-        .retry_run(&julia(), lost, None)
+        .retry_run(&julia(), lost, None, true)
         .await
         .expect("retry");
 
@@ -189,7 +189,7 @@ async fn only_a_run_that_failed_on_infrastructure_or_was_blocked_is_retried() {
             repo.end_run(run_id, ending).await.expect("end");
         }
 
-        let retried = service.retry_run(&julia(), run_id, None).await;
+        let retried = service.retry_run(&julia(), run_id, None, true).await;
 
         if allowed {
             assert!(retried.is_ok(), "{ending:?}: {retried:?}");
@@ -222,7 +222,7 @@ async fn a_retry_runs_the_whole_visit_it_stopped_in_again() {
     repo.end_run(run_id, RunOutcome::Failed).await.expect("end");
 
     let retried = service
-        .retry_run(&julia(), run_id, None)
+        .retry_run(&julia(), run_id, None, true)
         .await
         .expect("retry");
 
@@ -243,6 +243,46 @@ async fn a_retry_runs_the_whole_visit_it_stopped_in_again() {
     assert_eq!(kept, [1, 2]);
 }
 
+/// A visit number does not name a visit: a reset counts an entry's visits
+/// from 1 again. A Run sent back from `accept` to `fix` reviews again at
+/// `review`'s visit 1; a retry of the second review starts at its own
+/// round, not at the first one's.
+#[tokio::test]
+async fn a_retry_after_a_reset_starts_at_the_latest_visit_not_an_earlier_one() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let run_id = code_run(&repo).await;
+    took(&repo, run_id, 1, "plan", 1, "done").await;
+    took(&repo, run_id, 2, "write", 1, "done").await;
+    took(&repo, run_id, 3, "review", 1, "pass").await;
+    took(&repo, run_id, 4, "accept", 1, "fix").await;
+    took(&repo, run_id, 5, "fix", 1, "done").await;
+    took(&repo, run_id, 6, "review", 1, "failed").await;
+    repo.end_run(run_id, RunOutcome::Failed).await.expect("end");
+
+    let retried = service
+        .retry_run(&julia(), run_id, None, true)
+        .await
+        .expect("retry");
+
+    assert_eq!(
+        workflows.started.lock().expect("started")[0].start_at,
+        Some(StartAt {
+            entry: entry("review"),
+            first_seq: 6
+        })
+    );
+    let kept: Vec<u16> = repo
+        .list_steps(retried.run.id)
+        .await
+        .expect("read")
+        .iter()
+        .map(|step| step.seq)
+        .collect();
+    assert_eq!(kept, [1, 2, 3, 4, 5]);
+}
+
 /// A Run that took no Step is retried from its Flow's first entry,
 /// keeping nothing.
 #[tokio::test]
@@ -256,7 +296,7 @@ async fn a_run_that_took_no_step_is_retried_from_its_first_entry() {
         .expect("end");
 
     service
-        .retry_run(&julia(), run_id, None)
+        .retry_run(&julia(), run_id, None, true)
         .await
         .expect("retry");
 
@@ -278,17 +318,17 @@ async fn a_run_is_retried_once_and_a_retry_of_a_retry_keeps_the_first_branch() {
     let service = code_service(&repo, &workflows, &FakeGithub::default());
     let lost = lost_at_write(&repo).await;
     let first = service
-        .retry_run(&julia(), lost, None)
+        .retry_run(&julia(), lost, None, true)
         .await
         .expect("retry");
 
-    let again = service.retry_run(&julia(), lost, None).await;
+    let again = service.retry_run(&julia(), lost, None, true).await;
     took(&repo, first.run.id, 2, "write", 1, "failed").await;
     repo.end_run(first.run.id, RunOutcome::Infrastructure)
         .await
         .expect("end");
     let second = service
-        .retry_run(&julia(), first.run.id, None)
+        .retry_run(&julia(), first.run.id, None, true)
         .await
         .expect("retry the retry");
 
@@ -310,7 +350,7 @@ async fn someone_else_s_run_is_not_retried() {
     let service = code_service(&repo, &workflows, &FakeGithub::default());
     let lost = lost_at_write(&repo).await;
 
-    let retried = service.retry_run(&teo(), lost, None).await;
+    let retried = service.retry_run(&teo(), lost, None, true).await;
 
     assert!(
         matches!(retried, Err(FactoryError::NotFound)),
@@ -331,14 +371,38 @@ async fn a_retry_whose_workflow_does_not_start_is_not_kept() {
     let lost = lost_at_write(&repo).await;
 
     let refused = code_service(&repo, &failing, &FakeGithub::default())
-        .retry_run(&julia(), lost, None)
+        .retry_run(&julia(), lost, None, true)
         .await;
     let workflows = FakeWorkflows::default();
     let retried = code_service(&repo, &workflows, &FakeGithub::default())
-        .retry_run(&julia(), lost, None)
+        .retry_run(&julia(), lost, None, true)
         .await;
 
     assert!(refused.is_err());
     assert!(retried.is_ok(), "{retried:?}");
     assert_eq!(repo.runs.lock().expect("runs").len(), 2);
+}
+
+/// Whether a retry's request asks for the Control Files it names is the
+/// retrier's to say: a Run created in person and retried by an agent's
+/// program is not in person, and one retried in person is.
+#[tokio::test]
+async fn a_retry_is_in_person_only_when_its_owner_retried_it_so() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let by_program = lost_at_write(&repo).await;
+    let by_person = lost_at_write(&repo).await;
+
+    let program = service
+        .retry_run(&julia(), by_program, None, false)
+        .await
+        .expect("retry");
+    let person = service
+        .retry_run(&julia(), by_person, None, true)
+        .await
+        .expect("retry");
+
+    assert!(!program.run.created_in_person);
+    assert!(person.run.created_in_person);
 }

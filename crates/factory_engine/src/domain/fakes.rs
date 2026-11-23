@@ -685,6 +685,7 @@ impl RunRepository for FakeRepo {
         let run = Run {
             id: retry.id,
             created_at: Utc::now(),
+            created_in_person: retry.created_in_person,
             automation: None,
             end: None,
             budget_stop: None,
@@ -745,7 +746,22 @@ impl RunRepository for FakeRepo {
                     (run.id, step)
                 })
                 .collect();
+            let places: Vec<u16> = kept.iter().map(|(_, step)| step.seq).collect();
             steps.extend(kept);
+            // With the sessions they worked in and left.
+            let mut sessions = self.sessions.lock().expect("sessions");
+            let kept: Vec<_> = sessions
+                .iter()
+                .filter(|session| {
+                    session.key.run_id == retry.retried && places.contains(&session.key.seq)
+                })
+                .cloned()
+                .map(|mut session| {
+                    session.key.run_id = run.id;
+                    session
+                })
+                .collect();
+            sessions.extend(kept);
         }
         {
             let mut rounds = self.review_rounds.lock().expect("review rounds");

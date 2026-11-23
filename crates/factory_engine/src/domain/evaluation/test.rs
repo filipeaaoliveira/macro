@@ -4,8 +4,8 @@ use ai_usage::domain::session_usage::SessionTokens;
 use chrono::Utc;
 use factory_records::domain::evaluation::{EvaluationRepository, NewSuite, TrialKey, TrialTokens};
 use factory_records::domain::models::{
-    AgentName, EntryId, NewRun, Outcome, Repository, Role, RunEnd, RunId, RunInsert, RunOutcome,
-    Step, StepEnd, StepKey, StepSession, StepTerminal,
+    AgentName, EntryId, NewRetry, NewRun, Outcome, QueueHold, Repository, RetryInsert, Role,
+    RunEnd, RunId, RunInsert, RunOutcome, Step, StepEnd, StepKey, StepSession, StepTerminal,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::RunRules;
@@ -18,7 +18,7 @@ use super::{EvaluationDefinition, EvaluationDefinitionError};
 use crate::domain::agents::AgentDefinition;
 use crate::domain::fakes::{FakeGithub, FakeJudge, FakeRepo, FakeSession};
 use crate::domain::insights::fakes::FakeUsage;
-use crate::domain::models::{PullRequest, PullRequestState};
+use crate::domain::models::{PullRequest, PullRequestState, run_branch};
 use crate::domain::ports::ScoringService;
 use crate::domain::review_rounds::ChangedFile;
 
@@ -1277,6 +1277,69 @@ async fn a_run_that_merged_nothing_is_judged_on_its_branch_head() {
             "```diff\ndiff --git a/src/old.rs b/src/lib.rs\n@@ -3 +3 @@\n-old\n+new\n```"
         ),
         "{}",
+        slop.prompt
+    );
+}
+
+/// A retry pushes to the branch of the Run it retries: its change is read
+/// there, not from a branch of its own that never existed.
+#[tokio::test]
+async fn a_retry_is_judged_on_the_branch_of_the_run_it_retries() {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let retried = ended_run(&repo, "code", RunOutcome::Infrastructure, "failed", session).await;
+    let RetryInsert::Inserted(retry) = repo
+        .retry_run(
+            NewRetry {
+                id: RunId::generate(),
+                retried,
+                first_seq: 2,
+                created_in_person: false,
+            },
+            QueueHold::UNLIMITED,
+        )
+        .await
+        .expect("retry")
+    else {
+        panic!("an ended run is retried");
+    };
+    repo.end_run(retry.id, RunOutcome::Success)
+        .await
+        .expect("end");
+    let judge = Arc::new(FakeJudge::default());
+    judge.then(0.5);
+    judge.then(0.5);
+    let github = FakeGithub::default();
+    let head = "5555555555555555555555555555555555555555";
+    {
+        let mut state = github.state();
+        state.head = None;
+        state
+            .other_heads
+            .insert(run_branch(retried), head.to_string());
+        state.diffs.insert(
+            ("main".to_string(), head.to_string()),
+            vec![ChangedFile::from_patch(
+                "src/lib.rs".to_string(),
+                None,
+                Some("@@ -3 +3 @@\n-old\n+new\n"),
+            )],
+        );
+    }
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge.clone(),
+        usage(session),
+        github,
+        Arc::new(reading_definition()),
+    );
+
+    scoring.score_run(retry.id, false).await.expect("scored");
+
+    let slop = asked_of(&judge, "Is the change free of slop?");
+    assert!(
+        slop.prompt.contains("+new"),
+        "the retry's change was not read: {}",
         slop.prompt
     );
 }
