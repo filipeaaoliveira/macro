@@ -93,6 +93,13 @@ function InsightsSections(props: {
               })
             }
           />
+          {/* Retried Runs are already counted by how they ended: a subset,
+              never a state of its own. */}
+          <Show when={totals().retried > 0}>
+            <p data-retried-runs class="px-4 pb-2 text-xs text-ink-muted">
+              {t('factoryInsights.retriedRuns', { count: totals().retried })}
+            </p>
+          </Show>
           <div class="grid grid-cols-1 divide-y divide-edge-muted @sm/insight-main:grid-cols-2 @3xl/insight-main:grid-cols-4 @3xl/insight-main:divide-x @3xl/insight-main:divide-y-0">
             <Metric
               label={t('factoryInsights.totalRuns')}
