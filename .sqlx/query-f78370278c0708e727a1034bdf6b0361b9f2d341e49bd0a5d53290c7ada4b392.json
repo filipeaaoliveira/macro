@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_review_finding (\n                run_id, seq, place, round_seq, path, start_line, end_line, problem, why,\n                blocks_anywhere, follow_up_key, kind, follow_up_task_id, follow_up_commented,\n                fix_status, dispute, ruling, ruled_by, repeats_dropped\n            )\n            SELECT\n                $1, f.seq, f.place, f.round_seq, f.path, f.start_line, f.end_line, f.problem,\n                f.why, f.blocks_anywhere, f.follow_up_key, f.kind, f.follow_up_task_id,\n                f.follow_up_commented, f.fix_status, f.dispute, f.ruling, f.ruled_by,\n                f.repeats_dropped\n            FROM factory_review_finding f\n            WHERE f.run_id = $2\n                AND EXISTS (\n                    SELECT 1 FROM factory_step s WHERE s.run_id = $1 AND s.seq = f.seq\n                )\n                AND EXISTS (\n                    SELECT 1 FROM factory_review_round r\n                    WHERE r.run_id = $1 AND r.seq = f.round_seq\n                )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f78370278c0708e727a1034bdf6b0361b9f2d341e49bd0a5d53290c7ada4b392"
+}

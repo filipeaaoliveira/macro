@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_reviewed_head (run_id, head_sha, reviewed_at)\n            SELECT $1, head_sha, reviewed_at FROM factory_reviewed_head WHERE run_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0a6f3bf9bba5ecbfec3e89455e2a152a233dacaeb87f4dce20cfc9abed1d46ea"
+}

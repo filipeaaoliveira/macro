@@ -7,10 +7,10 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, DefinitionRead, EntryId, GateAnswer, HandBack, HandedBack, NewRun,
-    NewSteer, Outcome, PassedOver, QueueHold, Role, Run, RunFlow, RunId, RunInsert, RunOutcome,
-    SessionStep, SteerRefusal, Steered, Step, StepKey, StepSession, StepSteering, StoppingSession,
-    TaskLink, TeamMembership,
+    ControlFileChanges, DefinitionRead, EntryId, GateAnswer, HandBack, HandedBack, NewRetry,
+    NewRun, NewSteer, Outcome, PassedOver, QueueHold, RetryInsert, Role, Run, RunFlow, RunId,
+    RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepKey, StepSession,
+    StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::standing_rules::StandingRule;
 
@@ -40,6 +40,22 @@ pub trait RunRepository: Send + Sync + 'static {
         run: NewRun<'_>,
         hold: QueueHold<'_>,
     ) -> impl Future<Output = Result<RunInsert, Self::Err>> + Send;
+
+    /// Keep `retry`, a new Run that retries the ended Run `retry.retried`,
+    /// held to its owner's Queue as [`Self::insert_run_in_queue`] holds a
+    /// new Run. It keeps what the retried Run kept as it started: its owner,
+    /// request, task, Project, repository, Flow, Factory Definition, rules,
+    /// Agents and the arms its Experiments chose, with the Run whose branch
+    /// it works on, and the retried Run's pull request and the head it
+    /// reviewed and was asked to merge. Of its Steps, those before
+    /// `retry.first_seq` that ended are kept as the new Run's, at the same
+    /// places, with their answered Gates and the review rounds that ended
+    /// before it, so its later Steps read them as their own Run's. One write.
+    fn retry_run(
+        &self,
+        retry: NewRetry,
+        hold: QueueHold<'_>,
+    ) -> impl Future<Output = Result<RetryInsert, Self::Err>> + Send;
 
     /// Link the Run to the task document `task_id`, replacing any task it
     /// had. Linking it again changes nothing.

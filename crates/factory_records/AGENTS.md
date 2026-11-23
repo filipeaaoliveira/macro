@@ -157,6 +157,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   its activity: `start_step` and `open_gate` ignore a conflict, and `end_step`,
   `end_run` and `answer_gate` keep the first end and answer. Keep new writes
   safe to repeat.
+- A retry (`retry_run`) copies the retried Run's kept columns, arms, Agent
+  Rules, ended Steps before `first_seq` with their answered Gates, and its
+  ended review rounds, findings and reviewed head into the new Run, in one
+  transaction. A column added to `factory_run`, `factory_step`,
+  `factory_gate` or the review tables that a later Step reads must be added
+  to its copy too. `factory_run_retried_from_idx` keeps a Run retried once.
 - Steps and Gates are keyed by `(run_id, seq)`, the Step's place in its Run.
   `visit` is only the entry's count, which a reset restarts, so never key on
   it.

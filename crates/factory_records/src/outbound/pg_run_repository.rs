@@ -32,14 +32,18 @@ use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
     AgentName, AskedBack, BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, DefinitionRead, EntryId, Gate, GateAnswer, GateKind,
-    GateModelReading, HandBack, HandedBack, InvalidName, NewRun, NewSteer, Outcome, PassedOver,
-    QueueHold, QueuePlaces, Repository, Role, Run, RunDefinition, RunEnd, RunFlow, RunId,
-    RunInsert, RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered, Step, StepEnd,
-    StepKey, StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink, TeamMembership,
+    GateModelReading, HandBack, HandedBack, InvalidName, NewRetry, NewRun, NewSteer, Outcome,
+    PassedOver, QueueHold, QueuePlaces, Repository, RetryInsert, Role, Run, RunDefinition, RunEnd,
+    RunFlow, RunId, RunInsert, RunOutcome, RunRetry, SessionStep, StandInAnswer, SteerRefusal,
+    Steered, Step, StepEnd, StepKey, StepSession, StepSteering, StepTerminal, StoppingSession,
+    TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
 use flaws::run_flaw;
+
+/// The index that keeps a Run retried at most once.
+const RETRIED_FROM_INDEX: &str = "factory_run_retried_from_idx";
 
 /// The foreign key from a Run to its task document.
 const TASK_FOREIGN_KEY: &str = "factory_run_task_id_fkey";
@@ -251,6 +255,9 @@ pub enum PgRunRepositoryErr {
     /// type.
     #[error("a stored token budget is out of range")]
     BudgetOutOfRange,
+    /// A stored Run has only part of the retry it is.
+    #[error("a stored run has only part of the retry it is")]
+    PartialRetry,
     /// A stored Run's budget stop is not one this code knows.
     #[error("unknown token budget stop {0:?}")]
     UnknownBudgetStop(Option<String>),
@@ -290,6 +297,9 @@ struct RunRow {
     token_budget: Option<i64>,
     token_budget_stop: Option<String>,
     token_budget_used: Option<i64>,
+    retried_from: Option<Uuid>,
+    branch_run_id: Option<Uuid>,
+    first_seq: Option<i32>,
 }
 
 /// The token budget a Run keeps, stored as `stored`.
@@ -411,6 +421,15 @@ impl TryFrom<RunRow> for Run {
             },
             end,
             budget_stop: budget_stop(row.token_budget_stop, row.token_budget_used)?,
+            retry: match (row.retried_from, row.branch_run_id, row.first_seq) {
+                (Some(retried_from), Some(branch_of), Some(first_seq)) => Some(RunRetry {
+                    retried_from: RunId::from_uuid(retried_from),
+                    branch_of: RunId::from_uuid(branch_of),
+                    first_seq: number(first_seq)?,
+                }),
+                (None, None, None) => None,
+                _ => return Err(PgRunRepositoryErr::PartialRetry),
+            },
         })
     }
 }
@@ -765,7 +784,7 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -818,6 +837,246 @@ impl RunRepository for PgRunRepository {
             }
             Err(error) => Err(error.into()),
         }
+    }
+
+    #[tracing::instrument(err, skip_all, fields(id = %retry.id, retried = %retry.retried, limit = ?hold.limit))]
+    async fn retry_run(
+        &self,
+        retry: NewRetry,
+        hold: QueueHold<'_>,
+    ) -> Result<RetryInsert, Self::Err> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query!("SET LOCAL lock_timeout = '5s'")
+            .execute(&mut *transaction)
+            .await?;
+        let Some(owner) = sqlx::query_scalar!(
+            "SELECT user_id FROM factory_run WHERE id = $1 AND ended_at IS NOT NULL",
+            retry.retried.as_uuid(),
+        )
+        .fetch_optional(&mut *transaction)
+        .await?
+        else {
+            return Ok(RetryInsert::NotEnded);
+        };
+        let owner = MacroUserIdStr::try_from(owner.clone())
+            .map_err(|_| PgRunRepositoryErr::InvalidUserId(owner))?;
+        // A retry starts a Run: it waits its turn behind its owner's other
+        // starts, and is held to the Queue limit, as a new Run is.
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended('factory_queue:' || $1, 0))",
+            owner.as_ref(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        if let Some(limit) = hold.limit {
+            let places = queue_places(&mut transaction, &owner, hold.asking_flows, limit).await?;
+            if places.held() >= limit {
+                return Ok(RetryInsert::QueueFull(places));
+            }
+        }
+
+        // The retry keeps what the Run kept as it started, and what its
+        // branch has come to: its pull request, the Control Files it
+        // changed, and the head a person was asked to merge. Not its end,
+        // flaw, budget stop, Automation or cancel: those are the Run's own.
+        let first_seq = i32::from(retry.first_seq);
+        let inserted = sqlx::query_as!(
+            RunRow,
+            r#"
+            INSERT INTO factory_run (
+                id, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,
+                created_in_person, control_file_patterns, control_files_team_id, tampered_files,
+                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,
+                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,
+                definition_commit, definition_agents, flow_definition, flow_asks,
+                definition_evaluation, token_budget, known_ci_flakes, retried_from, branch_run_id,
+                first_seq
+            )
+            SELECT
+                $1, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,
+                created_in_person, control_file_patterns, control_files_team_id, tampered_files,
+                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,
+                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,
+                definition_commit, definition_agents, flow_definition, flow_asks,
+                definition_evaluation, token_budget, known_ci_flakes, id, COALESCE(branch_run_id, id),
+                $3
+            FROM factory_run
+            WHERE id = $2
+            RETURNING
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
+                standing_rules, standing_rules_source, standing_rules_project_id,
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+            first_seq,
+        )
+        .fetch_one(&mut *transaction)
+        .await;
+        let row = match inserted {
+            Ok(row) => row,
+            Err(sqlx::Error::Database(error)) if error.constraint() == Some(RETRIED_FROM_INDEX) => {
+                return Ok(RetryInsert::Retried);
+            }
+            Err(error) => return Err(error.into()),
+        };
+
+        // The Agents it runs with: the arms its Experiments chose, the
+        // Agent Rules that chose the rest, and whether its task's tags
+        // went unread.
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_run_arm (run_id, experiment, arm, agents)
+            SELECT $1, experiment, arm, agents FROM factory_run_arm WHERE run_id = $2
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_run_agent_rule (run_id, role, rule, agent)
+            SELECT $1, role, rule, agent FROM factory_run_agent_rule WHERE run_id = $2
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_run_task_tags_unread (run_id, recorded_at)
+            SELECT $1, recorded_at FROM factory_run_task_tags_unread WHERE run_id = $2
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+
+        // The Steps before the retry's own that ended, at their places,
+        // with the sessions they worked in, so the token budget counts what
+        // they used; not how their owner steered them, which steered the
+        // retried Run.
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_step (
+                run_id, seq, entry, visit, started_at, outcome, output, ended_at, session_id,
+                action_id, offered, handed_outcome, handed_output, handed_at, session_released_at,
+                prepared_at, opened_at, role, agent, passed_over, pass_reasons, bot_id,
+                setup_session_id, setup_passed
+            )
+            SELECT
+                $1, seq, entry, visit, started_at, outcome, output, ended_at, session_id,
+                action_id, offered, handed_outcome, handed_output, handed_at, session_released_at,
+                prepared_at, opened_at, role, agent, passed_over, pass_reasons, bot_id,
+                setup_session_id, setup_passed
+            FROM factory_step
+            WHERE run_id = $2 AND seq < $3 AND ended_at IS NOT NULL
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+            first_seq,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        // Their Gates that were answered, which later Steps read the notes
+        // of.
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_gate (
+                run_id, seq, question, answers, opened_at, answer, note, user_id, answered_at,
+                approved_control_files, rule, reply_confidence, asked_back_reply, asked_back_at,
+                stand_in_answer, stand_in_reason, stand_in_confidence, stand_in_until,
+                by_stand_in, agent_session_id, stand_in_declined_pick,
+                stand_in_declined_confidence, stand_in_declined_reason, asked_back_pick,
+                asked_back_confidence, asked_back_reason, asked_back_refused_tampered
+            )
+            SELECT
+                $1, g.seq, g.question, g.answers, g.opened_at, g.answer, g.note, g.user_id,
+                g.answered_at, g.approved_control_files, g.rule, g.reply_confidence,
+                g.asked_back_reply, g.asked_back_at, g.stand_in_answer, g.stand_in_reason,
+                g.stand_in_confidence, g.stand_in_until, g.by_stand_in, g.agent_session_id,
+                g.stand_in_declined_pick, g.stand_in_declined_confidence,
+                g.stand_in_declined_reason, g.asked_back_pick, g.asked_back_confidence,
+                g.asked_back_reason, g.asked_back_refused_tampered
+            FROM factory_gate g
+            JOIN factory_step s ON s.run_id = g.run_id AND s.seq = g.seq
+            WHERE g.run_id = $2 AND g.seq < $3 AND g.answer IS NOT NULL
+                AND s.ended_at IS NOT NULL
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+            first_seq,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        // The review rounds that ended before it, with what their reviewers
+        // found, which a fix and the next round read, and the head the
+        // latest reviewed.
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_review_round (
+                run_id, seq, round, reviewers, head_sha, diff_base, fix_diff, failure,
+                started_at, outcome, ended_at
+            )
+            SELECT
+                $1, seq, round, reviewers, head_sha, diff_base, fix_diff, failure, started_at,
+                outcome, ended_at
+            FROM factory_review_round
+            WHERE run_id = $2 AND seq < $3 AND ended_at IS NOT NULL
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+            first_seq,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_review_finding (
+                run_id, seq, place, round_seq, path, start_line, end_line, problem, why,
+                blocks_anywhere, follow_up_key, kind, follow_up_task_id, follow_up_commented,
+                fix_status, dispute, ruling, ruled_by, repeats_dropped
+            )
+            SELECT
+                $1, f.seq, f.place, f.round_seq, f.path, f.start_line, f.end_line, f.problem,
+                f.why, f.blocks_anywhere, f.follow_up_key, f.kind, f.follow_up_task_id,
+                f.follow_up_commented, f.fix_status, f.dispute, f.ruling, f.ruled_by,
+                f.repeats_dropped
+            FROM factory_review_finding f
+            WHERE f.run_id = $2
+                AND EXISTS (
+                    SELECT 1 FROM factory_step s WHERE s.run_id = $1 AND s.seq = f.seq
+                )
+                AND EXISTS (
+                    SELECT 1 FROM factory_review_round r
+                    WHERE r.run_id = $1 AND r.seq = f.round_seq
+                )
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_reviewed_head (run_id, head_sha, reviewed_at)
+            SELECT $1, head_sha, reviewed_at FROM factory_reviewed_head WHERE run_id = $2
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+
+        let run = Run::try_from(row)?;
+        transaction.commit().await?;
+        Ok(RetryInsert::Inserted(Box::new(run)))
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -1233,7 +1492,7 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
             FROM factory_run
             WHERE id = $1
             "#,
@@ -1338,7 +1597,7 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -1377,7 +1636,7 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1424,7 +1683,7 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
