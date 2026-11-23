@@ -300,9 +300,13 @@ pub struct BreakRun {
     pub restored: bool,
 }
 
-/// The exit statuses `timeout` gives a command it stopped: 124, or 137
-/// once it had to kill it.
-const TIMED_OUT: [i32; 2] = [124, 137];
+/// The exit status a break's run gives a test its watchdog stopped for
+/// running past its time, as `timeout` does.
+pub const HUNG_STATUS: i32 = 124;
+
+/// The exit statuses of a test stopped for its time: the watchdog's, and
+/// 137, which a test killed outright ends with.
+const TIMED_OUT: [i32; 2] = [HUNG_STATUS, 137];
 
 /// What begins each marker a break's run prints, before the run's nonce.
 pub const MARKER: &str = "macro-break";

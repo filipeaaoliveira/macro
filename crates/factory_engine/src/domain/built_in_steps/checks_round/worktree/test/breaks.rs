@@ -319,3 +319,75 @@ fn only_the_end_of_a_test_s_output_is_kept() {
     assert!(said.len() < 2 * BREAK_TAIL_BYTES + 1_000, "{}", said.len());
     assert!(said.contains("the end\n"));
 }
+
+/// A test that hangs with its break is stopped at its time by the
+/// watchdog, children and all, and the break is hung, not verified: the
+/// run ends within the time, not when the test would have.
+#[test]
+fn a_test_that_hangs_is_stopped_on_time_and_hung() {
+    let machine = Machine::new("break-hangs");
+    machine.prepare(&machine.pushed);
+    let hangs = break_of(
+        "pushed",
+        "broken",
+        "grep -qx pushed a.txt || { sleep 60 & sleep 60; }",
+    );
+    let started = std::time::Instant::now();
+
+    let output = machine.bash(&break_command(
+        ROUND,
+        &hangs,
+        "export A=1\n",
+        NONCE,
+        2,
+        5,
+        &unknown(),
+    ));
+    let run = BreakRun::read(&text(&output.stdout), NONCE);
+
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(run.status(), BreakStatus::Hung, "{output:?}");
+    assert_eq!(run.broken, Some(124));
+    assert!(run.restored);
+    assert_eq!(machine.worktree_file(), "pushed\n");
+}
+
+/// A test that leaves a child running with its output open still ends
+/// when its shell does, with the verdict of its shell, and the child is
+/// killed.
+#[test]
+fn a_child_holding_the_output_open_neither_holds_the_run_nor_outlives_it() {
+    let machine = Machine::new("break-holds");
+    machine.prepare(&machine.pushed);
+    let pid_file = machine.root.join("child.pid");
+    let holds = break_of(
+        "pushed",
+        "broken",
+        &format!(
+            "rm -f {pid}; sh -c 'echo $$ > {pid}; exec sleep 30' & \
+             while [ ! -s {pid} ]; do sleep 0.1; done; grep -qx pushed a.txt",
+            pid = pid_file.display()
+        ),
+    );
+    let started = std::time::Instant::now();
+
+    let (output, run) = machine.run_break(&holds);
+
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(run.status(), BreakStatus::Verified, "{output:?}");
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    let alive = Command::new("kill")
+        .args(["-0", pid.trim()])
+        .status()
+        .unwrap()
+        .success();
+    assert!(!alive, "the child {} is still running", pid.trim());
+}

@@ -1120,15 +1120,19 @@ from its environment), the command run again, and the file rewritten as it
 was (a new time, so a build tool builds it again). A file whose path goes
 through a symbolic link, checked before the first run and again just
 before the edit, is not broken. Each run is a process group of its own
-(`set -m`, `timeout --foreground`), killed whole once it ends, and only the
-last 1,500 bytes of its output are kept (`tail -c` into a file outside the
-tree) and shown on the standard error; the markers `BreakRun` reads are
+(`set -m`), watched by a shell watchdog (no `timeout`): past five minutes it
+marks the run hung, sends the group `TERM`, then `KILL` ten seconds later,
+and the run ends with 124. Once the test's shell returns, on time or not,
+its group and the watchdog's are killed, so a child that holds its output
+open neither holds the run up nor outlives it. Its output goes to a file
+outside the tree, held to 64 MiB (`ulimit -f`, writes past it failing),
+and only its last 1,500 bytes are shown on the standard error; the markers `BreakRun` reads are
 printed last on the standard output, each with a nonce of the run, and
 only those that end it count (the standard error is never read), so a
 runtime that merges both streams into a 16 KiB tail still returns them and
 nothing the test prints reads as one. A break is `verified` when the test
-passed without it and failed with it other than by `timeout` stopping it,
-`hung` when `timeout` stopped it (124 or 137), `not_reproduced` when it
+passed without it and failed with it other than by being stopped for its
+time, `hung` when the watchdog stopped it (124, or 137), `not_reproduced` when it
 passed with it too, `not_run` when it failed without it, `not_applied` when the file is
 missing or lacks the old text, `unreadable` for a `BREAK` line that does
 not read, `dropped` past 20 runnable breaks (`MAX_BREAKS`) or when the

@@ -79,9 +79,9 @@ async fn a_break_whose_test_fails_is_recorded_verified_on_the_checked_commit() {
     // In the round's worktree, under its lock.
     let shell = &sent[0].command.command;
     assert!(shell.contains(&format!("worktree=\"$base/{round}\"")));
-    assert!(shell.contains(
-        "timeout --foreground --kill-after=10 300 bash --noprofile --norc -c 'bun test toggle'"
-    ));
+    assert!(shell.contains("exec bash --noprofile --norc -c 'bun test toggle'"));
+    // Its watchdog stops it after five minutes.
+    assert!(shell.contains("    sleep 300\n"));
     assert!(shell.contains("BREAK_OLD='saved = true' BREAK_NEW='saved = false'"));
     // Two runs of five minutes, the lock's wait, two kills' ten seconds and
     // a minute for the rest.

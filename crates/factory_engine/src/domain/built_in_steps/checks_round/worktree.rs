@@ -186,6 +186,10 @@ lock=\"$worktree.lock\"
     )
 }
 
+/// The most of a break's test run's output its file holds, in KiB (bash's
+/// `ulimit -f` blocks).
+pub(super) const BREAK_OUT_KIB: u64 = 64 * 1024;
+
 /// How much of the end of each of a break's test runs is shown, in bytes:
 /// both runs' and the markers stay well under the 16 KiB a runtime that
 /// keeps one merged stream returns.
@@ -201,12 +205,17 @@ pub(super) const BREAK_TAIL_BYTES: usize = 1_500;
 /// and put the file back. The file is rewritten rather than copied back
 /// with its old time, so a build tool that goes by times builds it again.
 ///
-/// Each run is a process group of its own (`set -m`, with `timeout
-/// --foreground` so the test's children stay in it), killed whole once the
-/// run ends, so nothing the test left running prints after it. Only
-/// the last [`BREAK_TAIL_BYTES`] of its output are kept (in a file outside
-/// the worktree's tree, which `tail` keeps that small) and printed, on the
-/// standard error. The markers [`crate::domain::breaks::BreakRun`] reads
+/// Each run is a process group of its own (`set -m`), watched by a shell
+/// watchdog of its own group: past `timeout_secs` it marks the run hung,
+/// sends the whole group `TERM`, and `KILL` ten seconds later, so a test
+/// stops on time whatever children it started, and the run ends with
+/// [`crate::domain::breaks::HUNG_STATUS`]. Once the test's shell returns,
+/// on time or not, its group and the watchdog's are killed, so nothing the
+/// test left running outlives it or prints after it. Its output goes to a
+/// file outside the worktree's tree, held to [`BREAK_OUT_KIB`] (`ulimit -f`,
+/// a write past it failing rather than stopping the test), and only the
+/// last [`BREAK_TAIL_BYTES`] are printed, on the standard error. No
+/// `timeout` is used, so nothing depends on its flags. The markers [`crate::domain::breaks::BreakRun`] reads
 /// are printed last, on the standard output, each with `nonce`, so a
 /// runtime that merges both streams and keeps only their end still returns
 /// them, and nothing the test prints reads as one. A run stopped before its
@@ -241,21 +250,33 @@ mark() {{ marks=\"${{marks}}{MARKER} {nonce}: $1
 \"; }}
 finish() {{ printf '%s' \"$marks\"; exit 0; }}
 run_test() {{
+  rm -f \"$out\" \"$out.hung\"
   set -m
   (
-    timeout --foreground --kill-after=10 {timeout_secs} bash --noprofile --norc -c {command} 9>&- 2>&1 </dev/null |
-      tail -c {tail} >\"$out\"
-    exit \"${{PIPESTATUS[0]}}\"
+    trap '' XFSZ
+    ulimit -f {out_blocks}
+    exec bash --noprofile --norc -c {command} 9>&- >\"$out\" 2>&1 </dev/null
   ) &
   group=$!
+  (
+    sleep {timeout_secs}
+    : > \"$out.hung\"
+    kill -TERM -- \"-$group\" 2>/dev/null
+    sleep 10
+    kill -KILL -- \"-$group\" 2>/dev/null
+  ) 9>&- >/dev/null 2>&1 </dev/null &
+  watchdog=$!
   set +m
   wait \"$group\"
   ran=$?
   kill -KILL -- \"-$group\" 2>/dev/null
+  kill -KILL -- \"-$watchdog\" 2>/dev/null
+  wait \"$watchdog\" 2>/dev/null
+  if [ -e \"$out.hung\" ]; then ran={hung}; fi
   echo \"--- the test $1 exited with status $ran; the end of its output:\" >&2
-  cat \"$out\" >&2
+  tail -c {tail} \"$out\" >&2
   echo >&2
-  rm -f \"$out\"
+  rm -f \"$out\" \"$out.hung\"
   return $ran
 }}
 in_tree() {{
@@ -297,6 +318,8 @@ finish",
         new = shell_quote(&reported.new_text),
         nonce = nonce,
         tail = BREAK_TAIL_BYTES,
+        out_blocks = BREAK_OUT_KIB,
+        hung = crate::domain::breaks::HUNG_STATUS,
         take_lock = take_lock(lock_wait_secs),
         exports = context_exports(context),
     )
