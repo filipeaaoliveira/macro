@@ -7,13 +7,18 @@ import { runTitle } from '../core/run';
 import { createFocusRescue } from '../primitives/focus-rescue';
 import type { RunController } from '../primitives/run-controller';
 import { RunGate } from './run-dialog';
-import { RunCancel, RunContent, RunLoadFailed } from './shared/run-parts';
+import {
+  RunCancel,
+  RunContent,
+  RunLoadFailed,
+  RunRetry,
+} from './shared/run-parts';
 import { formatRunTime } from './shared/run-time';
 
 /**
  * The Run as a pane of its own, as the board and a Run's link open it: its
- * Steps scroll, and, for its owner, the Gate it waits on and Cancel run stay
- * pinned under them, as in the dialog.
+ * Steps scroll, and, for its owner, the Gate it waits on and Cancel run, or
+ * Retry run once it ended so, stay pinned under them, as in the dialog.
  */
 export function RunPane(props: { controller: RunController }) {
   let content: HTMLDivElement | undefined;
@@ -73,6 +78,11 @@ export function RunPane(props: { controller: RunController }) {
               <Show when={props.controller.owned() && !run().end}>
                 <div class="flex shrink-0 justify-end border-t border-edge-divider px-4 py-3">
                   <RunCancel controller={props.controller} />
+                </div>
+              </Show>
+              <Show when={props.controller.retriable()}>
+                <div class="flex shrink-0 justify-end border-t border-edge-divider px-4 py-3">
+                  <RunRetry controller={props.controller} />
                 </div>
               </Show>
             </>

@@ -112,7 +112,7 @@ const methods: Record<string, Partial<Record<SdkVerb, string>>> = {
     submitted: 'handBackFactoryStep answerFactoryGate',
     read: 'getFactoryRun',
     listed: 'listFactoryFlows listFactoryWaitingRuns listFactoryTaskRuns',
-    created: 'createFactoryRun startFactoryBenchmarkSuite',
+    created: 'createFactoryRun retryFactoryRun startFactoryBenchmarkSuite',
     cancelled: 'cancelFactoryRun',
     linked: 'linkFactoryRunTask',
     ran: 'fireFactoryAutomation',

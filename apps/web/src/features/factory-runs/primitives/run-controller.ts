@@ -1,6 +1,7 @@
 import { formatCompactRelativeTimestamp } from '@app/features/entity/utils/timestamp';
 import { createMemo, createSignal, onCleanup } from 'solid-js';
 import type {
+  RetryRunResult,
   RunActionResult,
   RunsContext,
   RunsSource,
@@ -8,10 +9,12 @@ import type {
 import {
   APPROVE_ANSWER,
   isQuestion,
+  isRetriable,
   isTampered,
   QUESTION_ANSWER,
   type Run,
   type RunStep,
+  retryOf,
   runStatus,
   type SteerAction,
 } from '../core/run';
@@ -32,19 +35,24 @@ function gateKey(step: Pick<RunStep, 'seq'>): number {
 /**
  * One open Run's state and actions, shared by the desktop dialog and the
  * phone sheet: the Run as last read, the Gate it waits on, the note being
- * written, and answering and cancelling with their locks.
+ * written, and answering, cancelling and retrying with their locks.
+ * `openRun` shows another Run in its place: the Run it retries, or its
+ * retry.
  */
 export function createRunController(
   context: Pick<
     RunsContext,
     | 'run'
+    | 'taskRuns'
     | 'answerGate'
     | 'replyToGate'
     | 'cancelRun'
+    | 'retryRun'
     | 'steerStep'
     | 'viewerId'
   >,
-  runId: () => string
+  runId: () => string,
+  openRun: (runId: string) => void = () => {}
 ) {
   const source: RunsSource<Run> = context.run(runId);
   const [note, setNote] = createSignal('');
@@ -68,6 +76,11 @@ export function createRunController(
   const [terminalNote, setTerminalNote] = createSignal('');
   // The steer on the wire, which locks the Terminal's controls.
   const [steering, setSteering] = createSignal<SteerAction>();
+  // A retry on the wire, and the Runs this person retried from here or the
+  // factory refused to retry: the Retry button goes once one is sent,
+  // before any list shows the retry.
+  const [retrying, setRetrying] = createSignal(false);
+  const [retried, setRetried] = createSignal<ReadonlySet<string>>(new Set());
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
   onCleanup(() => clearInterval(clock));
@@ -209,6 +222,56 @@ export function createRunController(
     return owner !== undefined && viewer !== undefined && owner === viewer;
   };
 
+  // The owner's Runs of the task, read once the Run ended as a retry can
+  // take over: its retry, if it has one, is among them.
+  const taskRuns = context.taskRuns(() => {
+    const run = source.data();
+    if (!run?.taskId || !owned() || !isRetriable(run, false)) return '';
+    return run.taskId;
+  });
+
+  const retriedBy = createMemo(() => {
+    const run = source.data();
+    const runs = taskRuns.data();
+    return run && runs ? retryOf(run, runs) : undefined;
+  });
+
+  const retriable = () => {
+    const run = source.data();
+    if (!run || !owned()) return false;
+    return isRetriable(run, retriedBy() !== undefined || retried().has(run.id));
+  };
+
+  // Another Run shown in this one's place starts clean: no note, Gate
+  // lock, focus rescue or Step Terminal of the Run before it.
+  const open = (next: string) => {
+    if (next === runId()) return;
+    setNote('');
+    setApproveControlFiles(false);
+    setAnsweredGate(undefined);
+    setRescue(undefined);
+    setCancelSent(false);
+    setTerminalSeq(undefined);
+    setTerminalNote('');
+    openRun(next);
+  };
+
+  const retry = async (): Promise<RetryRunResult | undefined> => {
+    const run = source.data();
+    if (!run || retrying() || !retriable()) return undefined;
+    setRetrying(true);
+    const result = await context.retryRun(run.id);
+    setRetrying(false);
+    // A retry that went through, and one the factory refused as retried
+    // already or not retriable (a Run that kept no Flow to walk again), is
+    // offered no more for this Run.
+    if (result.ok || result.reason === 'conflict') {
+      setRetried((ids) => new Set([...ids, run.id]));
+    }
+    if (result.ok) open(result.value.id);
+    return result;
+  };
+
   return {
     source,
     /** Whether the person owns the Run, and so acts on it. */
@@ -260,6 +323,15 @@ export function createRunController(
     answer,
     reply,
     cancel,
+    /** Whether the person can retry the Run: theirs, ended so, not retried. */
+    retriable,
+    /** Whether a retry is on the wire. */
+    retrying,
+    retry,
+    /** The Run's retry, when its task's Runs list it. */
+    retriedBy,
+    /** Shows another Run in this one's place, with none of this one's state. */
+    openRun: open,
     /** The Step whose Step Terminal is open, as last read. */
     terminalStep,
     openTerminal: (step: Pick<RunStep, 'seq'>) => {

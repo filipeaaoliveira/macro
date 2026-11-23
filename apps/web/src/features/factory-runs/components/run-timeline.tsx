@@ -6,10 +6,11 @@ import CaretDownIcon from '@icon/system/regular/caret-down.svg';
 import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
-import { fellShort, flowWordLabel, flowWordText } from '../core/flow-words';
+import { flowWordLabel, flowWordText, outcomeTone } from '../core/flow-words';
 import {
   type BaseRequiredChecks,
   type CheckRound,
+  type FiledTask,
   findingCounts,
   findingsOf,
   isQuestion,
@@ -21,12 +22,20 @@ import {
   roundStartingAt,
   type Steer,
   type SteerAction,
+  splitChildTasks,
   steerableSession,
   terminalState,
   USAGE_LIMIT_REASON,
   WHOLE_CHANGE,
 } from '../core/run';
 import { RULE_NAMES } from '../core/standing-rules';
+
+/** The classes of a Step's outcome badge, by its tone. */
+const OUTCOME_TONES = {
+  short: 'border-failure/30 text-failure',
+  sentBack: 'border-warning/40 text-warning-ink',
+  plain: undefined,
+} as const;
 
 export function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
   const entry = flowWordLabel(step.entry);
@@ -155,9 +164,15 @@ function TimelineStep(props: {
             <Badge
               variant="outline"
               size="xs"
+              data-outcome-tone={outcomeTone(
+                end().outcome,
+                props.step.gate?.answer?.answer
+              )}
               class={cn(
-                fellShort(end().outcome, props.step.gate?.answer?.answer) &&
-                  'border-failure/30 text-failure'
+                OUTCOME_TONES[
+                  outcomeTone(end().outcome, props.step.gate?.answer?.answer) ??
+                    'plain'
+                ]
               )}
             >
               {flowWordLabel(end().outcome)}
@@ -307,6 +322,9 @@ function TimelineStep(props: {
             </Show>
           </StepNote>
         )}
+      </Show>
+      <Show when={splitChildTasks(props.step).length > 0}>
+        <ChildTasksNote tasks={splitChildTasks(props.step)} />
       </Show>
       <For each={props.step.terminal?.steers}>
         {(steer) => <SteerNote steer={steer} />}
@@ -656,6 +674,26 @@ function FindingNote(props: { finding: ReviewFinding }) {
       <For each={findingResolution(props.finding)}>
         {(line) => (
           <span class="block whitespace-pre-wrap text-ink-muted">{line}</span>
+        )}
+      </For>
+    </StepNote>
+  );
+}
+
+/** The child tasks a split filed, each opening its task. */
+function ChildTasksNote(props: { tasks: FiledTask[] }) {
+  return (
+    <StepNote>
+      {t('factoryRuns.splitChildTasks', { count: props.tasks.length })}
+      <For each={props.tasks}>
+        {(task) => (
+          <a
+            data-split-child-task
+            class="block text-ink-muted underline"
+            href={buildSimpleEntityUrl({ type: 'task', id: task.id })}
+          >
+            {task.name}
+          </a>
         )}
       </For>
     </StepNote>

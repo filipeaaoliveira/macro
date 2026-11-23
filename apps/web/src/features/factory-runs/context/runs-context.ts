@@ -48,6 +48,23 @@ export type StartRunResult =
   | { ok: true; value: Run }
   | { ok: false; reason: StartRunFailure };
 
+/**
+ * Why a retry didn't start: the Run was retried already or can't be
+ * (`conflict`), the person's Queue is full, no Standing Role lets whoever
+ * acts start a Run, or the team's Factory Definition doesn't read.
+ */
+export type RetryRunFailure =
+  | 'conflict'
+  | 'queueFull'
+  | 'notInStandingRole'
+  | 'definitionUnreadable'
+  | 'failed';
+
+/** How a retry went: the new Run, or why there is none. */
+export type RetryRunResult =
+  | { ok: true; value: Run }
+  | { ok: false; reason: RetryRunFailure };
+
 export type StartRunInput = {
   taskId: string;
   flow: string;
@@ -122,6 +139,11 @@ export type RunsContext = {
    */
   replyToGate: (input: ReplyToGateInput) => Promise<RunActionResult>;
   cancelRun: (runId: string) => Promise<RunActionResult>;
+  /**
+   * Retries one of the person's Runs that ended `failed`, `infrastructure`
+   * or `blocked`: a new Run that starts where it stopped, on its branch.
+   */
+  retryRun: (runId: string) => Promise<RetryRunResult>;
   /**
    * Marks a Run that ended in success flawed, with why, in the person's
    * name. `conflict` means it did not end in success.

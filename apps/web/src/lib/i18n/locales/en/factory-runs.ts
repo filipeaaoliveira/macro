@@ -99,6 +99,10 @@ export default {
   reviewRoundReviewing: 'Reviewing…',
   reviewRoundNotOpened: 'Couldn’t start: {{failure}}',
   reviewBlockers: { one: '{{count}} blocker', other: '{{count}} blockers' },
+  splitChildTasks: {
+    one: 'Split into {{count}} child task',
+    other: 'Split into {{count}} child tasks',
+  },
   reviewFollowUps: {
     one: '{{count}} follow-up',
     other: '{{count}} follow-ups',
@@ -134,6 +138,21 @@ export default {
   keepRunning: 'Keep running',
   cancelFailed: 'Couldn’t cancel the run',
   alreadyEnded: 'This run has already ended',
+  retryRun: 'Retry run',
+  retryFailed: 'Couldn’t retry the run',
+  retryConflict: 'This run can’t be retried',
+  retryConflictDescription:
+    'It was retried already, or it no longer ended in a way a retry takes over',
+  retryQueueFull:
+    'Your queue is full: answer some runs in Waiting on you, or cancel one you no longer need, then retry the run.',
+  retryNotInStandingRole:
+    'Your team’s factory definition gives no standing role here that lets a run start, so this run can’t be retried.',
+  retry: 'Retry',
+  retryOf:
+    'This run retries an earlier one, on its branch, from where it stopped.',
+  openRetriedRun: 'Open the run it retries',
+  retriedIn: 'This run was retried.',
+  openRetry: 'Open its retry',
   // A Gate.
   gateTitle: 'Your answer is needed',
   question: 'Question',

@@ -2,7 +2,11 @@ import type { FetchWithTokenErrorCode } from '@core/util/fetchWithToken';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { type ResultError, throwOnErr } from '@core/util/result';
 import { useAgentRepositoriesQuery } from '@queries/agent-repositories/repositories';
-import { factoryClient, type StartRunErrorCode } from '@service-factory/client';
+import {
+  factoryClient,
+  type RetryRunErrorCode,
+  type StartRunErrorCode,
+} from '@service-factory/client';
 import type {
   GateModelReading as ApiGateModelReading,
   RunDetail,
@@ -15,6 +19,7 @@ import {
 } from '@tanstack/solid-query';
 import type { Accessor } from 'solid-js';
 import type {
+  RetryRunFailure,
   RunActionResult,
   RunsContext,
   RunsQueue,
@@ -198,6 +203,14 @@ export function toRun(detail: RunDetail): Run {
       agent: chosen.agent,
     })),
     taskTagsUnread: detail.taskTagsUnread ?? false,
+    // A service older than retries sends none.
+    retry: run.retry
+      ? {
+          retriedFrom: run.retry.retriedFrom,
+          branchOf: run.retry.branchOf,
+          firstSeq: run.retry.firstSeq,
+        }
+      : undefined,
     reviewRounds: detail.reviewRounds.map((round) => ({
       round: round.round,
       visit: round.visit,
@@ -346,6 +359,18 @@ function startFailure(
   if (codes.includes('UNREACHABLE_REPOSITORY')) return 'unreachableRepository';
   if (codes.includes('QUEUE_FULL')) return 'queueFull';
   if (codes.includes('DEFINITION_UNREADABLE')) return 'definitionUnreadable';
+  return 'failed';
+}
+
+/** Why a retry didn't start: the cause the service named, or a failure. */
+function retryFailure(
+  errors: ResultError<FetchWithTokenErrorCode | RetryRunErrorCode>[]
+): RetryRunFailure {
+  const codes = errors.map((error) => error.code);
+  if (codes.includes('QUEUE_FULL')) return 'queueFull';
+  if (codes.includes('NOT_IN_STANDING_ROLE')) return 'notInStandingRole';
+  if (codes.includes('DEFINITION_UNREADABLE')) return 'definitionUnreadable';
+  if (codes.includes('CONFLICT')) return 'conflict';
   return 'failed';
 }
 
@@ -523,6 +548,32 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
       );
       if (result.isErr()) return failure(result.error);
       return { ok: true, value: undefined };
+    },
+
+    async retryRun(runId) {
+      const result = await factoryClient.retryRun(runId);
+      // Retried or refused, the Run's lists and its insights read again: a
+      // retry shows in them, and a refusal means the Run moved on.
+      const reads = () =>
+        Promise.all([
+          refreshRun(client, runId, taskOfRun(client, runId)),
+          client.invalidateQueries({ queryKey: factoryRunKeys.insights._def }),
+        ]);
+      if (result.isErr()) {
+        fireAndForget(reads(), 'factory-runs');
+        return { ok: false, reason: retryFailure(result.error) };
+      }
+      const run = toRun(result.value);
+      seedRun(client, run);
+      const taskId = run.taskId;
+      if (taskId) {
+        client.setQueryData<Run[]>(
+          factoryRunKeys.task(taskId).queryKey,
+          (runs) => [run, ...(runs ?? []).filter((old) => old.id !== run.id)]
+        );
+      }
+      fireAndForget(reads(), 'factory-runs');
+      return { ok: true, value: run };
     },
 
     async markRunFlawed({ runId, reason }) {

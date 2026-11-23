@@ -1,6 +1,6 @@
 import { StaticMarkdownContext } from '@core/component/LexicalMarkdown/component/core/StaticMarkdown';
 import { isTouchDevice } from '@core/mobile/isTouchDevice';
-import { Show } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
 import { useRunsContext } from './context/runs-context';
 import { createRunController } from './primitives/run-controller';
 import { MobileRunSheet } from './views/mobile/run-sheet';
@@ -14,7 +14,13 @@ import { StepTerminalDialog } from './views/step-terminal-dialog';
  * Terminal either opens over it.
  */
 export function RunView(props: { runId: string; onClose: () => void }) {
-  const controller = createRunController(useRunsContext(), () => props.runId);
+  // A Run it links (the Run it retries, its retry) opens in its place.
+  const [opened, setOpened] = createSignal<string>();
+  const controller = createRunController(
+    useRunsContext(),
+    () => opened() ?? props.runId,
+    setOpened
+  );
 
   return (
     <StaticMarkdownContext>
@@ -33,10 +39,19 @@ export function RunView(props: { runId: string; onClose: () => void }) {
 
 /**
  * One Run as a pane of its own, as the board and a Run's link open it, with
- * its Step Terminal over it.
+ * its Step Terminal over it. A Run it links (the Run it retries, its retry)
+ * opens with `onOpenRun`, in the pane's place; without it, in the view's.
  */
-export function RunPageView(props: { runId: string }) {
-  const controller = createRunController(useRunsContext(), () => props.runId);
+export function RunPageView(props: {
+  runId: string;
+  onOpenRun?: (runId: string) => void;
+}) {
+  const [opened, setOpened] = createSignal<string>();
+  const controller = createRunController(
+    useRunsContext(),
+    () => (props.onOpenRun ? props.runId : (opened() ?? props.runId)),
+    (runId) => (props.onOpenRun ? props.onOpenRun(runId) : setOpened(runId))
+  );
 
   return (
     <StaticMarkdownContext>

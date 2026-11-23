@@ -344,6 +344,7 @@ function mount(options: {
     answerGate: vi.fn(),
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
+    retryRun: vi.fn(),
     markRunFlawed: vi.fn(),
     runScores: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
     labelRunScore: vi.fn(),
@@ -462,6 +463,35 @@ describe('RunInsightsView', () => {
         .closest('div')
         ?.parentElement?.querySelector('p')?.textContent
     ).toBe('50%');
+  });
+
+  it('says how many ended runs were retried, without counting them again', () => {
+    mount({ insights: november });
+    expect(screen.queryByText(/retried/)).toBeNull();
+    cleanup();
+
+    // The failed run was retried, and its retry is the running one.
+    mount({
+      insights: {
+        ...november,
+        totals: outcomes({ success: 1, failed: 1, running: 1, retried: 1 }),
+      },
+    });
+
+    expect(
+      screen.getByText(
+        '1 of these runs was retried after it ended. Its retry is a run of its own, counted by how it went.'
+      )
+    ).toBeTruthy();
+    // The retried failure stays one failure: one done of two ended, 50%.
+    expect(
+      screen
+        .getByText('Success rate')
+        .closest('div')
+        ?.parentElement?.querySelector('p')?.textContent
+    ).toBe('50%');
+    const outcomesList = screen.getByRole('list', { name: 'Run outcomes' });
+    expect(within(outcomesList).queryByText(/Retried/)).toBeNull();
   });
 
   it('says there is nothing to show for a period with no runs', () => {
