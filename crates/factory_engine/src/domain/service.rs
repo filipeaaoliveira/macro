@@ -1954,6 +1954,16 @@ where
         self.name_definition(actor, repo_url).await
     }
 
+    #[tracing::instrument(skip(self, actor, change))]
+    async fn propose_definition_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        change_id: Uuid,
+        change: crate::domain::definition::DefinitionChange,
+    ) -> Result<crate::domain::models::DefinitionPullRequest, FactoryError> {
+        self.propose_change(actor, change_id, change).await
+    }
+
     #[tracing::instrument(skip(self, actor))]
     async fn standing_rules(
         &self,

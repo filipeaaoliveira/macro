@@ -480,6 +480,18 @@ pub trait PullRequests: Send + Sync + 'static {
         repository: &CodeRepository,
         run_id: RunId,
     ) -> impl Future<Output = Result<BranchDeletion, Self::Err>> + Send;
+
+    /// Ask GitHub to create `branch` in `repository`, at one commit on top
+    /// of its base commit that writes its files. It only ever creates a
+    /// branch: one of that name already there, the default branch
+    /// included, is left as it is
+    /// ([`BranchCreation::Exists`](crate::domain::models::BranchCreation)).
+    fn create_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &crate::domain::models::NewBranch,
+    ) -> impl Future<Output = Result<crate::domain::models::BranchCreation, Self::Err>> + Send;
 }
 
 /// Asks the watch of a base branch's checks, which sets and clears its
@@ -979,6 +991,18 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: MacroUserIdStr<'static>,
         repo_url: Option<String>,
     ) -> impl Future<Output = Result<DefinitionSettings, FactoryError>> + Send;
+
+    /// Propose `change` to the Factory Definition of `actor`'s team as a
+    /// pull request on its repository, once the Definition reads with it,
+    /// and answer that pull request. The change `change_id` sent again
+    /// answers the pull request it opened. The actor must administer the
+    /// team.
+    fn propose_definition_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        change_id: Uuid,
+        change: crate::domain::definition::DefinitionChange,
+    ) -> impl Future<Output = Result<DefinitionPullRequest, FactoryError>> + Send;
 
     /// The Standing Rules `actor`'s Runs are created with: their team's
     /// Orchestrator Definition, or the factory's default, and the team's

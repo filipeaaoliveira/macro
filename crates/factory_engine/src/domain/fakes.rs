@@ -1826,6 +1826,8 @@ pub(crate) struct FakeGithubState {
     /// The commit `main` moves to as a merge is asked, as when another
     /// merge lands just before it.
     pub(crate) main_moves_on_merge: Option<String>,
+    /// The branches created, in order; one named again is there already.
+    pub(crate) created_branches: Vec<crate::domain::models::NewBranch>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -2320,6 +2322,26 @@ impl PullRequests for FakeGithub {
             .get(&(base.clone(), head.clone()))
             .or_else(|| state.merge_bases.get(&(head, base)))
             .cloned())
+    }
+
+    async fn create_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        branch: &crate::domain::models::NewBranch,
+    ) -> Result<crate::domain::models::BranchCreation, FakeGithubError> {
+        use crate::domain::models::BranchCreation;
+
+        let mut state = self.state();
+        let there = state
+            .created_branches
+            .iter()
+            .any(|created| created.name == branch.name);
+        if there {
+            return Ok(BranchCreation::Exists);
+        }
+        state.created_branches.push(branch.clone());
+        Ok(BranchCreation::Created)
     }
 }
 

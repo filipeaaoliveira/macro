@@ -38,6 +38,7 @@ use crate::outbound::local_agent::LocalAgent;
 
 mod board;
 mod control_files;
+mod definition_changes;
 mod flaws;
 mod orchestrator;
 mod standing_rules;
@@ -339,6 +340,15 @@ impl FactoryService for FakeService {
         actor: MacroUserIdStr<'static>,
         _repo_url: Option<String>,
     ) -> Result<DefinitionSettings, FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
+    async fn propose_definition_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _change_id: Uuid,
+        _change: crate::domain::definition::DefinitionChange,
+    ) -> Result<crate::domain::models::DefinitionPullRequest, FactoryError> {
         Err(self.refusing(&actor))
     }
 

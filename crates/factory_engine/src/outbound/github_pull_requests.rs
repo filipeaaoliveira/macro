@@ -779,4 +779,38 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             GithubBranchDeletion::Missing => BranchDeletion::Missing,
         })
     }
+
+    #[tracing::instrument(err, skip(self, owner, branch), fields(branch = %branch.name))]
+    async fn create_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &crate::domain::models::NewBranch,
+    ) -> Result<crate::domain::models::BranchCreation, GithubPullRequestsErr> {
+        use crate::domain::models::BranchCreation;
+        use github::outbound::github_oauth_client::GithubBranchCreation;
+
+        let token = self.token(owner).await?;
+        let files: Vec<(&str, &str)> = branch
+            .files
+            .iter()
+            .map(|(path, text)| (path.as_str(), text.as_str()))
+            .collect();
+        let creation = self
+            .github
+            .create_branch_with_files(
+                &token,
+                repository.owner(),
+                repository.name(),
+                &branch.base_commit,
+                &branch.name,
+                &branch.message,
+                &files,
+            )
+            .await?;
+        Ok(match creation {
+            GithubBranchCreation::Created => BranchCreation::Created,
+            GithubBranchCreation::Exists => BranchCreation::Exists,
+        })
+    }
 }
