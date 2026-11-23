@@ -1222,7 +1222,8 @@ impl FactoryError {
             | FactoryError::FiringRepeated
             | FactoryError::DefinitionNamed
             | FactoryError::NoDefinition
-            | FactoryError::DefinitionChangeNotOpened(_) => StatusCode::CONFLICT,
+            | FactoryError::DefinitionChangeNotOpened(_)
+            | FactoryError::DefinitionChangeClosed(_) => StatusCode::CONFLICT,
             FactoryError::TriggerUnavailable | FactoryError::SessionUnreachable => {
                 StatusCode::BAD_GATEWAY
             }
@@ -1271,6 +1272,13 @@ pub enum RunErrorCode {
     /// the Definition does not read with it, or the change itself is
     /// wrong; the message says which file and why.
     InvalidDefinitionChange,
+    /// GitHub did not create the change's branch or open its pull request
+    /// (a rule of the repository, or its branch already there with no pull
+    /// request); the message says why.
+    DefinitionChangeNotOpened,
+    /// The change's pull request was closed without merging; it is not
+    /// opened again.
+    DefinitionChangeClosed,
 }
 
 /// What a refused or failed request answers: a message, and for a refusal
@@ -1300,6 +1308,10 @@ impl FactoryError {
             FactoryError::DefinitionNamed => Some(RunErrorCode::DefinitionNamed),
             FactoryError::NoDefinition => Some(RunErrorCode::NoDefinition),
             FactoryError::InvalidDefinitionChange(_) => Some(RunErrorCode::InvalidDefinitionChange),
+            FactoryError::DefinitionChangeNotOpened(_) => {
+                Some(RunErrorCode::DefinitionChangeNotOpened)
+            }
+            FactoryError::DefinitionChangeClosed(_) => Some(RunErrorCode::DefinitionChangeClosed),
             _ => None,
         }
     }

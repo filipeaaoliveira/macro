@@ -347,7 +347,7 @@ impl FactoryService for FakeService {
         &self,
         actor: MacroUserIdStr<'static>,
         _change_id: Uuid,
-        _change: crate::domain::definition::DefinitionChange,
+        _change: crate::domain::definition::ProposedChange,
     ) -> Result<crate::domain::models::DefinitionPullRequest, FactoryError> {
         Err(self.refusing(&actor))
     }

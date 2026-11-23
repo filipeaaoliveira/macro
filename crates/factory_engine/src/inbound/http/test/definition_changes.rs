@@ -151,3 +151,93 @@ async fn a_change_that_does_not_read_is_refused_with_its_reason() {
     );
     assert!(github.state().created_branches.is_empty());
 }
+
+/// A file the Definition does not read and a change that changes nothing
+/// are the caller's to fix, with the same code and their reason.
+#[tokio::test]
+async fn an_unread_file_or_no_change_is_refused_with_its_reason() {
+    let repo = team();
+    let github = github();
+    let router = github_router(&repo, github.clone());
+    let unchanged_manifest = r#"{ "version": 1, "flows": ["notes"] }"#;
+
+    let mut answers = Vec::new();
+    for files in [
+        serde_json::json!({ "flows/other.json": "{}" }),
+        serde_json::json!({ "factory.json": unchanged_manifest }),
+    ] {
+        let refused = router
+            .clone()
+            .oneshot(call("POST", PATH, Caller::User("alice"), proposal(files)))
+            .await
+            .expect("response");
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        answers.push(body(refused).await);
+    }
+
+    assert_eq!(answers[0]["code"], "invalidDefinitionChange");
+    assert!(
+        answers[0]["message"].as_str().is_some_and(
+            |message| message.contains("flows/other.json is not a file the definition reads")
+        ),
+        "{}",
+        answers[0]
+    );
+    assert_eq!(answers[1]["code"], "invalidDefinitionChange");
+    assert!(
+        answers[1]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("leaves every file as it is")),
+        "{}",
+        answers[1]
+    );
+    assert!(github.state().created_branches.is_empty());
+}
+
+/// A member is refused before the change is looked at, however wrong it
+/// is.
+#[tokio::test]
+async fn a_member_is_refused_before_the_change_is_checked() {
+    let repo = team();
+    let router = github_router(&repo, github());
+
+    let refused = router
+        .oneshot(call(
+            "POST",
+            PATH,
+            Caller::User("eve"),
+            proposal(serde_json::json!({})),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+}
+
+/// The change sent again once its pull request was closed unmerged is a
+/// conflict that says so.
+#[tokio::test]
+async fn a_closed_change_sent_again_is_a_conflict() {
+    let repo = team();
+    let github = github();
+    let router = github_router(&repo, github.clone());
+    let change = proposal(serde_json::json!({
+        "factory.json": r#"{ "version": 1, "description": "Ours.", "flows": ["notes"] }"#,
+    }));
+    let opened = router
+        .clone()
+        .oneshot(call("POST", PATH, Caller::User("alice"), change.clone()))
+        .await
+        .expect("response");
+    assert_eq!(opened.status(), StatusCode::OK);
+    github.state().pull_request.as_mut().expect("opened").state =
+        crate::domain::models::PullRequestState::Closed;
+
+    let again = router
+        .oneshot(call("POST", PATH, Caller::User("alice"), change))
+        .await
+        .expect("response");
+
+    assert_eq!(again.status(), StatusCode::CONFLICT);
+    assert_eq!(body(again).await["code"], "definitionChangeClosed");
+}

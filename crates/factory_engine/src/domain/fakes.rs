@@ -1828,6 +1828,10 @@ pub(crate) struct FakeGithubState {
     pub(crate) main_moves_on_merge: Option<String>,
     /// The branches created, in order; one named again is there already.
     pub(crate) created_branches: Vec<crate::domain::models::NewBranch>,
+    /// GitHub's reason to decline creating a branch, as a ruleset's.
+    pub(crate) branch_refusal: Option<String>,
+    /// Whether GitHub refuses the person creating a branch.
+    pub(crate) branch_forbidden: bool,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -2340,8 +2344,55 @@ impl PullRequests for FakeGithub {
         if there {
             return Ok(BranchCreation::Exists);
         }
+        if state.branch_forbidden {
+            return Err(FakeGithubError::Refused);
+        }
+        if let Some(why) = state.branch_refusal.clone() {
+            return Ok(BranchCreation::Refused(why));
+        }
         state.created_branches.push(branch.clone());
         Ok(BranchCreation::Created)
+    }
+
+    /// The pull request is the one GitHub holds, once a branch of that name
+    /// was created; its title is its commit's.
+    async fn branch_pull_request(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<Option<crate::domain::models::BranchPullRequest>, FakeGithubError> {
+        use crate::domain::models::BranchPullRequest;
+
+        let state = self.state();
+        if state.find_fails {
+            return Err(FakeGithubError::Down);
+        }
+        let created = state
+            .created_branches
+            .iter()
+            .find(|created| created.name == branch);
+        let (Some(created), Some(pull_request)) = (created, state.pull_request.as_ref()) else {
+            return Ok(None);
+        };
+        Ok(Some(BranchPullRequest {
+            pull_request: DefinitionPullRequest {
+                number: pull_request.number,
+                title: created.message.clone(),
+                url: pull_request.url.clone(),
+                draft: false,
+            },
+            state: pull_request.state,
+        }))
+    }
+
+    fn access_refusal(error: &FakeGithubError) -> Option<crate::domain::models::AccessRefusal> {
+        use crate::domain::models::AccessRefusal;
+
+        match error {
+            FakeGithubError::Refused => Some(AccessRefusal::NotAllowed),
+            FakeGithubError::Down | FakeGithubError::TooLarge => None,
+        }
     }
 }
 

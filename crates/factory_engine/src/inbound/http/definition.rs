@@ -11,7 +11,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{FactoryRouterState, RunErrorResponse, in_person};
-use crate::domain::definition::DefinitionChange;
+use crate::domain::definition::ProposedChange;
 use crate::domain::models::{DefinitionPullRequest, DefinitionSettings, FactoryError};
 use crate::domain::ports::FactoryService;
 
@@ -97,7 +97,9 @@ where
 pub struct ProposeDefinitionChangeRequest {
     /// The change's id, a UUID the client makes once per change: sending
     /// the change again with it, as after a lost answer, answers the pull
-    /// request it opened rather than opening another.
+    /// request it opened, open or merged, without checking or writing
+    /// anything again (409 `definitionChangeClosed` once it was closed
+    /// unmerged).
     pub change_id: Uuid,
     /// What the change does, in a line: its pull request's title.
     pub title: String,
@@ -118,10 +120,13 @@ pub struct ProposeDefinitionChangeRequest {
 /// problem); each file written must be one it then reads. The change is
 /// committed on its own new branch, `definition-change/{changeId}`, never
 /// on the default branch, with the caller's GitHub account, which must
-/// push to the repository (400 `noPushAccess`); a person merges it. Only an
-/// admin of the team proposes, in their own signed-in session (403
-/// otherwise); a team that names no Definition has none to change (409
-/// `noDefinition`).
+/// push to the repository (400 `noPushAccess`); a person merges it. A
+/// branch GitHub will not create (a rule of the repository, or one of that
+/// name already there with no pull request) or a pull request it will not
+/// open is 409 `definitionChangeNotOpened`. Only an admin of the team
+/// proposes, in their own signed-in session (403 otherwise, before the
+/// change is checked); a team that names no Definition has none to change
+/// (409 `noDefinition`).
 #[utoipa::path(
     post,
     tag = "factory",
@@ -149,7 +154,11 @@ where
     Auth: MacroAuthorizationService,
 {
     let actor = in_person(caller.authorization, &headers)?;
-    let change = DefinitionChange::new(body.title, body.description, body.files)?;
+    let change = ProposedChange {
+        title: body.title,
+        description: body.description,
+        files: body.files,
+    };
     Ok(Json(
         state
             .service

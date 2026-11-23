@@ -3,6 +3,7 @@ use std::convert::Infallible;
 
 use super::{
     DefinitionChange, DefinitionChangeError, DefinitionChangeReadError, MAX_CHANGED_FILES,
+    ProposedChange,
 };
 use crate::domain::built_in_steps::built_in_step_use;
 use crate::domain::definition::{DefinitionError, DefinitionFiles, FactoryDefinition};
@@ -39,14 +40,14 @@ fn base() -> Files {
 }
 
 fn change(files: &[(&str, &str)]) -> DefinitionChange {
-    DefinitionChange::new(
-        "Add the plan flow".to_string(),
-        None,
-        files
+    DefinitionChange::new(ProposedChange {
+        title: "Add the plan flow".to_string(),
+        description: None,
+        files: files
             .iter()
             .map(|(path, text)| (path.to_string(), text.to_string()))
             .collect(),
-    )
+    })
     .expect("a change")
 }
 
@@ -160,13 +161,87 @@ fn a_change_has_a_title_and_some_files() {
         .map(|flow| (format!("flows/f{flow}.json"), REPLY.to_string()))
         .collect();
 
-    let blank = DefinitionChange::new("  ".to_string(), None, files.clone());
-    let none = DefinitionChange::new("Change".to_string(), None, BTreeMap::new());
-    let many = DefinitionChange::new("Change".to_string(), None, too_many);
-    let long = DefinitionChange::new("Change".to_string(), Some("x".repeat(16 * 1024 + 1)), files);
+    let proposed = |title: &str, description: Option<String>, files: BTreeMap<String, String>| {
+        DefinitionChange::new(ProposedChange {
+            title: title.to_string(),
+            description,
+            files,
+        })
+    };
+
+    let blank = proposed(" \n ", None, files.clone());
+    let none = proposed("Change", None, BTreeMap::new());
+    let many = proposed("Change", None, too_many);
+    let long = proposed("Change", Some("x".repeat(16 * 1024 + 1)), files.clone());
+    let lines = proposed(" Add a flow\r\nand its agents\r", None, files).expect("a change");
 
     assert!(matches!(blank, Err(DefinitionChangeError::Title)));
     assert!(matches!(none, Err(DefinitionChangeError::FileCount)));
     assert!(matches!(many, Err(DefinitionChangeError::FileCount)));
     assert!(matches!(long, Err(DefinitionChangeError::Description)));
+    assert_eq!(lines.title, "Add a flow and its agents");
+}
+
+/// What the change writes is checked as any Definition file is: a secret
+/// or a file too large is refused.
+#[tokio::test]
+async fn a_secret_or_a_file_too_large_in_a_change_is_refused() {
+    let secret = change(&[(
+        "agents.json",
+        r#"{
+            "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0", "model": "ghp_0123456789abcdefghijklmnop" } },
+            "roles": { "planner": ["primary"], "writer": ["primary"] }
+        }"#,
+    )]);
+    let large = change(&[("flows/reply.json", &" ".repeat(256 * 1024 + 1))]);
+
+    let secret = read(&secret).await;
+    let large = read(&large).await;
+
+    assert!(
+        matches!(
+            &secret,
+            Err(DefinitionChangeError::Invalid(DefinitionError::Secret { path, .. })) if path == "agents.json"
+        ),
+        "{secret:?}"
+    );
+    assert!(
+        matches!(
+            &large,
+            Err(DefinitionChangeError::Invalid(DefinitionError::TooLarge(path))) if path == "flows/reply.json"
+        ),
+        "{large:?}"
+    );
+}
+
+/// A file of the head that cannot be read at all, as one GitHub will not
+/// give, is one the change replaces: a broken Definition is repaired.
+#[tokio::test]
+async fn a_change_repairs_a_file_the_head_cannot_give() {
+    let replaced = change(&[("agents.json", AGENTS)]);
+
+    let repaired =
+        super::read_changed_definition(&Unreadable("agents.json"), &replaced, built_in_step_use)
+            .await;
+
+    assert!(repaired.is_ok(), "{repaired:?}");
+}
+
+/// [`base`], whose one file at the path it names GitHub will not give.
+struct Unreadable(&'static str);
+
+/// GitHub refusing a file.
+#[derive(Debug, thiserror::Error)]
+#[error("refused")]
+struct Refused;
+
+impl DefinitionFiles for Unreadable {
+    type Err = Refused;
+
+    async fn read(&self, path: &str) -> Result<Option<String>, Refused> {
+        if path == self.0 {
+            return Err(Refused);
+        }
+        Ok(base().0.get(path).cloned())
+    }
 }

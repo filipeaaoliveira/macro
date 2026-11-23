@@ -1959,7 +1959,7 @@ where
         &self,
         actor: MacroUserIdStr<'static>,
         change_id: Uuid,
-        change: crate::domain::definition::DefinitionChange,
+        change: crate::domain::definition::ProposedChange,
     ) -> Result<crate::domain::models::DefinitionPullRequest, FactoryError> {
         self.propose_change(actor, change_id, change).await
     }

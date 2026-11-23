@@ -2125,28 +2125,45 @@ read; a person merges), which a test reads with its bots replaced; `factory_defi
 An admin of the team changes the Definition from the factory's settings
 with `POST /settings/definition/changes` (`{"changeId", "title",
 "description"?, "files": {path: text}}`; `service/definition/change.rs`),
-which answers the pull request it opened (`DefinitionPullRequest`). Only an
-admin, in person from an account that is not an agent's (403 otherwise,
-as for naming the Definition), proposes: editing it changes the rules every
-Run of the team runs under. The change is checked as the Definition would
-read with it at its default branch's head (`read_changed_definition`, the
-files it writes read over the others with the same `read_definition` a
-Run's start and `factory_definition_check` use; 400
-`invalidDefinitionChange`, naming the file and the problem). Each file it
-writes must be one the Definition then reads (`NotRead`: a Flow's file
-the manifest does not name is never checked, so a secret could hide in
-it), at least one must differ from the head's, and it writes 1 to
-`MAX_CHANGED_FILES`. It is committed, with the admin's linked GitHub
-account, which must push to the repository (400 `noPushAccess`), as one
-commit over the head on its own new branch, `definition-change/{changeId}`
+which answers the pull request it opened (`DefinitionPullRequest`, with
+GitHub's own title and draft state). Only an admin, in person from an
+account that is not an agent's (403 otherwise, as for naming the
+Definition, and before the change is looked at), proposes: editing it
+changes the rules every Run of the team runs under. The change's pull
+request is looked up first, from its branch: once there, it is the answer
+whatever happened since (open or merged), and nothing is checked or
+written again, so a resend after a merge, or after the Definition moved
+on, is no error, and a late resend never brings back a branch that would
+undo later changes; one closed without merging is 409
+`definitionChangeClosed`, never opened again. Otherwise the change is
+checked as the Definition would read with it at its default branch's head
+(`read_changed_definition`, the files it writes read over the others with
+the same `read_definition` a Run's start and `factory_definition_check`
+use; 400 `invalidDefinitionChange`, naming the file and the problem). Each
+file it writes must be one the Definition then reads (`NotRead`: a Flow's
+file the manifest does not name is never checked, so a secret could hide
+in it), at least one must differ from the head's (a head file that cannot
+be read, too large or not text, differs, so a broken Definition can be
+repaired), it writes 1 to `MAX_CHANGED_FILES`, and its title is joined
+into one line. It is committed, with the admin's linked GitHub account,
+which must push to the repository (400 `noPushAccess`; a link GitHub no
+longer takes or a repository hidden from them is 400
+`unreachableDefinition`, `PullRequests::access_refusal`), as one commit
+over the head on its own new branch, `definition-change/{changeId}`
 (`PullRequests::create_branch`, which only ever creates a branch: one
 already there, the default branch included, is left as it is), and
 opened as a pull request onto the default branch, which a person merges;
-nothing is pushed to the default branch. The same `changeId` sent again
-finds its branch and answers the pull request it opened. A team that
-names no Definition has none to change (409 `noDefinition`). As for any
-pull request on the Definition, the change reaches Runs only once it
-merges.
+nothing is pushed to the default branch. A branch GitHub declines (a rule
+of the repository) or finds there already with no pull request (what it
+holds was never checked), and a pull request it will not open, are 409
+`definitionChangeNotOpened` with GitHub's reason. A team that names no
+Definition has none to change (409 `noDefinition`). As for any pull
+request on the Definition, the change reaches Runs only once it merges.
+Each proposal is checked alone, against the head it was made at: two
+pull requests that each read may not read once both merge (one adds a
+Flow, the other drops the Role it names). Run `factory_definition_check`
+in the Definition repository's CI, and require it on its default branch,
+so the merged result is checked too.
 
 Self-improvement (`src/domain/self_improvement.rs`): a team's Definition
 learns from the Runs that failed under it. A failure is a live Scorer's

@@ -8,9 +8,9 @@ use uuid::Uuid;
 
 use super::definition::{DEFINITION_REPO, FIRST, github_at, team_repo};
 use super::{FakeWorkflows, code_service, julia, teo};
-use crate::domain::definition::{DefinitionChange, DefinitionChangeError, DefinitionError};
+use crate::domain::definition::{DefinitionChangeError, DefinitionError, ProposedChange};
 use crate::domain::fakes::FakeGithub;
-use crate::domain::models::{DefinitionPullRequest, FactoryError, NewBranch};
+use crate::domain::models::{DefinitionPullRequest, FactoryError, NewBranch, PullRequestState};
 use crate::domain::ports::FactoryService;
 
 const CHANGE: Uuid = Uuid::from_u128(0xc4a9);
@@ -56,13 +56,12 @@ fn definition_github() -> FakeGithub {
     github
 }
 
-fn change(path: &str, text: &str) -> DefinitionChange {
-    DefinitionChange::new(
-        "Say what notes reply to".to_string(),
-        Some("Our notes flow replies.".to_string()),
-        BTreeMap::from([(path.to_string(), text.to_string())]),
-    )
-    .expect("a change")
+fn change(path: &str, text: &str) -> ProposedChange {
+    ProposedChange {
+        title: "Say what notes reply to".to_string(),
+        description: Some("Our notes flow replies.".to_string()),
+        files: BTreeMap::from([(path.to_string(), text.to_string())]),
+    }
 }
 
 /// An admin's change that the Definition reads with is committed on its
@@ -107,8 +106,8 @@ async fn an_admin_s_change_opens_a_pull_request_on_the_definition() {
     assert!(state.bodies[0].contains(FIRST), "{}", state.bodies[0]);
 }
 
-/// The same change sent again, as after a lost answer, finds its branch
-/// and answers the pull request it opened: GitHub opens no second one.
+/// The same change sent again, as after a lost answer, finds its pull
+/// request and answers it: nothing is checked, created or opened again.
 #[tokio::test]
 async fn a_change_sent_again_answers_its_pull_request() {
     let repo = team_repo();
@@ -118,7 +117,6 @@ async fn a_change_sent_again_answers_its_pull_request() {
         .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
         .await
         .expect("the change is opened");
-    github.state().open_refusal = Some("A pull request already exists".to_string());
 
     let again = service
         .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
@@ -128,6 +126,107 @@ async fn a_change_sent_again_answers_its_pull_request() {
     assert_eq!(again, first);
     assert_eq!(github.state().created_branches.len(), 1);
     assert_eq!(github.state().opened, 1);
+}
+
+/// Once its pull request merged, the change sent again answers it, though
+/// the Definition now holds the change, so it would change nothing.
+#[tokio::test]
+async fn a_merged_change_sent_again_answers_its_pull_request() {
+    let repo = team_repo();
+    let github = definition_github();
+    let service = code_service(&repo, &FakeWorkflows::default(), &github);
+    let first = service
+        .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
+        .await
+        .expect("the change is opened");
+    {
+        let mut state = github.state();
+        state.pull_request.as_mut().expect("opened").state = PullRequestState::Merged;
+        state.files.insert(
+            (FIRST.to_string(), "flows/notes.json".to_string()),
+            NOTES_CHANGED.to_string(),
+        );
+    }
+    let reads = github.state().file_reads.len();
+
+    let again = service
+        .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
+        .await
+        .expect("the merged pull request");
+
+    assert_eq!(again, first);
+    assert_eq!(github.state().file_reads.len(), reads);
+    assert_eq!(github.state().created_branches.len(), 1);
+    assert_eq!(github.state().opened, 1);
+}
+
+/// A change whose pull request was closed without merging is refused when
+/// sent again, and never opened anew.
+#[tokio::test]
+async fn a_closed_change_sent_again_is_refused() {
+    let repo = team_repo();
+    let github = definition_github();
+    let service = code_service(&repo, &FakeWorkflows::default(), &github);
+    service
+        .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
+        .await
+        .expect("the change is opened");
+    github.state().pull_request.as_mut().expect("opened").state = PullRequestState::Closed;
+
+    let again = service
+        .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
+        .await;
+
+    assert!(
+        matches!(&again, Err(FactoryError::DefinitionChangeClosed(url)) if url == &format!("{DEFINITION_REPO}/pull/7")),
+        "{again:?}"
+    );
+    assert_eq!(github.state().created_branches.len(), 1);
+    assert_eq!(github.state().opened, 1);
+}
+
+/// GitHub declining the branch (a rule of the repository, or the change's
+/// branch there already with no pull request) or refusing the person says
+/// so, and opens nothing.
+#[tokio::test]
+async fn a_branch_github_declines_opens_nothing() {
+    let repo = team_repo();
+    let github = definition_github();
+    let service = code_service(&repo, &FakeWorkflows::default(), &github);
+
+    github.state().branch_refusal = Some("Repository rule violations found".to_string());
+    let ruled = service
+        .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
+        .await;
+    github.state().branch_refusal = None;
+    github.state().branch_forbidden = true;
+    let forbidden = service
+        .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
+        .await;
+    github.state().branch_forbidden = false;
+    github.state().created_branches.push(NewBranch {
+        name: "definition-change/00000000-0000-0000-0000-00000000c4a9".to_string(),
+        base_commit: FIRST.to_string(),
+        message: "Something else".to_string(),
+        files: BTreeMap::new(),
+    });
+    let taken = service
+        .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
+        .await;
+
+    assert!(
+        matches!(&ruled, Err(FactoryError::DefinitionChangeNotOpened(why)) if why.contains("Repository rule violations found")),
+        "{ruled:?}"
+    );
+    assert!(
+        matches!(forbidden, Err(FactoryError::NoPushAccess)),
+        "{forbidden:?}"
+    );
+    assert!(
+        matches!(&taken, Err(FactoryError::DefinitionChangeNotOpened(why)) if why.contains("already there")),
+        "{taken:?}"
+    );
+    assert_eq!(github.state().opened, 0);
 }
 
 /// A change the Definition does not read with is refused with the
@@ -168,8 +267,17 @@ async fn only_an_admin_who_may_push_changes_a_named_definition() {
     let github = definition_github();
     let service = code_service(&repo, &FakeWorkflows::default(), &github);
 
+    // A member is refused before the change is looked at.
     let member = service
-        .propose_definition_change(teo(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
+        .propose_definition_change(
+            teo(),
+            CHANGE,
+            ProposedChange {
+                title: String::new(),
+                description: None,
+                files: BTreeMap::new(),
+            },
+        )
         .await;
     repo.agent_accounts
         .lock()

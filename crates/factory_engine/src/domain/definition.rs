@@ -35,7 +35,7 @@ mod test;
 mod change;
 pub use change::{
     DefinitionChange, DefinitionChangeError, DefinitionChangeReadError, MAX_CHANGED_FILES,
-    read_changed_definition,
+    ProposedChange, read_changed_definition,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

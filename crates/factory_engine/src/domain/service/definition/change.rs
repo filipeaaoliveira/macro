@@ -24,10 +24,12 @@ use uuid::Uuid;
 
 use super::{DefinitionHead, RepositoryFileError, RepositoryFiles, refused_file};
 use crate::domain::definition::{
-    DefinitionChange, DefinitionChangeError, DefinitionChangeReadError, read_changed_definition,
+    DefinitionChange, DefinitionChangeError, DefinitionChangeReadError, ProposedChange,
+    read_changed_definition,
 };
 use crate::domain::models::{
-    DefinitionPullRequest, FactoryError, NewBranch, OpenPullRequest, Opening,
+    AccessRefusal, BranchCreation, BranchPullRequest, DefinitionPullRequest, FactoryError,
+    NewBranch, OpenPullRequest, Opening, PullRequestState,
 };
 use crate::domain::ports::{
     PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
@@ -74,14 +76,21 @@ where
     /// the pull request of the change `change_id`: once the Definition
     /// reads with it at its default branch's head, commit it on the
     /// change's own branch and open its pull request, as `actor` on GitHub.
-    /// Sending the same change again answers the pull request it opened.
+    ///
+    /// The change's pull request, once there, is the answer whatever
+    /// happened since: the change sent again is neither checked nor written
+    /// again, so a change merged, or a Definition moved on, never refuses
+    /// it, and a late resend never brings back a branch that would undo
+    /// later changes. One closed without merging is refused, never opened
+    /// again.
     pub(in crate::domain::service) async fn propose_change(
         &self,
         actor: MacroUserIdStr<'static>,
         change_id: Uuid,
-        change: DefinitionChange,
+        change: ProposedChange,
     ) -> Result<DefinitionPullRequest, FactoryError> {
         let team = self.administered_team(&actor).await?;
+        let change = DefinitionChange::new(change)?;
         let repo_url = self
             .named_definition(Some(team))
             .await?
@@ -91,6 +100,16 @@ where
             access,
             commit,
         } = self.definition_head(&actor, &repo_url).await?;
+
+        let branch = change_branch(change_id);
+        let sent_before = self
+            .github
+            .branch_pull_request(&actor, &repository, &branch)
+            .await
+            .map_err(github_refusal::<G>)?;
+        if let Some(sent_before) = sent_before {
+            return answered(sent_before);
+        }
         if !access.can_push {
             return Err(FactoryError::NoPushAccess);
         }
@@ -116,12 +135,13 @@ where
                 DefinitionChangeReadError::Refused(error) => error.into(),
             })?;
 
-        // The branch is only ever created, never moved: a change sent again
-        // finds its own branch there and leaves it as it is.
-        let branch = change_branch(change_id);
+        // The branch is only ever created, never moved. One of the change's
+        // name already there with no pull request is not this change's to
+        // open: what it holds was never checked.
         let body = change_body(&change, &commit);
         let DefinitionChange { title, files, .. } = change;
-        self.github
+        let creation = self
+            .github
             .create_branch(
                 &actor,
                 &repository,
@@ -133,7 +153,20 @@ where
                 },
             )
             .await
-            .map_err(internal)?;
+            .map_err(github_refusal::<G>)?;
+        match creation {
+            BranchCreation::Created => {}
+            BranchCreation::Exists => {
+                return Err(FactoryError::DefinitionChangeNotOpened(format!(
+                    "the branch {branch} is already there with no pull request; send the change under a new changeId"
+                )));
+            }
+            BranchCreation::Refused(why) => {
+                return Err(FactoryError::DefinitionChangeNotOpened(format!(
+                    "GitHub did not create the branch {branch}: {why}"
+                )));
+            }
+        }
         let opening = self
             .github
             .open(
@@ -142,31 +175,49 @@ where
                 &OpenPullRequest {
                     branch: branch.clone(),
                     base: access.default_branch,
-                    title: title.clone(),
+                    title,
                     body,
                 },
             )
             .await
-            .map_err(internal)?;
-
-        // GitHub refuses a second pull request from the branch: the first
-        // one, opened by the change sent before, is the answer.
-        let found = self
-            .github
-            .find(&actor, &repository, &branch)
-            .await
-            .map_err(internal)?;
-        match (found, opening) {
-            (Some(pull_request), _) => Ok(DefinitionPullRequest {
-                number: pull_request.number,
-                title,
-                url: pull_request.url,
-                draft: false,
-            }),
-            (None, Opening::Refused(why)) => Err(FactoryError::DefinitionChangeNotOpened(why)),
-            (None, Opening::Opened) => Err(FactoryError::Internal(rootcause::report!(
-                "the definition change's pull request was opened but is not found"
-            ))),
+            .map_err(github_refusal::<G>)?;
+        if let Opening::Refused(why) = opening {
+            return Err(FactoryError::DefinitionChangeNotOpened(format!(
+                "GitHub did not open the pull request from {branch}: {why}"
+            )));
         }
+
+        let opened = self
+            .github
+            .branch_pull_request(&actor, &repository, &branch)
+            .await
+            .map_err(github_refusal::<G>)?
+            .ok_or_else(|| {
+                FactoryError::Internal(rootcause::report!(
+                    "the definition change's pull request was opened but is not found"
+                ))
+            })?;
+        Ok(opened.pull_request)
+    }
+}
+
+/// The answer to a change whose pull request is there: it, unless it was
+/// closed without merging.
+fn answered(sent_before: BranchPullRequest) -> Result<DefinitionPullRequest, FactoryError> {
+    match sent_before.state {
+        PullRequestState::Closed => Err(FactoryError::DefinitionChangeClosed(
+            sent_before.pull_request.url,
+        )),
+        PullRequestState::Open | PullRequestState::Merged => Ok(sent_before.pull_request),
+    }
+}
+
+/// `error` from GitHub, as the person proposing a change sees it: a
+/// refusal of their access says so, anything else is the factory's.
+fn github_refusal<G: PullRequests>(error: G::Err) -> FactoryError {
+    match G::access_refusal(&error) {
+        Some(AccessRefusal::NotAllowed) => FactoryError::NoPushAccess,
+        Some(AccessRefusal::Unreachable) => FactoryError::UnreachableDefinition,
+        None => FactoryError::Internal(internal(error)),
     }
 }

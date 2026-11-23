@@ -76,18 +76,36 @@ pub enum DefinitionChangeReadError<E> {
     Refused(#[from] DefinitionChangeError),
 }
 
+/// A change to a Factory Definition as a person sent it, not checked yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposedChange {
+    /// What it changes, in a line.
+    pub title: String,
+    /// Why, for the person who reviews it.
+    pub description: Option<String>,
+    /// The files it writes, by their path, each with its whole new text.
+    pub files: BTreeMap<String, String>,
+}
+
 impl DefinitionChange {
-    /// A change titled `title`, described by `description`, that writes
-    /// `files`.
-    pub fn new(
-        title: String,
-        description: Option<String>,
-        files: BTreeMap<String, String>,
-    ) -> Result<Self, DefinitionChangeError> {
+    /// `proposed`, once it writes a few files and names what it does in
+    /// one line: a title over several lines is joined into one, as a
+    /// pull request's title and a commit's first line are.
+    pub fn new(proposed: ProposedChange) -> Result<Self, DefinitionChangeError> {
+        let ProposedChange {
+            title,
+            description,
+            files,
+        } = proposed;
         if files.is_empty() || files.len() > MAX_CHANGED_FILES {
             return Err(DefinitionChangeError::FileCount);
         }
-        let title = title.trim().to_string();
+        let title = title
+            .split(['\r', '\n'])
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
         if title.is_empty() || title.len() > MAX_CHANGE_TITLE_BYTES {
             return Err(DefinitionChangeError::Title);
         }
@@ -156,12 +174,11 @@ pub async fn read_changed_definition<F: DefinitionFiles>(
         return Err(DefinitionChangeError::NotRead(unread.clone()).into());
     }
 
+    // A file the head holds that does not read (too large, not text) is
+    // one the change replaces, so a broken Definition can be repaired.
     for (path, text) in &change.files {
-        let before = base
-            .read(path)
-            .await
-            .map_err(DefinitionChangeReadError::Files)?;
-        if before.as_ref() != Some(text) {
+        let before = base.read(path).await;
+        if before.ok().flatten().as_ref() != Some(text) {
             return Ok(definition);
         }
     }
