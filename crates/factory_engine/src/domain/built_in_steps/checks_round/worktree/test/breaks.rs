@@ -40,7 +40,7 @@ impl Machine {
             5,
             &unknown(),
         ));
-        let run = BreakRun::read_streams(&text(&output.stdout), &text(&output.stderr), NONCE);
+        let run = BreakRun::read(&text(&output.stdout), NONCE);
         (output, run)
     }
 
@@ -254,4 +254,68 @@ fn a_path_through_a_symbolic_link_is_not_applied() {
         std::fs::read_to_string(outside.join("a.txt")).unwrap(),
         "pushed\n"
     );
+}
+
+/// The test's first run may swap its file for a symbolic link: the file is
+/// checked again just before the edit, so nothing outside is broken.
+#[test]
+fn a_file_swapped_for_a_link_by_the_first_run_is_not_applied() {
+    let machine = Machine::new("break-swapped");
+    machine.prepare(&machine.pushed);
+    let outside = machine.root.join("outside.txt");
+    std::fs::write(&outside, "pushed\n").unwrap();
+    let swaps = break_of(
+        "pushed",
+        "broken",
+        &format!(
+            "grep -qx pushed a.txt && {{ [ -L a.txt ] || {{ rm a.txt && ln -s {} a.txt; }}; }}",
+            outside.display()
+        ),
+    );
+
+    let (output, run) = machine.run_break(&swaps);
+
+    assert_eq!(run.status(), BreakStatus::NotApplied, "{output:?}");
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "pushed\n");
+}
+
+/// A test's run is a process group killed once it ends: a child it left
+/// running never acts after it.
+#[test]
+fn a_child_the_test_left_running_is_killed() {
+    let machine = Machine::new("break-child");
+    machine.prepare(&machine.pushed);
+    let late = machine.root.join("late");
+    let leaves = break_of(
+        "pushed",
+        "broken",
+        &format!(
+            "(sleep 2; touch {}) >/dev/null 2>&1 & grep -qx pushed a.txt",
+            late.display()
+        ),
+    );
+
+    let (output, run) = machine.run_break(&leaves);
+    std::thread::sleep(Duration::from_secs(4));
+
+    assert_eq!(run.status(), BreakStatus::Verified, "{output:?}");
+    assert!(!late.exists());
+}
+
+/// Only the end of a test's output is kept, however much it prints.
+#[test]
+fn only_the_end_of_a_test_s_output_is_kept() {
+    let machine = Machine::new("break-long");
+    machine.prepare(&machine.pushed);
+
+    let (output, run) = machine.run_break(&break_of(
+        "pushed",
+        "broken",
+        "yes 'a long line of test output' | head -c 3000000; echo the end; grep -qx pushed a.txt",
+    ));
+
+    assert_eq!(run.status(), BreakStatus::Verified, "{output:?}");
+    let said = text(&output.stderr);
+    assert!(said.len() < 2 * BREAK_TAIL_BYTES + 1_000, "{}", said.len());
+    assert!(said.contains("the end\n"));
 }

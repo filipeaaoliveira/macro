@@ -203,7 +203,7 @@ fn a_break_run_is_verified_only_when_the_test_passed_then_failed() {
         ),
         (
             "macro-break n1: unbroken 0\nmacro-break n1: broken 124\n",
-            BreakStatus::Verified,
+            BreakStatus::Hung,
         ),
         (
             "macro-break n1: unbroken 0\nmacro-break n1: broken 0\nmacro-break n1: restored\n",
@@ -267,13 +267,48 @@ fn only_the_markers_that_end_the_output_count() {
     let output = "macro-break n1: not-applied\n--- the test with the break exited with status 0\nmacro-break n1: unbroken 0\nmacro-break n1: broken 0\n";
 
     assert_eq!(run(output).status(), BreakStatus::NotReproduced);
+    // Markers after other output, as a merged stream returns them, count.
     assert_eq!(
-        BreakRun::read_streams(
-            "",
-            "noise\nmacro-break n1: unbroken 0\nmacro-break n1: broken 1\n",
-            "n1"
-        )
-        .status(),
+        run("noise\nmacro-break n1: unbroken 0\nmacro-break n1: broken 1\n").status(),
         BreakStatus::Verified
     );
+}
+
+/// A test that passed without its break and ran out of its time with it
+/// hung: that proves nothing, so it is not verified.
+#[test]
+fn a_break_whose_test_hangs_is_hung_not_verified() {
+    for code in [124, 137] {
+        let output = format!("macro-break n1: unbroken 0\nmacro-break n1: broken {code}\n");
+        assert_eq!(run(&output).status(), BreakStatus::Hung, "{code}");
+    }
+    assert_eq!(
+        run("macro-break n1: unbroken 0\nmacro-break n1: broken 101\n").status(),
+        BreakStatus::Verified
+    );
+}
+
+/// Unreadable lines take room only while there is some: readable breaks
+/// count toward the most a Step keeps, and push out the latest unreadable
+/// ones past it.
+#[test]
+fn readable_breaks_count_toward_the_most_kept() {
+    let mut work: String = (0..10).map(|at| format!("BREAK u{at}: no\n")).collect();
+    work.extend((0..45).map(|at| format!("BREAK t{at}: a.rs \"a\" -> \"b\" run `t`\n")));
+
+    let breaks = reported([work.as_str()]);
+
+    assert_eq!(breaks.len(), MAX_REPORTED);
+    let unreadable = breaks
+        .iter()
+        .filter(|kept| matches!(kept, Reported::Unreadable(_)))
+        .count();
+    assert_eq!(unreadable, 5);
+    assert_eq!(breaks[4].test(), "BREAK u4: no");
+
+    let mut only: String = (0..60).map(|at| format!("BREAK u{at}: no\n")).collect();
+    only.extend((0..50).map(|at| format!("BREAK t{at}: a.rs \"a\" -> \"b\" run `t`\n")));
+    let breaks = reported([only.as_str()]);
+    assert_eq!(breaks.len(), MAX_REPORTED);
+    assert!(breaks.iter().all(|kept| matches!(kept, Reported::Break(_))));
 }

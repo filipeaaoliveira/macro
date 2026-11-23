@@ -343,12 +343,12 @@ fn the_brief_says_which_records_block() {
     let brief = breaks_brief(&[record]);
 
     assert!(brief.contains(
-        "its latest record is `not reproduced`, `not run`, `not applied` or `unreadable`"
+        "its latest record is `not reproduced`, `hung`, `not run`, `not applied` or `unreadable`"
     ));
     assert!(
         brief.contains("A `dropped`, `unchecked` or `interrupted` record is no blocker by itself")
     );
-    assert!(brief.contains("exit status 124 or 137"));
+    assert!(brief.contains("only stops the code compiling"));
     assert!(brief.contains(
         "1. interrupted: its run ended before it said how the test went (step 2). Test `toggle 'x'`. Break: in `src/'a'.rs`"
     ));

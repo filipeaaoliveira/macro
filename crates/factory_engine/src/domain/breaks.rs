@@ -32,8 +32,9 @@ pub const BREAK_WORD: &str = "BREAK";
 /// The most breaks one Step runs; any more are recorded dropped.
 pub const MAX_BREAKS: usize = 20;
 
-/// The most break lines, readable or not, one Step keeps records of; any
-/// more are left out.
+/// The most break lines one Step keeps records of: readable ones count,
+/// and an unreadable one is kept only while there is room; any more are
+/// left out.
 pub const MAX_REPORTED: usize = 50;
 
 /// How a break's line is written, for a prompt or a reviewer.
@@ -124,12 +125,30 @@ pub fn reported<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<Reported> {
         let Some(read) = read_line(line) else {
             continue;
         };
-        let full = breaks.len() >= MAX_REPORTED;
+        let readable = breaks
+            .iter()
+            .filter(|kept| matches!(kept, Reported::Break(_)))
+            .count();
+        let room = match read {
+            Reported::Break(_) => readable < MAX_REPORTED,
+            Reported::Unreadable(_) => breaks.len() < MAX_REPORTED,
+        };
         match breaks.iter_mut().find(|kept| kept.test() == read.test()) {
             Some(kept) => *kept = read,
-            None if !full => breaks.push(read),
+            None if room => breaks.push(read),
             None => {}
         }
+    }
+    // A readable line taken past the room leaves out the latest unreadable
+    // ones, so the Step keeps at most [`MAX_REPORTED`].
+    while breaks.len() > MAX_REPORTED {
+        let Some(last) = breaks
+            .iter()
+            .rposition(|kept| matches!(kept, Reported::Unreadable(_)))
+        else {
+            break;
+        };
+        breaks.remove(last);
     }
     breaks
 }
@@ -281,24 +300,19 @@ pub struct BreakRun {
     pub restored: bool,
 }
 
+/// The exit statuses `timeout` gives a command it stopped: 124, or 137
+/// once it had to kill it.
+const TIMED_OUT: [i32; 2] = [124, 137];
+
 /// What begins each marker a break's run prints, before the run's nonce.
 pub const MARKER: &str = "macro-break";
 
 impl BreakRun {
-    /// Read the markers of the run `nonce` from the run's standard output,
-    /// or, when it holds none, from its standard error, where a runtime
-    /// that merges the streams may return them.
-    pub fn read_streams(stdout: &str, stderr: &str, nonce: &str) -> Self {
-        let run = Self::read(stdout, nonce);
-        if run == Self::read("", nonce) {
-            return Self::read(stderr, nonce);
-        }
-        run
-    }
-
-    /// Read the markers of the run `nonce` that end `output`: the lines at
-    /// its end that start with [`MARKER`] and the nonce, which the run
-    /// prints last. Nothing before them counts, so nothing the test
+    /// Read the markers of the run `nonce` that end `output`, its standard
+    /// output: the lines at its end that start with [`MARKER`] and the
+    /// nonce, which the run prints last, after the test's process group is
+    /// killed. The standard error is never read: the nonce is in the
+    /// command's arguments, which a test can see. Nothing before them counts, so nothing the test
     /// printed, which the run shows only the end of before its markers,
     /// reads as one, even with the nonce.
     pub fn read(output: &str, nonce: &str) -> Self {
@@ -331,7 +345,8 @@ impl BreakRun {
     }
 
     /// How the break went: verified only when the test passed without it
-    /// and failed with it; interrupted when the run ended before it said
+    /// and failed with it, not by running out of its time (hung, which
+    /// proves nothing); interrupted when the run ended before it said
     /// how the test went.
     pub fn status(&self) -> BreakStatus {
         if self.not_applied {
@@ -339,6 +354,7 @@ impl BreakRun {
         }
         match (self.unbroken, self.broken) {
             (Some(0), Some(0)) => BreakStatus::NotReproduced,
+            (Some(0), Some(code)) if TIMED_OUT.contains(&code) => BreakStatus::Hung,
             (Some(0), Some(_)) => BreakStatus::Verified,
             (Some(0), None) | (None, _) => BreakStatus::Interrupted,
             (Some(_), _) => BreakStatus::NotRun,

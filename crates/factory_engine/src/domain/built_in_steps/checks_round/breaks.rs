@@ -160,7 +160,7 @@ where
             }
             // A runtime may return both streams as one.
             let both = format!("{}\n{}", output.stdout, output.stderr);
-            let run = BreakRun::read_streams(&output.stdout, &output.stderr, &nonce);
+            let run = BreakRun::read(&output.stdout, &nonce);
             let marker = format!("{MARKER} {nonce}:");
             let shown: Vec<&str> = both
                 .lines()

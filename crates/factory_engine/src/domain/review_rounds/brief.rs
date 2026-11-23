@@ -275,12 +275,13 @@ pub fn breaks_brief(records: &[BreakRecord]) -> String {
                  commit whose checks passed. A break is `verified` only when the test passed \
                  without it and failed with it.\n\n\
                  A test the change adds is a blocker when it has no record below, or when its \
-                 latest record is `not reproduced`, `not run`, `not applied` or `unreadable`. \
+                 latest record is `not reproduced`, `hung`, `not run`, `not applied` or \
+                 `unreadable`. \
                  A `dropped`, `unchecked` or `interrupted` record is no blocker by itself: the \
                  factory could not run the break, so judge the test from the diff as you would \
                  any claim. Even a `verified` break proves nothing when it only stops the code \
-                 compiling, when its command does not run that test alone, or when the test \
-                 failed by hanging (exit status 124 or 137): raise a blocker then too.\n\n";
+                 compiling, or when its command does not run that test alone: raise a blocker \
+                 then too.\n\n";
     if latest.is_empty() {
         return format!("{intro}No step of this run reported a break: no test it adds has one.\n");
     }
@@ -345,6 +346,9 @@ fn agent_text(text: &str) -> String {
 fn status_words(status: BreakStatus) -> &'static str {
     match status {
         BreakStatus::Verified => "verified: it passed without the break and failed with it",
+        BreakStatus::Hung => {
+            "hung: it ran out of its time with the break, which proves nothing of what it checks"
+        }
         BreakStatus::NotReproduced => {
             "not reproduced: it passed with the break too, so it does not catch it"
         }

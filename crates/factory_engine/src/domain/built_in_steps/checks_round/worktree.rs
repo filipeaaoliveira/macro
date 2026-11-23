@@ -201,15 +201,21 @@ pub(super) const BREAK_TAIL_BYTES: usize = 1_500;
 /// and put the file back. The file is rewritten rather than copied back
 /// with its old time, so a build tool that goes by times builds it again.
 ///
-/// Each run's output goes to a file outside the worktree's tree, and only
-/// its last [`BREAK_TAIL_BYTES`] are printed, on the standard error. The
-/// markers [`crate::domain::breaks::BreakRun`] reads are printed last, on
-/// the standard output, each with `nonce`, so a runtime that merges both
-/// streams and keeps only their end still returns them, and nothing the
-/// test prints reads as one. A run stopped before its end prints none.
+/// Each run is a process group of its own (`set -m`, with `timeout
+/// --foreground` so the test's children stay in it), killed whole once the
+/// run ends, so nothing the test left running prints after it. Only
+/// the last [`BREAK_TAIL_BYTES`] of its output are kept (in a file outside
+/// the worktree's tree, which `tail` keeps that small) and printed, on the
+/// standard error. The markers [`crate::domain::breaks::BreakRun`] reads
+/// are printed last, on the standard output, each with `nonce`, so a
+/// runtime that merges both streams and keeps only their end still returns
+/// them, and nothing the test prints reads as one. A run stopped before its
+/// end prints none.
 ///
 /// A file that is not a regular file in the worktree, or whose path goes
-/// through a symbolic link, or that lacks the old text, is not broken; a
+/// through a symbolic link (checked again just before the edit, as the
+/// test's first run may have changed the tree), or that lacks the old text,
+/// is not broken; a
 /// read break's new text always differs from its old, so a replacement
 /// changes the file. The edit needs only POSIX `awk`, which reads the texts
 /// from its environment, as they are.
@@ -235,10 +241,19 @@ mark() {{ marks=\"${{marks}}{MARKER} {nonce}: $1
 \"; }}
 finish() {{ printf '%s' \"$marks\"; exit 0; }}
 run_test() {{
-  timeout --kill-after=10 {timeout_secs} bash --noprofile --norc -c {command} 9>&- >\"$out\" 2>&1
+  set -m
+  (
+    timeout --foreground --kill-after=10 {timeout_secs} bash --noprofile --norc -c {command} 9>&- 2>&1 </dev/null |
+      tail -c {tail} >\"$out\"
+    exit \"${{PIPESTATUS[0]}}\"
+  ) &
+  group=$!
+  set +m
+  wait \"$group\"
   ran=$?
+  kill -KILL -- \"-$group\" 2>/dev/null
   echo \"--- the test $1 exited with status $ran; the end of its output:\" >&2
-  tail -c {tail} \"$out\" >&2
+  cat \"$out\" >&2
   echo >&2
   rm -f \"$out\"
   return $ran
@@ -259,6 +274,7 @@ run_test 'without the break'
 unbroken=$?
 mark \"unbroken $unbroken\"
 [ \"$unbroken\" -eq 0 ] || finish
+in_tree || {{ mark 'not-applied: no such file'; finish; }}
 cat \"$file\" > \"$saved\" || exit 1
 BREAK_OLD={old} BREAK_NEW={new} awk '
   !done {{ at = index($0, ENVIRON[\"BREAK_OLD\"]) }}

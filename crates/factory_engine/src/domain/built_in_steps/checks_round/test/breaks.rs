@@ -79,9 +79,9 @@ async fn a_break_whose_test_fails_is_recorded_verified_on_the_checked_commit() {
     // In the round's worktree, under its lock.
     let shell = &sent[0].command.command;
     assert!(shell.contains(&format!("worktree=\"$base/{round}\"")));
-    assert!(
-        shell.contains("timeout --kill-after=10 300 bash --noprofile --norc -c 'bun test toggle'")
-    );
+    assert!(shell.contains(
+        "timeout --foreground --kill-after=10 300 bash --noprofile --norc -c 'bun test toggle'"
+    ));
     assert!(shell.contains("BREAK_OLD='saved = true' BREAK_NEW='saved = false'"));
     // Two runs of five minutes, the lock's wait, two kills' ten seconds and
     // a minute for the rest.
@@ -221,9 +221,9 @@ async fn a_break_runs_with_the_checks_environment() {
     assert_eq!(breaks(&repo, input)[0].status, BreakStatus::Verified);
 }
 
-/// The markers may come back in either stream, as a runtime that merges
-/// them returns them, and the test's output kept is both streams' without
-/// the markers.
+/// The markers end the standard output even where a runtime merges both
+/// streams into it, and the test's output kept is the streams' without the
+/// markers.
 #[tokio::test]
 async fn markers_read_from_a_merged_stream() {
     let agent = working(
@@ -232,11 +232,11 @@ async fn markers_read_from_a_merged_stream() {
             ran(0, "12 passed"),
             Ok(SessionCommandOutput {
                 exit_code: 0,
-                stdout: String::new(),
-                stderr: format!(
+                stdout: format!(
                     "{}\n--- the test with the break exited with status 1\n{VERIFIED}",
                     "x".repeat(20_000)
                 ),
+                stderr: String::new(),
             }),
         ],
         Vec::new(),
@@ -495,4 +495,56 @@ async fn a_break_with_no_time_left_is_dropped() {
         records[0].output,
         "The step's time ran out before this break ran."
     );
+}
+
+/// Markers only on the standard error are never read: the run is
+/// interrupted, as a test that saw the nonce could have printed them.
+#[tokio::test]
+async fn markers_only_on_the_standard_error_leave_the_break_interrupted() {
+    let agent = working(
+        BREAK,
+        vec![
+            ran(0, "12 passed"),
+            Ok(SessionCommandOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: VERIFIED.to_string(),
+            }),
+        ],
+        Vec::new(),
+    );
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+
+    let first = run_in_session(&agent, &github, &repo, input).await;
+
+    assert!(first.is_err());
+    assert_eq!(breaks(&repo, input)[0].status, BreakStatus::Interrupted);
+}
+
+/// A test that ran out of its time with the break hung: it is recorded so,
+/// never verified.
+#[tokio::test]
+async fn a_break_whose_test_hangs_is_recorded_hung() {
+    let agent = working(
+        BREAK,
+        vec![
+            ran(0, "12 passed"),
+            ran(
+                0,
+                "macro-break NONCE: unbroken 0\nmacro-break NONCE: broken 124\nmacro-break NONCE: restored\n",
+            ),
+        ],
+        Vec::new(),
+    );
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+
+    run_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert_eq!(breaks(&repo, input)[0].status, BreakStatus::Hung);
 }
