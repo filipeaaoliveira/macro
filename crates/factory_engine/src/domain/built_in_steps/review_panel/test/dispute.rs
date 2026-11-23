@@ -12,6 +12,7 @@ use factory_records::domain::review_rounds::{
 
 use super::{
     CORRECTNESS, PASSES, Reviewer, review, reviewing, second_round, second_round_finding, steps,
+    steps_at,
 };
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::StepName;
@@ -23,6 +24,11 @@ use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundsImpl};
 const FIX_DISPUTES: &str = "Fixed a.rs; b.rs asks for a run against production.\n```json\n\
     {\"blockers\": [{\"number\": 1, \"status\": \"fixed\"}, {\"number\": 2, \"status\": \
     \"disputed\", \"reason\": \"The sandbox cannot reach production\"}]}\n```";
+
+/// The fix's hand back: its one Blocker disputed.
+const DISPUTES_ALL: &str = "a.rs already returns the error.\n```json\n\
+    {\"blockers\": [{\"number\": 1, \"status\": \"disputed\", \"reason\": \
+    \"The caller returns the error\"}]}\n```";
 
 fn fix() -> StepName {
     StepName::try_from("fix".to_string()).expect("valid")
@@ -586,4 +592,29 @@ fn disputing(reason: &str) -> String {
             .to_string()
             .replace('`', "\\u0060");
     format!("Disputed.\n```json\n{block}\n```")
+}
+
+/// A fix that disputes every Blocker changes nothing: it may leave the
+/// Run's branch at the commit the round reviewed, and ends `done`.
+#[tokio::test]
+async fn a_fix_that_disputes_every_blocker_may_leave_the_branch_where_it_was() {
+    let repo = FakeRepo::default();
+    let (run_id, _) = second_round(&repo, &["a.rs"], true).await;
+    repo.with_step_role(StepKey { run_id, seq: 3 }, CORRECTNESS.clone());
+    let rounds = repo.review_rounds(run_id).await.expect("rounds");
+    let reviewed = rounds[0].head_sha.clone().expect("a reviewed head");
+    let entry = EntryId::try_from("fix".to_string()).expect("entry");
+    repo.start_step(StepKey { run_id, seq: 4 }, &entry, 1)
+        .await
+        .expect("start");
+    let fixer = Reviewer::answering(("done", DISPUTES_ALL), ("done", DISPUTES_ALL));
+
+    let report = steps_at(&fixer, &repo, &reviewed)
+        .run(&fix(), fixing(run_id, &rounds[0]))
+        .await
+        .expect("fix");
+
+    assert_eq!(report.outcome, Outcome::done(), "{}", report.output);
+    let rounds = repo.review_rounds(run_id).await.expect("rounds");
+    assert_eq!(rounds[0].findings[0].fix_status, Some(FixStatus::Disputed));
 }

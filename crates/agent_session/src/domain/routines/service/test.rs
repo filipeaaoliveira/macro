@@ -300,6 +300,7 @@ impl Fixture {
             source: SessionSource::Routine,
             visibility: SessionVisibility::Unlisted,
             repo_url: None,
+            work_branch: None,
         }
     }
 
@@ -370,6 +371,17 @@ async fn preparation_hands_the_runtime_the_session_s_repository() {
 }
 
 #[tokio::test]
+async fn external_preparation_names_the_work_branch() {
+    let fx = Fixture::new(false);
+    let mut command = fx.prepare();
+    command.repo_url = Some("https://github.com/macro/app".to_owned());
+    command.work_branch = Some("factory/run".to_owned());
+    fx.service.prepare(command).await.unwrap();
+    let requests = fx.openings.external.lock().unwrap();
+    assert_eq!(requests[0].work_branch.as_deref(), Some("factory/run"));
+}
+
+#[tokio::test]
 async fn external_preparation_uses_requested_identity_and_model() {
     for override_model in [None, Some("override-model".to_owned())] {
         let fx = Fixture::new(false);
@@ -385,6 +397,7 @@ async fn external_preparation_uses_requested_identity_and_model() {
             &[RequestedExternalSession {
                 origin: trigger_context::TriggerOrigin::Unknown,
                 repo_url: None,
+                work_branch: None,
                 session_id: fx.session.id,
                 bot_id: fx.session.bot_id,
                 owner: fx.session.owner_user().unwrap().clone(),

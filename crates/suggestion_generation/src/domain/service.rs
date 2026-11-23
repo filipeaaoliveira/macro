@@ -1138,6 +1138,7 @@ where
                 billing: SessionBilling::NonBillable,
                 instructions: None,
                 repo_url: None,
+                work_branch: None,
             })
             .await?;
         self.sessions

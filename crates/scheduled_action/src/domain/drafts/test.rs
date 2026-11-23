@@ -21,12 +21,14 @@ pub(super) fn owner() -> MacroUserIdStr<'static> {
     MacroUserIdStr::parse_from_str(OWNER).unwrap()
 }
 
+/// A draft's row: its owner, its agent, what it handed back and when.
+pub(super) type DraftRow = (MacroUserIdStr<'static>, BotId, HandedBack, DateTime<Utc>);
+
 /// Drafts in memory, as the table keeps them; a background draft's row
 /// also has its part in `jobs`.
 #[derive(Default)]
 pub(super) struct Rows {
-    pub(super) drafts:
-        Mutex<HashMap<Uuid, (MacroUserIdStr<'static>, BotId, HandedBack, DateTime<Utc>)>>,
+    pub(super) drafts: Mutex<HashMap<Uuid, DraftRow>>,
     pub(super) jobs: Mutex<HashMap<Uuid, JobRow>>,
     pub(super) finished: Mutex<Vec<Uuid>>,
     /// How many writes of a job's result fail before one succeeds.

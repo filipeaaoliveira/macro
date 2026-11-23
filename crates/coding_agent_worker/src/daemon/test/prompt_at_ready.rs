@@ -8,6 +8,7 @@
 //! watches every second of it.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use agent_session::domain::model::AgentSessionId;
@@ -64,10 +65,7 @@ impl ControlPlane {
     /// Subscribe to live events and take the logged ones after `cursor`:
     /// exactly after that event when it is logged, else from the time the
     /// UUIDv7 encodes.
-    fn resume(
-        &self,
-        cursor: Option<Uuid>,
-    ) -> (Vec<(Uuid, String)>, broadcast::Receiver<(Uuid, String)>) {
+    fn resume(&self, cursor: Option<Uuid>) -> (Vec<Published>, broadcast::Receiver<Published>) {
         let published = self.published.lock().unwrap();
         let live = self.live.subscribe();
         let Some(cursor) = cursor else {
@@ -84,6 +82,9 @@ impl ControlPlane {
         (replay, live)
     }
 }
+
+/// A published event: its id and its JSON.
+type Published = (Uuid, String);
 
 /// When a UUIDv7 was minted, as Unix seconds and nanoseconds.
 fn minted(id: &Uuid) -> Option<(u64, u32)> {
@@ -252,13 +253,30 @@ async fn serve_gateway(listener: TcpListener, plane: Arc<ControlPlane>, ready: A
 async fn computer_ready(
     hold_streams: bool,
 ) -> (Daemon, Arc<ControlPlane>, mpsc::UnboundedReceiver<String>) {
+    computer_ready_in(hold_streams, None).await
+}
+
+/// [`computer_ready`], serving `workspace` (its path and repository) when
+/// one is given, else the current directory with none.
+async fn computer_ready_in(
+    hold_streams: bool,
+    workspace: Option<(PathBuf, String)>,
+) -> (Daemon, Arc<ControlPlane>, mpsc::UnboundedReceiver<String>) {
     let gateway = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let storage = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mut config: Config = toml::from_str(include_str!("../../../config.example.toml")).unwrap();
     config.macro_api.api_url = format!("http://{}", gateway.local_addr().unwrap());
     config.macro_api.storage_url = format!("http://{}", storage.local_addr().unwrap());
-    config.workspace.path = std::env::current_dir().unwrap();
-    config.workspace.repo_url = None;
+    match workspace {
+        Some((path, repo_url)) => {
+            config.workspace.path = path;
+            config.workspace.repo_url = Some(repo_url);
+        }
+        None => {
+            config.workspace.path = std::env::current_dir().unwrap();
+            config.workspace.repo_url = None;
+        }
+    }
     config.harness.command = "python3".to_owned();
     config.harness.args = vec!["-c".to_owned(), include_str!("../test_acp.py").to_owned()];
     let credentials = HarnessCredentials {
@@ -299,6 +317,7 @@ fn session_request(session: AgentSessionId) -> macro_event_broker::Event<AgentTr
     macro_event_broker::Event::new(AgentTriggerTopicEvent::New(
         NewAgentSessionEvent::Requested(AgentSessionRequestedEvent {
             repo_url: None,
+            work_branch: None,
             bot_id: AGENT,
             session_id: session,
             owner: REQUESTER.to_owned(),
@@ -358,6 +377,60 @@ async fn an_event_delivered_twice_is_handled_once() {
         later.to_string(),
         "the repeat was handled again"
     );
+
+    daemon.stop().await;
+}
+
+/// A factory Step's session names its Run's branch: it is created in that
+/// branch's worktree beside the shared workspace, never in the workspace.
+#[tokio::test]
+async fn a_session_naming_its_work_branch_is_created_in_the_branch_s_worktree() {
+    const REPOSITORY: &str = "https://github.com/org/project";
+    let root = tempfile::tempdir().unwrap();
+    let checkout = root.path().join("checkout");
+    std::fs::create_dir(&checkout).unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&checkout)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "--initial-branch=main"]);
+    git(&[
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "user.name=T",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "initial",
+    ]);
+    let checkout = checkout.canonicalize().unwrap();
+    let (daemon, plane, mut created) =
+        computer_ready_in(false, Some((checkout.clone(), REPOSITORY.to_owned()))).await;
+
+    let session = AgentSessionId::new_from_uuid(Uuid::now_v7());
+    let mut request = session_request(session);
+    if let AgentTriggerTopicEvent::New(NewAgentSessionEvent::Requested(requested)) =
+        &mut request.event
+    {
+        requested.repo_url = Some(REPOSITORY.to_owned());
+        requested.work_branch = Some("factory/run".to_owned());
+    }
+    plane.publish(&request);
+
+    let body = tokio::time::timeout(Duration::from_secs(10), created.recv())
+        .await
+        .expect("macrod creates the session")
+        .unwrap();
+    let create: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let worktree = crate::branch_worktrees::directory(&checkout).join("factory+run");
+    assert_eq!(create["workspace"], worktree.to_string_lossy().as_ref());
+    assert!(worktree.join(".git").exists());
 
     daemon.stop().await;
 }

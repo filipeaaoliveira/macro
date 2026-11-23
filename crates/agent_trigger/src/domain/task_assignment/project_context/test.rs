@@ -102,16 +102,15 @@ fn membership(project: Option<InitiativeId>) -> MockProjectMemberships {
     memberships
 }
 
-fn allowed(
-    _: &InitiativeEventActor,
-    project: InitiativeId,
-    task: &str,
-) -> std::pin::Pin<
+/// What an access check answers with.
+type Receipts = std::pin::Pin<
     Box<
         dyn Future<Output = std::result::Result<Option<(ViewReceipt, EditReceipt)>, AccessError>>
             + Send,
     >,
-> {
+>;
+
+fn allowed(_: &InitiativeEventActor, project: InitiativeId, task: &str) -> Receipts {
     let result = (
         receipt(&project.to_string(), EntityType::Initiative),
         receipt(task, EntityType::Document),

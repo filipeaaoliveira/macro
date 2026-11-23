@@ -16,6 +16,7 @@
 //! `agent_trigger.new` delivery opens a session and forwards the first prompt;
 //! `agent_trigger.existing` deliveries forward follow-up messages.
 
+mod branch_worktrees;
 mod computer;
 mod config;
 mod daemon;

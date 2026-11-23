@@ -4,16 +4,18 @@ use std::sync::Mutex;
 
 use super::*;
 
+/// One link the stub keeps: its session, pull request key, source and
+/// what it was linked at.
+type StubLink = (
+    AgentSessionId,
+    String,
+    PullRequestLinkSource,
+    Option<String>,
+);
+
 #[derive(Default)]
 struct StubLinks {
-    links: Mutex<
-        Vec<(
-            AgentSessionId,
-            String,
-            PullRequestLinkSource,
-            Option<String>,
-        )>,
-    >,
+    links: Mutex<Vec<StubLink>>,
 }
 
 impl StubLinks {

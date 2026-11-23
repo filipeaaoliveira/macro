@@ -333,8 +333,7 @@ async fn a_drafted_suggestion_without_its_card_still_closes(pool: PgPool) {
             .await
             .unwrap(),
     );
-    sqlx::query("DELETE FROM suggestion WHERE user_id = $1")
-        .bind(USER_A)
+    sqlx::query!("DELETE FROM suggestion WHERE user_id = $1", USER_A)
         .execute(&pool)
         .await
         .unwrap();

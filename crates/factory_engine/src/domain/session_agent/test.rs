@@ -648,6 +648,7 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
     );
     assert_eq!(prepared[0].visibility, SessionVisibility::Hidden);
     assert_eq!(prepared[0].repo_url, None);
+    assert_eq!(prepared[0].work_branch, None);
     assert!(sessions.deleted.lock().expect("deleted").is_empty());
     let prompts = sessions.prompt_calls.lock().expect("prompts");
     assert_eq!(prompts.len(), 1);
@@ -694,7 +695,8 @@ async fn a_step_of_a_run_under_a_definition_takes_the_agents_it_kept() {
 }
 
 /// A Step of a Run that works on a repository opens its session in it, so
-/// the session's runtime checks the repository out.
+/// the session's runtime checks the repository out, on the Run's branch: a
+/// runtime that shares one checkout gives the branch a worktree of its own.
 #[tokio::test]
 async fn a_step_on_a_repository_opens_its_session_in_it() {
     let repo = FakeRepo::default();
@@ -703,6 +705,7 @@ async fn a_step_on_a_repository_opens_its_session_in_it() {
         repo_url: Some("https://github.com/macro/app".to_string()),
         ..plan_task(&repo).await
     };
+    let key = task.key;
 
     agent(&sessions, &repo).answer(task).await.expect("answer");
 
@@ -710,6 +713,10 @@ async fn a_step_on_a_repository_opens_its_session_in_it() {
     assert_eq!(
         prepared[0].repo_url.as_deref(),
         Some("https://github.com/macro/app")
+    );
+    assert_eq!(
+        prepared[0].work_branch.as_deref(),
+        Some(format!("factory/{}", key.run_id).as_str())
     );
 }
 

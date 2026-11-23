@@ -199,6 +199,7 @@ fn answer_between_bridges(
     let handed = adopted.and_then(|agent| {
         agent
             .hand_off(turns.snapshot())
+            .map(|handed| handed.with_workplaces(turns.workplaces_state()))
             .inspect_err(|error| tracing::warn!(error = %error, "could not hand the agent off"))
             .ok()
     });

@@ -137,7 +137,7 @@ impl Daemon {
             EventStreamClient::new(&config.macro_api, &credentials),
             runtime_connected.clone(),
         )));
-        let executor = Dispatcher::new(api, runtime, config.workspace.clone());
+        let executor = Dispatcher::new(api, runtime, config.workspace.clone(), turns.clone());
         #[cfg(unix)]
         let executor = executor.with_workspaces(workspaces);
         #[cfg(unix)]

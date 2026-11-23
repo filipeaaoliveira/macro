@@ -290,6 +290,7 @@ where
                 billing: agent_session::domain::model::SessionBilling::Billable,
                 instructions: None,
                 repo_url: None,
+                work_branch: None,
             })
             .await
             .map_err(|error| RunStartError::NotStarted(rootcause::report!("{error:?}")))?;
