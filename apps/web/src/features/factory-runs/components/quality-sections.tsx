@@ -3,6 +3,7 @@ import {
   Metric,
 } from '@app/features/scheduling/components/insights-panel';
 import { formatLocale, t } from '@app/lib/i18n';
+import { buildSimpleEntityUrl } from '@core/util/url';
 import { For, type JSX, Show } from 'solid-js';
 import {
   type BlockerCount,
@@ -11,6 +12,8 @@ import {
   type CiCause,
   type CiCauseCounts,
   type CiHealth,
+  type CiQuarantined,
+  type CiRetryCounts,
   type DeliveryInsight,
   mergedCost,
   type QualityInsights,
@@ -102,6 +105,83 @@ function CauseCounts(props: { causes: CiCauseCounts }) {
         )}
       </For>
     </dl>
+  );
+}
+
+/** How the reruns of known flaky jobs ended, under `rerun_flaky_ci`. */
+function RetryCounts(props: { retries: CiRetryCounts }) {
+  const counts = () => [
+    { label: t('factoryQuality.retriesPassed'), value: props.retries.passed },
+    { label: t('factoryQuality.retriesFailed'), value: props.retries.failed },
+    {
+      label: t('factoryQuality.retriesRefused'),
+      value: props.retries.refused,
+    },
+  ];
+  return (
+    <dl
+      aria-label={t('factoryQuality.flakyReruns')}
+      class="grid grid-cols-3 gap-x-4 gap-y-3 px-4 py-3"
+    >
+      <For each={counts()}>
+        {(count) => (
+          <div class="flex min-w-0 flex-col gap-0.5">
+            <dt class="text-xs text-ink-muted">{count.label}</dt>
+            <dd class="text-sm font-medium tabular-nums">{count.value}</dd>
+          </div>
+        )}
+      </For>
+    </dl>
+  );
+}
+
+/** A job quarantined as a known flake, and the task filed for it. */
+function QuarantinedJob(props: {
+  job: CiQuarantined;
+  name: (repository: string, name: string) => string;
+}) {
+  return (
+    <li class="flex flex-col gap-2 px-4 py-3">
+      <h4 class="min-w-0 truncate text-sm font-medium">
+        {props.job.step
+          ? t('factoryQuality.failedStep', {
+              job: props.name(props.job.repository, props.job.job),
+              step: props.job.step,
+            })
+          : props.name(props.job.repository, props.job.job)}
+      </h4>
+      <Show when={props.job.failure}>
+        {(test) => (
+          <p class="min-w-0 truncate font-mono text-xs" title={test()}>
+            {test()}
+          </p>
+        )}
+      </Show>
+      <p class="text-xs text-ink-muted">
+        {t('factoryQuality.quarantinedSince', {
+          count: props.job.passedRetries,
+          date: formatRunDate(props.job.quarantinedAt),
+          lastPassed: formatRunDate(props.job.lastPassedAt),
+        })}
+      </p>
+      <Show
+        when={props.job.taskId}
+        fallback={
+          <p class="text-xs text-ink-muted">
+            {t('factoryQuality.quarantineNoTask')}
+          </p>
+        }
+      >
+        {(taskId) => (
+          <a
+            class="text-xs text-ink-muted underline"
+            href={buildSimpleEntityUrl({ type: 'task', id: taskId() })}
+          >
+            {t('factoryQuality.quarantineTask')}
+          </a>
+        )}
+      </Show>
+    </li>
   );
 }
 
@@ -270,6 +350,28 @@ function CiSection(props: {
                 />
               </li>
             )}
+          </For>
+        </ul>
+      </Show>
+      <SubHeading
+        title={t('factoryQuality.flakyReruns')}
+        description={t('factoryQuality.flakyRerunsDescription')}
+      />
+      <RetryCounts retries={props.ci.retries} />
+      <SubHeading
+        title={t('factoryQuality.quarantined')}
+        description={t('factoryQuality.quarantinedDescription')}
+      />
+      <Show
+        when={props.ci.quarantined.length > 0}
+        fallback={<EmptyNote>{t('factoryQuality.noQuarantined')}</EmptyNote>}
+      >
+        <ul
+          aria-label={t('factoryQuality.quarantined')}
+          class="flex flex-col divide-y divide-edge-muted"
+        >
+          <For each={props.ci.quarantined}>
+            {(job) => <QuarantinedJob job={job} name={jobName} />}
           </For>
         </ul>
       </Show>

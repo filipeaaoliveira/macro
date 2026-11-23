@@ -49,6 +49,7 @@ const NO_STAND_IN: StandInKinds = { plan: false, blockers: false };
 /**
  * The team's Standing Rules: which kinds of Gate the factory answers on its
  * own for its Runs, whether the Gates it leaves go to the Run's owner,
+ * whether it reruns a pull request's known flaky CI jobs once before a fix,
  * whether its Runs post their updates to their task's thread, its Queue
  * limit, its token budget, which the stand-in answers for the owner when no rule does, and
  * which the Orchestrator may approve.
@@ -196,6 +197,22 @@ export function StandingRulesSettings() {
                   </Checkbox>
                 )}
               </For>
+              <Checkbox
+                size="sm"
+                checked={definition().rerunFlakyCi ?? false}
+                onChange={(on: boolean) => toggle('rerunFlakyCi', on)}
+                disabled={locked()}
+              >
+                <Checkbox.Control />
+                <div class="flex flex-col gap-0.5">
+                  <Checkbox.Label class="text-sm">
+                    {t(RULE_NAMES.rerun_flaky_ci)}
+                  </Checkbox.Label>
+                  <Checkbox.Description class="text-xs text-ink-muted">
+                    {t('factoryRuns.standingRulesRerunFlakyCiHint')}
+                  </Checkbox.Description>
+                </div>
+              </Checkbox>
               <Checkbox
                 size="sm"
                 checked={!(definition().quietGates ?? false)}

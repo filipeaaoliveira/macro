@@ -6,6 +6,7 @@ import type { QualityParams } from '../core/quality';
 export const factoryRunKeys = createQueryKeys('factoryRuns', {
   task: (taskId: string) => ({ queryKey: [taskId] }),
   run: (runId: string) => ({ queryKey: [runId] }),
+  runScores: (runId: string) => ({ queryKey: [runId] }),
   waiting: null,
   flows: null,
   controlFiles: null,

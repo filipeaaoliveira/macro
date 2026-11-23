@@ -369,4 +369,32 @@ describe('StandingRulesSettings', () => {
     expect(screen.getByText('Only team admins can change them.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Use default' })).toBeNull();
   });
+
+  it('turns the flaky CI rerun on, keeping the other rules', async () => {
+    vi.mocked(factoryClient.setStandingRules).mockResolvedValueOnce(
+      ok({
+        ...teamDefault,
+        definition: { ...teamDefault.definition, rerunFlakyCi: true },
+        isDefault: false,
+      })
+    );
+    mount(teamDefault);
+
+    const rerun = await screen.findByRole('checkbox', {
+      name: /Rerun flaky CI once/,
+    });
+    expect((rerun as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(rerun);
+
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: false,
+        rerunFlakyCi: true,
+      })
+    );
+    await waitFor(() => expect((rerun as HTMLInputElement).checked).toBe(true));
+  });
 });

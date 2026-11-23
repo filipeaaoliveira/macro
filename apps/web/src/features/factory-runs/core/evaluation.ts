@@ -1,4 +1,8 @@
-import type { SuiteInsight } from '@service-factory/generated/schemas';
+import type {
+  RunScore,
+  ScorerCalibration,
+  SuiteInsight,
+} from '@service-factory/generated/schemas';
 import { tokenTotal } from './insights';
 
 export type {
@@ -10,6 +14,8 @@ export type {
   ImprovementInsight,
   ImprovementState,
   NamerStanding,
+  RunScore,
+  ScorerCalibration,
   ScorerInsight,
   SelfImprovementInsight,
   SuiteInsight,
@@ -120,4 +126,73 @@ export function suiteStandings(
     }
   }
   return standings;
+}
+
+/**
+ * Where a Scorer stands on calibration: `calibrated` once its current judge
+ * has `needed` labels and agrees with at least `threshold` of them;
+ * otherwise it needs more labels, or it has them and agrees too little.
+ */
+export type CalibrationReading =
+  | { kind: 'calibrated'; agreement: number }
+  | { kind: 'needsLabels'; remaining: number }
+  | { kind: 'disagrees'; agreement: number; threshold: number };
+
+/** How a Scorer's calibration reads, as the service decided it. */
+export function calibrationReading(
+  calibration: ScorerCalibration
+): CalibrationReading {
+  const agreement = calibration.agreement ?? 0;
+  if (calibration.calibrated) return { kind: 'calibrated', agreement };
+  if (calibration.labelled < calibration.needed) {
+    return {
+      kind: 'needsLabels',
+      remaining: calibration.needed - calibration.labelled,
+    };
+  }
+  return { kind: 'disagrees', agreement, threshold: calibration.threshold };
+}
+
+/**
+ * Whether the person's label of a judgment disagrees with the judge: they
+ * say it should have passed and it failed, or the other way round. None
+ * while it is unlabelled.
+ */
+export function labelDisagrees(score: RunScore): boolean | undefined {
+  if (!score.label) return undefined;
+  return score.label.passed !== score.passed;
+}
+
+/** The Scorers, by name, whose judges are not calibrated yet. */
+export function uncalibratedScorers(
+  scorers: readonly { name: string; calibration: ScorerCalibration }[]
+): Set<string> {
+  return new Set(
+    scorers
+      .filter((scorer) => !scorer.calibration.calibrated)
+      .map((scorer) => scorer.name)
+  );
+}
+
+/** How often a newly ended Run's scores are read again. */
+const SCORES_POLL_MS = 15_000;
+
+/**
+ * How long after a Run ends its scores are read again: its Scorers judge it
+ * once it ends, and the factory doesn't say which of them will.
+ */
+const SCORES_POLL_WINDOW_MS = 5 * 60_000;
+
+/**
+ * When to read an ended Run's scores again: every `SCORES_POLL_MS` for
+ * `SCORES_POLL_WINDOW_MS` after it ended, then no more.
+ */
+export function scoresRefetchInterval(
+  endedAt: string | undefined,
+  now: number
+): number | false {
+  if (!endedAt) return false;
+  const ended = Date.parse(endedAt);
+  if (Number.isNaN(ended)) return false;
+  return now - ended < SCORES_POLL_WINDOW_MS ? SCORES_POLL_MS : false;
 }

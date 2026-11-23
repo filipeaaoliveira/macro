@@ -1,5 +1,6 @@
 import type { Accessor } from 'solid-js';
 import { createContext, useContext } from 'solid-js';
+import type { RunScore } from '../core/evaluation';
 import type { Flow, Run, RunStep } from '../core/run';
 
 /**
@@ -77,6 +78,13 @@ export type MarkRunFlawedInput = {
   reason: string;
 };
 
+export type LabelRunScoreInput = {
+  runId: string;
+  scorer: string;
+  /** Whether the Run should have passed on the Scorer's dimension. */
+  passed: boolean;
+};
+
 /** What the Run's owner does to a running Step from its Step Terminal. */
 export type SteerStepInput = {
   runId: string;
@@ -119,6 +127,21 @@ export type RunsContext = {
    * name. `conflict` means it did not end in success.
    */
   markRunFlawed: (input: MarkRunFlawedInput) => Promise<RunActionResult>;
+  /**
+   * The live Scorers' judgments of one of the person's own Runs, read while
+   * `enabled`: only its owner reads them. They are read again for a few
+   * minutes after the Run ended at `endedAt`, as its Scorers judge it.
+   */
+  runScores: (
+    runId: Accessor<string>,
+    enabled: Accessor<boolean>,
+    endedAt: Accessor<string | undefined>
+  ) => RunsSource<RunScore[]>;
+  /**
+   * Labels a Scorer's judgment of the person's Run with whether it should
+   * have passed, replacing the label it had.
+   */
+  labelRunScore: (input: LabelRunScoreInput) => Promise<RunActionResult>;
   /**
    * Sends a running Step's agent a note, pauses, resumes or stops the Step.
    * `conflict` means the Step takes no such steering now: it ended, is

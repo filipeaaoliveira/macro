@@ -1,6 +1,9 @@
 import { throwOnErr } from '@core/util/result';
 import { factoryClient } from '@service-factory/client';
-import type { DefinitionSettings } from '@service-factory/generated/schemas';
+import type {
+  DefinitionSettings,
+  ProposeDefinitionChangeRequest,
+} from '@service-factory/generated/schemas';
 import {
   queryOptions,
   useMutation,
@@ -42,5 +45,21 @@ export function useSetDefinitionMutation() {
       ].map((queryKey) => client.invalidateQueries({ queryKey }));
       return Promise.all(reads);
     },
+  }));
+}
+
+/**
+ * Proposes a change to the team's Factory Definition as a pull request; the
+ * Definition is read again, so its open pull requests list the new one.
+ */
+export function useProposeDefinitionChangeMutation() {
+  const client = useQueryClient();
+  return useMutation(() => ({
+    mutationFn: (request: ProposeDefinitionChangeRequest) =>
+      throwOnErr(() => factoryClient.proposeDefinitionChange(request)),
+    onSuccess: () =>
+      client.invalidateQueries({
+        queryKey: factoryRunKeys.definition.queryKey,
+      }),
   }));
 }

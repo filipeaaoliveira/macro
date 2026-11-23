@@ -344,6 +344,8 @@ function mount(options: {
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
     markRunFlawed: vi.fn(),
+    runScores: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    labelRunScore: vi.fn(),
     steerStep: vi.fn(),
   };
   render(() => (
@@ -550,6 +552,56 @@ describe('RunInsightsView', () => {
 
     fireEvent.click(trial);
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('marks a scorer not calibrated, here and beside an arm’s scores, until its judge agrees with enough labels', () => {
+    mount({ insights: november, evaluation: judged });
+
+    const scorers = screen.getByRole('heading', { name: 'Scorers' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(scorers).getByText('Not calibrated')).toBeTruthy();
+    expect(within(scorers).getByText('0 labels')).toBeTruthy();
+    expect(scorers.textContent).toContain(
+      'Not calibrated yet: label 20 more of its judgments from a run’s view.'
+    );
+    const backup = screen.getByRole('rowheader', { name: /backup/ });
+    expect(backup.parentElement?.textContent).toContain(
+      'correctness 0.90 (not calibrated)'
+    );
+  });
+
+  it('marks a calibrated scorer, with how far its judge agrees', () => {
+    const scorer = judged.scorers[0];
+    if (!scorer) throw new Error('No scorer');
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        scorers: [
+          {
+            ...scorer,
+            calibration: {
+              labelled: 20,
+              agreed: 18,
+              agreement: 0.9,
+              needed: 20,
+              threshold: 0.8,
+              calibrated: true,
+            },
+          },
+        ],
+      },
+    });
+
+    const scorers = screen.getByRole('heading', { name: 'Scorers' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(scorers).getByText('Calibrated')).toBeTruthy();
+    expect(within(scorers).getByText('90%')).toBeTruthy();
+    expect(scorers.textContent).toContain(
+      'Its judge agrees with 90% of your 20 labels'
+    );
+    const backup = screen.getByRole('rowheader', { name: /backup/ });
+    expect(backup.parentElement?.textContent).not.toContain('not calibrated');
   });
 
   it('shows each agent rule beside the runs it chose an agent for', () => {
@@ -935,6 +987,75 @@ describe('RunInsightsView', () => {
     expect(figure('First push to green')).toBe('2hr');
     expect(figure('CI fix rounds')).toBe('2');
     expect(figure('Review fix rounds')).toBe('1');
+  });
+
+  it('counts how flaky reruns ended and lists each quarantined job with its task', () => {
+    mount({
+      insights: november,
+      quality: () => {
+        const read = quality();
+        return {
+          ...read,
+          ci: {
+            ...read.ci,
+            retries: { passed: 3, failed: 1, refused: 2 },
+            quarantined: [
+              {
+                repository: APP,
+                job: 'test',
+                step: 'Run tests',
+                failure: 'src/net.rs: net::test::retry',
+                passedRetries: 4,
+                quarantinedAt: '2026-11-03T10:00:00Z',
+                lastPassedAt: '2026-11-09T10:00:00Z',
+                taskId: 'task-flake',
+              },
+              {
+                repository: 'https://github.com/macro/site',
+                job: 'e2e',
+                step: null,
+                failure: null,
+                passedRetries: 1,
+                quarantinedAt: '2026-11-05T10:00:00Z',
+                lastPassedAt: '2026-11-05T10:00:00Z',
+                taskId: null,
+              },
+            ],
+          },
+        };
+      },
+    });
+
+    const reruns = screen.getByLabelText('Flaky job reruns');
+    expect(reruns.textContent).toContain('Passed on rerun3');
+    expect(reruns.textContent).toContain('Failed again1');
+    expect(reruns.textContent).toContain('Not rerun by GitHub2');
+
+    const quarantined = screen.getByRole('list', { name: 'Quarantined jobs' });
+    const rows = within(quarantined).getAllByRole('listitem');
+    expect(rows.map((row) => row.querySelector('h4')?.textContent)).toEqual([
+      'macro/app · test · Run tests',
+      'macro/site · e2e',
+    ]);
+    expect(rows[0]?.textContent).toContain('src/net.rs: net::test::retry');
+    expect(rows[0]?.textContent).toContain('4 passed retries, quarantined');
+    expect(
+      within(rows[0] as HTMLElement)
+        .getByRole('link', { name: 'Open the task filed for it' })
+        .getAttribute('href')
+    ).toContain('task-flake');
+    expect(rows[1]?.textContent).toContain('1 passed retry, quarantined');
+    expect(within(rows[1] as HTMLElement).queryByRole('link')).toBeNull();
+    expect(rows[1]?.textContent).toContain('No task filed yet.');
+  });
+
+  it('says no job is quarantined', () => {
+    mount({ insights: november, quality: () => quality() });
+
+    expect(
+      screen.getByText('No job is quarantined in these repositories.')
+    ).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'Quarantined jobs' })).toBeNull();
   });
 
   it('shows review rounds, blockers by reviewer and agent, and recurring blocker texts', () => {

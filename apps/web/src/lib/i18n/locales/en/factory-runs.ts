@@ -169,6 +169,19 @@ export default {
   ruleFixBlockers: 'Fix review blockers',
   ruleMergeWhenGreen: 'Merge when CI is green',
   ruleRerunFlakyCi: 'Rerun flaky CI once',
+  // The Scorers' judgments of an ended Run, and its owner's labels.
+  scores: 'Scores',
+  scoresLoadFailed: 'Scores couldn’t be loaded',
+  scorePassed: 'Passed',
+  scoreFailed: 'Failed',
+  labelScore: 'Your label for {{scorer}}',
+  labelScoreQuestion: 'Should it have passed?',
+  labelShouldPass: 'Should pass',
+  labelShouldFail: 'Should fail',
+  labelScoreFailed: 'Your label couldn’t be saved',
+  labelDisagrees: 'You disagree with the judge.',
+  scoreByEarlierJudge:
+    'An earlier version of this scorer judged it, so your label doesn’t count toward its calibration.',
   // An agent's question to the Run's owner.
   questionTitle: 'The {{role}} has a question',
   questionWaiting:
@@ -241,6 +254,45 @@ export default {
   definitionPullRequestDraft: '(draft)',
   definitionOpensInNewTab: '(opens in a new tab)',
   definitionAdminsOnly: 'Only team admins can change it.',
+  // A change to the Definition's files, proposed as a pull request.
+  definitionChangeStart: 'Propose a change',
+  definitionChangeTitle: 'Change the definition',
+  definitionChangeHowTo:
+    'Write the whole new text of each file you change. The change opens as a pull request on the definition’s repository, and reaches runs once someone merges it. A new flow’s file needs factory.json to name the flow too.',
+  definitionChangeSummary: 'What it changes',
+  definitionChangeSummaryBlank: 'Say what the change does.',
+  definitionChangeSummaryTooLong: 'Keep it under {{max}} bytes.',
+  definitionChangeWhy: 'Why (optional)',
+  definitionChangeWhyTooLong: 'Keep it under {{max}} bytes.',
+  definitionChangeFile: 'File {{number}}',
+  definitionChangeFilePlaceholder: 'flows/code.json',
+  definitionChangeFileText: 'File {{number}}’s new text',
+  definitionChangeCurrentFile: 'The file as it is now',
+  definitionChangePathProblem:
+    'Name factory.json, agents.json, rules.json, scorers.json or a flow’s file, flows/name.json.',
+  definitionChangeDuplicateProblem: 'Another file of this change writes it.',
+  definitionChangeJsonProblem: 'This isn’t valid JSON.',
+  definitionChangeAddFile: 'Add a file',
+  definitionChangeRemoveFile: 'Remove file {{number}}',
+  definitionChangeDiscard: 'Discard',
+  definitionChangeSend: 'Open pull request',
+  definitionChangeOpened: 'Pull request opened:',
+  definitionChangeInvalid:
+    'The definition doesn’t read with this change: {{message}}',
+  definitionChangeNoPush:
+    'Your GitHub account can’t push to the definition’s repository.',
+  definitionChangeNoDefinition: 'Your team names no definition to change.',
+  definitionChangeNotOpened:
+    '{{message}}. Sending it again tries a new branch.',
+  definitionChangeHeadInvalid:
+    'The definition doesn’t read at its default branch now: {{message}}',
+  definitionChangeUnreachable:
+    'The definition’s repository couldn’t be read with your GitHub account: {{message}}',
+  definitionChangeClosed:
+    'This change’s pull request was closed without merging. Send it again to open a new one.',
+  definitionChangeForbidden: 'Only team admins can propose changes.',
+  definitionChangeFailed:
+    'The change couldn’t be sent. Send it again: if its pull request was opened, you’ll get it back.',
   definitionSave: 'Save',
   definitionRemove: 'Stop using it',
   definitionSaved: 'Factory definition saved',
@@ -262,6 +314,8 @@ export default {
     'Send the blockers reviewers find to be fixed, at most twice in a row; blockers found after that wait for a person.',
   standingRulesMergeWhenGreenHint:
     'Merge once CI passes and the base branch isn’t held.',
+  standingRulesRerunFlakyCiHint:
+    'When every failed CI job is a known flake, run the failed jobs again once before sending the change to be fixed. A known flake is a job your factory definition lists, one quarantined in the repository, or one whose same failure broke other pull requests.',
   standingRulesAlwaysPerson:
     'A run that changes control files its request doesn’t name always waits for a person.',
   standingRulesProjects: {

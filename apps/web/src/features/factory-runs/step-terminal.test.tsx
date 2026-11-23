@@ -108,6 +108,8 @@ function mount(steerStep: RunsContext['steerStep'] = vi.fn(async () => DONE)) {
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
     markRunFlawed: vi.fn(),
+    runScores: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    labelRunScore: vi.fn(),
     steerStep,
   };
   render(() => (

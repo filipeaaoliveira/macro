@@ -11,6 +11,8 @@ export type {
   CiCauseCounts,
   CiHealth,
   CiJobHealth,
+  CiQuarantined,
+  CiRetryCounts,
   DeliveryInsight,
   QualityInsights,
   RecurringBlocker,

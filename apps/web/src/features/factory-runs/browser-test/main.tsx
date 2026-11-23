@@ -350,6 +350,10 @@ function createFixtureContext(): RunsContext {
       }));
       return { ok: true, value: undefined };
     },
+    runScores: () => ready(() => []),
+    async labelRunScore() {
+      return { ok: false, reason: 'failed' };
+    },
     async steerStep(input) {
       // The service keeps what the owner did on the Step; a pause holds it
       // until a resume.

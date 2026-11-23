@@ -23,6 +23,11 @@ export type OrchestratorDefinition = {
   ownerGates: boolean;
   quietGates?: boolean;
   taskThread?: boolean;
+  /**
+   * Rerun, once, a pull request's failed CI jobs when every red job is a
+   * known flake, before any CI fix (`rerun_flaky_ci`). Off when left out.
+   */
+  rerunFlakyCi?: boolean;
   standIn?: StandInKinds;
   /**
    * The Queue limit: the most places a person may hold (Runs waiting on
@@ -53,6 +58,7 @@ export type GateKind = Exclude<
   | 'ownerGates'
   | 'quietGates'
   | 'taskThread'
+  | 'rerunFlakyCi'
   | 'standIn'
   | 'queueLimit'
   | 'tokenBudget'

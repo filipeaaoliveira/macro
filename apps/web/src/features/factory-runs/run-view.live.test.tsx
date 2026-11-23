@@ -19,6 +19,8 @@ vi.mock('@service-factory/client', () => ({
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
     markRunFlawed: vi.fn(),
+    runScores: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    labelRunScore: vi.fn(),
     steerStep: vi.fn(),
   },
 }));

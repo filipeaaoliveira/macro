@@ -26,7 +26,7 @@ import type {
   SuiteInsight,
   SuiteStanding,
 } from '../core/evaluation';
-import { suiteStandings } from '../core/evaluation';
+import { suiteStandings, uncalibratedScorers } from '../core/evaluation';
 import { flowWordLabel } from '../core/flow-words';
 import { tokenTotal } from '../core/insights';
 import { formatRunDate, formatShare, formatTokens } from './insight-format';
@@ -34,6 +34,7 @@ import {
   INSIGHT_OUTCOME_COLORS,
   insightOutcomeLabel,
 } from './insight-outcomes';
+import { CalibrationBadge, calibrationLine } from './scorer-calibration';
 
 function Figure(props: { label: string; children: JSX.Element }) {
   return (
@@ -82,7 +83,10 @@ function ScorerRow(props: { scorer: ScorerInsight }) {
   return (
     <li class="flex flex-col gap-3 px-4 py-4 sm:px-5">
       <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 class="text-sm font-medium">{props.scorer.name}</h3>
+        <div class="flex flex-wrap items-center gap-2">
+          <h3 class="text-sm font-medium">{props.scorer.name}</h3>
+          <CalibrationBadge calibration={props.scorer.calibration} />
+        </div>
         <span class="text-xs text-ink-muted">{sample()}</span>
       </div>
       <Show when={props.scorer.instructions}>
@@ -90,7 +94,7 @@ function ScorerRow(props: { scorer: ScorerInsight }) {
           <p class="text-xs text-ink-muted line-clamp-2">{instructions()}</p>
         )}
       </Show>
-      <dl class="grid grid-cols-3 gap-x-4 gap-y-3">
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
         <Figure label={t('factoryEvaluation.judged')}>
           {props.scorer.judged}
         </Figure>
@@ -102,12 +106,28 @@ function ScorerRow(props: { scorer: ScorerInsight }) {
             ? formatShare(props.scorer.passed / props.scorer.judged)
             : '–'}
         </Figure>
+        <Figure label={t('factoryEvaluation.agreement')}>
+          {(() => {
+            const agreement = props.scorer.calibration.agreement;
+            return agreement === null || agreement === undefined
+              ? '–'
+              : formatShare(agreement);
+          })()}
+          <span class="block text-xs font-normal text-ink-muted">
+            {t('factoryEvaluation.labelled', {
+              count: props.scorer.calibration.labelled,
+            })}
+          </span>
+        </Figure>
       </dl>
+      <p class="text-xs text-ink-muted">
+        {calibrationLine(props.scorer.calibration)}
+      </p>
     </li>
   );
 }
 
-function ArmRow(props: { arm: ArmInsight }) {
+function ArmRow(props: { arm: ArmInsight; uncalibrated: Set<string> }) {
   return (
     <tr class="border-t border-edge-muted">
       <th scope="row" class="py-2 pr-3 text-left font-medium">
@@ -136,6 +156,10 @@ function ArmRow(props: { arm: ArmInsight }) {
               <span class="tabular-nums text-ink">
                 {formatScore(score.meanScore)}
               </span>
+              <Show when={props.uncalibrated.has(score.scorer)}>
+                {' '}
+                <span>{t('factoryEvaluation.uncalibratedMark')}</span>
+              </Show>
             </>
           )}
         </For>
@@ -144,7 +168,10 @@ function ArmRow(props: { arm: ArmInsight }) {
   );
 }
 
-function ExperimentRow(props: { experiment: ExperimentInsight }) {
+function ExperimentRow(props: {
+  experiment: ExperimentInsight;
+  uncalibrated: Set<string>;
+}) {
   return (
     <li class="flex flex-col gap-2 px-4 py-4 sm:px-5">
       <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -175,7 +202,7 @@ function ExperimentRow(props: { experiment: ExperimentInsight }) {
           </thead>
           <tbody>
             <For each={props.experiment.arms}>
-              {(arm) => <ArmRow arm={arm} />}
+              {(arm) => <ArmRow arm={arm} uncalibrated={props.uncalibrated} />}
             </For>
           </tbody>
         </table>
@@ -624,6 +651,10 @@ export function EvaluationSections(props: {
   onOpenRun: (runId: string) => void;
 }) {
   const standings = createMemo(() => suiteStandings(props.evaluation.suites));
+  // An arm's scores from a Scorer not calibrated yet say so.
+  const uncalibrated = createMemo(() =>
+    uncalibratedScorers(props.evaluation.scorers)
+  );
   const paretoDescriptionId = createUniqueId();
 
   return (
@@ -665,7 +696,12 @@ export function EvaluationSections(props: {
               <EmptyRow>{t('factoryEvaluation.noExperiments')}</EmptyRow>
             }
           >
-            {(experiment) => <ExperimentRow experiment={experiment} />}
+            {(experiment) => (
+              <ExperimentRow
+                experiment={experiment}
+                uncalibrated={uncalibrated()}
+              />
+            )}
           </For>
         </ul>
       </InsightSection>
