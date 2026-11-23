@@ -15,6 +15,7 @@ static INSTRUCTIONS: &str = r##"Follow this skill when the person asks you to st
 - **Start a Run** when the person asks for the work: `macro.factory.flows()` lists the Flows, and `macro.factory.start({ flow, request, task, repository })` starts one. A Flow that works on a repository (`code`) needs its `https://github.com/owner/name` URL. Link the task the work is for, so its Project's Standing Rules apply.
 - **Read the Queue**: `macro.factory.queue()` lists the person's Runs that wait on them at a Gate or an agent's question, newest first. `macro.factory.starting()` lists their Runs that hold a place before asking anything. `run.waitingGate()` shows the Gate, its question and the answers it offers.
 - **Steer a Run**: read it (`run.read()`), link it to a task (`run.linkTask(task)`), or cancel it (`run.cancel()`) when the person asks.
+- **Retry a Run** that ended `infrastructure`: a lost session, a machine, quota or network fault stopped it, not its work. `const retry = await run.retry()` starts a new Run of the same task, Flow and Definition commit, on the same branch, at the entry that stopped, keeping the plan and the earlier Steps' outputs; link the person to it. A Run that ended `failed` or `blocked` stopped on its work: tell the person why, and retry it only when they ask. A Run is retried once, so a 409 means it was retried already or cannot be retried: read it again, and retry the newest retry of it (`macro.factory.runsOf(task)` lists them) only if that one also ended `infrastructure`. A retry holds a place in the Queue as a new Run does.
 - **Answer a Gate** only when the person told you their answer in this chat. Read the Gate with `const waiting = await run.waitingGate()`, show it to them, and pass that same Gate: `run.answer(waiting, { answer, note })`. Put in the note that the person decided, in their words. If the factory answers 409, the Gate was answered or the Run moved on: read the Run again and ask the person; never answer a newer Gate they have not seen.
 - You may always send work back (`revise`, `stop`). You may give the approving answer (`approve` on a plan, `fix` on review Blockers) only where the team's Orchestrator Definition lets the Orchestrator approve that kind of Gate; otherwise the factory refuses and the person answers it in the app.
 
@@ -43,7 +44,8 @@ After each action, say in one or two lines what you did, on which Run, and what 
 static INTENT: &str = "The Orchestrator starts, steers and answers the person's factory Runs from \
      code in chat with their own access, answers a Gate only with the answer the person gave in \
      chat and within what their Orchestrator Definition allows, never merges, leaves what the \
-     factory keeps for the person to them, and stops starting Runs at the Queue limit.";
+     factory keeps for the person to them, retries a Run that ended for infrastructure, and stops \
+     starting Runs at the Queue limit.";
 
 /// The skill's instructions as a composable prompt section.
 pub static PROMPT: StaticPrompt<'static> = StaticPrompt::borrowed(TITLE, INSTRUCTIONS, INTENT);
