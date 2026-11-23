@@ -840,7 +840,16 @@ where
         work_output: &str,
     ) -> Result<Option<String>, BuiltInStepError> {
         let branch = run_branch(input.key.run_id);
-        let head = self.pushed_commit(input).await?;
+        let head = match self.pull_requests.branch_head(&input).await? {
+            Some(head) => head,
+            None => {
+                tokio::time::sleep(BRANCH_HEAD_LAG).await;
+                self.pull_requests
+                    .branch_head(&input)
+                    .await?
+                    .ok_or_else(|| retry("the run's branch is not on GitHub".to_string()))?
+            }
+        };
         let fixed = answers.filter(|round| {
             round.head_sha.as_deref() == Some(head.as_str())
                 && fix_answers(round, work_output)
