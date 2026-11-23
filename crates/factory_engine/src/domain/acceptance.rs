@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::built_in_steps::cut;
 use crate::domain::checks::{DEFAULT_CHECK_TIMEOUT_SECS, MAX_CHECK_TIMEOUT_SECS};
-use crate::domain::review_rounds::{escape, json_block};
+use crate::domain::review_rounds::{escape, json_block, json_blocks};
 
 /// The entry whose Step's output holds the acceptance checks.
 const PLAN_STEP: &str = "plan";
@@ -165,25 +165,33 @@ pub enum AcceptanceError {
 }
 
 impl AcceptanceChecks {
-    /// The acceptance checks a plan's output ends with, in its last fenced
-    /// `json` block; none when it has no block naming `acceptance`.
+    /// The acceptance checks a plan's output holds, in its last fenced
+    /// `json` block naming `acceptance`, wherever other blocks stand; none
+    /// when it has no such block.
     pub fn from_plan(output: &str) -> Result<Option<Self>, AcceptanceError> {
         Ok(Self::split(output)?.map(|(_, checks)| checks))
     }
 
     /// The plan's text without its acceptance block, and the checks the
-    /// block holds; none when it has no block naming `acceptance`.
+    /// block holds; none when it has no block naming `acceptance`. A size
+    /// block after it, or any other, is left in the plan's text.
     fn split(output: &str) -> Result<Option<(String, Self)>, AcceptanceError> {
-        let Some((plan, block)) = json_block(output) else {
+        let found = json_blocks(output)
+            .into_iter()
+            .rev()
+            .find(|block| block.names("acceptance"));
+        let Some(block) = found else {
+            // A last block that is not JSON is checks that do not read,
+            // as the planner is told to end with them.
+            if let Some((_, block)) = json_block(output)
+                && let Err(error) = serde_json::from_str::<serde_json::Value>(block)
+            {
+                return Err(AcceptanceError::Unreadable(error.to_string()));
+            }
             return Ok(None);
         };
-        let value: serde_json::Value = match serde_json::from_str(block) {
-            Ok(value) => value,
-            Err(error) => return Err(AcceptanceError::Unreadable(error.to_string())),
-        };
-        if value.get("acceptance").is_none() {
-            return Ok(None);
-        }
+        let plan = block.cut_from(output);
+        let value = block.value;
         let written: WrittenChecks = serde_json::from_value(value)
             .map_err(|error| AcceptanceError::Unreadable(error.to_string()))?;
         if written.acceptance.is_empty() || written.acceptance.len() > MAX_CLAUSES {
@@ -335,8 +343,21 @@ pub fn plan_output(output: &str) -> String {
     if plan.len() + note.len() <= MAX_OUTPUT_BYTES {
         return format!("{plan}{note}");
     }
-    let room = MAX_OUTPUT_BYTES - note.len() - CUT_NOTE.len();
-    format!("{}{CUT_NOTE}{note}", cut(&plan, room))
+    // The plan's size block, which `plan_review` reads, is kept whole: the
+    // plan's prose is cut to leave room for it.
+    let size_block = json_blocks(&plan)
+        .into_iter()
+        .rev()
+        .find(|block| block.names("size"));
+    let (prose, kept) = match size_block {
+        Some(block) if block.end - block.start + 2 < MAX_OUTPUT_BYTES / 2 => {
+            let kept = format!("\n\n{}", &plan[block.start..block.end]);
+            (block.cut_from(&plan), kept)
+        }
+        _ => (plan, String::new()),
+    };
+    let room = MAX_OUTPUT_BYTES - note.len() - CUT_NOTE.len() - kept.len();
+    format!("{}{CUT_NOTE}{kept}{note}", cut(&prose, room))
 }
 
 /// What the plan's Gate says of acceptance checks that do not read.

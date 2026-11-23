@@ -35,6 +35,7 @@ use uuid::Uuid;
 
 use crate::domain::control_files::ControlFiles;
 use crate::domain::ports::FollowUpTask;
+use crate::domain::review_rounds::json_blocks;
 
 /// The entry whose Step's output holds the plan, as the acceptance checks
 /// read it.
@@ -58,6 +59,10 @@ const MAX_NAME_BYTES: usize = 200;
 
 /// The longest child task's request, in bytes.
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
+
+/// The largest size block, in bytes, fences included: with the plan's
+/// acceptance checks, it fits whole in what a Step's output holds.
+pub const MAX_BLOCK_BYTES: usize = 16 * 1024;
 
 /// The namespace of the ids of the child tasks a Run files.
 const CHILD_NAMESPACE: Uuid = Uuid::from_u128(0x6f1c_2a54_93d8_4b07_a1e5_7c3b_d09e_4f21);
@@ -134,6 +139,9 @@ pub enum SizeBlockError {
         "the plan has no size block: end it with a fenced json block naming `size`, before its acceptance checks"
     )]
     Missing,
+    /// The block is larger than the plan's output keeps whole.
+    #[error("the size block is over {MAX_BLOCK_BYTES} bytes: shorten the child tasks' requests")]
+    TooLarge,
     /// The block is not a size block's JSON.
     #[error("the size block does not read: {0}")]
     Unreadable(String),
@@ -213,12 +221,14 @@ impl PlanSize {
         let block = json_blocks(plan)
             .into_iter()
             .rev()
-            .find_map(|block| {
-                let value: serde_json::Value = serde_json::from_str(block).ok()?;
-                value.get("size").is_some().then_some(value)
-            })
+            .find(|block| block.names("size"))
             .ok_or(SizeBlockError::Missing)?;
-        let written: WrittenSize = serde_json::from_value(block)
+        // The plan's output keeps a block of at most this size whole, however
+        // long the plan's prose (`plan_output`).
+        if block.end - block.start > MAX_BLOCK_BYTES {
+            return Err(SizeBlockError::TooLarge);
+        }
+        let written: WrittenSize = serde_json::from_value(block.value)
             .map_err(|error| SizeBlockError::Unreadable(error.to_string()))?;
 
         match written.size.as_str() {
@@ -299,32 +309,46 @@ fn sized(text: &str, max: usize) -> bool {
 }
 
 /// Whether `path` names a file from the repository's root: not blank,
-/// within its bound, out of no folder (`..`), with no control character and
-/// nothing that would quote or tag the text it is written into.
+/// within its bound, each folder and the file named, none of them `.` or
+/// `..`, in letters, digits and `.`, `_`, `-`, `+`, `@`, `[`, `]`, `(`, `)`
+/// only. Nothing in it is read as part of a URL (`%`, `?`, `#`), quotes or
+/// tags the text it is written into, or climbs out of the repository.
 fn plain_path(path: &str) -> bool {
-    let quotes = path
-        .chars()
-        .any(|c| c.is_control() || c.is_whitespace() || matches!(c, '`' | '<' | '>'));
-    let climbs = path.split('/').any(|part| part == "..");
-    sized(path, MAX_PATH_BYTES) && !quotes && !climbs && !path.ends_with('/')
+    let safe = path.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '[' | ']' | '(' | ')')
+    });
+    let named = path
+        .split('/')
+        .all(|part| !part.is_empty() && part != "." && part != "..");
+    sized(path, MAX_PATH_BYTES) && safe && named
 }
 
-/// The bodies of `text`'s fenced `json` blocks, in order.
-fn json_blocks(text: &str) -> Vec<&str> {
-    // ASCII lowercasing keeps every byte where it was, so places in it are
-    // places in `text`.
-    let lower = text.to_ascii_lowercase();
-    let mut blocks = Vec::new();
-    let mut from = 0;
-    while let Some(open) = lower[from..].find("```json").map(|at| from + at) {
-        let body = open + "```json".len();
-        let Some(close) = text[body..].find("```").map(|at| body + at) else {
-            break;
-        };
-        blocks.push(text[body..close].trim());
-        from = close + 3;
-    }
-    blocks
+/// The entry of the `code` Flow whose Gate asks to approve a plan, and the
+/// one that asked it before plans were reviewed.
+const PLAN_GATE_ENTRIES: (&str, &str) = ("plan-review", "plan");
+
+/// The entry that asked `entry`'s Gate before plans were reviewed: `plan`
+/// for `plan-review`. An owner's answers there are past answers to it, and
+/// a Gate recorded there is a plan Gate.
+pub fn earlier_gate_entry(entry: &str) -> Option<&'static str> {
+    (entry == PLAN_GATE_ENTRIES.0).then_some(PLAN_GATE_ENTRIES.1)
+}
+
+/// The entry that asks `entry`'s Gate now that plans are reviewed:
+/// `plan-review` for `plan`.
+pub fn later_gate_entry(entry: &str) -> Option<&'static str> {
+    (entry == PLAN_GATE_ENTRIES.1).then_some(PLAN_GATE_ENTRIES.0)
+}
+
+/// How the output of a plan review starts when its last round still found
+/// Blockers: the plan goes to its Gate with them.
+pub const BLOCKERS_LEFT: &str = "The plan review still finds";
+
+/// Whether `output`, a `plan_review` Step's, put the plan to its Gate with
+/// Blockers left: then no Standing Rule and no stand-in approves it.
+pub fn blockers_left(output: &str) -> bool {
+    output.starts_with(BLOCKERS_LEFT)
 }
 
 /// The latest plan among a Run's `earlier` Steps: the output of its latest
@@ -528,11 +552,11 @@ pub fn task_mention(id: Uuid, name: &str) -> String {
     format!("<m-document-mention>{mention}</m-document-mention>")
 }
 
-/// The task filed for `child`, split from the task `parent`, when the Run
-/// `run_id` works on one.
-pub fn child_task(child: &ChildTask, parent: Option<Uuid>, run_id: RunId) -> FollowUpTask {
+/// The task filed for `child`, split from the task `parent`, by its id and
+/// name, when the Run `run_id` works on one.
+pub fn child_task(child: &ChildTask, parent: Option<(Uuid, &str)>, run_id: RunId) -> FollowUpTask {
     let from = match parent {
-        Some(parent) => format!("Split from {} by", task_mention(parent, "")),
+        Some((parent, name)) => format!("Split from {} by", task_mention(parent, name)),
         None => "Split by".to_string(),
     };
     FollowUpTask {

@@ -821,7 +821,8 @@ where
     }
 
     /// Which of `paths` are files the Run's base holds: at the commit the
-    /// Run is pinned to, else at its base branch. A file too large for
+    /// Run is pinned to, else at its base branch, each read by its
+    /// percent-encoded path. A file too large for
     /// GitHub to give is held; one GitHub refuses the owner is left out,
     /// unknown.
     pub(crate) async fn base_files(
@@ -833,9 +834,15 @@ where
         let at = input.base_commit.unwrap_or(&recorded.base_branch);
         let mut held = BTreeMap::new();
         for path in paths {
+            // Each folder and the file name goes into the contents URL
+            // encoded, so nothing in a path reads as part of the URL.
+            let encoded: Vec<String> = path
+                .split('/')
+                .map(|part| urlencoding::encode(part).into_owned())
+                .collect();
             let read = self
                 .github
-                .file_text(input.owner, &repository, at, path)
+                .file_text(input.owner, &repository, at, &encoded.join("/"))
                 .await;
             let is_file = match read {
                 Ok(text) => text.is_some(),

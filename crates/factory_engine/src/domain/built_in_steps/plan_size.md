@@ -6,7 +6,7 @@ whether the change fits one run. A plan reviewer reads it before a person
 does, and the factory checks it.
 
 When it fits, list each file the change touches, from the repository's
-root (files, not folders), with `change` `add` for a new file, `edit` for
+root (files, not folders; letters, digits and `._-+@[]()` only), with `change` `add` for a new file, `edit` for
 one the base holds, or `delete`; and map each Done-when item of the request
 to the plan work that makes it hold, quoting the item as the request words
 it:
@@ -21,7 +21,8 @@ A change fits when one pull request can carry it and a reviewer can read
 it in one sitting: at most about 20 files and 1000 changed lines, and no
 parts that could merge on their own. When it does not, say why and split
 the task into 2 to 8 child tasks, each a request another run can carry
-out alone, with its own `## Done when` list. The factory files them and
+out alone, with its own `## Done when` list. Keep the whole block under
+16 KiB. The factory files them and
 this run ends there:
 
 ```json

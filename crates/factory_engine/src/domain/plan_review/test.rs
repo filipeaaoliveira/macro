@@ -235,7 +235,7 @@ fn a_child_task_links_the_task_it_was_split_from() {
         request: "Add it.".to_string(),
     };
 
-    let task = child_task(&child, Some(parent), run);
+    let task = child_task(&child, Some((parent, "Clean up slugs")), run);
 
     assert_eq!(task.name, "Add the API");
     assert!(
@@ -244,4 +244,44 @@ fn a_child_task_links_the_task_it_was_split_from() {
     );
     assert!(task.markdown.contains(&parent.to_string()));
     assert!(task.markdown.contains(&run.to_string()));
+}
+
+#[test]
+fn a_path_reads_only_in_its_safe_characters() {
+    let block = |path: &str| {
+        format!(
+            "```json\n{{\"size\": \"fits\", \"files\": [{{\"path\": \"{path}\", \"change\": \"edit\"}}]}}\n```"
+        )
+    };
+
+    for path in [
+        "%2e%2e/secret",
+        "a?.rs",
+        "a#b.rs",
+        "a b.rs",
+        "a//b.rs",
+        "a/./b.rs",
+        "dir/",
+    ] {
+        assert_eq!(
+            PlanSize::from_plan(&block(path)),
+            Err(SizeBlockError::File(1)),
+            "{path}"
+        );
+    }
+    assert!(PlanSize::from_plan(&block("app/[slug]/page(1)@v2+x.tsx")).is_ok());
+}
+
+#[test]
+fn a_size_block_too_large_to_keep_whole_is_a_blocker() {
+    let request = "x".repeat(MAX_REQUEST_BYTES);
+    let children: Vec<String> = (0..3)
+        .map(|index| format!("{{\"name\": \"Part {index}\", \"request\": \"{request}\"}}"))
+        .collect();
+    let plan = format!(
+        "```json\n{{\"size\": \"oversized\", \"why\": \"Big\", \"children\": [{}]}}\n```",
+        children.join(", ")
+    );
+
+    assert_eq!(PlanSize::from_plan(&plan), Err(SizeBlockError::TooLarge));
 }
