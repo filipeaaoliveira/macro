@@ -186,9 +186,13 @@ lock=\"$worktree.lock\"
     )
 }
 
-/// The most of a break's test run's output its file holds, in KiB (bash's
-/// `ulimit -f` blocks).
-pub(super) const BREAK_OUT_KIB: u64 = 64 * 1024;
+/// How large a break's test run's output file may grow before its
+/// watchdog, which looks each second, cuts it to its last
+/// [`BREAK_OUT_KEEP_BYTES`].
+pub(super) const BREAK_OUT_CAP_BYTES: u64 = 8 * 1024 * 1024;
+
+/// What a break's output file is cut to past [`BREAK_OUT_CAP_BYTES`].
+pub(super) const BREAK_OUT_KEEP_BYTES: u64 = 64 * 1024;
 
 /// How much of the end of each of a break's test runs is shown, in bytes:
 /// both runs' and the markers stay well under the 16 KiB a runtime that
@@ -212,8 +216,10 @@ pub(super) const BREAK_TAIL_BYTES: usize = 1_500;
 /// [`crate::domain::breaks::HUNG_STATUS`]. Once the test's shell returns,
 /// on time or not, its group and the watchdog's are killed, so nothing the
 /// test left running outlives it or prints after it. Its output goes to a
-/// file outside the worktree's tree, held to [`BREAK_OUT_KIB`] (`ulimit -f`,
-/// a write past it failing rather than stopping the test), and only the
+/// file outside the worktree's tree, opened to append, which the watchdog
+/// cuts to its last [`BREAK_OUT_KEEP_BYTES`] whenever it is past
+/// [`BREAK_OUT_CAP_BYTES`] (no limit is set on what else the test writes,
+/// such as a build's files), and only the
 /// last [`BREAK_TAIL_BYTES`] are printed, on the standard error. No
 /// `timeout` is used, so nothing depends on its flags. The markers [`crate::domain::breaks::BreakRun`] reads
 /// are printed last, on the standard output, each with `nonce`, so a
@@ -252,14 +258,22 @@ finish() {{ printf '%s' \"$marks\"; exit 0; }}
 run_test() {{
   rm -f \"$out\" \"$out.hung\"
   set -m
+  : > \"$out\"
   (
-    trap '' XFSZ
-    ulimit -f {out_blocks}
-    exec bash --noprofile --norc -c {command} 9>&- >\"$out\" 2>&1 </dev/null
+    exec bash --noprofile --norc -c {command} 9>&- >>\"$out\" 2>&1 </dev/null
   ) &
   group=$!
   (
-    sleep {timeout_secs}
+    waited=0
+    while [ \"$waited\" -lt {timeout_secs} ]; do
+      sleep 1
+      waited=$((waited + 1))
+      size=$(( $(wc -c < \"$out\" 2>/dev/null || echo 0) ))
+      if [ \"$size\" -gt {out_cap} ]; then
+        tail -c {out_keep} \"$out\" > \"$out.tail\" && cat \"$out.tail\" > \"$out\"
+        rm -f \"$out.tail\"
+      fi
+    done
     : > \"$out.hung\"
     kill -TERM -- \"-$group\" 2>/dev/null
     sleep 10
@@ -276,7 +290,7 @@ run_test() {{
   echo \"--- the test $1 exited with status $ran; the end of its output:\" >&2
   tail -c {tail} \"$out\" >&2
   echo >&2
-  rm -f \"$out\" \"$out.hung\"
+  rm -f \"$out\" \"$out.hung\" \"$out.tail\"
   return $ran
 }}
 in_tree() {{
@@ -318,7 +332,8 @@ finish",
         new = shell_quote(&reported.new_text),
         nonce = nonce,
         tail = BREAK_TAIL_BYTES,
-        out_blocks = BREAK_OUT_KIB,
+        out_cap = BREAK_OUT_CAP_BYTES,
+        out_keep = BREAK_OUT_KEEP_BYTES,
         hung = crate::domain::breaks::HUNG_STATUS,
         take_lock = take_lock(lock_wait_secs),
         exports = context_exports(context),

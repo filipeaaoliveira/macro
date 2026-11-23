@@ -391,3 +391,50 @@ fn a_child_holding_the_output_open_neither_holds_the_run_nor_outlives_it() {
         .success();
     assert!(!alive, "the child {} is still running", pid.trim());
 }
+
+/// Nothing caps what the test writes but its output: a file larger than
+/// the output's cap is written whole.
+#[test]
+fn a_test_writes_files_larger_than_the_output_cap() {
+    let machine = Machine::new("break-big-file");
+    machine.prepare(&machine.pushed);
+    let big = BREAK_OUT_CAP_BYTES * 9;
+    let writes = break_of(
+        "pushed",
+        "broken",
+        &format!(
+            "dd if=/dev/zero of=big.bin bs=1048576 count={} 2>/dev/null && \
+             [ \"$(( $(wc -c < big.bin) ))\" -eq {big} ] && grep -qx pushed a.txt",
+            big / 1_048_576
+        ),
+    );
+
+    let (output, run) = machine.run_break(&writes);
+
+    assert_eq!(run.status(), BreakStatus::Verified, "{output:?}");
+}
+
+/// A test that prints more than the output's cap, a second at a time, sees
+/// its output file cut back each time it passes the cap.
+#[test]
+fn the_output_file_is_cut_back_past_its_cap() {
+    let machine = Machine::new("break-loud");
+    machine.prepare(&machine.pushed);
+    let chunk = BREAK_OUT_CAP_BYTES * 3 / 8;
+    let loud = break_of(
+        "pushed",
+        "broken",
+        &format!(
+            "out=\"../$(basename \"$PWD\").break.out\"; \
+             for i in 1 2 3 4; do head -c {chunk} /dev/zero; sleep 1.5; done; \
+             [ \"$(( $(wc -c < \"$out\") ))\" -lt {cap} ] && grep -qx pushed a.txt",
+            cap = BREAK_OUT_CAP_BYTES
+        ),
+    );
+
+    // Its runs take some six seconds each: past the other tests' limit.
+    let output = machine.bash(&break_command(ROUND, &loud, "", NONCE, 30, 5, &unknown()));
+    let run = BreakRun::read(&text(&output.stdout), NONCE);
+
+    assert_eq!(run.status(), BreakStatus::Verified, "{output:?}");
+}

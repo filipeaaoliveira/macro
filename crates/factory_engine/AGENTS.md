@@ -1125,7 +1125,8 @@ marks the run hung, sends the group `TERM`, then `KILL` ten seconds later,
 and the run ends with 124. Once the test's shell returns, on time or not,
 its group and the watchdog's are killed, so a child that holds its output
 open neither holds the run up nor outlives it. Its output goes to a file
-outside the tree, held to 64 MiB (`ulimit -f`, writes past it failing),
+outside the tree, opened to append, which the watchdog cuts to its last
+64 KiB whenever it passes 8 MiB (nothing limits the test's other files),
 and only its last 1,500 bytes are shown on the standard error; the markers `BreakRun` reads are
 printed last on the standard output, each with a nonce of the run, and
 only those that end it count (the standard error is never read), so a
