@@ -1215,6 +1215,47 @@ fn a_retry_starts_at_its_entry_past_the_steps_it_kept() {
     assert_eq!((entry.id.as_str(), seq), ("review", 4));
 }
 
+/// A retry that starts at the plan review, past the Steps it kept, sends
+/// a plan with Blockers back to the planner, and its review has its three
+/// rounds afresh: the retried Run's rounds are not counted, and a fourth
+/// is never run.
+#[test]
+fn a_retry_at_the_plan_review_sends_blockers_back_and_has_three_rounds_again() {
+    let code = flow(CODE_FLOW);
+    let interpreter = Interpreter::new(&code);
+    let review = "plan-review".to_string().try_into().expect("valid entry");
+    let mut state = interpreter.start_at(&review, 5).expect("start");
+    let mut outcomes = ["blockers", "done", "blockers", "done", "blockers", "done"].iter();
+    let mut steps = Vec::new();
+
+    let end = loop {
+        match interpreter.next_step(&mut state).expect("next") {
+            NextStep::End(end) => break end,
+            NextStep::Run { entry, visit, seq } => {
+                steps.push((format!("{}#{visit}", entry.id), seq));
+                let next = outcomes
+                    .next()
+                    .unwrap_or_else(|| panic!("{} ran with no outcome left", entry.id));
+                let outcome = Outcome::try_from(next.to_string()).expect("valid outcome");
+                interpreter.record(&mut state, &outcome).expect("record");
+            }
+        }
+    };
+
+    assert_eq!(
+        steps,
+        [
+            ("plan-review#1".to_string(), 5),
+            ("plan#1".to_string(), 6),
+            ("plan-review#2".to_string(), 7),
+            ("plan#2".to_string(), 8),
+            ("plan-review#3".to_string(), 9),
+            ("plan#3".to_string(), 10),
+        ]
+    );
+    assert_eq!(end, RunOutcome::Manual, "no fourth round runs");
+}
+
 /// A retry may start only at an entry its Flow has.
 #[test]
 fn a_retry_at_an_entry_its_flow_lacks_cannot_start() {

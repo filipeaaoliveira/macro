@@ -1413,3 +1413,38 @@ async fn agent_rules_that_differ_in_role_or_match_read() {
         .expect("rules that differ read");
     assert_eq!(definition.agents.rules().len(), 4);
 }
+
+/// The template ships the built-in Flows a team starts from: each of its
+/// Flows is the built-in one of the same name, so a team's copy takes the
+/// plan review, the split and every other entry and route the built-in
+/// Flow has.
+#[test]
+fn the_template_s_flows_are_the_built_in_ones() {
+    let template = concat!(env!("CARGO_MANIFEST_DIR"), "/definition_template/flows");
+    let built_in = concat!(env!("CARGO_MANIFEST_DIR"), "/flows");
+    let read = |path: std::path::PathBuf| -> serde_json::Value {
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{} reads: {error}", path.display()));
+        serde_json::from_str(&text)
+            .unwrap_or_else(|error| panic!("{} is JSON: {error}", path.display()))
+    };
+    let mut names: Vec<String> = std::fs::read_dir(template)
+        .expect("the template has flows")
+        .map(|file| {
+            file.expect("a flow")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort();
+
+    assert_eq!(names, ["code.json", "plan.json", "reply.json"]);
+    for name in &names {
+        assert_eq!(
+            read(std::path::Path::new(template).join(name)),
+            read(std::path::Path::new(built_in).join(name)),
+            "the template's {name} drifted from the built-in Flow"
+        );
+    }
+}

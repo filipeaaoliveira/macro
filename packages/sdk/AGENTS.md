@@ -45,9 +45,11 @@ enforced by the ordinary backend APIs.
   (a person's agent in Macro chat) uses it: `flows`, `start`, `queue` (the
   Runs waiting on the person), `runsOf(task)` and `FactoryRun` (`read`,
   `waitingGate`, `answer(waiting, ...)` on the Gate the agent read,
-  `cancel`, `linkTask`), and `handBack`, how the
-  agent session doing a Step hands back its result. The factory's settings,
-  a reply in words and insights are the person's (`coverage/skipped.ts`);
+  `cancel`, `linkTask`), `startBenchmarkSuite` (trial Runs of a Benchmark,
+  which the service checks against Standing Roles as it checks `start`),
+  and `handBack`, how the agent session doing a Step hands back its result. The factory's settings,
+  a reply in words, steering a Step, marking a Run flawed and insights are
+  the person's (`coverage/skipped.ts`);
   the service refuses an agent session what it keeps for the person in
   person. The service runs only on local stacks so far, so every method is
   `@mcp-exclude`. Code mode is handed the factory's

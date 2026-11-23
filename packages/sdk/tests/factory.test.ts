@@ -205,3 +205,48 @@ test('a retry past the queue limit is refused with its code', async () => {
     code: 'queueFull',
   });
 });
+
+test('a benchmark suite starts its trials and hands back their runs', async () => {
+  const TRIAL = '01960000-0000-7000-8000-000000000003';
+  const requests: Request[] = [];
+  globalThis.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      return Response.json(
+        {
+          id: 'suite-1',
+          runs: { 'add-export': TRIAL },
+          refused: { task: 'rename-flag', reason: 'queue full' },
+        },
+        { status: 201 },
+      );
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+
+  const suite = await macro().factory.startBenchmarkSuite('smoke', {
+    agents: { implementer: 'fast' },
+  });
+
+  const started = requests.at(-1);
+  expect(started?.method).toBe('POST');
+  expect(started?.url).toBe('https://factory.test/benchmarks/smoke/suites');
+  expect(await started?.json()).toEqual({ agents: { implementer: 'fast' } });
+  expect(suite.id).toBe('suite-1');
+  expect(suite.runs['add-export']?.id).toBe(TRIAL);
+  expect(suite.refused).toEqual({ task: 'rename-flag', reason: 'queue full' });
+});
+
+test('a benchmark suite the factory refuses throws', async () => {
+  globalThis.fetch = Object.assign(
+    async () =>
+      Response.json(
+        { message: 'a suite of smoke still runs', code: 'conflict' },
+        { status: 409 },
+      ),
+    { preconnect: originalFetch.preconnect },
+  );
+
+  await expect(macro().factory.startBenchmarkSuite('smoke')).rejects.toThrow();
+});
