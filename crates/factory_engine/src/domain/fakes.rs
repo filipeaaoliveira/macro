@@ -133,6 +133,9 @@ pub(crate) struct FollowUpComment {
 #[derive(Clone, Default)]
 pub(crate) struct FakeRepo {
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
+    /// Whether reading a Run's review rounds fails, as the database down
+    /// does.
+    pub(crate) review_rounds_fail: Arc<std::sync::atomic::AtomicBool>,
     /// The merge queues and the updates of Runs' branches.
     pub(crate) queue: Arc<Mutex<merge_queue::FakeQueue>>,
     /// The built-in Flow each Run walks.

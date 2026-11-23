@@ -734,3 +734,29 @@ async fn no_comment_is_written_when_its_author_is_unknown() {
     assert!(state.comments.is_empty());
     assert_eq!(state.comment_writes, 0);
 }
+
+/// Review rounds that cannot be read hold no pull request back: it opens
+/// with what the earlier Steps say.
+#[tokio::test]
+async fn publishing_opens_the_pull_request_when_review_rounds_cannot_be_read() {
+    let github = FakeGithub::default();
+    let repo = FakeRepo::default();
+    repo.review_rounds_fail
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let run_id = RunId::generate();
+    keep_round(&repo, run_id, first_round());
+    let earlier = earlier();
+    let mut publishing: StepInput<'_> = input(run_id);
+    publishing.earlier = &earlier;
+
+    let report = steps(&github, &repo)
+        .publish(publishing)
+        .await
+        .expect("publish");
+
+    assert_eq!(outcome(&report), "published");
+    let body = github.state().description.clone().expect("opened");
+    assert!(body.contains("## Factory run"));
+    assert!(body.contains("> Change the slug function so repeated dashes collapse."));
+    assert!(!body.contains("### Review rounds"));
+}
