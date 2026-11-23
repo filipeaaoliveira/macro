@@ -419,6 +419,17 @@ export type RunAutomation = {
   trigger: AutomationTriggerKind;
 };
 
+/**
+ * What a Run that retries another keeps of it: the Run it retries, the Run
+ * whose branch it works on (the first of a chain of retries), and the place
+ * of its own first Step: the Steps before it are the retried Run's, kept.
+ */
+export type RunRetry = {
+  retriedFrom: string;
+  branchOf: string;
+  firstSeq: number;
+};
+
 export type Run = {
   id: string;
   request: string;
@@ -466,6 +477,8 @@ export type Run = {
   tokenBudget?: RunTokenBudget;
   /** What became of its blockers; none from a service older than disputes. */
   blockerResolutions?: BlockerResolutions;
+  /** The Run it retries, for a retry; none for a Run started afresh. */
+  retry?: RunRetry;
 };
 
 /** A Flow a person can start a Run of. */
@@ -621,4 +634,37 @@ export function terminalState(
   if (step.terminal?.stopAskedAt) return 'stopping';
   if (step.terminal?.pausedAt) return 'paused';
   return step.terminal?.betweenTurns ? 'between' : 'working';
+}
+
+/** How a Run ends that its owner can retry. */
+const RETRIABLE_OUTCOMES: ReadonlySet<RunOutcome> = new Set([
+  'failed',
+  'infrastructure',
+  'blocked',
+]);
+
+/**
+ * The Flows whose Runs the factory never retries: a Benchmark trial and a
+ * self-improvement Run belong to the suite or improvement that started
+ * them.
+ */
+const UNRETRIED_FLOWS: ReadonlySet<string> = new Set(['benchmark', 'improve']);
+
+/**
+ * The retry of `run` among `runs` (its task's), if one is listed: the Run
+ * whose `retry.retriedFrom` names it. A Run is retried at most once.
+ */
+export function retryOf(run: Pick<Run, 'id'>, runs: Run[]): Run | undefined {
+  return runs.find((other) => other.retry?.retriedFrom === run.id);
+}
+
+/**
+ * Whether `run` can be retried: it ended `failed`, `infrastructure` or
+ * `blocked`, is no Benchmark trial or self-improvement Run, and no retry of
+ * it is known.
+ */
+export function isRetriable(run: Run, retried: boolean): boolean {
+  if (!run.end || !RETRIABLE_OUTCOMES.has(run.end.outcome)) return false;
+  if (run.flow !== undefined && UNRETRIED_FLOWS.has(run.flow)) return false;
+  return !retried;
 }

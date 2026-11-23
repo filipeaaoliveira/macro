@@ -76,6 +76,7 @@ function mount(options: {
   answerGate?: RunsContext['answerGate'];
   replyToGate?: RunsContext['replyToGate'];
   cancelRun?: RunsContext['cancelRun'];
+  retryRun?: RunsContext['retryRun'];
   markRunFlawed?: RunsContext['markRunFlawed'];
   scores?: RunScore[];
   labelRunScore?: RunsContext['labelRunScore'];
@@ -112,6 +113,7 @@ function mount(options: {
     answerGate: options.answerGate ?? vi.fn(async () => DONE),
     replyToGate: options.replyToGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
+    retryRun: options.retryRun ?? vi.fn(),
     markRunFlawed: options.markRunFlawed ?? vi.fn(async () => DONE),
     runScores: () => ({
       state: () => 'ready',

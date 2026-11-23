@@ -134,6 +134,19 @@ export default {
   keepRunning: 'Keep running',
   cancelFailed: 'Couldn’t cancel the run',
   alreadyEnded: 'This run has already ended',
+  retryRun: 'Retry run',
+  retryFailed: 'Couldn’t retry the run',
+  retryConflict: 'This run can’t be retried',
+  retryConflictDescription:
+    'It was retried already, or it no longer ended in a way a retry takes over',
+  retryQueueFull:
+    'Your queue is full: answer some runs in Waiting on you, or cancel one you no longer need, then retry the run.',
+  retry: 'Retry',
+  retryOf:
+    'This run retries an earlier one, on its branch, from where it stopped.',
+  openRetriedRun: 'Open the run it retries',
+  retriedIn: 'This run was retried.',
+  openRetry: 'Open its retry',
   // A Gate.
   gateTitle: 'Your answer is needed',
   question: 'Question',

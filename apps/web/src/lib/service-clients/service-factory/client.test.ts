@@ -193,6 +193,33 @@ describe('factoryClient routes', () => {
     });
   });
 
+  it('retries a Run, and names a full Queue apart from other refusals', async () => {
+    await factoryClient.retryRun('run 1');
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/runs/run%201/retry',
+      method: 'POST',
+      body: undefined,
+    });
+    const handler = vi
+      .mocked(fetchWithToken)
+      .mock.calls.at(-1)?.[1]?.errorResponseHandler;
+    if (!handler) throw new Error('No error response handler');
+    const refused = (body: unknown) =>
+      handler(new Response(JSON.stringify(body), { status: 409 }));
+
+    expect(
+      await refused({ message: 'too many wait', code: 'queueFull' })
+    ).toEqual({ code: 'QUEUE_FULL', message: 'too many wait' });
+    // A Run retried already, or one that can't be, carries no code.
+    expect(await refused({ message: 'the run was retried already' })).toEqual({
+      code: 'CONFLICT',
+      message: 'the run was retried already',
+    });
+    expect(
+      await handler(new Response('Bad gateway', { status: 502 }))
+    ).toMatchObject({ code: 'HTTP_ERROR' });
+  });
+
   it('steers a running Step from its Step Terminal', async () => {
     await factoryClient.noteStep('run-1', 2, { note: 'Use the tokens' });
     expect(lastCall()).toEqual({

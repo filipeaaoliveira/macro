@@ -13,6 +13,7 @@ import {
   RunCancel,
   RunContent,
   RunLoadFailed,
+  RunRetry,
   replyToGate,
 } from './shared/run-parts';
 import { formatRunTime } from './shared/run-time';
@@ -139,6 +140,11 @@ export function RunDialog(props: {
                 <Show when={props.controller.owned() && !run().end}>
                   <ActionDialogShell.Footer>
                     <RunCancel controller={props.controller} />
+                  </ActionDialogShell.Footer>
+                </Show>
+                <Show when={props.controller.retriable()}>
+                  <ActionDialogShell.Footer>
+                    <RunRetry controller={props.controller} />
                   </ActionDialogShell.Footer>
                 </Show>
                 <Show

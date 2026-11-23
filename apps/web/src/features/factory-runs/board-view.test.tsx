@@ -201,6 +201,7 @@ function mount(options: {
     answerGate: vi.fn(),
     replyToGate: vi.fn(),
     cancelRun: options.cancelRun ?? vi.fn(),
+    retryRun: vi.fn(),
     markRunFlawed: vi.fn(),
     runScores: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
     labelRunScore: vi.fn(),

@@ -6,7 +6,10 @@ import { Show } from 'solid-js';
 import { CancelRun, RunSteps, RunSummary } from '../../components/run-details';
 import { RunFlawNote } from '../../components/run-flaw';
 import { RunScores } from '../../components/run-scores';
-import type { RunActionResult } from '../../context/runs-context';
+import type {
+  RetryRunResult,
+  RunActionResult,
+} from '../../context/runs-context';
 import type { Run } from '../../core/run';
 import type { RunController } from '../../primitives/run-controller';
 
@@ -41,6 +44,21 @@ function notifyCancel(result: RunActionResult | undefined) {
   toast.failure(t('factoryRuns.cancelFailed'));
 }
 
+function notifyRetry(result: RetryRunResult | undefined) {
+  if (!result || result.ok) return;
+  if (result.reason === 'queueFull') {
+    toast.alert(t('factoryRuns.retryQueueFull'));
+    return;
+  }
+  if (result.reason === 'conflict') {
+    toast.alert(t('factoryRuns.retryConflict'), {
+      subtext: t('factoryRuns.retryConflictDescription'),
+    });
+    return;
+  }
+  toast.failure(t('factoryRuns.retryFailed'));
+}
+
 /** What scrolls: where the Run is, its request, and its Steps. */
 export function RunContent(props: {
   controller: RunController;
@@ -57,6 +75,8 @@ export function RunContent(props: {
             status={status()}
             time={props.time}
             statusRef={props.statusRef}
+            retriedBy={props.controller.retriedBy()?.id}
+            onOpenRun={props.controller.openRun}
           />
           <Show when={props.run.end?.flaw}>
             {(flaw) => <RunFlawNote flaw={flaw()} time={props.time} />}
@@ -123,6 +143,28 @@ export function RunCancel(props: { controller: RunController }) {
         fireAndForget(cancelRun(props.controller), 'factory-runs')
       }
     />
+  );
+}
+
+async function retryRun(controller: RunController) {
+  notifyRetry(await controller.retry());
+}
+
+/**
+ * Retry run, for its owner once it ended `failed`, `infrastructure` or
+ * `blocked` and no retry of it is known: a new Run starts where it stopped,
+ * and opens in its place.
+ */
+export function RunRetry(props: { controller: RunController }) {
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      loading={props.controller.retrying()}
+      onClick={() => fireAndForget(retryRun(props.controller), 'factory-runs')}
+    >
+      {t('factoryRuns.retryRun')}
+    </Button>
   );
 }
 

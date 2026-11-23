@@ -316,6 +316,10 @@ function createFixtureContext(): RunsContext {
       }));
       return { ok: true, value: undefined };
     },
+    async retryRun() {
+      return { ok: false, reason: 'failed' };
+    },
+
     async cancelRun(runId) {
       const run = runs().find((candidate) => candidate.id === runId);
       if (run?.end) return { ok: false, reason: 'conflict' };
