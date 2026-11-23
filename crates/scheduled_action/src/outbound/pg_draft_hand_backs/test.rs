@@ -52,13 +52,23 @@ async fn a_drafts_latest_check_by_its_owner_is_its_answer(pool: PgPool) {
     };
     assert!(
         !drafts
-            .record(session, &stranger, &check("Theirs"), std::slice::from_ref(&folder))
+            .record(
+                session,
+                &stranger,
+                &check("Theirs"),
+                std::slice::from_ref(&folder)
+            )
             .await
             .unwrap()
     );
     assert!(
         drafts
-            .record(session, &owner(), &check("First"), std::slice::from_ref(&database))
+            .record(
+                session,
+                &owner(),
+                &check("First"),
+                std::slice::from_ref(&database)
+            )
             .await
             .unwrap()
     );

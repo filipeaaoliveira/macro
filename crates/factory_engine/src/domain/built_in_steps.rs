@@ -640,8 +640,15 @@ where
                     .review
                     .filter(|round| round.blockers().next().is_some());
                 let instructions = fix_instructions(blockers);
-                self.work_and_check(step, &instructions, vec![Outcome::done()], input, blockers, true)
-                    .await
+                self.work_and_check(
+                    step,
+                    &instructions,
+                    vec![Outcome::done()],
+                    input,
+                    blockers,
+                    true,
+                )
+                .await
             }
             BuiltInStep::CiFix => {
                 let outcomes = vec![Outcome::done()];

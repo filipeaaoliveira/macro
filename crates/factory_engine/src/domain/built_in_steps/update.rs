@@ -86,7 +86,14 @@ where
                     .replace("{base_sha}", &update.base_sha)
                     .replace("{head}", &head);
                 let checked = self
-                    .work_and_check(step, &instructions, vec![Outcome::done()], input, None, false)
+                    .work_and_check(
+                        step,
+                        &instructions,
+                        vec![Outcome::done()],
+                        input,
+                        None,
+                        false,
+                    )
                     .await?;
                 if checked.outcome != Outcome::done() {
                     return Ok(checked);

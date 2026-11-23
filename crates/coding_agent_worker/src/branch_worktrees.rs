@@ -80,7 +80,10 @@ impl BranchWorktrees {
     /// The worktree sessions on `branch` work in, made when there is none
     /// yet; then a sweep in the background, when one is due. None when the
     /// checkout is no git checkout: there is nothing to make a worktree of.
-    pub(crate) async fn prepare(self: &Arc<Self>, branch: &str) -> rootcause::Result<Option<PathBuf>> {
+    pub(crate) async fn prepare(
+        self: &Arc<Self>,
+        branch: &str,
+    ) -> rootcause::Result<Option<PathBuf>> {
         let key = key(branch)?;
         let Some(top) = self.top().await else {
             return Ok(None);
@@ -373,9 +376,12 @@ async fn holds_nothing_origin_lacks(path: &Path) -> bool {
     let clean = git(path, &["status", "--porcelain"])
         .await
         .is_ok_and(|status| status.is_empty());
-    let pushed = git(path, &["rev-list", "--max-count=1", "HEAD", "--not", "--remotes"])
-        .await
-        .is_ok_and(|unpushed| unpushed.is_empty());
+    let pushed = git(
+        path,
+        &["rev-list", "--max-count=1", "HEAD", "--not", "--remotes"],
+    )
+    .await
+    .is_ok_and(|unpushed| unpushed.is_empty());
     clean && pushed
 }
 

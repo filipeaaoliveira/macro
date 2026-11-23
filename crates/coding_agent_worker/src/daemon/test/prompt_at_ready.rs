@@ -399,7 +399,16 @@ async fn a_session_naming_its_work_branch_is_created_in_the_branch_s_worktree() 
         assert!(status.success(), "git {args:?}");
     };
     git(&["init", "--initial-branch=main"]);
-    git(&["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "--allow-empty", "-m", "initial"]);
+    git(&[
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "user.name=T",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "initial",
+    ]);
     let checkout = checkout.canonicalize().unwrap();
     let (daemon, plane, mut created) =
         computer_ready_in(false, Some((checkout.clone(), REPOSITORY.to_owned()))).await;

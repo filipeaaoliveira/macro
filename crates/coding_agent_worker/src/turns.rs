@@ -102,12 +102,7 @@ impl ActiveTurns {
                             .unwrap_or_else(PoisonError::into_inner)
                             .insert(id);
                     }
-                    (
-                        "session/new",
-                        Some(RpcParams {
-                            cwd: Some(cwd), ..
-                        }),
-                    ) => {
+                    ("session/new", Some(RpcParams { cwd: Some(cwd), .. })) => {
                         workplaces.opening.insert(id, cwd);
                     }
                     (

@@ -45,7 +45,11 @@ async fn repositories() -> Repositories {
     .await
     .unwrap();
     identify(&checkout).await;
-    let checkout = PathBuf::from(git(&checkout, &["rev-parse", "--show-toplevel"]).await.unwrap());
+    let checkout = PathBuf::from(
+        git(&checkout, &["rev-parse", "--show-toplevel"])
+            .await
+            .unwrap(),
+    );
     Repositories {
         _root: root,
         origin,
@@ -93,7 +97,10 @@ async fn subjects(origin: &Path, branch: &str) -> Vec<String> {
 async fn two_runs_at_once_commit_on_their_own_branches_and_leave_the_checkout_alone() {
     let repos = repositories().await;
     let head = git(&repos.checkout, &["rev-parse", "HEAD"]).await.unwrap();
-    let worktrees = Arc::new(BranchWorktrees::new(repos.checkout.clone(), ActiveTurns::default()));
+    let worktrees = Arc::new(BranchWorktrees::new(
+        repos.checkout.clone(),
+        ActiveTurns::default(),
+    ));
 
     let (first, second) = tokio::join!(
         worktrees.prepare("factory/run-1"),
@@ -133,7 +140,10 @@ async fn two_runs_at_once_commit_on_their_own_branches_and_leave_the_checkout_al
 #[tokio::test]
 async fn a_later_step_of_the_run_works_in_the_same_worktree() {
     let repos = repositories().await;
-    let worktrees = Arc::new(BranchWorktrees::new(repos.checkout.clone(), ActiveTurns::default()));
+    let worktrees = Arc::new(BranchWorktrees::new(
+        repos.checkout.clone(),
+        ActiveTurns::default(),
+    ));
     let first = worktrees.prepare("factory/run").await.unwrap().unwrap();
     check_out(&first, "factory/run").await;
     std::fs::write(first.join("unpushed"), "work").unwrap();
@@ -151,7 +161,10 @@ async fn a_later_step_of_the_run_works_in_the_same_worktree() {
 #[tokio::test]
 async fn a_new_worktree_starts_at_the_branch_origin_has() {
     let repos = repositories().await;
-    let worktrees = Arc::new(BranchWorktrees::new(repos.checkout.clone(), ActiveTurns::default()));
+    let worktrees = Arc::new(BranchWorktrees::new(
+        repos.checkout.clone(),
+        ActiveTurns::default(),
+    ));
     let first = worktrees.prepare("factory/run").await.unwrap().unwrap();
     check_out(&first, "factory/run").await;
     commit_and_push(&first, "factory/run", "one").await;
@@ -171,18 +184,16 @@ async fn a_new_worktree_starts_at_the_branch_origin_has() {
 
 /// Make a session of `worktrees` used `key`'s worktree `by` ago.
 fn age(repos: &Repositories, key: &str, by: Duration) {
-    touch(
-        &directory(&repos.checkout),
-        key,
-        SystemTime::now() - by,
-    )
-    .unwrap();
+    touch(&directory(&repos.checkout), key, SystemTime::now() - by).unwrap();
 }
 
 #[tokio::test]
 async fn worktrees_no_session_used_for_long_or_whose_branch_origin_deleted_are_removed() {
     let repos = repositories().await;
-    let worktrees = Arc::new(BranchWorktrees::new(repos.checkout.clone(), ActiveTurns::default()));
+    let worktrees = Arc::new(BranchWorktrees::new(
+        repos.checkout.clone(),
+        ActiveTurns::default(),
+    ));
     let stale = worktrees.prepare("factory/stale").await.unwrap().unwrap();
     let merged = worktrees.prepare("factory/merged").await.unwrap().unwrap();
     let empty = worktrees.prepare("factory/empty").await.unwrap().unwrap();
@@ -196,7 +207,11 @@ async fn worktrees_no_session_used_for_long_or_whose_branch_origin_deleted_are_r
     // Not pushed, with a change it would lose.
     std::fs::write(editing.join("draft"), "work").unwrap();
     let idle = GONE_AFTER + Duration::from_secs(60);
-    age(&repos, "factory+stale", STALE_AFTER + Duration::from_secs(60));
+    age(
+        &repos,
+        "factory+stale",
+        STALE_AFTER + Duration::from_secs(60),
+    );
     age(&repos, "factory+merged", idle);
     age(&repos, "factory+empty", idle);
     age(&repos, "factory+editing", idle);
@@ -215,9 +230,17 @@ async fn worktrees_no_session_used_for_long_or_whose_branch_origin_deleted_are_r
     assert!(!listed.contains("factory+stale"));
     assert!(!listed.contains("factory+merged"));
     assert!(
-        git(&repos.checkout, &["rev-parse", "--verify", "--quiet", "refs/heads/factory/merged"])
-            .await
-            .is_err(),
+        git(
+            &repos.checkout,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "refs/heads/factory/merged"
+            ]
+        )
+        .await
+        .is_err(),
         "the removed worktree's branch is deleted with it"
     );
 }
@@ -241,7 +264,11 @@ async fn a_worktree_a_session_has_a_turn_running_in_is_never_removed() {
         r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"s1","prompt":[]}}"#,
         LineDirection::Stdin,
     );
-    age(&repos, "factory+busy", STALE_AFTER + Duration::from_secs(60));
+    age(
+        &repos,
+        "factory+busy",
+        STALE_AFTER + Duration::from_secs(60),
+    );
 
     worktrees.sweep("factory+other").await;
     assert!(path.exists(), "a turn runs there");
@@ -258,7 +285,10 @@ async fn a_worktree_a_session_has_a_turn_running_in_is_never_removed() {
 #[tokio::test]
 async fn a_workspace_that_is_no_checkout_has_no_worktrees() {
     let root = tempfile::tempdir().unwrap();
-    let worktrees = Arc::new(BranchWorktrees::new(root.path().to_owned(), ActiveTurns::default()));
+    let worktrees = Arc::new(BranchWorktrees::new(
+        root.path().to_owned(),
+        ActiveTurns::default(),
+    ));
     assert!(worktrees.prepare("factory/run").await.unwrap().is_none());
 }
 

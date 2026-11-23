@@ -88,7 +88,14 @@ async fn work_that_pushes_nothing_of_its_own_is_not_read_off_the_branch() {
     let step = StepName::try_from("write".to_string()).expect("valid");
 
     let report = steps
-        .work_and_check(&step, "Merge the base in", vec![Outcome::done()], input, None, false)
+        .work_and_check(
+            &step,
+            "Merge the base in",
+            vec![Outcome::done()],
+            input,
+            None,
+            false,
+        )
         .await
         .expect("work");
 
