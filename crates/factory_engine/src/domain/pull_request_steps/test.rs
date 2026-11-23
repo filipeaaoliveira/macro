@@ -13,6 +13,7 @@ mod branch_cleanup;
 mod ci_waits;
 mod control_files;
 mod description;
+mod flaky_ci;
 mod merge_queue;
 mod page;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches, ci, suite};

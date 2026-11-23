@@ -18,9 +18,6 @@
 //! within [`FLAKY_PERIOD`] is quarantined, and the Run files a task for it
 //! when it ends.
 
-#[cfg(test)]
-mod test;
-
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
@@ -77,7 +74,10 @@ fn still_running(checks: &HeadChecks) -> bool {
         .suites
         .iter()
         .any(|suite| suite.state == CheckState::Waiting && suite.check_runs > 0);
-    let run_waits = checks.runs.iter().any(|run| run.state == CheckState::Waiting);
+    let run_waits = checks
+        .runs
+        .iter()
+        .any(|run| run.state == CheckState::Waiting);
     let status_waits = checks
         .statuses
         .iter()
@@ -101,7 +101,10 @@ fn may_be_flaky(checks: &HeadChecks, flakes: &CiFlakes) -> bool {
         .collect();
     let named = |name: &str| {
         flakes.known.iter().any(|known| known == name)
-            || flakes.quarantined.iter().any(|quarantined| quarantined == name)
+            || flakes
+                .quarantined
+                .iter()
+                .any(|quarantined| quarantined == name)
             || flakes.failures.iter().any(|failure| failure.name == name)
     };
     !failed_runs.is_empty() && failed_runs.into_iter().all(named)
@@ -110,7 +113,10 @@ fn may_be_flaky(checks: &HeadChecks, flakes: &CiFlakes) -> bool {
 /// The reruns that take every failed job of `jobs` as a known flake, by
 /// `flakes`; none when a job failed that is no known flake, was cancelled,
 /// or is not a GitHub Actions job, or when none failed.
-pub(crate) fn flaky_retries(jobs: &[FinishedJob], flakes: &CiFlakes) -> Option<Vec<CiRetryRequest>> {
+pub(crate) fn flaky_retries(
+    jobs: &[FinishedJob],
+    flakes: &CiFlakes,
+) -> Option<Vec<CiRetryRequest>> {
     let mut retries = Vec::new();
     for job in jobs {
         if !matches!(job.state, CheckState::Failed(_)) {

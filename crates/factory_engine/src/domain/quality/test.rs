@@ -137,6 +137,7 @@ fn finished(state: CheckState, step: Option<&str>, detail: Option<&str>) -> Fini
         failed_step: step.map(str::to_string),
         detail: detail.map(str::to_string),
         annotations: Vec::new(),
+        actions_job_id: None,
     }
 }
 
@@ -1035,4 +1036,53 @@ async fn a_repository_is_matched_however_it_is_written() {
         assert_eq!(asked[0].repository.as_deref(), Some(APP), "{named}");
         assert_eq!(quality.repository.as_deref(), Some(APP), "{named}");
     }
+}
+
+/// CI health counts how the Runs' reruns of flaky jobs ended, leaving out
+/// those still running, and lists the quarantined jobs, with a task only
+/// once it is filed.
+#[test]
+fn ci_health_counts_reruns_and_lists_quarantines() {
+    use factory_records::domain::quality::{CiQuarantine, CiRetryRecord, CiRetryResult};
+
+    let rerun = |result: Option<CiRetryResult>| CiRetryRecord {
+        run_id: run(1).run.id,
+        name: "e2e".to_string(),
+        result,
+    };
+    let task = Uuid::from_u128(77);
+    let quarantine = |name: &str, filed: bool| CiQuarantine {
+        repository: "https://github.com/macro/app".to_string(),
+        name: name.to_string(),
+        run_id: run(1).run.id,
+        passed_retries: 3,
+        task_id: task,
+        filed,
+        quarantined_at: at("2026-11-02T12:00:00Z"),
+    };
+    let records = QualityRecords {
+        runs: vec![run(1)],
+        ci_retries: vec![
+            rerun(Some(CiRetryResult::Passed)),
+            rerun(Some(CiRetryResult::Passed)),
+            rerun(Some(CiRetryResult::Failed)),
+            rerun(Some(CiRetryResult::Refused)),
+            rerun(None),
+        ],
+        ci_quarantines: vec![quarantine("e2e", true), quarantine("lint", false)],
+        ..QualityRecords::default()
+    };
+
+    let ci = summarize_quality(&query(None), records, &[]).ci;
+
+    assert_eq!(
+        (ci.retries.passed, ci.retries.failed, ci.retries.refused),
+        (2, 1, 1)
+    );
+    let listed: Vec<_> = ci
+        .quarantined
+        .iter()
+        .map(|quarantined| (quarantined.job.as_str(), quarantined.task_id))
+        .collect();
+    assert_eq!(listed, vec![("e2e", Some(task)), ("lint", None)]);
 }

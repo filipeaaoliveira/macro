@@ -3,7 +3,7 @@
 
 mod board;
 mod definition;
-mod quarantine;
+pub(crate) mod quarantine;
 mod standing;
 #[cfg(test)]
 mod test;
@@ -60,10 +60,9 @@ use crate::domain::models::{
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
-    AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates,
-    NoQuarantineTasks, NoTaskThread, PullRequests, QuarantineTasks, Retryable, RunWorkflows,
-    RunWorkflowsError, StepExecutor, StepService, TaskAccess, TaskDirectory, TaskNotes,
-    TaskThread, UserDirectory,
+    AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoQuarantineTasks,
+    NoTaskThread, PullRequests, QuarantineTasks, Retryable, RunWorkflows, RunWorkflowsError,
+    StepExecutor, StepService, TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
 use crate::domain::standing_rules::{
     GateFacts, RuleAnswer, any_dismissed, kind_answers, offers_kind_answers, repeated_blockers,

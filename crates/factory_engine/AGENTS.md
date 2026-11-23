@@ -2391,6 +2391,12 @@ Definition.
 - `src/domain/quality.rs`: CI health, review quality, cost per merged
   pull request and the autonomy rate (`GET /insights/quality`), and how a
   `ci` wait's finished jobs are classed before they are kept.
+- `src/domain/pull_request_steps/flaky_ci.rs`: the `rerun_flaky_ci`
+  Standing Rule: a red of only known flaky jobs (the Definition's
+  `knownFlakes`, a job quarantined in the repository, or the same failure
+  on other pull requests) is rerun once through GitHub before `ci-fix`;
+  passed retries quarantine a job, and `service/quarantine.rs` files its
+  task as the Run ends.
 - `src/domain/evaluation.rs`: Scorers, Experiments and Benchmarks, their
   sampling and arm assignment; `evaluation/service.rs` scores a Run that
   ended; `evaluation/insights.rs` the evaluation insights and suites.
@@ -2663,3 +2669,9 @@ Definition.
 - A worker older than `selfImprovement` in `scorers.json` cannot read a
   Definition that sets it (`deny_unknown_fields`); one that leaves the
   defaults keeps the JSON it kept before.
+- Run the `factory_ci_quarantine` migration before deploying the factory:
+  the default rules now store `rerun_flaky_ci` on each Run, which the old
+  check refuses. A `ci` Step reruns only GitHub Actions jobs, with the
+  owner's token: one that may not write Actions gets the rerun declined,
+  and the red goes to `ci-fix` as before. A red the rule may rerun is held
+  until the head's other checks finish, so its `ci-fix` starts later.

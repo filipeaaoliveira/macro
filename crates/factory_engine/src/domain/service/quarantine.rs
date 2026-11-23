@@ -33,7 +33,7 @@ fn quarantine_task(run: &Run, quarantine: &CiQuarantine) -> FollowUpTask {
 /// File a task for each quarantine `run` made that has none yet. It never
 /// fails the Run's end: a task that cannot be filed now is logged, and its
 /// quarantine stays listed without one.
-pub(super) async fn file_tasks<R: RunRepository, Q: QuarantineTasks>(
+pub(crate) async fn file_tasks<R: RunRepository, Q: QuarantineTasks>(
     repo: &R,
     tasks: &Q,
     run: &Run,

@@ -21,9 +21,8 @@ use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, JobRerun,
-    Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState, PullRequestText,
-    RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
+    Merging, OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState,
+    PullRequestText, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;

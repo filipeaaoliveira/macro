@@ -46,9 +46,8 @@ use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     DefinitionPullRequest, FinishedJob, GITHUB_COMMITTER, HeadChecks, JobRerun, Merging,
-    OpenPullRequest,
-    Opening, PullRequest, PullRequestComment, PullRequestState, PullRequestText, RepositoryAccess,
-    RequiredChecks, run_branch,
+    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState, PullRequestText,
+    RepositoryAccess, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -866,7 +865,11 @@ impl RunRepository for FakeRepo {
             .collect())
     }
 
-    async fn mark_ci_quarantine_filed(&self, repository: &str, name: &str) -> Result<(), FakeError> {
+    async fn mark_ci_quarantine_filed(
+        &self,
+        repository: &str,
+        name: &str,
+    ) -> Result<(), FakeError> {
         for quarantine in self.ci_quarantines.lock().expect("quarantines").iter_mut() {
             if quarantine.repository == repository && quarantine.name == name {
                 quarantine.filed = true;

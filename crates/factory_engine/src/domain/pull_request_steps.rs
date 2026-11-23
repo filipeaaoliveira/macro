@@ -49,8 +49,8 @@ use crate::domain::control_files::{ControlFiles, ControlFilesError};
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
-    BranchDeletion, BranchUpdating, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
-    FinishedJob, OpenPullRequest, Opening, PullRequest, PullRequestState, RequiredCheck,
+    BranchDeletion, BranchUpdating, CheckState, CheckSuite, CodeRepository, FinishedJob,
+    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RequiredCheck,
     RequiredChecks, StepInput, StepReport, run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
@@ -380,7 +380,12 @@ fn report(outcome_name: &str, output: String) -> StepReport {
 
 /// What `ci` reports of a red on `head`: the checks that `failed`, and
 /// what the flaky rule did, `rerun`.
-fn red_report(pull_request: &PullRequest, head: &str, failed: &[String], rerun: &str) -> StepReport {
+fn red_report(
+    pull_request: &PullRequest,
+    head: &str,
+    failed: &[String],
+    rerun: &str,
+) -> StepReport {
     report(
         "red",
         format!(
@@ -1006,9 +1011,6 @@ where
         // read, so a Run that comes here without `publish`, as from
         // `update`, shows its latest checks.
         let mut reported = false;
-        // The failed checks of a red the wait holds back while the head's
-        // other checks finish, to tell whether only flaky jobs failed.
-        let mut held_red: Option<Vec<String>> = None;
         loop {
             let (pull_request, checks) = self
                 .find_with_checks(&input, &repository, required.as_ref(), &mut kept)
@@ -1031,7 +1033,10 @@ where
             };
             let elapsed = chrono::TimeDelta::from_std(started.elapsed()).unwrap_or_default();
             let now = started_at + elapsed;
-            held_red = None;
+            // The failed checks of a red this read holds back while the
+            // head's other checks finish, to tell whether only flaky jobs
+            // failed.
+            let mut held_red: Option<Vec<String>> = None;
             match verdict(&pull_request, &checks, required.as_ref(), now) {
                 Verdict::Green(passed) => {
                     let seen = (head.clone(), passed);
