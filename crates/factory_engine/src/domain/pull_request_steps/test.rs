@@ -12,6 +12,7 @@ use super::{CI_WAIT, PullRequestStepError, PullRequestSteps};
 mod branch_cleanup;
 mod ci_waits;
 mod control_files;
+mod description;
 mod merge_queue;
 mod page;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches, ci, suite};
@@ -597,28 +598,6 @@ async fn a_refused_merge_or_one_no_person_agreed_to_merges_nothing() {
     assert_eq!(outcome(&refused), "refused");
     assert!(refused.output.contains("Required reviews are missing."));
     assert!(matches!(unasked, Err(PullRequestStepError::NoMergeHead)));
-}
-
-/// A request too long for GitHub's description is cut, and the lines that
-/// name the Run and its task stay.
-#[tokio::test]
-async fn a_long_request_is_cut_to_fit_the_description_keeping_the_task() {
-    let github = FakeGithub::default();
-    // Characters, not bytes, count: each of these is two bytes.
-    let request = "é".repeat(70_000);
-    let mut long = input(RunId::generate());
-    long.request = &request;
-
-    steps(&github, &FakeRepo::default())
-        .publish(long)
-        .await
-        .expect("publish");
-
-    let body = github.state().bodies[0].clone();
-    assert!(body.chars().count() <= 65_536);
-    assert!(body.starts_with("ééé"));
-    assert!(body.contains("(The rest of the request is left out.)"));
-    assert!(body.contains("\n\nTask: MACRO-"));
 }
 
 /// A token that may not read Actions runs is named in CI's output, so the

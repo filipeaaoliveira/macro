@@ -867,6 +867,26 @@ while an Actions suite sits empty. Its guarantees:
   reports only by status (as some deploy previews do) keeps CI waiting until
   it times out.
 
+The pull request's description holds the request, then the Run's report,
+then the lines that name the Run and its task
+(`src/domain/pull_request_steps/description.rs`). The report is a section
+marked by HTML comments: the plan (without its acceptance block), the
+Done-when checklist with each clause's result in the latest `accept` Step,
+the review rounds with how each Blocker ended (fixed, disputed and upheld or
+dropped), the latest round of the repository's checks, and the follow-ups
+filed. `publish` opens the pull request with it, and `publish` and `ci` (once,
+on its first read, so a Run that comes back from `update` shows it) write it
+again on each visit: only the marked section is replaced, so what a person
+wrote around it stays, and a description without it gets it at its end. A
+description holds at most 65,536 characters: the request is kept whole
+lines, and the rest of it, then what does not fit of the report, go into
+numbered comments, each found again by its marker and edited in place; one
+no longer needed says so. What agents wrote is quoted so it mentions no one
+and links no issue (a word joiner after each `@` and `#`, no `<` or `>`).
+Follow-ups are not named by their task id, which would link the pull
+request to them. Writing the report reads before it writes, writes only what
+changed, and a failure is logged without failing the Step.
+
 On a repository, `write` and `fix` then run the repository's own checks
 (`src/domain/built_in_steps/checks_round.rs`). The repository declares them
 in `.macro/checks.json` on its base branch (`src/domain/checks.rs`): each a

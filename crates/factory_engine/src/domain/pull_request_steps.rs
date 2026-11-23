@@ -28,6 +28,7 @@
 //! and CI run again and the merge Gate asks again. `merge` ends `queued`
 //! when the Runs ahead of it are still there after [`QUEUE_WAIT`].
 
+mod description;
 #[cfg(test)]
 mod test;
 
@@ -39,7 +40,7 @@ use factory_records::domain::merge_queue::{BranchUpdate, MergeQueueRepository, Q
 use factory_records::domain::models::{ControlFileChanges, Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::quality::{CiJob, CiJobResult, CiVerdict, CiWait};
-use github::domain::models::MacroTaskId;
+use factory_records::domain::review_rounds::ReviewRoundRepository;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::checks::CHECKS_FILE;
@@ -494,35 +495,6 @@ fn title(request: &str) -> String {
     format!("{}…", cut.trim_end())
 }
 
-/// The description of the Run's pull request: the request, then the task it
-/// works on, written so GitHub's webhook links the pull request to the task.
-/// A request too long for GitHub's [`MAX_BODY_CHARS`] is cut, never the
-/// lines after it.
-fn body(input: &StepInput<'_>) -> String {
-    const CUT: &str = "\n\n(The rest of the request is left out.)";
-
-    let mut footer = format!("\n\nOpened by a Macro factory run ({}).", input.key.run_id);
-    if let Some(task_id) = input.task_id {
-        footer.push_str(&format!(
-            "\n\nTask: {}",
-            MacroTaskId::from_uuid(&task_id).to_task_id_string()
-        ));
-    }
-
-    let room = MAX_BODY_CHARS - footer.chars().count();
-    let request = if input.request.chars().count() <= room {
-        input.request.to_string()
-    } else {
-        let kept: String = input
-            .request
-            .chars()
-            .take(room - CUT.chars().count())
-            .collect();
-        format!("{kept}{CUT}")
-    };
-    format!("{request}{footer}")
-}
-
 /// The pull request Steps, on GitHub through `github`, keeping the commit a
 /// person is asked to merge and the merges they make in the Run's records,
 /// and starting the watch of the base branch a Run merges to.
@@ -875,7 +847,10 @@ where
     /// `closed` when a person closed it without merging, or `refused` with
     /// GitHub's reason, such as a branch with nothing its base lacks. A
     /// published head's Control Files are checked, and named.
-    pub async fn publish(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
+    pub async fn publish(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError>
+    where
+        R: ReviewRoundRepository,
+    {
         let (repository, recorded) = Self::repository(&input)?;
 
         // A retry, or a Run sent back here after a fix, finds the pull
@@ -883,6 +858,7 @@ where
         let pull_request = match self.find(&input, &repository).await? {
             Some(pull_request) => pull_request,
             None => {
+                let run_report = self.report(&input).await?;
                 let opening = self
                     .github
                     .open(
@@ -892,7 +868,11 @@ where
                             branch: run_branch(input.key.run_id),
                             base: recorded.base_branch.clone(),
                             title: title(input.request),
-                            body: body(&input),
+                            body: description::opening(
+                                input.request,
+                                &description::footer(&input),
+                                &run_report,
+                            ),
                         },
                     )
                     .await
@@ -915,6 +895,8 @@ where
                 format!("{}\n\nIt was closed without merging.", named(&pull_request)),
             ),
             PullRequestState::Open => {
+                self.refresh_report(&input, &repository, &pull_request)
+                    .await;
                 let changes = self
                     .check_control_files(&input, &repository, recorded, &pull_request.head_sha)
                     .await?;
@@ -975,7 +957,10 @@ where
     /// [`CI_WAIT`]; or `closed` when a person closed the pull request. A pull
     /// request that merged meanwhile is `green`. The head it calls green is
     /// kept as the one a person may be asked to merge.
-    pub async fn ci(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
+    pub async fn ci(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError>
+    where
+        R: ReviewRoundRepository,
+    {
         let (repository, recorded) = Self::repository(&input)?;
         let required = self.required_checks(&input, &repository, recorded).await?;
         // The wall clock a suite's age is read against, moved on by the
@@ -992,10 +977,19 @@ where
         // The heads this wait read, in order, each once: a newer push
         // replaces the head, and cancels its runs.
         let mut heads: Vec<String> = Vec::new();
+        // Whether this wait wrote the Run's report yet: once, on its first
+        // read, so a Run that comes here without `publish`, as from
+        // `update`, shows its latest checks.
+        let mut reported = false;
         loop {
             let (pull_request, checks) = self
                 .find_with_checks(&input, &repository, required.as_ref(), &mut kept)
                 .await?;
+            if !reported && pull_request.state == PullRequestState::Open {
+                self.refresh_report(&input, &repository, &pull_request)
+                    .await;
+            }
+            reported = true;
             let head = pull_request.head_sha.clone();
             if heads.last() != Some(&head) {
                 heads.retain(|seen| *seen != head);
