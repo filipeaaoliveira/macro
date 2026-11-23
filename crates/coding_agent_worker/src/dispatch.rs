@@ -30,7 +30,7 @@ pub struct Dispatcher {
     api: HarnessApi,
     runtime: Runtime,
     workspace: Workspace,
-    branches: BranchWorktrees,
+    branches: std::sync::Arc<BranchWorktrees>,
     #[cfg(unix)]
     workspaces: Option<crate::herdr::repositories::Workspaces>,
     #[cfg(unix)]
@@ -38,12 +38,17 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-    /// Build the executor.
-    pub fn new(api: HarnessApi, runtime: Runtime, workspace: Workspace) -> Self {
+    /// Build the executor; `turns` says which sessions work where.
+    pub fn new(
+        api: HarnessApi,
+        runtime: Runtime,
+        workspace: Workspace,
+        turns: crate::turns::ActiveTurns,
+    ) -> Self {
         Self {
             api,
             runtime,
-            branches: BranchWorktrees::new(workspace.path.clone()),
+            branches: std::sync::Arc::new(BranchWorktrees::new(workspace.path.clone(), turns)),
             workspace,
             #[cfg(unix)]
             workspaces: None,

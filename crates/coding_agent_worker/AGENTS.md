@@ -83,15 +83,19 @@ the local ACP process (Claude Code, Codex, ...), and drives native
   create/dial/prompt against the live harness service.
 - `src/branch_worktrees.rs`: without Herdr, a requested session that names
   its `work_branch` (a factory Run's `factory/<run id>`) works in that
-  branch's git worktree of the workspace,
-  `<workspace>/.macrod-worktrees/<branch, / as +>`, not in the workspace
+  branch's git worktree of the workspace, beside it rather than in it
+  (`<workspace>.macrod-worktrees/<branch, / as +>`), not in the workspace
   itself: made detached at origin's branch (else origin's default), shared
-  by every session naming the branch, left out of the workspace's status
-  (`info/exclude`), and never moving the workspace's `HEAD`. Each prepare
-  removes worktrees no session asked for in 14 days, and those whose branch
-  origin had and deleted, idle for an hour. A workspace that is no git
-  checkout serves the session itself, with a warning; a worktree that cannot
-  be made fails the request (`workspace preparation failed`).
+  by every session naming the branch, never moving the workspace's `HEAD`.
+  Branches prepare under locks of their own; at most every 5 minutes a
+  prepare starts a background sweep that removes worktrees no session used
+  in 3 days, and those idle for an hour whose branch origin no longer lists
+  and that hold nothing origin lacks, with their local branch. Use is read
+  off the ACP wire (`src/turns.rs`, `ActiveTurns::workplace`: a session's
+  `cwd`, its turns starting and ending); a worktree with a turn running is
+  never removed. A workspace that is no git checkout serves the session
+  itself, with a warning; a worktree that cannot be made fails the request
+  (`workspace preparation failed`).
 - `src/daemon.rs` `watch_presence`: each minute a connection has held, asks
   `GET /harnesses/me` with `RUNTIME_CONNECTED_HEADER`. A service that reads the
   harness offline logs `harness_presence_disagreement`, macrod warns, and the TUI
