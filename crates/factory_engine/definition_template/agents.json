@@ -13,6 +13,7 @@
     "writer": ["primary", "backup"],
     "fixer": ["primary", "backup"],
     "reviewer": ["backup", "primary"],
-    "verifier": ["backup", "primary"]
+    "verifier": ["backup", "primary"],
+    "plan-reviewer": ["backup", "primary"]
   }
 }

@@ -17,7 +17,7 @@ fn plan_gate(answer: &str, note: Option<&str>, kind: GateKind) -> AnsweredGate {
     AnsweredGate {
         run_id: RunId::generate(),
         seq: 2,
-        entry: EntryId::try_from("plan".to_string()).expect("valid"),
+        entry: EntryId::try_from("plan-review".to_string()).expect("valid"),
         owner: MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid"),
         flow: Some("code".to_string()),
         flow_definition: None,

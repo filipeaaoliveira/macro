@@ -63,9 +63,10 @@ Outside the files, all must be done:
   first; the next takes over only when Macro refuses the first for lack of
   quota. Keep `planner`, `writer`, `reviewer` and `fixer` filled: a
   self-improvement Run needs them, and the validator does not check them
-  (a Run that lacks one is refused when it starts). A review panel's Role
-  and `verifier`, when not listed, take `reviewer`'s Agents. Left as is,
-  `primary` plans, writes and fixes, and `backup` reviews and verifies.
+  (a Run that lacks one is refused when it starts). A review panel's Role,
+  `verifier` and `plan-reviewer`, when not listed, take `reviewer`'s
+  Agents. Left as is, `primary` plans, writes and fixes, and `backup`
+  reviews plans and changes and verifies.
 - `standing` (may): the Standing Roles (below). Left out, any of your
   agents may start, cancel and link Runs, and answer plan and Blockers
   Gates where `rules.json` lets it.
@@ -83,8 +84,9 @@ Outside the files, all must be done:
 `flows/{name}.json` (may):
 
 - `max_visits`: how many times a Run may visit an entry, the first visit
-  included. Past that, the Run ends Handed off. Left as is, 3 for `plan`,
-  `review`, `accept`, `ci-fix` and `merge-gate`.
+  included. Past that, the Run ends Handed off. Left as is, 9 for `plan`
+  (three review rounds for each time a person sends it back), 3 for
+  `plan-review`, `review`, `accept`, `ci-fix` and `merge-gate`.
 - A Gate's `question`: the words the owner reads.
 - Keep the merge Gate on the `ready_to_merge` entry: the validator refuses a
   Flow that merges another way.
@@ -193,7 +195,9 @@ What each Step of the `code` Flow does with it:
 
 | Step | Who | What it produces |
 | --- | --- | --- |
-| `plan` | `primary` | A plan, ending with one acceptance check per Done-when clause: a command that exits 0 only when the clause holds. Then the plan Gate. |
+| `plan` | `primary` | A plan, ending with its size block (the files it touches and the work each Done-when item maps to, or the child tasks of a task too big for one run), then one acceptance check per Done-when clause: a command that exits 0 only when the clause holds. |
+| `plan_review` | `backup` | The factory checks the plan (its files at the base, its Done-when mapping, the Control Files it changes), then a plan reviewer reads it. Blockers go back to `plan`, up to three rounds; then the plan Gate, with the review's result. |
+| `split` | the factory | Only for a plan too big for one run: files its child tasks in your task's project, linked to your task, and ends the run Handed off. |
 | `write` | `primary` | Commits on the Run's branch, `factory/{run id}`, then the repository's checks, run up to 3 rounds. |
 | `review` | `backup` | Three reviewers (correctness, scope, tests) review the change at once. Blockers go to `fix`; a finding outside the change becomes a follow-up task. |
 | `fix` | `primary` | Commits that fix the Blockers, checked and reviewed again. |
@@ -206,8 +210,9 @@ What each Step of the `code` Flow does with it:
 
 The Gates the owner sees, in order:
 
-1. The plan Gate: approve, or revise with a note. Nothing is written
-   before you approve.
+1. The plan Gate, after the plan review: approve, or revise with a note.
+   The review's result is shown with it, including Blockers its third
+   round still found. Nothing is written before you approve.
 2. A Blockers Gate, only when the rules leave Blockers to you: a review
    round finds the same Blockers a rule's fix left unchanged (`ownerGates`).
    Fix sends them to `fix`; stop leaves the branch to you.
