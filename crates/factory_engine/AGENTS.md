@@ -281,8 +281,11 @@ Its first own Step's prompt says it takes over a failed Step's checkout,
 which may hold that Step's unfinished changes (`RESUMED_RUN_NOTE`), unless
 its Step only reads its checkout (`reads_only`, by the Step, whatever Role
 its entry names: `plan`, `plan_review`, `review`, `accept`, `verify`). A Run
-is retried at most once (`AlreadyRetried`, 409; retry the newest retry
-instead); a retry is held to the Queue limit a new Run would be, and an
+is retried at most once (`AlreadyRetried`, 409 `alreadyRetried`; retry
+the newest retry instead), and a Run that may not be retried is 409
+`notRetriable`. A retried Run names its retry (`retriedBy`, on its read and
+in every list of Runs, read through `factory_run_retried_from_idx`), so a
+chain of retries is followed forward without a search. A retry is held to the Queue limit a new Run would be, and an
 agent acting for the owner needs a Standing Role that allows `start`. The
 retry is created in person only when its owner retried it in person, from
 an account that is not an agent's. The kept Steps' sessions count against

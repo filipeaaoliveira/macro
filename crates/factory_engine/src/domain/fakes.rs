@@ -661,6 +661,7 @@ impl RunRepository for FakeRepo {
             end: None,
             budget_stop: None,
             retry: None,
+            retried_by: None,
         };
         if let Some(kept) = kept_flow {
             self.kept_flows
@@ -729,9 +730,17 @@ impl RunRepository for FakeRepo {
                 branch_of: retried.branch_of(),
                 first_seq: retry.first_seq,
             }),
+            retried_by: None,
             ..retried.clone()
         };
-        self.runs.lock().expect("runs").insert(run.id, run.clone());
+        {
+            // As the database reads it: the retried Run names its retry.
+            let mut runs = self.runs.lock().expect("runs");
+            runs.insert(run.id, run.clone());
+            if let Some(retried) = runs.get_mut(&retry.retried) {
+                retried.retried_by = Some(run.id);
+            }
+        }
         let flow = self
             .flows
             .lock()

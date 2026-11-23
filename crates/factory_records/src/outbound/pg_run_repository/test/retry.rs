@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::{entry, insert, julia, key, outcome, planner, session};
+use crate::domain::board::{BoardQuery, RunBoardRepository as _};
 use crate::domain::evaluation::EvaluationRepository as _;
 use crate::domain::gate_replies::GateReplyRepository as _;
 use crate::domain::insights::{InsightsScope, RunInsightsRepository as _};
@@ -326,6 +327,82 @@ async fn a_run_is_retried_once_once_ended_and_retries_keep_its_branch(pool: PgPo
             branch_of: lost,
             first_seq: 4,
         })
+    );
+}
+
+/// A retried Run names the Run that retried it, in its own read and on the
+/// board, so a chain of retries is followed forward without a search; a
+/// Run not retried, a new retry among them, names none.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_retried_run_names_its_retry(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let lost = lost_at_fix(&pool, &repo).await;
+    let first = RunId::generate();
+    let second = RunId::generate();
+
+    let RetryInsert::Inserted(kept) = retry(
+        &repo,
+        NewRetry {
+            id: first,
+            retried: lost,
+            first_seq: 4,
+            created_in_person: false,
+        },
+    )
+    .await
+    else {
+        panic!("an ended Run is retried");
+    };
+    repo.end_run(first, RunOutcome::Failed).await.expect("end");
+    retry(
+        &repo,
+        NewRetry {
+            id: second,
+            retried: first,
+            first_seq: 4,
+            created_in_person: false,
+        },
+    )
+    .await;
+    let read = |id| {
+        let repo = &repo;
+        async move {
+            repo.get_run(id)
+                .await
+                .expect("read")
+                .expect("run")
+                .retried_by
+        }
+    };
+    let board: Vec<(RunId, Option<RunId>)> = repo
+        .board_runs(&BoardQuery {
+            user_id: julia(),
+            team_id: None,
+            state: None,
+            flow: None,
+            repo_url: None,
+            project_id: None,
+            search: None,
+            built_in_merge_entries: vec!["merge".to_string()],
+            after: None,
+            limit: 50,
+        })
+        .await
+        .expect("board")
+        .into_iter()
+        .map(|listed| (listed.run.id, listed.run.retried_by))
+        .collect();
+
+    assert_eq!(kept.retried_by, None);
+    assert_eq!(read(lost).await, Some(first));
+    assert_eq!(read(first).await, Some(second));
+    assert_eq!(read(second).await, None);
+    assert_eq!(
+        board,
+        [(second, None), (first, Some(second)), (lost, Some(first))]
     );
 }
 

@@ -433,6 +433,9 @@ pub struct Run {
     /// The Run it retries, and what it keeps of it; none for a Run that
     /// retries none.
     pub retry: Option<RunRetry>,
+    /// The Run that retried it; none until one does. A Run is retried at
+    /// most once, so this names the next Run of a chain of retries.
+    pub retried_by: Option<RunId>,
 }
 
 /// What a Run that retries another keeps of it: the Run it retries, the

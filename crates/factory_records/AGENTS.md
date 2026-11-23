@@ -173,7 +173,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   answers and reviewed head into the new Run, in one transaction. A column
   added to `factory_run`, `factory_step`, `factory_gate` or the review
   tables that a later Step reads must be added to its copy too.
-  `factory_run_retried_from_idx` keeps a Run retried once.
+  `factory_run_retried_from_idx` keeps a Run retried once, and every read
+  of a Run reads its retry through it (`retried_by`, one lookup per Run
+  read).
 - Kept rows count once, on the Run that made them: the Insights and
   quality reads leave out a retry's rows below its `first_seq`, and the
   arm and Agent Rule tallies leave out a Run that was retried. A new read

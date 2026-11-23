@@ -305,6 +305,7 @@ struct RunRow {
     retried_from: Option<Uuid>,
     branch_run_id: Option<Uuid>,
     first_seq: Option<i32>,
+    retried_by: Option<Uuid>,
 }
 
 /// The token budget a Run keeps, stored as `stored`.
@@ -435,6 +436,7 @@ impl TryFrom<RunRow> for Run {
                 (None, None, None) => None,
                 _ => return Err(PgRunRepositoryErr::PartialRetry),
             },
+            retried_by: row.retried_by.map(RunId::from_uuid),
         })
     }
 }
@@ -789,7 +791,8 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                NULL::uuid AS "retried_by?"
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -913,7 +916,8 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                NULL::uuid AS "retried_by?"
             "#,
             retry.id.as_uuid(),
             retry.retried.as_uuid(),
@@ -1553,8 +1557,9 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
-            FROM factory_run
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
+            FROM factory_run r
             WHERE id = $1
             "#,
             id.as_uuid(),
@@ -1658,8 +1663,9 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
-            FROM factory_run
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
+            FROM factory_run r
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
             LIMIT $3
@@ -1697,7 +1703,8 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1744,7 +1751,8 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL

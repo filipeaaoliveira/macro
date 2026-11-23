@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND EXISTS (\n                    SELECT 1 FROM factory_gate g\n                    WHERE g.run_id = r.id AND g.answer IS NULL\n                )\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $2\n            ",
+  "query": "\n            INSERT INTO factory_run (\n                id, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,\n                created_in_person, control_file_patterns, control_files_team_id, tampered_files,\n                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,\n                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,\n                definition_commit, definition_agents, flow_definition, flow_asks,\n                definition_evaluation, token_budget, known_ci_flakes, retried_from, branch_run_id,\n                first_seq\n            )\n            SELECT\n                $1, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,\n                $4, control_file_patterns, control_files_team_id, tampered_files,\n                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,\n                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,\n                definition_commit, definition_agents, flow_definition, flow_asks,\n                definition_evaluation, token_budget, known_ci_flakes, id, COALESCE(branch_run_id, id),\n                $3\n            FROM factory_run\n            WHERE id = $2\n            RETURNING\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,\n                NULL::uuid AS \"retried_by?\"\n            ",
   "describe": {
     "columns": [
       {
@@ -182,12 +182,19 @@
         "ordinal": 35,
         "name": "first_seq",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 36,
+        "name": "retried_by?",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8"
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Bool"
       ]
     },
     "nullable": [
@@ -226,8 +233,9 @@
       true,
       true,
       true,
-      true
+      true,
+      null
     ]
   },
-  "hash": "0b0fe606e69a9faf93544d6b824d7076619695e81ff9f7ae39960a916ad342b5"
+  "hash": "c1cca63aba06ab3be79de9ea3903103678a99a54159884ca9b48e12acb030838"
 }
