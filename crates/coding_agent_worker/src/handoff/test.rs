@@ -22,7 +22,8 @@ fn spawn_child() -> (std::process::Child, HandedOffAgent) {
         OwnedFd::from(child.stderr.take().unwrap()),
         b"{\"jsonrpc\":\"2.0\",\"method\":\"session/upd".to_vec(),
         vec!["\"agent_session:1:7\"".to_owned()],
-    );
+    )
+    .with_workplaces("{\"cwd\":{\"s1\":\"/w/run\"}}".to_owned());
     (child, agent)
 }
 
@@ -72,6 +73,7 @@ fn state_round_trips_through_the_inherited_descriptor() {
         b"{\"jsonrpc\":\"2.0\",\"method\":\"session/upd"
     );
     assert_eq!(parts.active_prompts, ["\"agent_session:1:7\""]);
+    assert_eq!(parts.workplaces, "{\"cwd\":{\"s1\":\"/w/run\"}}");
     // Adopted descriptors are close-on-exec again, so later children never
     // inherit them.
     assert_eq!(

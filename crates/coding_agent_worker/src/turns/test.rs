@@ -140,3 +140,26 @@ fn a_loaded_session_works_where_it_was_loaded() {
     );
     assert!(turns.workplace("/w/run").0);
 }
+
+#[test]
+fn clearing_frees_every_workplace_and_a_handoff_keeps_them() {
+    let turns = ActiveTurns::default();
+    turns.observe(
+        r#"{"jsonrpc":"2.0","id":3,"method":"session/load","params":{"sessionId":"s2","cwd":"/w/run","mcpServers":[]}}"#,
+        LineDirection::Stdin,
+    );
+    turns.observe(
+        r#"{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"s2","prompt":[]}}"#,
+        LineDirection::Stdin,
+    );
+    let next = ActiveTurns::default();
+    next.restore(turns.snapshot());
+    next.restore_workplaces(&turns.workplaces_state());
+    assert!(next.workplace("/w/run").0, "the next image sees the turn");
+
+    turns.clear();
+
+    let (running, used) = turns.workplace("/w/run");
+    assert!(!running);
+    assert!(used.is_some(), "when it was used is kept");
+}

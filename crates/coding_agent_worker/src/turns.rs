@@ -24,7 +24,8 @@ pub struct ActiveTurns {
 /// `session/load` and `session/resume`, and which of them have a turn
 /// running or had one start or end lately: what keeps a branch's worktree
 /// (`crate::branch_worktrees`) from being removed under its session.
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 struct Workplaces {
     /// `session/new` requests not answered yet, by id: their `cwd`.
     opening: HashMap<String, String>,
@@ -155,6 +156,40 @@ impl ActiveTurns {
         self.workplaces
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Where the sessions work, which turns run and when each `cwd` was last
+    /// used, as JSON for the next process image (`restore_workplaces`).
+    pub fn workplaces_state(&self) -> String {
+        serde_json::to_string(&*self.workplaces()).unwrap_or_default()
+    }
+
+    /// Continue from what an earlier process image kept
+    /// (`workplaces_state`); state that does not read is dropped.
+    pub fn restore_workplaces(&self, state: &str) {
+        if state.is_empty() {
+            return;
+        }
+        match serde_json::from_str::<Workplaces>(state) {
+            Ok(kept) => *self.workplaces() = kept,
+            Err(error) => tracing::warn!(%error, "dropping the handed-off workplaces"),
+        }
+    }
+
+    /// Forget `cwd`, a directory that is gone: its sessions and when it
+    /// was used.
+    pub fn forget_workplace(&self, cwd: &str) {
+        let mut workplaces = self.workplaces();
+        workplaces.active.remove(cwd);
+        let gone: Vec<String> = workplaces
+            .cwd
+            .iter()
+            .filter(|(_, at)| *at == cwd)
+            .map(|(session, _)| session.clone())
+            .collect();
+        for session in gone {
+            workplaces.cwd.remove(&session);
+        }
     }
 
     /// Whether a session working in `cwd` has a turn running, and when a
