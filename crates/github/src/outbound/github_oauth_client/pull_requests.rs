@@ -72,7 +72,7 @@ pub enum GithubBranchUpdate {
 /// `.` or ends with `.lock`, no `..` or `@{`, no control character, space,
 /// `~`, `^`, `:`, `?`, `*`, `[` or `\`, and not `@`, nor starting with `-`
 /// or ending with `.`.
-fn is_branch_name(branch: &str) -> bool {
+pub(super) fn is_branch_name(branch: &str) -> bool {
     const REFUSED: &[char] = &[' ', '~', '^', ':', '?', '*', '[', '\\'];
 
     let refused_char = branch
@@ -102,7 +102,7 @@ pub(super) fn is_repository_part(part: &str) -> bool {
 }
 
 /// What a refused read is, once throttling is ruled out.
-fn refusal(status: StatusCode) -> Option<GithubError> {
+pub(super) fn refusal(status: StatusCode) -> Option<GithubError> {
     match status {
         StatusCode::UNAUTHORIZED => Some(GithubError::ReauthenticationRequired),
         StatusCode::FORBIDDEN => Some(GithubError::Forbidden),

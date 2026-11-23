@@ -33,6 +33,8 @@ mod pull_requests;
 pub use pull_requests::GithubBranchUpdate;
 #[cfg(test)]
 mod test;
+mod commits;
+pub use commits::GithubBranchCreation;
 
 const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 /// GitHub's name in error messages users see.
