@@ -12,10 +12,11 @@ use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr};
 use crate::domain::evaluation::{
-    AgentChoices, ArmScore, ArmTally, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository,
-    Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE, RuleTally, RunAgentRule,
-    RunAgents, RunArm, SUITE_STARTING_SECS, SUITES_READ, ScorerTally, ScoringStep, ScoringSubject,
-    SubjectTrial, SuiteInsert, SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
+    AgentChoices, ArmScore, ArmTally, BENCHMARK_FLOW, CalibrationTally, EvaluationRecords,
+    EvaluationRepository, Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE,
+    RuleTally, RunAgentRule, RunAgents, RunArm, RunJudgment, SUITE_STARTING_SECS, SUITES_READ,
+    ScorerLabel, ScorerTally, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert, SuiteRecord,
+    TrialKey, TrialRecord, TrialResult, TrialTokens,
 };
 use crate::domain::insights::InsightsScope;
 use crate::domain::models::{AgentName, EntryId, Outcome, Role, RunId, RunOutcome};
@@ -727,6 +728,7 @@ impl EvaluationRepository for PgRunRepository {
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
 
         let suites = self.read_suites(&mut transaction, scope).await?;
+        let calibrations = calibrations_of(&mut transaction, scope.user_id.as_ref()).await?;
 
         transaction.commit().await?;
         Ok(EvaluationRecords {
@@ -735,8 +737,117 @@ impl EvaluationRepository for PgRunRepository {
             arm_scores,
             rules,
             suites,
+            calibrations,
         })
     }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn run_judgments(&self, run_id: RunId) -> Result<Vec<RunJudgment>, Self::Err> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT s.scorer, s.score, s.reason, s.model, s.judged_at,
+                   l.passed AS "passed?", l.labelled_at AS "labelled_at?"
+            FROM factory_run_score s
+            LEFT JOIN factory_scorer_label l ON l.run_id = s.run_id AND l.scorer = s.scorer
+            WHERE s.run_id = $1
+            ORDER BY s.scorer
+            "#,
+            run_id.as_uuid(),
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| RunJudgment {
+                scorer: row.scorer,
+                score: row.score,
+                reason: row.reason,
+                model: row.model,
+                judged_at: row.judged_at,
+                label: row
+                    .passed
+                    .zip(row.labelled_at)
+                    .map(|(passed, labelled_at)| ScorerLabel {
+                        passed,
+                        labelled_at,
+                    }),
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn label_judgment(
+        &self,
+        run_id: RunId,
+        scorer: &str,
+        passed: bool,
+    ) -> Result<Option<ScorerLabel>, Self::Err> {
+        // Only a judgment that exists is labelled: no row is inserted for a
+        // Scorer that did not judge the Run.
+        let row = sqlx::query!(
+            r#"
+            INSERT INTO factory_scorer_label (run_id, scorer, passed)
+            SELECT run_id, scorer, $3
+            FROM factory_run_score
+            WHERE run_id = $1 AND scorer = $2
+            ON CONFLICT (run_id, scorer)
+                DO UPDATE SET passed = EXCLUDED.passed, labelled_at = now()
+            RETURNING passed, labelled_at
+            "#,
+            run_id.as_uuid(),
+            scorer,
+            passed,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| ScorerLabel {
+            passed: row.passed,
+            labelled_at: row.labelled_at,
+        }))
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn calibrations(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<CalibrationTally>, Self::Err> {
+        let mut connection = self.pool.acquire().await?;
+        calibrations_of(&mut connection, user_id.as_ref()).await
+    }
+}
+
+/// How each Scorer's judgments agree with `user_id`'s labels of them, over
+/// all their Runs. Only a Run's owner labels it, so their labels are those
+/// of their Runs, read through `factory_run_user_created_idx`.
+async fn calibrations_of(
+    connection: &mut sqlx::PgConnection,
+    user_id: &str,
+) -> Result<Vec<CalibrationTally>, PgRunRepositoryErr> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT l.scorer,
+               count(*) AS "labelled!",
+               count(*) FILTER (WHERE (s.score >= $2) = l.passed) AS "agreed!"
+        FROM factory_run r
+        JOIN factory_scorer_label l ON l.run_id = r.id
+        JOIN factory_run_score s ON s.run_id = l.run_id AND s.scorer = l.scorer
+        WHERE r.user_id = $1
+        GROUP BY l.scorer
+        ORDER BY l.scorer
+        "#,
+        user_id,
+        PASS_SCORE,
+    )
+    .fetch_all(connection)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| CalibrationTally {
+            scorer: row.scorer,
+            labelled: count(row.labelled),
+            agreed: count(row.agreed),
+        })
+        .collect())
 }
 
 impl PgRunRepository {

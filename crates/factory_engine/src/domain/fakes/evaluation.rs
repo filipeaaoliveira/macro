@@ -4,10 +4,11 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 
+use chrono::{DateTime, Utc};
 use factory_records::domain::evaluation::{
-    AgentChoices, EvaluationRecords, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite,
-    RunAgentRule, RunAgents, RunArm, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert,
-    TrialKey, TrialResult,
+    AgentChoices, CalibrationTally, EvaluationRecords, EvaluationRepository, Judgment,
+    MAX_OPEN_TRIALS, NewSuite, PASS_SCORE, RunAgentRule, RunAgents, RunArm, RunJudgment,
+    ScorerLabel, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert, TrialKey, TrialResult,
 };
 use factory_records::domain::insights::InsightsScope;
 use factory_records::domain::models::RunId;
@@ -39,6 +40,8 @@ pub(crate) struct FakeEvaluation {
     pub(crate) task_tags_unread: std::collections::BTreeSet<RunId>,
     /// The live Scorers' judgments, by Run.
     pub(crate) run_scores: BTreeMap<RunId, Vec<Judgment>>,
+    /// The owners' labels of the live judgments, by Run and Scorer.
+    pub(crate) labels: BTreeMap<(RunId, String), ScorerLabel>,
     /// The suites, by id.
     pub(crate) suites: BTreeMap<Uuid, FakeSuite>,
     /// Each trial's Run.
@@ -357,6 +360,80 @@ impl EvaluationRepository for FakeRepo {
         _scope: &InsightsScope,
     ) -> Result<EvaluationRecords, FakeError> {
         Ok(EvaluationRecords::default())
+    }
+
+    /// Judgments keep no time here: each reads as judged at the epoch.
+    async fn run_judgments(&self, run_id: RunId) -> Result<Vec<RunJudgment>, FakeError> {
+        let kept = self.evaluation.lock().expect("evaluation");
+        let mut judgments: Vec<RunJudgment> = kept
+            .run_scores
+            .get(&run_id)
+            .into_iter()
+            .flatten()
+            .map(|judgment| RunJudgment {
+                scorer: judgment.scorer.clone(),
+                score: judgment.score,
+                reason: judgment.reason.clone(),
+                model: judgment.model.clone(),
+                judged_at: DateTime::<Utc>::UNIX_EPOCH,
+                label: kept.labels.get(&(run_id, judgment.scorer.clone())).copied(),
+            })
+            .collect();
+        judgments.sort_by(|first, second| first.scorer.cmp(&second.scorer));
+        Ok(judgments)
+    }
+
+    async fn label_judgment(
+        &self,
+        run_id: RunId,
+        scorer: &str,
+        passed: bool,
+    ) -> Result<Option<ScorerLabel>, FakeError> {
+        let mut kept = self.evaluation.lock().expect("evaluation");
+        let judged = kept
+            .run_scores
+            .get(&run_id)
+            .is_some_and(|scores| scores.iter().any(|judgment| judgment.scorer == scorer));
+        if !judged {
+            return Ok(None);
+        }
+        let label = ScorerLabel {
+            passed,
+            labelled_at: Utc::now(),
+        };
+        kept.labels.insert((run_id, scorer.to_string()), label);
+        Ok(Some(label))
+    }
+
+    async fn calibrations(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<CalibrationTally>, FakeError> {
+        let runs = self.runs.lock().expect("runs").clone();
+        let kept = self.evaluation.lock().expect("evaluation");
+        let mut tallies: BTreeMap<String, CalibrationTally> = BTreeMap::new();
+        for ((run_id, scorer), label) in &kept.labels {
+            let owned = runs.get(run_id).is_some_and(|run| run.user_id == *user_id);
+            let judgment = kept
+                .run_scores
+                .get(run_id)
+                .and_then(|scores| scores.iter().find(|judgment| judgment.scorer == *scorer));
+            let (true, Some(judgment)) = (owned, judgment) else {
+                continue;
+            };
+            let tally = tallies
+                .entry(scorer.clone())
+                .or_insert_with(|| CalibrationTally {
+                    scorer: scorer.clone(),
+                    labelled: 0,
+                    agreed: 0,
+                });
+            tally.labelled += 1;
+            if (judgment.score >= PASS_SCORE) == label.passed {
+                tally.agreed += 1;
+            }
+        }
+        Ok(tallies.into_values().collect())
     }
 }
 

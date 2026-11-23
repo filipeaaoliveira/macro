@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_scorer_label (run_id, scorer, passed)\n            SELECT run_id, scorer, $3\n            FROM factory_run_score\n            WHERE run_id = $1 AND scorer = $2\n            ON CONFLICT (run_id, scorer)\n                DO UPDATE SET passed = EXCLUDED.passed, labelled_at = now()\n            RETURNING passed, labelled_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "labelled_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7f60497a04ae54ca8d152fc2b69d0a49b63dd75134d8615e4c75425d3bb4ca32"
+}

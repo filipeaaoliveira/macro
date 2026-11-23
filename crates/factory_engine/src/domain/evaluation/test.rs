@@ -1071,6 +1071,7 @@ fn evaluation_insights_list_defined_and_retired_scorers_and_arms() {
             fell_back: 1,
         }],
         suites: Vec::new(),
+        calibrations: Vec::new(),
     };
 
     let insights = evaluation_insights(&definition(), &query, records);

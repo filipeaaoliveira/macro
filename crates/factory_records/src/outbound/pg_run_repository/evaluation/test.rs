@@ -5,8 +5,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::evaluation::{
-    AgentChoices, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite, RunAgentRule,
-    RunAgents, RunArm, SuiteInsert, TrialKey, TrialResult, TrialTokens,
+    AgentChoices, CalibrationTally, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite,
+    RunAgentRule, RunAgents, RunArm, SuiteInsert, TrialKey, TrialResult, TrialTokens,
 };
 use crate::domain::insights::{InsightsScope, RunInsightsRepository};
 use crate::domain::models::{AgentName, Role, RunId};
@@ -704,6 +704,117 @@ async fn agent_rules_are_counted_with_the_runs_they_chose_for(pool: PgPool) {
         ),
         ("writer", "docs", "docs-writer", 2, 2, 1, 1)
     );
+}
+
+/// A person labels a live Scorer's judgments of their Runs: a new label
+/// replaces the last, a Scorer that did not judge the Run takes none, and
+/// each Scorer agrees with the labels where its score passes exactly when
+/// the label does, over all of the person's Runs and no one else's.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn labels_replace_the_last_and_count_the_judges_agreement(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    // An October Run of Julia's, outside the period, and one of Teo's.
+    sqlx::query!(
+        "INSERT INTO factory_run (id, user_id, flow, request, created_at, outcome, ended_at) VALUES \
+             ($1, 'macro|julia@example.com', 'code', 'Add the search', '2026-10-05 09:00Z', \
+              'success', '2026-10-05 10:00Z'), \
+             ($2, 'macro|teo@example.com', 'code', 'Add the cart', '2026-11-10 09:00Z', \
+              'success', '2026-11-10 10:00Z')",
+        Uuid::from_u128(0x901),
+        Uuid::from_u128(0x902),
+    )
+    .execute(&pool)
+    .await
+    .expect("runs recorded");
+    let october = RunId::from_uuid(Uuid::from_u128(0x901));
+    let teos = RunId::from_uuid(Uuid::from_u128(0x902));
+    for (run_id, scorer, score) in [
+        (run(EXPORT), "correctness", 0.9),
+        (run(IMPORT), "correctness", 0.2),
+        (october, "correctness", 0.5),
+        (run(EXPORT), "tidiness", 0.3),
+        (teos, "correctness", 0.9),
+    ] {
+        repo.record_run_score(run_id, &judgment(scorer, score))
+            .await
+            .expect("score recorded");
+    }
+
+    let first = repo
+        .label_judgment(run(EXPORT), "correctness", false)
+        .await
+        .expect("labelled")
+        .expect("the scorer judged the run");
+    assert!(!first.passed);
+    let replaced = repo
+        .label_judgment(run(EXPORT), "correctness", true)
+        .await
+        .expect("labelled")
+        .expect("the scorer judged the run");
+    assert!(replaced.passed);
+    assert!(replaced.labelled_at >= first.labelled_at);
+    let unjudged = repo
+        .label_judgment(run(IMPORT), "tidiness", true)
+        .await
+        .expect("labelled");
+    assert_eq!(unjudged, None);
+    // The import's judge failed it and Julia agrees; the October Run passed
+    // at exactly the pass score and she says it should have failed; the
+    // tidiness judge failed the export and she says it passed.
+    for (run_id, scorer, passed) in [
+        (run(IMPORT), "correctness", false),
+        (october, "correctness", false),
+        (run(EXPORT), "tidiness", true),
+        (teos, "correctness", true),
+    ] {
+        repo.label_judgment(run_id, scorer, passed)
+            .await
+            .expect("labelled")
+            .expect("the scorer judged the run");
+    }
+
+    let judgments = repo.run_judgments(run(EXPORT)).await.expect("read");
+    let labels: Vec<_> = judgments
+        .iter()
+        .map(|judgment| {
+            (
+                judgment.scorer.as_str(),
+                judgment.score,
+                judgment.label.map(|label| label.passed),
+            )
+        })
+        .collect();
+    assert_eq!(
+        labels,
+        vec![
+            ("correctness", 0.9, Some(true)),
+            ("tidiness", 0.3, Some(true))
+        ]
+    );
+    let teos_judgments = repo.run_judgments(teos).await.expect("read");
+    assert_eq!(
+        teos_judgments[0].label.map(|label| label.passed),
+        Some(true)
+    );
+
+    let expected = vec![
+        CalibrationTally {
+            scorer: "correctness".to_string(),
+            labelled: 3,
+            agreed: 2,
+        },
+        CalibrationTally {
+            scorer: "tidiness".to_string(),
+            labelled: 1,
+            agreed: 0,
+        },
+    ];
+    assert_eq!(repo.calibrations(&julia()).await.expect("read"), expected);
+    let read = repo.read_evaluation(&november()).await.expect("read");
+    assert_eq!(read.calibrations, expected);
 }
 
 /// Each trial reads when its Run started and ended, for the time it took.
