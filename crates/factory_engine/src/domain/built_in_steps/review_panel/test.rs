@@ -235,6 +235,7 @@ fn reviewing<'a>(run_id: RunId, round: &'a ReviewRound) -> StepInput<'a> {
         base_commit: None,
         routes: &[],
         max_visits: None,
+        retry: None,
     }
 }
 

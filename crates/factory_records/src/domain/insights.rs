@@ -151,6 +151,9 @@ pub struct InsightsRecords {
     pub trouble: Vec<EntryTrouble>,
     /// The sessions of their agent Steps.
     pub sessions: Vec<StepSessionRef>,
+    /// Those of the Runs that a retry took over, whatever the retry's own
+    /// period: each is counted by its own outcome all the same.
+    pub retried: Vec<RunId>,
 }
 
 /// How many Runs [`InsightsRecords::trouble`] keeps for each entry.

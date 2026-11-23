@@ -36,7 +36,7 @@ use crate::domain::agents::{PLAN_REVIEWER, REVIEWER_ROLES, VERIFIER};
 use crate::domain::checks::fence_for;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
-use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport, run_branch};
+use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport};
 use crate::domain::no_result::retry_prompt;
 use crate::domain::ports::{
     AgentFailure, ChildTasks, MainWatches, NoChildTasks, PullRequests, Retryable, StepAgent,
@@ -452,6 +452,7 @@ where
             prompt: asked_prompt,
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
+            branch_of: input.retry.map(|retry| retry.branch_of),
             answer_by,
             resumes: input.resumes,
             // Should the asking Step's session be gone, a new one is told
@@ -832,8 +833,13 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
     };
     let workplace = input
         .repository
-        .map(|repository| workplace(repository, &run_branch(input.key.run_id), input.base_commit))
+        .map(|repository| workplace(repository, &input.branch(), input.base_commit))
         .unwrap_or_default();
+    let workplace = if input.repository.is_some() && input.resumes_failed_run() {
+        format!("{workplace}{RESUMED_RUN_NOTE}")
+    } else {
+        workplace
+    };
     format!(
         "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{ask}{workplace}\n\
          ## Request\n\n{}\n{}{}{}",
@@ -843,6 +849,13 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
         history(input.earlier)
     )
 }
+
+/// What the first Step of a retry is told of its checkout: the retried
+/// Run's Step failed in it, and may have left unfinished changes behind.
+pub(crate) const RESUMED_RUN_NOTE: &str = "\nThis run retries a run that failed at this step: \
+the branch already holds what that run's earlier steps pushed, and your working tree may \
+still hold the failed step's unfinished, uncommitted changes. Run `git status` and \
+`git log` first, and keep, finish or discard those changes on purpose before you go on.\n";
 
 /// Where the agent works: a checkout of the Run's repository, on the Run's
 /// branch `branch`, made from `base_commit` when the Run pins one, else

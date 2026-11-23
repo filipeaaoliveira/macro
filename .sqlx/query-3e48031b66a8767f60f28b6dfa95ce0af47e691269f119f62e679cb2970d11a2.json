@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                run_id, seq, round_seq, problem, fix_status, ruling,\n                kind = 'dismissed' AS \"dismissed!\"\n            FROM factory_review_finding\n            WHERE run_id = ANY($1) AND kind IN ('blocker', 'dismissed')\n            ORDER BY run_id, seq, place\n            ",
+  "query": "\n            SELECT\n                run_id, seq, round_seq, problem, fix_status, ruling,\n                kind = 'dismissed' AS \"dismissed!\"\n            FROM factory_review_finding f\n            WHERE run_id = ANY($1) AND kind IN ('blocker', 'dismissed')\n                AND seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = f.run_id)\n            ORDER BY run_id, seq, place\n            ",
   "describe": {
     "columns": [
       {
@@ -54,5 +54,5 @@
       null
     ]
   },
-  "hash": "d95d2a6c24492f26eeea9e17ef4905cfa928979aff1bd24e67aa21ca90214bfb"
+  "hash": "3e48031b66a8767f60f28b6dfa95ce0af47e691269f119f62e679cb2970d11a2"
 }

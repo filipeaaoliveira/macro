@@ -39,6 +39,7 @@ fn run() -> Run {
         definition: None,
         end: None,
         budget_stop: None,
+        retry: None,
     }
 }
 

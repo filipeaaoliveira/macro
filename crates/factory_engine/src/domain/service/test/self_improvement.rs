@@ -445,6 +445,7 @@ async fn an_improvement_run_merges_only_by_a_person() {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        branch_of: None,
     };
     worker.run_step(publish).await.expect("published");
     let kept = bench
@@ -904,6 +905,7 @@ async fn an_improvement_run_s_plan_and_merge_wait_for_a_person_whatever_it_chang
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        branch_of: None,
     };
     worker.run_step(publish).await.expect("published");
     let kept = bench

@@ -110,6 +110,7 @@ async fn walk(budget: Option<u64>, usage: &FakeRunTokens) -> Walked {
         run_id: run.id,
         flow,
         token_budget: budget.is_some(),
+        start_at: None,
     };
     let run_id = run.id;
 

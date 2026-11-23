@@ -149,6 +149,9 @@ pub struct ScoringSubject {
     pub run_id: RunId,
     /// Its owner: judges and usage reads run as them.
     pub user_id: MacroUserIdStr<'static>,
+    /// The Run whose branch it worked on: its own, or for a retry, the
+    /// first Run it retries.
+    pub branch_of: RunId,
     /// The built-in Flow it walked.
     pub flow: Option<String>,
     /// What it was asked to do.

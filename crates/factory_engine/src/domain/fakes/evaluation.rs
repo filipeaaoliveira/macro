@@ -240,6 +240,7 @@ impl EvaluationRepository for FakeRepo {
         .collect();
         Ok(Some(ScoringSubject {
             run_id,
+            branch_of: run.branch_of(),
             user_id: run.user_id,
             flow,
             request: run.request,

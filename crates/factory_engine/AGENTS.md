@@ -254,6 +254,49 @@ workflow takes it, a link once linked, and an answer in `factory_answer_gate`, f
 `AnswerGate::standing` (left out when none, so histories replay as before; the
 workflow only hands it on). The Run API lists them as `standingActs`.
 
+`POST /runs/{id}/retry` (`domain/service/retry.rs`) retries a Run of the
+caller's that ended `failed`, `infrastructure` or `blocked` (409 otherwise,
+and for a Benchmark trial, a self-improvement Run or a Run that kept no
+Flow): a new Run of the same task, request, Flow (the one the Run kept),
+Factory Definition commit, rules and Agents, whose `retry` names the Run it
+retries (`retriedFrom`), the Run whose branch it works on (`branchOf`, the
+first of a chain of retries) and the place of its own first Step
+(`firstSeq`). It starts at the entry of the Run's latest own Step, at the
+first Step of that visit (`retry_start`: the Run's own Steps right before
+it at consecutive places with the same entry and visit number, since a
+reset, and each retry, counts visits from 1 again; never below a retry's
+`firstSeq`). A retry that took no Step of its own is retried where it
+started, so a review panel's round or a Step an
+agent's question went on from runs again whole; the
+Steps before it that ended are kept as the retry's own, at their places,
+with their answered Gates, sessions and the review rounds that ended
+before it, so the plan, the branch and the Blockers a fix reads are not
+made again. Its workflow starts there (`RunStart::start_at`,
+`Interpreter::start_at`): visits and facts start afresh, and the retry
+takes as many Steps of its own as a new Run. Every Step works on the
+branch of `branchOf` (`StepInput::branch`, `AgentTask::branch`), so it
+pushes to, reviews and proposes from the retried Run's branch and pull
+request; Scorers read its change there too (`ScoringSubject::branch_of`).
+Its first own Step's prompt says it takes over a failed Step's checkout,
+which may hold that Step's unfinished changes (`RESUMED_RUN_NOTE`). A Run
+is retried at most once (`AlreadyRetried`, 409; retry the newest retry
+instead); a retry is held to the Queue limit a new Run would be, and an
+agent acting for the owner needs a Standing Role that allows `start`. The
+retry is created in person only when its owner retried it in person, from
+an account that is not an agent's. The kept Steps' sessions count against
+its token budget, so a Run its budget stopped stops again; Insights, the
+quality view and the arm and Agent Rule tallies count kept Steps, Gates,
+sessions and review rounds once, on the Run that made them, and a Run and
+its retries as one attempt of their arm (the newest among the Runs
+read). Insights counts a Run a retry took over by how it ended and as
+`retried` (`OutcomeCounts::retried`). A retry's start writes its Flow as
+`retry_flow` (`RunStart`'s `Serialize`), which a worker from before
+retries cannot read: its workflow task fails until a newer worker takes
+it, rather than walk the retry from its first entry. Each of a retry's
+Step requests carries `branch_of`, which such a worker's activities
+refuse (`StepRequest` denies unknown fields), so none works on a branch of
+the retry's own. Deploy every worker before the API all the same.
+
 Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
 `deny_unknown_fields`, and an agent Step reads its Run's kept Agents
 (`SessionAgent::run_agents`). A worker from before them fails every agent Step

@@ -217,6 +217,7 @@ async fn walk_entry(
             most: 2,
             owner_answers: true,
         },
+        branch_of: None,
     };
     let mut held = Vec::new();
     let mut next = 6;
@@ -526,6 +527,7 @@ async fn reviewers_of_a_flow_without_questions_never_ask() {
             most: 0,
             owner_answers: true,
         },
+        branch_of: None,
     };
     let mut held = Vec::new();
 

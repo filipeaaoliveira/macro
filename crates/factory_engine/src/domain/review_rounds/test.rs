@@ -587,6 +587,7 @@ async fn a_step_reads_its_round_or_the_latest_that_ended() {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        branch_of: None,
     };
     steps.start_step(fix.clone()).await.expect("start");
     steps.run_step(fix.clone()).await.expect("run");

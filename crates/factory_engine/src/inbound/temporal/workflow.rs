@@ -255,7 +255,17 @@ impl FlowWorkflow {
         start: RunStart,
     ) -> WorkflowResult<RunOutcome> {
         let interpreter = Interpreter::new(&start.flow);
-        let mut state = interpreter.start();
+        // A retry starts at the entry the Run it retries stopped at, past
+        // the Steps it kept; an entry its Flow lacks fails it at once, as
+        // a Flow that cannot go on does. A Run started before retries
+        // carries no start and replays as before.
+        let (mut state, unstartable) = match &start.start_at {
+            None => (interpreter.start(), None),
+            Some(at) => match interpreter.start_at(&at.entry, at.first_seq) {
+                Ok(state) => (state, None),
+                Err(error) => (interpreter.start(), Some(error)),
+            },
+        };
         // The Step's work is dropped before its cancellation completes, so
         // the agent is stopped after it, and the Run's `cancelled` end
         // closes the Step, so a late end of it records nothing.
@@ -271,7 +281,9 @@ impl FlowWorkflow {
 
         // A Flow that cannot go on still records the Run's end, then fails
         // the workflow with why, for Temporal to show.
-        let mut stopped = None;
+        let mut stopped = unstartable;
+        // A retry's Steps carry the Run whose branch they work on.
+        let branch_of = start.start_at.as_ref().map(|at| at.branch_of);
         // The Steps whose agents may still hold what their work used: from
         // a Step's work's start until its agent is stopped or let go, and
         // the Steps it goes on from, whose session it works in.
@@ -285,6 +297,9 @@ impl FlowWorkflow {
         // routes.
         let mut ending = RunEnding::default();
         let outcome = loop {
+            if stopped.is_some() {
+                break RunOutcome::Failed;
+            }
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
                 Err(error) => {
@@ -319,7 +334,11 @@ impl FlowWorkflow {
                     run_id: start.run_id,
                     seq,
                 };
-                let request = questions.offer(StepRequest::of(key, entry, visit), 0);
+                let request = StepRequest {
+                    branch_of,
+                    ..StepRequest::of(key, entry, visit)
+                };
+                let request = questions.offer(request, 0);
                 walk_step(&temporal, entry, request, questions, &mut held, &mut resume).await?
             } else {
                 let panel = Panel {
@@ -328,6 +347,7 @@ impl FlowWorkflow {
                     visit,
                     seq,
                     questions,
+                    branch_of,
                 };
                 review_round(&temporal, &panel, &mut held, &mut resume).await?
             };

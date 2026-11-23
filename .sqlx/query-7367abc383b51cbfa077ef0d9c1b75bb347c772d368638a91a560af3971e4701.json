@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome,\n                r.definition_evaluation\n            FROM factory_run r\n            WHERE r.id = $1\n            ",
+  "query": "\n            SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome,\n                r.definition_evaluation, COALESCE(r.branch_run_id, r.id) AS \"branch_of!\"\n            FROM factory_run r\n            WHERE r.id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "ordinal": 6,
         "name": "definition_evaluation",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "branch_of!",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -51,8 +56,9 @@
       true,
       true,
       true,
-      true
+      true,
+      null
     ]
   },
-  "hash": "7266ed59656780d4484a2e2b11b54d002b9f0779cc6ee9d3ecd31f9b4a4e93df"
+  "hash": "7367abc383b51cbfa077ef0d9c1b75bb347c772d368638a91a560af3971e4701"
 }

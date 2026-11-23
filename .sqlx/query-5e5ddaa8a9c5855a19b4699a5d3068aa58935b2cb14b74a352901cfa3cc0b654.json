@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND COALESCE(r.flow_asks, r.flow = ANY($2))\n                AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq\n            FROM factory_run\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -167,13 +167,26 @@
         "ordinal": 32,
         "name": "token_budget_used",
         "type_info": "Int8"
+      },
+      {
+        "ordinal": 33,
+        "name": "retried_from",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 34,
+        "name": "branch_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 35,
+        "name": "first_seq",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "TextArray",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -209,8 +222,11 @@
       true,
       true,
       true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "b583df7491154fbb10a8158b9816740f1a63aa81daa24bb0f46bbd4c25a39e5d"
+  "hash": "5e5ddaa8a9c5855a19b4699a5d3068aa58935b2cb14b74a352901cfa3cc0b654"
 }

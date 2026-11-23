@@ -1233,6 +1233,27 @@ pub trait FactoryService: Send + Sync + 'static {
         in_person: bool,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
+    /// Retry `actor`'s Run `id`, which ended `failed`, `infrastructure` or
+    /// `blocked`: a new Run of the same task, Flow and Factory Definition
+    /// commit, on the same branch, that keeps the Steps the Run took before
+    /// the entry it stopped at, with their outputs, and starts there. The
+    /// new Run names the one it retries. A Run is retried at most once
+    /// (`AlreadyRetried`); a running Run, one that ended otherwise, a
+    /// Benchmark trial and a self-improvement Run are not retried
+    /// (`NotRetriable`). The retry is held to the Queue limit of the rules
+    /// the Run keeps. For the agent `acting`, on a Run whose Definition has
+    /// Standing Roles, its bot must fill one that allows `start`. The
+    /// retry's request asks for the Control Files it names only when its
+    /// owner retried it `in_person` (and from an account that is not an
+    /// agent's), whoever created the Run it retries.
+    fn retry_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        acting: Option<ActingAgent>,
+        in_person: bool,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
     /// Mark `actor`'s Run flawed, for `reason`, in their own name: it
     /// ended `success`, and its result was found wrong afterwards. Marking
     /// a flawed Run again keeps its first mark.

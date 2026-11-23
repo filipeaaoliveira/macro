@@ -25,8 +25,12 @@ enum Position {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunState {
     position: Position,
-    /// The Steps the Run has taken; never reset.
+    /// The Steps the Run has taken, those a retry kept included; never
+    /// reset.
     steps: u16,
+    /// The Steps a retry kept from the Run it retries, which it did not
+    /// take: they count for places, not against its most Steps.
+    kept: u16,
     visits: BTreeMap<EntryId, u16>,
     facts: BTreeMap<FactName, bool>,
 }
@@ -111,9 +115,32 @@ impl<'a> Interpreter<'a> {
         RunState {
             position: Position::Entry(0),
             steps: 0,
+            kept: 0,
             visits: BTreeMap::new(),
             facts: self.flow.facts.clone(),
         }
+    }
+
+    /// A retry's state: at `entry`, the one the Run it retries stopped at,
+    /// with its first Step at `first_seq`, past the Steps it kept. It
+    /// visits each entry afresh, takes as many Steps as a new Run, and
+    /// starts with the Flow's starting facts: the retried Run's visits and
+    /// facts are not kept.
+    pub fn start_at(&self, entry: &EntryId, first_seq: u16) -> Result<RunState, InterpreterError> {
+        let index = self
+            .flow
+            .entries
+            .iter()
+            .position(|listed| listed.id == *entry)
+            .ok_or_else(|| InterpreterError::UnknownEntry(entry.clone()))?;
+        let kept = first_seq.saturating_sub(1);
+        Ok(RunState {
+            position: Position::Entry(index),
+            steps: kept,
+            kept,
+            visits: BTreeMap::new(),
+            facts: self.flow.facts.clone(),
+        })
     }
 
     /// Move the Run past the entries it skips or that ran out of visits, to
@@ -150,7 +177,8 @@ impl<'a> Interpreter<'a> {
             // Steps, however its resets count visits. A review panel takes
             // a Step for each of its reviewers, all or none.
             let taken = u16::try_from(entry.reviewers.len().max(1)).unwrap_or(u16::MAX);
-            if state.steps.saturating_add(taken) > MAX_STEPS {
+            let own = state.steps - state.kept;
+            if own.saturating_add(taken) > MAX_STEPS || state.steps.checked_add(taken).is_none() {
                 state.position = Position::End(RunOutcome::Blocked);
                 return Ok(NextStep::End(RunOutcome::Blocked));
             }
@@ -174,7 +202,7 @@ impl<'a> Interpreter<'a> {
         if !matches!(state.position, Position::Entry(_)) {
             return Err(InterpreterError::Ended);
         }
-        if state.steps >= MAX_STEPS {
+        if state.steps - state.kept >= MAX_STEPS || state.steps == u16::MAX {
             state.position = Position::End(RunOutcome::Blocked);
             return Ok(None);
         }

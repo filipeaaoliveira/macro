@@ -38,7 +38,7 @@ use factory_records::domain::review_rounds::ReviewRoundRepository;
 
 use super::{BuiltInStepError, BuiltInSteps, outcomes};
 use crate::domain::flow::StepName;
-use crate::domain::models::{StepInput, StepReport, run_branch};
+use crate::domain::models::{StepInput, StepReport};
 use crate::domain::ports::{ChildTasks, MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::Update;
 
@@ -133,7 +133,7 @@ where
             Update::Conflict(update) => {
                 let instructions = RESOLVE_INSTRUCTIONS
                     .replace("{base_sha}", &update.base_sha)
-                    .replace("{branch}", &run_branch(input.key.run_id));
+                    .replace("{branch}", &input.branch());
                 let resolved = self
                     .work_and_check(
                         step,

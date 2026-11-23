@@ -11,6 +11,7 @@ mod gate_owner;
 mod gate_replies;
 mod questions;
 mod replay;
+mod retry;
 mod review_panel;
 mod task_thread;
 mod token_budget;
@@ -292,6 +293,7 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
         run_id: run.id,
         flow,
         token_budget: false,
+        start_at: None,
     }
 }
 
@@ -695,6 +697,9 @@ struct CodeAgent {
     asked: Arc<Notify>,
     /// What a verifier hands back, in turn: `pass` once they run out.
     verdicts: Arc<Mutex<Vec<&'static str>>>,
+    /// The Steps whose next ask fails as the agent's machine went away
+    /// (out of quota), once each.
+    lost: Arc<Mutex<Vec<&'static str>>>,
 }
 
 /// What a reviewer hands back for `review`, one of [`CodeAgent`]'s
@@ -729,6 +734,7 @@ impl CodeAgent {
             steps: Arc::default(),
             asked: Arc::default(),
             verdicts: Arc::default(),
+            lost: Arc::default(),
         }
     }
 
@@ -744,6 +750,13 @@ impl StepAgent for CodeAgent {
         let step = task.step.as_str().to_string();
         self.steps.lock().expect("steps").push(step.clone());
         self.asked.notify_one();
+        {
+            let mut lost = self.lost.lock().expect("lost");
+            if let Some(at) = lost.iter().position(|lost| *lost == step) {
+                lost.remove(at);
+                return Err(AgentFailed::OutOfQuota);
+            }
+        }
         if step == "review" {
             let review = {
                 let mut reviews = self.reviews.lock().expect("reviews");
@@ -1097,6 +1110,7 @@ where
         run_id: run.id,
         flow,
         token_budget: false,
+        start_at: None,
     };
     let task_queue = format!("factory-test-{}", Uuid::now_v7());
     let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");

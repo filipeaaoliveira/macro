@@ -1189,3 +1189,78 @@ fn a_plan_past_its_nine_visits_ends_the_run_for_a_person() {
     assert_eq!(steps.last().map(String::as_str), Some("plan-review#3"));
     assert_eq!(end, Ok(RunOutcome::Manual));
 }
+
+/// A retry starts at the entry the Run it retries stopped at, its first
+/// Step at the place past the Steps it kept, and walks on as the Flow
+/// routes from there: a `code` Run that stopped at `write` does not plan
+/// again.
+#[test]
+fn a_retry_starts_at_its_entry_past_the_steps_it_kept() {
+    let code = flow(CODE_FLOW);
+    let interpreter = Interpreter::new(&code);
+    let write = "write".to_string().try_into().expect("valid entry");
+    let mut state = interpreter.start_at(&write, 3).expect("start");
+
+    let NextStep::Run { entry, visit, seq } = interpreter.next_step(&mut state).expect("next")
+    else {
+        panic!("the retry runs a step");
+    };
+    assert_eq!((entry.id.as_str(), visit, seq), ("write", 1, 3));
+    interpreter
+        .record(&mut state, &Outcome::done())
+        .expect("record");
+    let NextStep::Run { entry, seq, .. } = interpreter.next_step(&mut state).expect("next") else {
+        panic!("the retry goes on");
+    };
+    assert_eq!((entry.id.as_str(), seq), ("review", 4));
+}
+
+/// A retry may start only at an entry its Flow has.
+#[test]
+fn a_retry_at_an_entry_its_flow_lacks_cannot_start() {
+    let code = flow(CODE_FLOW);
+    let interpreter = Interpreter::new(&code);
+    let gone = "deploy".to_string().try_into().expect("valid entry");
+
+    assert_eq!(
+        interpreter.start_at(&gone, 2),
+        Err(InterpreterError::UnknownEntry(gone))
+    );
+}
+
+/// A retry takes as many Steps of its own as a new Run, however many it
+/// kept: a Run that stopped at its most Steps is retried with room to go
+/// on.
+#[test]
+fn a_retry_takes_its_most_steps_past_the_ones_it_kept() {
+    let looping = flow(
+        r#"{
+            "entries": [
+                { "id": "a", "step": "work",
+                  "on": { "done": [{ "to": { "kind": "entry", "entry": "a" } }] } }
+            ]
+        }"#,
+    );
+    let interpreter = Interpreter::new(&looping);
+    let entry = "a".to_string().try_into().expect("valid entry");
+    let kept = factory_records::domain::models::MAX_STEPS;
+    let mut state = interpreter.start_at(&entry, kept + 1).expect("start");
+    let mut places = Vec::new();
+
+    let end = loop {
+        match interpreter.next_step(&mut state).expect("next") {
+            NextStep::End(end) => break end,
+            NextStep::Run { seq, .. } => {
+                places.push(seq);
+                interpreter
+                    .record(&mut state, &Outcome::done())
+                    .expect("record");
+            }
+        }
+    };
+
+    assert_eq!(end, RunOutcome::Blocked);
+    assert_eq!(places.len(), usize::from(kept));
+    assert_eq!(places.first(), Some(&(kept + 1)));
+    assert_eq!(places.last(), Some(&(2 * kept)));
+}

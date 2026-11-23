@@ -32,6 +32,7 @@ mod definition_changes;
 mod evaluation;
 mod gate_owner;
 mod orchestrator;
+mod retry;
 mod self_improvement;
 mod standing;
 mod standing_rules;
@@ -291,6 +292,7 @@ fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        branch_of: None,
     }
 }
 

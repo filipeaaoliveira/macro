@@ -106,6 +106,7 @@ fn input(run_id: RunId) -> StepInput<'static> {
         base_commit: None,
         routes: &[],
         max_visits: None,
+        retry: None,
     }
 }
 
