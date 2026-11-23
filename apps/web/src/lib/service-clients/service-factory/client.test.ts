@@ -105,6 +105,15 @@ describe('factoryClient routes', () => {
         message: 'a rule',
       })
     ).toEqual({ code: 'DEFINITION_CHANGE_NOT_OPENED', message: 'a rule' });
+    expect(
+      await refused(400, {
+        code: 'unreachableDefinition',
+        message: 'no access',
+      })
+    ).toEqual({ code: 'DEFINITION_UNREACHABLE', message: 'no access' });
+    expect(
+      await refused(400, { code: 'invalidDefinition', message: 'moved' })
+    ).toEqual({ code: 'DEFINITION_INVALID', message: 'moved' });
     // A refusal with no code the change names keeps the status's, and the
     // service's message.
     expect(await refused(403, { message: 'admins only' })).toEqual({

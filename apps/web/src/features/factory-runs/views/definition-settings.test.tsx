@@ -339,6 +339,71 @@ describe('DefinitionSettings', () => {
       expect(ids[2]).not.toBe(ids[1]);
     });
 
+    it('sends a change edited after a lost answer under a new id', async () => {
+      vi.mocked(factoryClient.proposeDefinitionChange)
+        .mockResolvedValueOnce(
+          err([{ code: 'SERVER_ERROR', message: 'Internal server error' }])
+        )
+        .mockResolvedValueOnce(
+          ok({
+            number: 11,
+            title: 'Fixed',
+            url: `${REPO}/pull/11`,
+            draft: false,
+          })
+        );
+      mount(admin);
+      await write({});
+      send();
+      await screen.findByText(
+        'The change couldn’t be sent. Send it again: if its pull request was opened, you’ll get it back.'
+      );
+      fireEvent.input(
+        screen.getByRole('textbox', { name: 'File 1’s new text' }),
+        { target: { value: '{"entries": ["plan", "reply"]}' } }
+      );
+      send();
+      await screen.findByRole('link', {
+        name: '#11 Fixed (opens in a new tab)',
+      });
+
+      const [first, second] = vi
+        .mocked(factoryClient.proposeDefinitionChange)
+        .mock.calls.map(([request]) => request);
+      expect(second?.changeId).not.toBe(first?.changeId);
+      expect(second?.files).toEqual({
+        'flows/notes.json': '{"entries": ["plan", "reply"]}',
+      });
+    });
+
+    it('says why GitHub didn’t open the pull request, in the factory’s words, and why the repository couldn’t be read', async () => {
+      vi.mocked(factoryClient.proposeDefinitionChange)
+        .mockResolvedValueOnce(
+          err([
+            {
+              code: 'DEFINITION_CHANGE_NOT_OPENED',
+              message:
+                'GitHub did not create the branch definition-change/1: a rule forbids it',
+            },
+          ])
+        )
+        .mockResolvedValueOnce(
+          err([{ code: 'DEFINITION_UNREACHABLE', message: 'not found' }])
+        );
+      mount(admin);
+      await write({});
+      send();
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'GitHub did not create the branch definition-change/1: a rule forbids it. Sending it again tries a new branch.'
+      );
+      send();
+      await waitFor(() =>
+        expect(screen.getByRole('alert').textContent).toBe(
+          'The definition’s repository couldn’t be read with your GitHub account: not found'
+        )
+      );
+    });
+
     it('offers no change to a member who doesn’t administer the team', async () => {
       mount(named);
 

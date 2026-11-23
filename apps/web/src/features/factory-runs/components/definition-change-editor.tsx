@@ -5,13 +5,14 @@ import type { DefinitionPullRequest } from '@service-factory/generated/schemas';
 import { Button, TextField } from '@ui';
 import { createSignal, Index, Show } from 'solid-js';
 import {
-  changeRequest,
   checkDraft,
   type DraftFile,
   type DraftFileProblem,
   definitionFileUrl,
   MAX_CHANGE_DESCRIPTION_BYTES,
   MAX_CHANGE_TITLE_BYTES,
+  type SentChange,
+  sendUnder,
 } from '../core/definition-change';
 import { useProposeDefinitionChangeMutation } from '../queries/definition';
 import { ExternalLink } from './definition-contents';
@@ -40,6 +41,16 @@ function refusal(error: unknown): { text: string; newChange: boolean } {
     case 'NO_PUSH_ACCESS':
       return {
         text: t('factoryRuns.definitionChangeNoPush'),
+        newChange: false,
+      };
+    case 'DEFINITION_UNREACHABLE':
+      return {
+        text: t('factoryRuns.definitionChangeUnreachable', { message }),
+        newChange: false,
+      };
+    case 'DEFINITION_INVALID':
+      return {
+        text: t('factoryRuns.definitionChangeHeadInvalid', { message }),
         newChange: false,
       };
     case 'NO_DEFINITION':
@@ -87,8 +98,11 @@ export function DefinitionChangeEditor(props: {
   const [title, setTitle] = createSignal('');
   const [description, setDescription] = createSignal('');
   const [files, setFiles] = createSignal<DraftFile[]>([EMPTY_FILE]);
-  // One id per change: a resend after a lost answer answers its pull request.
-  const [changeId, setChangeId] = createSignal(crypto.randomUUID());
+  // What was last sent, and under which id: sent again unchanged, as after
+  // a lost answer, it keeps the id and answers the pull request it opened;
+  // any edit since goes under a new id, since the factory answers a resent
+  // id from its pull request without writing the edit.
+  const [sent, setSent] = createSignal<SentChange>();
   const [checked, setChecked] = createSignal(false);
   const [refused, setRefused] = createSignal<string>();
   const [opened, setOpened] = createSignal<DefinitionPullRequest>();
@@ -105,7 +119,7 @@ export function DefinitionChangeEditor(props: {
     setTitle('');
     setDescription('');
     setFiles([EMPTY_FILE]);
-    setChangeId(crypto.randomUUID());
+    setSent(undefined);
     setChecked(false);
     setRefused(undefined);
   };
@@ -119,17 +133,17 @@ export function DefinitionChangeEditor(props: {
     setChecked(true);
     setRefused(undefined);
     if (!check().ready || mutation.isPending) return;
+    const change = sendUnder(sent(), draft(), () => crypto.randomUUID());
+    setSent(change.sent);
     try {
-      const pullRequest = await mutation.mutateAsync(
-        changeRequest(draft(), changeId())
-      );
+      const pullRequest = await mutation.mutateAsync(change.request);
       setOpened(pullRequest);
       reset();
       setEditing(false);
     } catch (error) {
       const answer = refusal(error);
       setRefused(answer.text);
-      if (answer.newChange) setChangeId(crypto.randomUUID());
+      if (answer.newChange) setSent(undefined);
     }
   };
 

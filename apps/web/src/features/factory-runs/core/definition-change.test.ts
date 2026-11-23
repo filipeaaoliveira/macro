@@ -5,6 +5,7 @@ import {
   type DefinitionChangeDraft,
   definitionFileUrl,
   isDefinitionFile,
+  sendUnder,
 } from './definition-change';
 
 const draft = (
@@ -118,5 +119,41 @@ describe('definitionFileUrl', () => {
     expect(definitionFileUrl(repo, 'flows/code.json', null)).toBe(
       `${repo}/blob/HEAD/flows/code.json`
     );
+  });
+});
+
+describe('sendUnder', () => {
+  const ids = () => {
+    let next = 0;
+    return () => `change-${++next}`;
+  };
+
+  it('sends a first change under a new id', () => {
+    const sent = sendUnder(undefined, draft(), ids());
+    expect(sent.request.changeId).toBe('change-1');
+    expect(sent.sent.id).toBe('change-1');
+  });
+
+  it('keeps the id for the same change sent again, and takes a new one once it is edited', () => {
+    const newId = ids();
+    const first = sendUnder(undefined, draft(), newId);
+    const again = sendUnder(first.sent, draft(), newId);
+    expect(again.request.changeId).toBe('change-1');
+
+    const retitled = sendUnder(
+      again.sent,
+      draft({ title: 'Add a docs flow, fixed' }),
+      newId
+    );
+    expect(retitled.request.changeId).toBe('change-2');
+    const retexted = sendUnder(
+      retitled.sent,
+      draft({
+        title: 'Add a docs flow, fixed',
+        files: [{ path: 'flows/docs.json', text: '{"entries": ["plan"]}' }],
+      }),
+      newId
+    );
+    expect(retexted.request.changeId).toBe('change-3');
   });
 });

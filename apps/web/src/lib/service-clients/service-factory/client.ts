@@ -152,6 +152,8 @@ async function refusal(
 /** Why a proposed change to the team's Factory Definition was refused. */
 export type DefinitionChangeErrorCode =
   | 'NO_DEFINITION'
+  | 'DEFINITION_UNREACHABLE'
+  | 'DEFINITION_INVALID'
   | 'INVALID_DEFINITION_CHANGE'
   | 'DEFINITION_CHANGE_NOT_OPENED'
   | 'DEFINITION_CHANGE_CLOSED'
@@ -159,6 +161,8 @@ export type DefinitionChangeErrorCode =
 
 const DEFINITION_CHANGE_ERROR_CODES = {
   noDefinition: 'NO_DEFINITION',
+  unreachableDefinition: 'DEFINITION_UNREACHABLE',
+  invalidDefinition: 'DEFINITION_INVALID',
   invalidDefinitionChange: 'INVALID_DEFINITION_CHANGE',
   definitionChangeNotOpened: 'DEFINITION_CHANGE_NOT_OPENED',
   definitionChangeClosed: 'DEFINITION_CHANGE_CLOSED',

@@ -130,3 +130,23 @@ export function definitionFileUrl(
 ): string {
   return `${repoUrl}/blob/${commit ?? 'HEAD'}/${path}`;
 }
+
+/** A change as it was last sent: its id, and what it sent under it. */
+export type SentChange = { id: string; body: string };
+
+/**
+ * The request a draft sends, and what it was sent as. It goes under the
+ * id it was last sent under while it is unchanged since: sent again after
+ * a lost answer, the factory answers the pull request that id opened. Once
+ * edited, it goes under a new id, since the factory answers a resent id
+ * from its pull request without writing anything again.
+ */
+export function sendUnder(
+  last: SentChange | undefined,
+  draft: DefinitionChangeDraft,
+  newId: () => string
+): { request: ProposeDefinitionChangeRequest; sent: SentChange } {
+  const body = JSON.stringify(changeRequest(draft, ''));
+  const id = last && last.body === body ? last.id : newId();
+  return { request: changeRequest(draft, id), sent: { id, body } };
+}

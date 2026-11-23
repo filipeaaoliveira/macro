@@ -283,7 +283,11 @@ export default {
     'Your GitHub account can’t push to the definition’s repository.',
   definitionChangeNoDefinition: 'Your team names no definition to change.',
   definitionChangeNotOpened:
-    'GitHub didn’t open the pull request: {{message}}. Send it again to try on a new branch.',
+    '{{message}}. Sending it again tries a new branch.',
+  definitionChangeHeadInvalid:
+    'The definition doesn’t read at its default branch now: {{message}}',
+  definitionChangeUnreachable:
+    'The definition’s repository couldn’t be read with your GitHub account: {{message}}',
   definitionChangeClosed:
     'This change’s pull request was closed without merging. Send it again to open a new one.',
   definitionChangeForbidden: 'Only team admins can propose changes.',
