@@ -613,8 +613,9 @@ impl EvaluationRepository for PgRunRepository {
 
         // A retry keeps the arms and Agent Rules of the Run it retries, so
         // a Run and its retries are one attempt of an arm or a rule: it is
-        // counted once, as its newest Run, the one that was not retried,
-        // ended, and the Steps that Run kept count with it.
+        // counted once, as its newest Run among those read, and the Steps
+        // that Run kept count with it. A Run whose retry falls outside the
+        // period counts the attempt itself, so no attempt is lost.
         //
         // An arm's Agents are the same for each of its Runs while the
         // Experiment is unchanged; the newest Run's are shown. A Run fell
@@ -645,7 +646,7 @@ impl EvaluationRepository for PgRunRepository {
             FROM factory_run_arm a
             JOIN factory_run r ON r.id = a.run_id
             WHERE a.run_id = ANY($1)
-              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = a.run_id)
+              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = a.run_id AND n.id = ANY($1))
             GROUP BY a.experiment, a.arm
             ORDER BY a.experiment, a.arm
             "#,
@@ -675,7 +676,7 @@ impl EvaluationRepository for PgRunRepository {
             FROM factory_run_arm a
             JOIN factory_run_score s ON s.run_id = a.run_id
             WHERE a.run_id = ANY($1)
-              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = a.run_id)
+              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = a.run_id AND n.id = ANY($1))
             GROUP BY a.experiment, a.arm, s.scorer
             ORDER BY a.experiment, a.arm, s.scorer
             "#,
@@ -715,7 +716,7 @@ impl EvaluationRepository for PgRunRepository {
             FROM factory_run_agent_rule g
             JOIN factory_run r ON r.id = g.run_id
             WHERE g.run_id = ANY($1)
-              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = g.run_id)
+              AND NOT EXISTS (SELECT 1 FROM factory_run n WHERE n.retried_from = g.run_id AND n.id = ANY($1))
             GROUP BY g.role, g.rule
             ORDER BY g.role, g.rule
             "#,

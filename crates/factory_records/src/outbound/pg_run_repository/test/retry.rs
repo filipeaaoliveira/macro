@@ -447,4 +447,25 @@ async fn what_a_retry_kept_counts_once_on_the_run_that_made_it(pool: PgPool) {
         .map(|arm| (arm.runs, arm.succeeded))
         .collect();
     assert_eq!(arms, [(1, 1)], "a run and its retry are one attempt");
+    assert_eq!(insights.retried, [lost]);
+
+    // A retry outside the period leaves the attempt to the Run it retried.
+    sqlx::query!(
+        "UPDATE factory_run SET created_at = now() + interval '2 days' WHERE id = $1",
+        id.as_uuid(),
+    )
+    .execute(&pool)
+    .await
+    .expect("move the retry out of the period");
+    let evaluation = repo.read_evaluation(&scope).await.expect("evaluation");
+    let arms: Vec<(u32, u32)> = evaluation
+        .arms
+        .iter()
+        .map(|arm| (arm.runs, arm.succeeded))
+        .collect();
+    assert_eq!(
+        arms,
+        [(1, 0)],
+        "the attempt is counted by the run in the period"
+    );
 }

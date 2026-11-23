@@ -394,6 +394,21 @@ impl RunInsightsRepository for PgRunRepository {
         })
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
 
+        // The Runs a retry took over, through `factory_run_retried_from_idx`.
+        let retried = sqlx::query_scalar!(
+            r#"
+            SELECT retried_from AS "retried_from!"
+            FROM factory_run
+            WHERE retried_from = ANY($1)
+            "#,
+            &ids,
+        )
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(RunId::from_uuid)
+        .collect();
+
         transaction.commit().await?;
         Ok(InsightsRecords {
             runs,
@@ -402,6 +417,7 @@ impl RunInsightsRepository for PgRunRepository {
             counts,
             trouble,
             sessions,
+            retried,
         })
     }
 }
