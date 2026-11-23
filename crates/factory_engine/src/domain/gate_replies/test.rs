@@ -1074,3 +1074,39 @@ async fn words_in_the_window_of_a_run_without_a_task_close_its_notice() {
         [stand_in_id(key.run_id, key.seq)]
     );
 }
+
+/// Plan Gates were asked at `plan` before plans were reviewed: the owner's
+/// answers there are past answers to the plan Gate `plan-review` asks.
+#[tokio::test]
+async fn the_stand_in_reads_answers_to_plan_gates_asked_before_plan_review() {
+    let repo = FakeRepo::default();
+    let earlier = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    repo.answer_gate(
+        earlier,
+        &outcome("revise"),
+        Some("Old plan gate"),
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("past answer");
+    {
+        let mut steps = repo.steps.lock().expect("steps");
+        if let Some((_, step)) = steps
+            .iter_mut()
+            .find(|(id, step)| *id == earlier.run_id && step.seq == earlier.seq)
+        {
+            step.entry = EntryId::try_from("plan".to_string()).expect("valid");
+        }
+    }
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+
+    gates(&repo, &model)
+        .stand_in(plan_asking(key))
+        .await
+        .expect("stand in");
+
+    assert!(model.asked()[0].prompt.contains("Old plan gate"));
+}

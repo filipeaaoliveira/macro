@@ -239,3 +239,47 @@ fn checks_dropped_for_their_size_do_not_read() {
         Err(AcceptanceError::TooLarge)
     );
 }
+
+/// A size block after the acceptance block leaves the checks read: each
+/// block is found by its key, not by where it stands.
+#[test]
+fn a_size_block_after_the_checks_leaves_them_read() {
+    let plan = format!(
+        "{PLAN}\n\n```json\n{{\"size\": \"fits\", \"files\": [{{\"path\": \"src/a.rs\", \"change\": \"edit\"}}]}}\n```"
+    );
+
+    let kept = plan_output(&plan);
+
+    assert_eq!(
+        AcceptanceChecks::from_plan(&kept),
+        AcceptanceChecks::from_plan(PLAN)
+    );
+    assert!(
+        crate::domain::plan_review::PlanSize::from_plan(&kept).is_ok(),
+        "{kept}"
+    );
+}
+
+/// A plan too long for a Step's output is cut in its prose: its size
+/// block, at its end, is kept whole.
+#[test]
+fn a_long_plan_keeps_its_size_block() {
+    let size = "```json\n{\"size\": \"fits\", \"files\": [{\"path\": \"src/a.rs\", \"change\": \"edit\"}]}\n```";
+    let long = format!(
+        "{}\n\n{size}\n\n{}",
+        "x".repeat(MAX_OUTPUT_BYTES),
+        &PLAN["Change the toggle.".len()..]
+    );
+
+    let kept = plan_output(&long);
+
+    assert!(kept.len() <= MAX_OUTPUT_BYTES, "{}", kept.len());
+    assert!(
+        crate::domain::plan_review::PlanSize::from_plan(&kept).is_ok(),
+        "the size block was cut"
+    );
+    assert_eq!(
+        AcceptanceChecks::from_plan(&kept),
+        AcceptanceChecks::from_plan(PLAN)
+    );
+}

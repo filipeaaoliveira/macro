@@ -54,6 +54,7 @@ fn a_passing_review_goes_through_ci_to_the_merge_question() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "pass",
@@ -69,6 +70,7 @@ fn a_passing_review_goes_through_ci_to_the_merge_question() {
         steps,
         [
             "plan#1",
+            "plan-review#1",
             "write#1",
             "review#1",
             "accept#1",
@@ -99,7 +101,7 @@ fn an_outcome_without_a_transition_goes_to_the_entry_below() {
     else {
         panic!("the run ended after plan");
     };
-    assert_eq!((entry.id.as_str(), visit, seq), ("write", 1, 2));
+    assert_eq!((entry.id.as_str(), visit, seq), ("plan-review", 1, 2));
 }
 
 #[test]
@@ -107,7 +109,7 @@ fn changes_loop_through_fix_until_the_review_runs_out_of_rounds() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
-            "approve", "done", "changes", "done", "changes", "done", "changes", "done",
+            "done", "approve", "done", "changes", "done", "changes", "done", "changes", "done",
         ],
     );
 
@@ -116,7 +118,15 @@ fn changes_loop_through_fix_until_the_review_runs_out_of_rounds() {
     assert_eq!(
         steps,
         [
-            "plan#1", "write#1", "review#1", "fix#1", "review#2", "fix#2", "review#3", "fix#3"
+            "plan#1",
+            "plan-review#1",
+            "write#1",
+            "review#1",
+            "fix#1",
+            "review#2",
+            "fix#2",
+            "review#3",
+            "fix#3"
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Manual));
@@ -131,7 +141,7 @@ fn a_review_panel_takes_a_place_for_each_reviewer() {
     let mut state = interpreter.start();
     let mut places = Vec::new();
 
-    for outcome in ["approve", "done", "changes", "done"] {
+    for outcome in ["done", "approve", "done", "changes", "done"] {
         let NextStep::Run { entry, seq, .. } = interpreter.next_step(&mut state).expect("next")
         else {
             panic!("the run ended early");
@@ -153,10 +163,11 @@ fn a_review_panel_takes_a_place_for_each_reviewer() {
         places,
         [
             ("plan", 1),
-            ("write", 2),
-            ("review", 3),
-            ("fix", 6),
-            ("review", 7)
+            ("plan-review", 2),
+            ("write", 3),
+            ("review", 4),
+            ("fix", 7),
+            ("review", 8)
         ]
     );
 }
@@ -165,12 +176,18 @@ fn a_review_panel_takes_a_place_for_each_reviewer() {
 /// from `fix` alike, before any pull request is opened.
 #[test]
 fn red_checks_end_the_code_run_for_a_person() {
-    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "red"]);
-    assert_eq!(steps, ["plan#1", "write#1"]);
+    let (steps, end) = walk(&flow(CODE_FLOW), &["done", "approve", "red"]);
+    assert_eq!(steps, ["plan#1", "plan-review#1", "write#1"]);
     assert_eq!(end, Ok(RunOutcome::Manual));
 
-    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "done", "changes", "red"]);
-    assert_eq!(steps, ["plan#1", "write#1", "review#1", "fix#1"]);
+    let (steps, end) = walk(
+        &flow(CODE_FLOW),
+        &["done", "approve", "done", "changes", "red"],
+    );
+    assert_eq!(
+        steps,
+        ["plan#1", "plan-review#1", "write#1", "review#1", "fix#1"]
+    );
     assert_eq!(end, Ok(RunOutcome::Manual));
 }
 
@@ -219,6 +236,7 @@ fn red_ci_is_fixed_reviewed_again_and_goes_green() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "changes",
@@ -243,6 +261,7 @@ fn red_ci_is_fixed_reviewed_again_and_goes_green() {
         steps,
         [
             "plan#1",
+            "plan-review#1",
             "write#1",
             "review#1",
             "fix#1",
@@ -264,7 +283,15 @@ fn red_ci_is_fixed_reviewed_again_and_goes_green() {
 
 #[test]
 fn ci_that_stays_red_after_three_fixes_is_left_for_a_person() {
-    let mut outcomes = vec!["approve", "done", "pass", "pass", "published", "red"];
+    let mut outcomes = vec![
+        "done",
+        "approve",
+        "done",
+        "pass",
+        "pass",
+        "published",
+        "red",
+    ];
     for _ in 0..3 {
         outcomes.extend(["done", "pass", "pass", "published", "red"]);
     }
@@ -287,6 +314,7 @@ fn a_person_sending_the_merge_back_has_the_change_fixed_and_asked_again() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "pass",
@@ -308,6 +336,7 @@ fn a_person_sending_the_merge_back_has_the_change_fixed_and_asked_again() {
         steps,
         [
             "plan#1",
+            "plan-review#1",
             "write#1",
             "review#1",
             "accept#1",
@@ -331,6 +360,7 @@ fn a_person_sending_the_merge_back_has_the_change_fixed_and_asked_again() {
 #[test]
 fn a_revise_at_the_merge_question_is_reviewed_again_and_the_question_is_capped() {
     let mut outcomes = vec![
+        "done",
         "approve",
         "done",
         "changes",
@@ -350,7 +380,7 @@ fn a_revise_at_the_merge_question_is_reviewed_again_and_the_question_is_capped()
 
     // After three reviews, the first revise is still reviewed: the reset
     // counts its visits from one.
-    assert_eq!(steps[10..13], ["merge-gate#1", "fix#3", "review#1"]);
+    assert_eq!(steps[11..14], ["merge-gate#1", "fix#3", "review#1"]);
     assert_eq!(
         steps
             .iter()
@@ -366,6 +396,7 @@ fn a_head_that_moved_before_the_merge_goes_back_to_ci() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "pass",
@@ -381,7 +412,7 @@ fn a_head_that_moved_before_the_merge_goes_back_to_ci() {
     );
 
     assert_eq!(
-        steps[6..],
+        steps[7..],
         // Each approval starts `merge`'s visits over.
         ["merge-gate#1", "merge#1", "ci#2", "merge-gate#2", "merge#1"]
     );
@@ -390,13 +421,13 @@ fn a_head_that_moved_before_the_merge_goes_back_to_ci() {
 
 #[test]
 fn nothing_to_write_or_a_refused_pull_request_is_left_for_a_person() {
-    let (unchanged, unchanged_end) = walk(&flow(CODE_FLOW), &["approve", "unchanged"]);
+    let (unchanged, unchanged_end) = walk(&flow(CODE_FLOW), &["done", "approve", "unchanged"]);
     let (refused, refused_end) = walk(
         &flow(CODE_FLOW),
-        &["approve", "done", "pass", "pass", "refused"],
+        &["done", "approve", "done", "pass", "pass", "refused"],
     );
 
-    assert_eq!(unchanged, ["plan#1", "write#1"]);
+    assert_eq!(unchanged, ["plan#1", "plan-review#1", "write#1"]);
     assert_eq!(unchanged_end, Ok(RunOutcome::Manual));
     assert_eq!(refused.last().map(String::as_str), Some("publish#1"));
     assert_eq!(refused_end, Ok(RunOutcome::Manual));
@@ -421,9 +452,9 @@ fn an_exhausted_entry_without_on_exhausted_ends_the_run_blocked() {
 
 #[test]
 fn a_failed_step_the_flow_does_not_route_ends_the_run_failed() {
-    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "failed"]);
+    let (steps, end) = walk(&flow(CODE_FLOW), &["done", "approve", "failed"]);
 
-    assert_eq!(steps, ["plan#1", "write#1"]);
+    assert_eq!(steps, ["plan#1", "plan-review#1", "write#1"]);
     assert_eq!(end, Ok(RunOutcome::Failed));
 }
 
@@ -581,6 +612,7 @@ fn a_held_merge_asks_again_even_after_tampered_merges_went_back() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "pass",
@@ -601,7 +633,7 @@ fn a_held_merge_asks_again_even_after_tampered_merges_went_back() {
     );
 
     assert_eq!(
-        steps[6..],
+        steps[7..],
         [
             "merge-gate#1",
             "merge#1",
@@ -628,6 +660,7 @@ fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "pass",
@@ -652,7 +685,7 @@ fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
     );
 
     assert_eq!(
-        steps[6..],
+        steps[7..],
         [
             "merge-gate#1",
             "update#1",
@@ -680,6 +713,7 @@ fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
 #[test]
 fn a_queued_merge_keeps_its_approval_and_asks_again_after_twelve_waits() {
     let mut outcomes = vec![
+        "done",
         "approve",
         "done",
         "pass",
@@ -695,13 +729,21 @@ fn a_queued_merge_keeps_its_approval_and_asks_again_after_twelve_waits() {
     let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
 
     let waits: Vec<String> = (1..=12).map(|visit| format!("merge#{visit}")).collect();
-    assert_eq!(steps[6], "merge-gate#1");
-    assert_eq!(steps[7..19], waits[..]);
-    assert_eq!(steps[19], "merge-gate#2", "asked again after twelve waits");
-    assert_eq!(steps[20..32], waits[..]);
+    assert_eq!(steps[7], "merge-gate#1");
+    assert_eq!(steps[8..20], waits[..]);
+    assert_eq!(steps[20], "merge-gate#2", "asked again after twelve waits");
+    assert_eq!(steps[21..33], waits[..]);
     assert_eq!(end, Ok(RunOutcome::Success));
 
-    let mut endless = vec!["approve", "done", "pass", "pass", "published", "green"];
+    let mut endless = vec![
+        "done",
+        "approve",
+        "done",
+        "pass",
+        "pass",
+        "published",
+        "green",
+    ];
     for _ in 0..3 {
         endless.push("approve");
         endless.extend(["queued"; 12]);
@@ -718,6 +760,7 @@ fn a_conflict_left_alone_or_endless_updates_end_for_a_person() {
     let (_, stopped) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "pass",
@@ -731,6 +774,7 @@ fn a_conflict_left_alone_or_endless_updates_end_for_a_person() {
     assert_eq!(stopped, Ok(RunOutcome::Manual));
 
     let mut retries = vec![
+        "done",
         "approve",
         "done",
         "pass",
@@ -751,7 +795,15 @@ fn a_conflict_left_alone_or_endless_updates_end_for_a_person() {
 /// own ten visits bound a base that moves faster than the Run's CI.
 #[test]
 fn a_base_that_keeps_moving_never_exhausts_the_merge_gate() {
-    let mut outcomes = vec!["approve", "done", "pass", "pass", "published", "green"];
+    let mut outcomes = vec![
+        "done",
+        "approve",
+        "done",
+        "pass",
+        "pass",
+        "published",
+        "green",
+    ];
     for _ in 0..4 {
         outcomes.extend(["behind", "done", "green"]);
     }
@@ -766,7 +818,15 @@ fn a_base_that_keeps_moving_never_exhausts_the_merge_gate() {
         Some("merge-gate#1")
     );
 
-    let mut chasing = vec!["approve", "done", "pass", "pass", "published", "green"];
+    let mut chasing = vec![
+        "done",
+        "approve",
+        "done",
+        "pass",
+        "pass",
+        "published",
+        "green",
+    ];
     for _ in 0..10 {
         chasing.extend(["behind", "done", "green"]);
     }
@@ -785,9 +845,13 @@ fn a_base_that_keeps_moving_never_exhausts_the_merge_gate() {
 #[test]
 fn an_unresolved_or_failed_review_is_left_for_a_person() {
     for outcome in ["unresolved", "failed"] {
-        let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "done", outcome]);
+        let (steps, end) = walk(&flow(CODE_FLOW), &["done", "approve", "done", outcome]);
 
-        assert_eq!(steps, ["plan#1", "write#1", "review#1"], "{outcome}");
+        assert_eq!(
+            steps,
+            ["plan#1", "plan-review#1", "write#1", "review#1"],
+            "{outcome}"
+        );
         assert_eq!(end, Ok(RunOutcome::Manual), "{outcome}");
     }
 }
@@ -856,6 +920,7 @@ fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "pass",
@@ -870,9 +935,10 @@ fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
         ],
     );
     assert_eq!(
-        steps[..9],
+        steps[..10],
         [
             "plan#1",
+            "plan-review#1",
             "write#1",
             "review#1",
             "accept#1",
@@ -888,6 +954,7 @@ fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "done",
             "approve",
             "done",
             "changes",
@@ -908,7 +975,10 @@ fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
     assert!(steps.iter().all(|step| step != "fix#5"), "{steps:?}");
     assert_eq!(end, Ok(RunOutcome::Manual));
 
-    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "done", "pass", "stop"]);
+    let (steps, end) = walk(
+        &flow(CODE_FLOW),
+        &["done", "approve", "done", "pass", "stop"],
+    );
     assert_eq!(steps.last().map(String::as_str), Some("accept#1"));
     assert_eq!(end, Ok(RunOutcome::Manual));
 }
@@ -923,7 +993,15 @@ fn a_run_ends_once_its_change_is_merged() {
             .iter()
             .all(|entry| !["deploy", "verify"].contains(&entry.step.as_str()))
     );
-    let to_merge_gate = ["approve", "done", "pass", "pass", "published", "green"];
+    let to_merge_gate = [
+        "done",
+        "approve",
+        "done",
+        "pass",
+        "pass",
+        "published",
+        "green",
+    ];
 
     let mut merged = to_merge_gate.to_vec();
     merged.extend(["approve", "merged"]);
@@ -1026,4 +1104,88 @@ fn a_run_in_flight_on_the_code_flow_before_verify_ends_at_its_merge() {
 
     assert_eq!(steps.last().map(String::as_str), Some("merge#1"));
     assert_eq!(end, Ok(RunOutcome::Success));
+}
+
+/// A plan the review finds Blockers in goes back to the planner, and the
+/// revision is reviewed again before the plan Gate asks; a person's revise
+/// gives the review its rounds again.
+#[test]
+fn a_plan_with_blockers_is_revised_and_reviewed_again_before_its_gate() {
+    let (steps, end) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "done", "blockers", "done", "revise", "done", "approve", "red",
+        ],
+    );
+
+    assert_eq!(
+        steps,
+        [
+            "plan#1",
+            "plan-review#1",
+            "plan#2",
+            "plan-review#2",
+            "plan#3",
+            "plan-review#1",
+            "write#1"
+        ]
+    );
+    assert_eq!(end, Ok(RunOutcome::Manual));
+}
+
+/// The review's third round ends `reviewed` whatever it found, so its
+/// Gate asks: a fourth round never runs.
+#[test]
+fn the_plan_review_runs_at_most_three_rounds_before_its_gate() {
+    let (steps, _) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "done", "blockers", "done", "blockers", "done", "approve", "red",
+        ],
+    );
+
+    assert_eq!(
+        steps,
+        [
+            "plan#1",
+            "plan-review#1",
+            "plan#2",
+            "plan-review#2",
+            "plan#3",
+            "plan-review#3",
+            "write#1"
+        ]
+    );
+}
+
+/// A plan that finds its task too big for one Run has it split into child
+/// tasks, and the Run ends for a person.
+#[test]
+fn an_oversized_plan_is_split_and_the_run_ends_for_a_person() {
+    let (steps, end) = walk(&flow(CODE_FLOW), &["done", "oversized", "done"]);
+
+    assert_eq!(steps, ["plan#1", "plan-review#1", "split#1"]);
+    assert_eq!(end, Ok(RunOutcome::Manual));
+}
+
+/// A plan sent back again and again ends the Run for a person at its
+/// tenth visit, past its nine.
+#[test]
+fn a_plan_past_its_nine_visits_ends_the_run_for_a_person() {
+    let mut outcomes = Vec::new();
+    for _ in 0..3 {
+        outcomes.extend(["done", "blockers", "done", "blockers", "done", "revise"]);
+    }
+
+    let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
+
+    assert_eq!(
+        steps
+            .iter()
+            .filter(|step| step.starts_with("plan#"))
+            .count(),
+        9
+    );
+    assert_eq!(steps.last().map(String::as_str), Some("plan-review#3"));
+    assert_eq!(end, Ok(RunOutcome::Manual));
 }

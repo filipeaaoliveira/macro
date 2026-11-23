@@ -33,6 +33,7 @@ mod flaky_ci;
 #[cfg(test)]
 mod test;
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -54,7 +55,7 @@ use crate::domain::models::{
     HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RequiredCheck,
     RequiredChecks, StepInput, StepReport, run_branch,
 };
-use crate::domain::ports::{MainWatches, PullRequests, Retryable};
+use crate::domain::ports::{FileRefusal, MainWatches, PullRequests, Retryable};
 use crate::domain::quality::ci_jobs;
 use crate::domain::setup::SETUP_FILE;
 use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
@@ -817,6 +818,43 @@ where
             .await
             .map_err(PullRequestStepError::github)?;
         Ok(VerifyFile::read(text.as_deref()))
+    }
+
+    /// Which of `paths` are files the Run's base holds: at the commit the
+    /// Run is pinned to, else at its base branch, each read by its
+    /// percent-encoded path. A file too large for
+    /// GitHub to give is held; one GitHub refuses the owner is left out,
+    /// unknown.
+    pub(crate) async fn base_files(
+        &self,
+        input: &StepInput<'_>,
+        paths: &[String],
+    ) -> Result<BTreeMap<String, bool>, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        let at = input.base_commit.unwrap_or(&recorded.base_branch);
+        let mut held = BTreeMap::new();
+        for path in paths {
+            // Each folder and the file name goes into the contents URL
+            // encoded, so nothing in a path reads as part of the URL.
+            let encoded: Vec<String> = path
+                .split('/')
+                .map(|part| urlencoding::encode(part).into_owned())
+                .collect();
+            let read = self
+                .github
+                .file_text(input.owner, &repository, at, &encoded.join("/"))
+                .await;
+            let is_file = match read {
+                Ok(text) => text.is_some(),
+                Err(error) => match G::file_refusal(&error) {
+                    Some(FileRefusal::TooLarge) => true,
+                    Some(FileRefusal::Refused) => continue,
+                    None => return Err(PullRequestStepError::github(error)),
+                },
+            };
+            held.insert(path.clone(), is_file);
+        }
+        Ok(held)
     }
 
     /// The pull request from the Run's branch, if there is one. The Run

@@ -9,6 +9,7 @@ use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
 use macro_user_id::user_id::MacroUserIdStr;
 
+mod plan_review;
 mod update;
 
 use super::{BuiltInStepError, BuiltInSteps};
@@ -130,6 +131,7 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         owner_notes: &[],
         base_commit: None,
         routes: &[],
+        max_visits: None,
     }
 }
 

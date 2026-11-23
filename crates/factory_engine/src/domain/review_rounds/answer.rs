@@ -209,6 +209,64 @@ pub(crate) fn json_block(text: &str) -> Option<(String, &str)> {
     Some((summary.trim().to_string(), text[body_start..close].trim()))
 }
 
+/// A fenced `json` block of a text, read: where it starts and ends in the
+/// text, its fences included, and the JSON value it holds.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct JsonBlock {
+    /// Where its opening fence starts.
+    pub(crate) start: usize,
+    /// Just past its closing fence.
+    pub(crate) end: usize,
+    /// What it holds.
+    pub(crate) value: serde_json::Value,
+}
+
+impl JsonBlock {
+    /// Whether it holds an object with the key `key`.
+    pub(crate) fn names(&self, key: &str) -> bool {
+        self.value.get(key).is_some()
+    }
+
+    /// `text`, the text it was read from, without it, trimmed.
+    pub(crate) fn cut_from(&self, text: &str) -> String {
+        format!("{}{}", &text[..self.start], &text[self.end..])
+            .trim()
+            .to_string()
+    }
+}
+
+/// The fenced `json` blocks of `text` (`json` in any case) that hold one
+/// JSON value, in order. A block ends where its value ends, at the fence
+/// after it: a fence inside one of its strings, as a code sample in a
+/// markdown string holds, does not end it.
+pub(crate) fn json_blocks(text: &str) -> Vec<JsonBlock> {
+    const OPEN: &str = "```json";
+    // ASCII lowercasing keeps every byte where it was, so places in it are
+    // places in `text`.
+    let lower = text.to_ascii_lowercase();
+    let mut blocks = Vec::new();
+    let mut from = 0;
+    while let Some(start) = lower[from..].find(OPEN).map(|at| from + at) {
+        let body = start + OPEN.len();
+        from = body;
+        let mut values =
+            serde_json::Deserializer::from_str(&text[body..]).into_iter::<serde_json::Value>();
+        let Some(Ok(value)) = values.next() else {
+            continue;
+        };
+        let after = body + values.byte_offset();
+        let rest = &text[after..];
+        let close = after + (rest.len() - rest.trim_start().len());
+        if !text[close..].starts_with("```") {
+            continue;
+        }
+        let end = close + 3;
+        blocks.push(JsonBlock { start, end, value });
+        from = end;
+    }
+    blocks
+}
+
 /// A written Blocker as a finding, if it holds together: a file, a problem
 /// and why, each within its bound, lines from 1, the last not before the
 /// first, and a `previous` among the `carried` Blockers. A first line alone

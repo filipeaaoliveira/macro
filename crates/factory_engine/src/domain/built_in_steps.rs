@@ -6,12 +6,15 @@
 //! On a repository, `write` and `fix` then have the agent run the checks
 //! the repository declares, in rounds (`checks_round`). `accept`, before
 //! the merge, has a verifier check the change does what the Run's request
-//! asks (`accept`). A Run ends at its merge: `deploy` and `verify`, which
+//! asks (`accept`). Before a person reads a plan, `plan_review` checks it
+//! and has a plan reviewer read it, and `split` files the child tasks of a
+//! plan too big for one Run (`plan_review`). A Run ends at its merge: `deploy` and `verify`, which
 //! once followed it, run only for the Runs whose Flow still names them, and
 //! end at once ([`past_merge_outcome`]). No new Flow may name them.
 
 mod accept;
 mod checks_round;
+mod plan_review;
 mod review_panel;
 mod update;
 
@@ -22,21 +25,22 @@ mod test;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{
-    CheckRoundOutcome, Outcome, Repository, Role, Step, StepKey, StepSession,
+    CheckRoundOutcome, GateKind, Outcome, Repository, Role, Step, StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::acceptance::plan_output;
-use crate::domain::agents::{REVIEWER_ROLES, VERIFIER};
+use crate::domain::agents::{PLAN_REVIEWER, REVIEWER_ROLES, VERIFIER};
 use crate::domain::checks::fence_for;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
 use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport, run_branch};
 use crate::domain::no_result::retry_prompt;
 use crate::domain::ports::{
-    AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
+    AgentFailure, ChildTasks, MainWatches, NoChildTasks, PullRequests, Retryable, StepAgent,
+    StepExecutor,
 };
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
 use crate::domain::questions::{
@@ -75,6 +79,10 @@ const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
 /// What the agent is told for a `plan` Step on a repository, after
 /// [`PLAN_INSTRUCTIONS`]: to end the plan with its acceptance checks.
 const PLAN_ACCEPTANCE_INSTRUCTIONS: &str = include_str!("built_in_steps/plan_acceptance.md");
+
+/// What the agent is told for a `plan` Step on a repository, before
+/// [`PLAN_ACCEPTANCE_INSTRUCTIONS`]: to end the plan with its size block.
+const PLAN_SIZE_INSTRUCTIONS: &str = include_str!("built_in_steps/plan_size.md");
 
 /// What the agent is told for a `write` Step.
 const WRITE_INSTRUCTIONS: &str = include_str!("built_in_steps/write.md");
@@ -159,6 +167,11 @@ enum BuiltInStep {
     /// A verifier checks the head of the Run's branch does what the
     /// request asks, before the merge.
     Accept,
+    /// The factory checks the Run's plan, then a plan reviewer reads it,
+    /// before a person does.
+    PlanReview,
+    /// The child tasks of a plan too big for one Run are filed.
+    Split,
     /// Once waited for the merge to deploy. Only a Run started on a `code`
     /// Flow that named it reaches it, once merged: it ends `off` at once,
     /// which ends the Run `success`.
@@ -184,6 +197,8 @@ impl BuiltInStep {
             "merge" => Some(Self::Merge),
             "update" => Some(Self::Update),
             "accept" => Some(Self::Accept),
+            "plan_review" => Some(Self::PlanReview),
+            "split" => Some(Self::Split),
             "deploy" => Some(Self::Deploy),
             "verify" => Some(Self::Verify),
             _ => None,
@@ -200,7 +215,9 @@ impl BuiltInStep {
             Self::Review => "reviewer",
             Self::Fix | Self::CiFix => "fixer",
             Self::Accept | Self::Verify => VERIFIER,
+            Self::PlanReview => PLAN_REVIEWER,
             Self::Reply
+            | Self::Split
             | Self::Publish
             | Self::Ci
             | Self::ReadyToMerge
@@ -256,6 +273,13 @@ pub enum BuiltInStepError {
     /// the agent works: the Step ends `failed` with this, for its owner.
     #[error("the repository's setup failed: {0}")]
     Setup(String),
+    /// A child task could not be filed now: asking again may file it.
+    #[error("a child task could not be filed: {0:?}")]
+    ChildTask(rootcause::Report),
+    /// Document storage made a child task under another id than asked:
+    /// asking again would make another.
+    #[error("{0}")]
+    ChildTaskElsewhere(String),
 }
 
 impl BuiltInStepError {
@@ -274,11 +298,13 @@ impl Retryable for BuiltInStepError {
         match self {
             BuiltInStepError::Agent { retryable, .. } => *retryable,
             BuiltInStepError::PullRequest(error) => error.retryable(),
+            BuiltInStepError::ChildTask(_) => true,
             BuiltInStepError::UnknownStep(_)
             | BuiltInStepError::NotAnAgentStep(_)
             | BuiltInStepError::NoRepository(_)
             | BuiltInStepError::UnexpectedOutcome { .. }
             | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::ChildTaskElsewhere(_)
             | BuiltInStepError::Setup(_) => false,
         }
     }
@@ -294,6 +320,8 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::UnexpectedOutcome { .. }
             | BuiltInStepError::PullRequest(_)
             | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::ChildTask(_)
+            | BuiltInStepError::ChildTaskElsewhere(_)
             | BuiltInStepError::Setup(_) => false,
         }
     }
@@ -307,6 +335,8 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::UnexpectedOutcome { .. }
             | BuiltInStepError::PullRequest(_)
             | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::ChildTask(_)
+            | BuiltInStepError::ChildTaskElsewhere(_)
             | BuiltInStepError::Setup(_) => false,
         }
     }
@@ -319,12 +349,13 @@ fn outcomes(names: &[&str]) -> Vec<Outcome> {
         .collect()
 }
 
-/// The built-in Steps, over the agent that does the agent Steps and the
-/// pull request Steps.
+/// The built-in Steps, over the agent that does the agent Steps, the pull
+/// request Steps, and where `split` files child tasks.
 #[derive(Debug, Clone)]
-pub struct BuiltInSteps<A, G, R, M> {
+pub struct BuiltInSteps<A, G, R, M, C = NoChildTasks> {
     agent: A,
     pull_requests: PullRequestSteps<G, R, M>,
+    child_tasks: C,
 }
 
 impl<A, G, R, M> BuiltInSteps<A, G, R, M>
@@ -334,11 +365,31 @@ where
     R: RunRepository + MainHoldRepository + MergeQueueRepository,
     M: MainWatches,
 {
-    /// The built-in Steps, with `agent` doing the agent Steps.
+    /// The built-in Steps, with `agent` doing the agent Steps, filing no
+    /// child task until [`Self::with_child_tasks`].
     pub fn new(agent: A, pull_requests: PullRequestSteps<G, R, M>) -> Self {
         Self {
             agent,
             pull_requests,
+            child_tasks: NoChildTasks,
+        }
+    }
+}
+
+impl<A, G, R, M, C> BuiltInSteps<A, G, R, M, C>
+where
+    A: StepAgent,
+    G: PullRequests,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository,
+    M: MainWatches,
+    C: ChildTasks,
+{
+    /// The built-in Steps, with `split` filing child tasks in `tasks`.
+    pub fn with_child_tasks<C2: ChildTasks>(self, tasks: C2) -> BuiltInSteps<A, G, R, M, C2> {
+        BuiltInSteps {
+            agent: self.agent,
+            pull_requests: self.pull_requests,
+            child_tasks: tasks,
         }
     }
 
@@ -488,12 +539,13 @@ where
     }
 }
 
-impl<A, G, R, M> StepExecutor for BuiltInSteps<A, G, R, M>
+impl<A, G, R, M, C> StepExecutor for BuiltInSteps<A, G, R, M, C>
 where
     A: StepAgent,
     G: PullRequests,
     R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
+    C: ChildTasks,
 {
     type Err = BuiltInStepError;
 
@@ -570,12 +622,13 @@ where
     }
 }
 
-impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+impl<A, G, R, M, C> BuiltInSteps<A, G, R, M, C>
 where
     A: StepAgent,
     G: PullRequests,
     R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
+    C: ChildTasks,
 {
     async fn run_built_in(
         &self,
@@ -589,12 +642,13 @@ where
                 outcome: Outcome::done(),
                 output: format!("Received the request: {}", input.request),
             }),
-            // On a repository, the plan ends with its acceptance checks,
-            // which the Step keeps written out for the person at its Gate.
+            // On a repository, the plan ends with its size block, which
+            // `plan_review` checks, and its acceptance checks, which the
+            // Step keeps written out for the person at its Gate.
             BuiltInStep::Plan if input.repository.is_some() => {
                 let file = self.pull_requests.base_verify_file(&input).await?;
                 let instructions = format!(
-                    "{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
+                    "{PLAN_INSTRUCTIONS}{PLAN_SIZE_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
                     verify_note(&file)
                 );
                 let plan = self
@@ -661,6 +715,8 @@ where
             BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
             BuiltInStep::Update => self.update_branch(step, input).await,
             BuiltInStep::Accept => self.accept_change(step, input).await,
+            BuiltInStep::PlanReview => self.review_plan(step, input).await,
+            BuiltInStep::Split => self.split_task(input).await,
             BuiltInStep::Deploy | BuiltInStep::Verify => {
                 // An earlier attempt of an old `verify` may have left its
                 // round of acceptance checks open: it never ends now.
@@ -812,7 +868,10 @@ fn workplace(repository: &Repository, branch: &str, base_commit: Option<&str>) -
 /// in [`HISTORY_BUDGET`]; of a review panel's entry, its latest Step of each
 /// Role. A loop that visits an entry again and again adds
 /// nothing but its latest round. The newest Step is never left out: when it
-/// alone is past the budget, its end is cut.
+/// alone is past the budget, its end is cut. A person's answers to the
+/// Flow's Gates of the Steps left out follow, newest first, as many as fit:
+/// a note sent with a plan's `revise` stays in the planner's prompt after a
+/// review sends the plan back again.
 fn history(earlier: &[Step]) -> String {
     let mut latest: Vec<&Step> = Vec::new();
     for step in earlier.iter().rev() {
@@ -824,6 +883,7 @@ fn history(earlier: &[Step]) -> String {
         }
     }
 
+    let latest_seqs: Vec<u16> = latest.iter().map(|step| step.seq).collect();
     let mut history = String::new();
     let mut left_out = 0;
     for step in latest {
@@ -837,12 +897,64 @@ fn history(earlier: &[Step]) -> String {
             left_out += 1;
         }
     }
+
+    let answers = earlier_answers(earlier, &latest_seqs);
+    if !answers.is_empty() {
+        let heading = "\n## Earlier answers at the run's gates\n\n";
+        let mut section = String::from(heading);
+        let mut answers_left_out = 0;
+        for answer in answers {
+            if history.len() + section.len() + answer.len() <= HISTORY_BUDGET {
+                section.push_str(&answer);
+            } else {
+                answers_left_out += 1;
+            }
+        }
+        if section.len() > heading.len() {
+            history.push_str(&section);
+        }
+        left_out += answers_left_out;
+    }
     if left_out > 0 {
         history.push_str(&format!(
             "\n({left_out} earlier steps are left out: the prompt has no room for them.)\n"
         ));
     }
     history
+}
+
+/// The longest note of an earlier answer a prompt carries, in bytes.
+const ANSWER_NOTE_BUDGET: usize = 2048;
+
+/// How a person answered the Flow's Gates of the `earlier` Steps not in
+/// `shown`, newest first, one line each: their words are escaped, as in a
+/// Step's section.
+fn earlier_answers(earlier: &[Step], shown: &[u16]) -> Vec<String> {
+    earlier
+        .iter()
+        .rev()
+        .filter(|step| !shown.contains(&step.seq))
+        .filter_map(|step| {
+            let gate = step
+                .gate
+                .as_ref()
+                .filter(|gate| gate.kind == GateKind::Flow)?;
+            let answer = gate.answer.as_ref()?;
+            let note = answer
+                .note
+                .as_deref()
+                .map_or("(no note)".to_string(), |note| {
+                    escape(cut(note, ANSWER_NOTE_BUDGET)).replace('\n', " ")
+                });
+            Some(format!(
+                "- Step {}, visit {}: a person was asked \"{}\" and answered `{}`: {note}\n",
+                step.entry,
+                step.visit,
+                escape(&gate.question).replace('\n', " "),
+                answer.answer
+            ))
+        })
+        .collect()
 }
 
 /// What ends a section cut to fit the prompt.
@@ -864,12 +976,14 @@ fn section(step: &Step) -> String {
         return String::new();
     };
     // A review panel's reviewer, or a verifier, wrote its output with what
-    // the change's own checks printed: it is data, fenced as the briefs
-    // fence the findings, never instructions.
-    let reviewed = step
-        .role
-        .as_ref()
-        .is_some_and(|role| REVIEWER_ROLES.contains(&role.as_str()) || role.as_str() == VERIFIER);
+    // the change's own checks printed, and a plan reviewer about a plan:
+    // it is data, fenced as the briefs fence the findings, never
+    // instructions.
+    let reviewed = step.role.as_ref().is_some_and(|role| {
+        REVIEWER_ROLES.contains(&role.as_str())
+            || role.as_str() == VERIFIER
+            || role.as_str() == PLAN_REVIEWER
+    });
     let output = if reviewed {
         fenced_review(&end.output)
     } else {

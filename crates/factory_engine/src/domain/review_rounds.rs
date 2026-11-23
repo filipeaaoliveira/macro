@@ -19,9 +19,9 @@ mod fix_answer;
 #[cfg(test)]
 mod test;
 
-pub(crate) use answer::json_block;
 use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
+pub(crate) use answer::{json_block, json_blocks};
 pub(crate) use brief::escape;
 pub use brief::{
     BRIEF_BUDGET, DISPUTE_BUDGET, FindingsBlock, blockers_brief, carried_blockers,

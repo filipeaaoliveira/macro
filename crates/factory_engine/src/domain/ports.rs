@@ -734,6 +734,59 @@ impl QuarantineTasks for NoQuarantineTasks {
     }
 }
 
+/// Where the `split` Step files the child tasks of a task too big for one
+/// Run.
+pub trait ChildTasks: Send + Sync + 'static {
+    /// The error type returned when the task cannot be filed now.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// File `task` as `user_id`'s, with the id `task_id`, in the project
+    /// of the task document `of` when it has one, unless a task with that
+    /// id is already there: then it was filed before. Whether it is filed,
+    /// or none when nothing files tasks.
+    fn file_child(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        task: &FollowUpTask,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<Option<FollowUpMade>, Self::Err>> + Send;
+
+    /// The name of the task document `task_id`, as `user_id` reads it;
+    /// none when it is gone, or nothing files tasks.
+    fn task_name(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+}
+
+/// Where nothing files child tasks: a `split` Step fails, saying so.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoChildTasks;
+
+impl ChildTasks for NoChildTasks {
+    type Err = std::convert::Infallible;
+
+    async fn file_child(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        _of: Option<Uuid>,
+        _task: &FollowUpTask,
+        _task_id: Uuid,
+    ) -> Result<Option<FollowUpMade>, Self::Err> {
+        Ok(None)
+    }
+
+    async fn task_name(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        _task_id: Uuid,
+    ) -> Result<Option<String>, Self::Err> {
+        Ok(None)
+    }
+}
+
 /// The task thread where nothing serves it: no update is posted.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoTaskThread;

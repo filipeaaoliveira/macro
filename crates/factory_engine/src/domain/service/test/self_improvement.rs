@@ -465,6 +465,7 @@ async fn an_improvement_run_merges_only_by_a_person() {
             tampered: kept.is_tampered(),
             held: false,
             repeated_blockers: false,
+            plan_blockers_left: false,
             dismissed: false,
         };
         let offered = [
@@ -977,6 +978,7 @@ async fn an_improvement_run_s_plan_and_merge_wait_for_a_person_whatever_it_chang
             fix_rounds: 0,
             fix_limit: 0,
             repeated_blockers: false,
+            plan_blockers_left: false,
         };
         assert!(!may_stand_in(Some(rules), &facts, &offered), "{entry}");
 

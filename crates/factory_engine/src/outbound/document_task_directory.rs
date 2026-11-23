@@ -18,7 +18,7 @@ mod test;
 
 use crate::domain::gate_owner::factory_signed;
 use crate::domain::ports::{
-    FollowUpMade, FollowUpTask, QuarantineTasks, TaskAccess, TaskDirectory,
+    ChildTasks, FollowUpMade, FollowUpTask, QuarantineTasks, TaskAccess, TaskDirectory,
 };
 use crate::outbound::task_project::{initiative_of, new_task_properties, tags_of};
 
@@ -234,6 +234,39 @@ impl<A: EntityAccessService> QuarantineTasks for DocumentTaskDirectory<A> {
         self.create_follow_up(user_id, of, task, task_id)
             .await
             .map(Some)
+    }
+}
+
+/// A child task of a split task is filed as a follow-up task is.
+impl<A: EntityAccessService> ChildTasks for DocumentTaskDirectory<A> {
+    type Err = DocumentTaskDirectoryErr;
+
+    async fn file_child(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        task: &FollowUpTask,
+        task_id: Uuid,
+    ) -> Result<Option<FollowUpMade>, Self::Err> {
+        self.create_follow_up(user_id, of, task, task_id)
+            .await
+            .map(Some)
+    }
+
+    /// The Run's own task, which its owner reads: the Run was made on it.
+    async fn task_name(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Option<String>, Self::Err> {
+        let document = self
+            .documents
+            .get_document_basic(&task_id.to_string())
+            .await
+            .map_err(documents)?;
+        Ok(document
+            .filter(|document| document.deleted_at.is_none())
+            .map(|document| document.document_name))
     }
 }
 

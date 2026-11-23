@@ -95,6 +95,11 @@ pub struct GateFacts {
     /// merges such a Run, a person does (the stand-in never merges); false
     /// for other Gates.
     pub dismissed: bool,
+    /// For a plan Gate, whether its plan review's last round left Blockers
+    /// ([`blockers_left`](crate::domain::plan_review::blockers_left)): a
+    /// person reads them, so no rule approves the plan; false for other
+    /// Gates.
+    pub plan_blockers_left: bool,
 }
 
 /// A Standing Rule's answer to a Gate: the rule, and the answer it gives.
@@ -120,6 +125,7 @@ pub fn rule_answer(
     }
     let answer = match facts.kind {
         RuleGateKind::Plan | RuleGateKind::Merge if facts.tampered => return None,
+        RuleGateKind::Plan if facts.plan_blockers_left => return None,
         RuleGateKind::Plan => "approve",
         RuleGateKind::Blockers if facts.fix_rounds >= facts.fix_limit => return None,
         RuleGateKind::Blockers if rules.owner_gates && facts.repeated_blockers => return None,

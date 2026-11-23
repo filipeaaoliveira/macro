@@ -127,7 +127,13 @@ async fn an_agent_sends_work_back_and_approves_only_what_the_rules_let_it() {
     let service = code_service(&repo, &workflows, &FakeGithub::default());
 
     for (entry, ended, answers, back, approving) in [
-        ("plan", "done", ["approve", "revise"], "revise", "approve"),
+        (
+            "plan-review",
+            "reviewed",
+            ["approve", "revise"],
+            "revise",
+            "approve",
+        ),
         ("review", "changes", ["fix", "stop"], "stop", "fix"),
         (
             "merge-gate",
@@ -154,7 +160,15 @@ async fn an_agent_sends_work_back_and_approves_only_what_the_rules_let_it() {
     }
 
     let on = rules(true, true, false);
-    let plan = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
+    let plan = waiting_with(
+        &repo,
+        on,
+        "plan-review",
+        1,
+        "reviewed",
+        &["approve", "revise"],
+    )
+    .await;
     agent_answers(&service, plan, "approve")
         .await
         .expect("the rules let it approve the plan");
@@ -220,14 +234,29 @@ async fn an_agent_never_answers_what_is_kept_for_a_person() {
         agent_answers(&service, stopped, "stop").await,
         PersonOnly::PersonsGate,
     );
-    let stopped_at_plan =
-        waiting_with(&repo, on, "plan", 1, "no_result", &["approve", "revise"]).await;
+    let stopped_at_plan = waiting_with(
+        &repo,
+        on,
+        "plan-review",
+        1,
+        "no_result",
+        &["approve", "revise"],
+    )
+    .await;
     refused_for(
         agent_answers(&service, stopped_at_plan, "revise").await,
         PersonOnly::PersonsGate,
     );
 
-    let tampered = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
+    let tampered = waiting_with(
+        &repo,
+        on,
+        "plan-review",
+        1,
+        "reviewed",
+        &["approve", "revise"],
+    )
+    .await;
     let changes = ControlFileChanges {
         tampered: vec![".github/workflows/ci.yml".to_string()],
         named: Vec::new(),
@@ -291,7 +320,15 @@ async fn an_agent_never_answers_what_is_kept_for_a_person() {
 
     // A planner's session works as the owner too: it never approves the
     // plan it wrote.
-    let plan = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
+    let plan = waiting_with(
+        &repo,
+        on,
+        "plan-review",
+        1,
+        "reviewed",
+        &["approve", "revise"],
+    )
+    .await;
     let session = StepSession {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
@@ -325,7 +362,15 @@ async fn an_agent_never_answers_what_is_kept_for_a_person() {
     refused_for(own, PersonOnly::StepSession);
 
     // The agent decided on a Gate the owner answered meanwhile.
-    let raced = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
+    let raced = waiting_with(
+        &repo,
+        on,
+        "plan-review",
+        1,
+        "reviewed",
+        &["approve", "revise"],
+    )
+    .await;
     repo.answer_gate(
         StepKey {
             run_id: raced,
