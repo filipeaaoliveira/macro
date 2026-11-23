@@ -386,9 +386,12 @@ async fn sweep_legacy(top: &Path) {
             tracing::info!(%branch, "keeping an earlier macrod's worktree that holds work origin lacks");
             continue;
         }
-        if git(top, &["worktree", "remove", "--force", &path.to_string_lossy()])
-            .await
-            .is_err()
+        if git(
+            top,
+            &["worktree", "remove", "--force", &path.to_string_lossy()],
+        )
+        .await
+        .is_err()
         {
             continue;
         }

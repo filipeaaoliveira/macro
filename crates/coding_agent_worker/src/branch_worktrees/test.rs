@@ -308,7 +308,11 @@ async fn a_commit_never_pushed_keeps_its_worktree_and_branch_on_both_paths() {
     let waiting_commit = commit_only(&waiting, "waiting").await;
     let old_commit = commit_only(&old, "old").await;
     // Not on origin, idle past the hour: the branch-gone path.
-    age(&repos, "factory+waiting", GONE_AFTER + Duration::from_secs(60));
+    age(
+        &repos,
+        "factory+waiting",
+        GONE_AFTER + Duration::from_secs(60),
+    );
     // Idle past the days: the stale path.
     age(&repos, "factory+old", STALE_AFTER + Duration::from_secs(60));
 
@@ -316,11 +320,17 @@ async fn a_commit_never_pushed_keeps_its_worktree_and_branch_on_both_paths() {
 
     assert!(waiting.exists());
     assert!(old.exists());
-    for (branch, commit) in [("factory/waiting", waiting_commit), ("factory/old", old_commit)] {
+    for (branch, commit) in [
+        ("factory/waiting", waiting_commit),
+        ("factory/old", old_commit),
+    ] {
         assert_eq!(
-            git(&repos.checkout, &["rev-parse", &format!("refs/heads/{branch}")])
-                .await
-                .unwrap(),
+            git(
+                &repos.checkout,
+                &["rev-parse", &format!("refs/heads/{branch}")]
+            )
+            .await
+            .unwrap(),
             commit
         );
     }
@@ -363,7 +373,13 @@ async fn the_first_sweep_removes_the_worktrees_kept_in_the_checkout() {
     let old = legacy.join("factory+old");
     git(
         &repos.checkout,
-        &["worktree", "add", "--detach", &old.to_string_lossy(), "HEAD"],
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            &old.to_string_lossy(),
+            "HEAD",
+        ],
     )
     .await
     .unwrap();
@@ -382,7 +398,9 @@ async fn the_first_sweep_removes_the_worktrees_kept_in_the_checkout() {
             .contains(LEGACY_DIRECTORY)
     );
     assert_eq!(
-        git(&repos.checkout, &["status", "--porcelain"]).await.unwrap(),
+        git(&repos.checkout, &["status", "--porcelain"])
+            .await
+            .unwrap(),
         ""
     );
 }
