@@ -81,7 +81,7 @@ async fn a_break_whose_test_fails_is_recorded_verified_on_the_checked_commit() {
     assert!(shell.contains(&format!("worktree=\"$base/{round}\"")));
     assert!(shell.contains("exec bash --noprofile --norc -c 'bun test toggle'"));
     // Its watchdog stops it after five minutes.
-    assert!(shell.contains("while [ \"$waited\" -lt 300 ]; do"));
+    assert!(shell.contains("end=$((SECONDS + 300))"));
     assert!(shell.contains("BREAK_OLD='saved = true' BREAK_NEW='saved = false'"));
     // Two runs of five minutes, the lock's wait, two kills' ten seconds and
     // a minute for the rest.

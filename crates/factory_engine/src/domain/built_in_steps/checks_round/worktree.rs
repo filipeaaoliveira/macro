@@ -210,7 +210,8 @@ pub(super) const BREAK_TAIL_BYTES: usize = 1_500;
 /// with its old time, so a build tool that goes by times builds it again.
 ///
 /// Each run is a process group of its own (`set -m`), watched by a shell
-/// watchdog of its own group: past `timeout_secs` it marks the run hung,
+/// watchdog of its own group: past `timeout_secs` of wall time (a
+/// `SECONDS` deadline, not a count of sleeps) it marks the run hung,
 /// sends the whole group `TERM`, and `KILL` ten seconds later, so a test
 /// stops on time whatever children it started, and the run ends with
 /// [`crate::domain::breaks::HUNG_STATUS`]. Once the test's shell returns,
@@ -264,10 +265,9 @@ run_test() {{
   ) &
   group=$!
   (
-    waited=0
-    while [ \"$waited\" -lt {timeout_secs} ]; do
+    end=$((SECONDS + {timeout_secs}))
+    while [ \"$SECONDS\" -lt \"$end\" ]; do
       sleep 1
-      waited=$((waited + 1))
       size=$(( $(wc -c < \"$out\" 2>/dev/null || echo 0) ))
       if [ \"$size\" -gt {out_cap} ]; then
         tail -c {out_keep} \"$out\" > \"$out.tail\" && cat \"$out.tail\" > \"$out\"
