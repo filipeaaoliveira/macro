@@ -802,9 +802,13 @@ where
         answers: Option<&ReviewRound>,
         work_output: &str,
     ) -> Result<Option<StepReport>, BuiltInStepError> {
-        let Some(why) = self.not_on_branch(input, answers, work_output).await? else {
+        if self
+            .not_on_branch(input, answers, work_output)
+            .await?
+            .is_none()
+        {
             return Ok(None);
-        };
+        }
         tokio::time::sleep(BRANCH_HEAD_LAG).await;
         let Some(why) = self.not_on_branch(input, answers, work_output).await? else {
             return Ok(None);
