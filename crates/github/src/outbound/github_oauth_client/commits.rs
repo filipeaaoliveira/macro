@@ -32,6 +32,21 @@ pub enum GithubBranchCreation {
     Exists,
 }
 
+/// A branch to create: one commit on top of `base_commit` that writes
+/// `files`.
+#[derive(Debug, Clone, Copy)]
+pub struct GithubNewBranch<'a> {
+    /// Its name.
+    pub name: &'a str,
+    /// The full id of the commit its one commit goes on top of.
+    pub base_commit: &'a str,
+    /// That commit's message.
+    pub message: &'a str,
+    /// The files it writes: each path from the repository's root, and the
+    /// file's whole text.
+    pub files: &'a [(&'a str, &'a str)],
+}
+
 #[derive(serde::Deserialize)]
 struct GitObject {
     sha: String,
@@ -43,26 +58,28 @@ struct GitCommit {
 }
 
 impl GithubOauthImpl {
-    /// Creates `branch` as the user, at a new commit on top of
-    /// `base_commit` that writes each of `files` (its path from the
-    /// repository's root, and its text) and leaves every other file as
-    /// `base_commit` has it. The branch is only ever created: one already
+    /// Creates `branch` as the user, at a new commit on top of its base
+    /// commit that writes each of its files and leaves every other file as
+    /// the base commit has it. The branch is only ever created: one already
     /// there, the default branch included, is left as it is
     /// ([`GithubBranchCreation::Exists`]). A retry after a lost answer finds
     /// the branch there; the commit it made again is left unreferenced.
     /// An owner, repository, branch or commit GitHub would not take is
     /// never sent.
-    #[tracing::instrument(skip(self, access_token, message, files), err)]
+    #[tracing::instrument(skip(self, access_token, branch), fields(branch = branch.name), err)]
     pub async fn create_branch_with_files(
         &self,
         access_token: &str,
         owner: &str,
         repo: &str,
-        base_commit: &str,
-        branch: &str,
-        message: &str,
-        files: &[(&str, &str)],
+        branch: GithubNewBranch<'_>,
     ) -> Result<GithubBranchCreation, GithubError> {
+        let GithubNewBranch {
+            name: branch,
+            base_commit,
+            message,
+            files,
+        } = branch;
         if !is_github_owner(owner) || !is_github_repository_name(repo) {
             return Err(GithubError::Internal(anyhow::anyhow!(
                 "not a repository: {owner:?}/{repo:?}"

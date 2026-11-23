@@ -788,7 +788,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         branch: &crate::domain::models::NewBranch,
     ) -> Result<crate::domain::models::BranchCreation, GithubPullRequestsErr> {
         use crate::domain::models::BranchCreation;
-        use github::outbound::github_oauth_client::GithubBranchCreation;
+        use github::outbound::github_oauth_client::{GithubBranchCreation, GithubNewBranch};
 
         let token = self.token(owner).await?;
         let files: Vec<(&str, &str)> = branch
@@ -802,10 +802,12 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 &token,
                 repository.owner(),
                 repository.name(),
-                &branch.base_commit,
-                &branch.name,
-                &branch.message,
-                &files,
+                GithubNewBranch {
+                    name: &branch.name,
+                    base_commit: &branch.base_commit,
+                    message: &branch.message,
+                    files: &files,
+                },
             )
             .await?;
         Ok(match creation {

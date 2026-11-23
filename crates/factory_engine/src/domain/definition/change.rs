@@ -44,7 +44,9 @@ pub enum DefinitionChangeError {
     #[error("a change must write from 1 to {MAX_CHANGED_FILES} files")]
     FileCount,
     /// Its title is blank or too long.
-    #[error("a change's title must not be blank, and must be at most {MAX_CHANGE_TITLE_BYTES} bytes")]
+    #[error(
+        "a change's title must not be blank, and must be at most {MAX_CHANGE_TITLE_BYTES} bytes"
+    )]
     Title,
     /// Its description is too long.
     #[error("a change's description must be at most {MAX_CHANGE_DESCRIPTION_BYTES} bytes")]
@@ -146,7 +148,10 @@ pub async fn read_changed_definition<F: DefinitionFiles>(
             DefinitionReadError::Invalid(error) => DefinitionChangeError::Invalid(error).into(),
         })?;
 
-    let read = files.read.into_inner().unwrap_or_else(PoisonError::into_inner);
+    let read = files
+        .read
+        .into_inner()
+        .unwrap_or_else(PoisonError::into_inner);
     if let Some(unread) = change.files.keys().find(|path| !read.contains(*path)) {
         return Err(DefinitionChangeError::NotRead(unread.clone()).into());
     }

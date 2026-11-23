@@ -95,10 +95,7 @@ async fn an_admin_s_change_opens_a_pull_request_on_the_definition() {
             name: "definition-change/00000000-0000-0000-0000-00000000c4a9".to_string(),
             base_commit: FIRST.to_string(),
             message: "Say what notes reply to".to_string(),
-            files: BTreeMap::from([(
-                "flows/notes.json".to_string(),
-                NOTES_CHANGED.to_string()
-            )]),
+            files: BTreeMap::from([("flows/notes.json".to_string(), NOTES_CHANGED.to_string())]),
         }]
     );
     assert_eq!(state.opened, 1);
@@ -192,13 +189,19 @@ async fn only_an_admin_who_may_push_changes_a_named_definition() {
         .propose_definition_change(julia(), CHANGE, change("flows/notes.json", NOTES_CHANGED))
         .await;
 
-    assert!(matches!(member, Err(FactoryError::NotATeamAdmin)), "{member:?}");
+    assert!(
+        matches!(member, Err(FactoryError::NotATeamAdmin)),
+        "{member:?}"
+    );
     assert!(matches!(agent, Err(FactoryError::NotAPerson)), "{agent:?}");
     assert!(
         matches!(read_only, Err(FactoryError::NoPushAccess)),
         "{read_only:?}"
     );
-    assert!(matches!(unnamed, Err(FactoryError::NoDefinition)), "{unnamed:?}");
+    assert!(
+        matches!(unnamed, Err(FactoryError::NoDefinition)),
+        "{unnamed:?}"
+    );
     assert!(github.state().created_branches.is_empty());
     assert_eq!(github.state().opened, 0);
 }

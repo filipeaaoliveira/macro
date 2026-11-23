@@ -29,7 +29,9 @@ use crate::domain::definition::{
 use crate::domain::models::{
     DefinitionPullRequest, FactoryError, NewBranch, OpenPullRequest, Opening,
 };
-use crate::domain::ports::{PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory};
+use crate::domain::ports::{
+    PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
+};
 use crate::domain::service::{FactoryServiceImpl, internal};
 
 /// The branch a change to a Definition is committed on: one per change, so
@@ -104,9 +106,10 @@ where
         read_changed_definition(&files, &change, |step| self.executor.serves(step))
             .await
             .map_err(|error| match error {
-                DefinitionChangeReadError::Files(RepositoryFileError::Refused { path, refusal }) => {
-                    DefinitionChangeError::Invalid(refused_file(path, refusal)).into()
-                }
+                DefinitionChangeReadError::Files(RepositoryFileError::Refused {
+                    path,
+                    refusal,
+                }) => DefinitionChangeError::Invalid(refused_file(path, refusal)).into(),
                 DefinitionChangeReadError::Files(RepositoryFileError::Github(error)) => {
                     FactoryError::Internal(internal(error))
                 }

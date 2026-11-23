@@ -1299,9 +1299,7 @@ impl FactoryError {
             FactoryError::InvalidDefinition(_) => Some(RunErrorCode::InvalidDefinition),
             FactoryError::DefinitionNamed => Some(RunErrorCode::DefinitionNamed),
             FactoryError::NoDefinition => Some(RunErrorCode::NoDefinition),
-            FactoryError::InvalidDefinitionChange(_) => {
-                Some(RunErrorCode::InvalidDefinitionChange)
-            }
+            FactoryError::InvalidDefinitionChange(_) => Some(RunErrorCode::InvalidDefinitionChange),
             _ => None,
         }
     }

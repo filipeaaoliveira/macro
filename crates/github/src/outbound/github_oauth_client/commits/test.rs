@@ -1,6 +1,6 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
-use super::GithubBranchCreation;
+use super::{GithubBranchCreation, GithubNewBranch};
 use crate::domain::models::GithubError;
 
 const BASE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -41,10 +41,12 @@ async fn a_branch_is_created_at_a_commit_writing_the_files() {
             "token",
             "macro",
             "factory-definition",
-            BASE,
-            "definition-change/1",
-            "Add a flow",
-            &[("flows/notes.json", "{\"entries\":[]}")],
+            GithubNewBranch {
+                name: "definition-change/1",
+                base_commit: BASE,
+                message: "Add a flow",
+                files: &[("flows/notes.json", "{\"entries\":[]}")],
+            },
         )
         .await
         .unwrap();
@@ -59,7 +61,11 @@ async fn a_branch_is_created_at_a_commit_writing_the_files() {
         requests[0]
     );
     assert!(requests[1].starts_with("POST /repos/macro/factory-definition/git/trees HTTP/1.1"));
-    assert!(requests[1].contains(r#""base_tree":"tree0""#), "{}", requests[1]);
+    assert!(
+        requests[1].contains(r#""base_tree":"tree0""#),
+        "{}",
+        requests[1]
+    );
     assert!(
         requests[1].contains(r#""path":"flows/notes.json""#),
         "{}",
@@ -105,10 +111,12 @@ async fn a_branch_already_there_is_left_as_it_is() {
             "token",
             "macro",
             "factory-definition",
-            BASE,
-            "definition-change/1",
-            "Add a flow",
-            &[("agents.json", "{}")],
+            GithubNewBranch {
+                name: "definition-change/1",
+                base_commit: BASE,
+                message: "Add a flow",
+                files: &[("agents.json", "{}")],
+            },
         )
         .await
         .unwrap();
@@ -138,10 +146,12 @@ async fn a_user_who_may_not_write_is_refused() {
             "token",
             "macro",
             "factory-definition",
-            BASE,
-            "definition-change/1",
-            "Add a flow",
-            &[("agents.json", "{}")],
+            GithubNewBranch {
+                name: "definition-change/1",
+                base_commit: BASE,
+                message: "Add a flow",
+                files: &[("agents.json", "{}")],
+            },
         )
         .await;
 
@@ -164,10 +174,12 @@ async fn a_name_git_would_not_take_is_never_sent() {
                 "token",
                 "macro",
                 "factory-definition",
-                base,
-                branch,
-                "Add a flow",
-                &[("agents.json", "{}")],
+                GithubNewBranch {
+                    name: branch,
+                    base_commit: base,
+                    message: "Add a flow",
+                    files: &[("agents.json", "{}")],
+                },
             )
             .await;
         assert!(

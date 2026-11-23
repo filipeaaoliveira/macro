@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
-use super::{DefinitionChange, DefinitionChangeError, DefinitionChangeReadError, MAX_CHANGED_FILES};
+use super::{
+    DefinitionChange, DefinitionChangeError, DefinitionChangeReadError, MAX_CHANGED_FILES,
+};
 use crate::domain::built_in_steps::built_in_step_use;
 use crate::domain::definition::{DefinitionError, DefinitionFiles, FactoryDefinition};
 
@@ -91,10 +93,13 @@ async fn a_change_the_definition_does_not_read_with_is_refused() {
             r#"{ "version": 1, "flows": ["reply", "plan"] }"#,
         ),
         ("flows/plan.json", PLAN),
-        ("agents.json", r#"{
+        (
+            "agents.json",
+            r#"{
             "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
             "roles": { "planner": ["primary"] }
-        }"#),
+        }"#,
+        ),
     ]);
 
     // The `reply` Flow names no Role: only adding `plan`, whose writer no
