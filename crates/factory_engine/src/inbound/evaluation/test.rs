@@ -197,6 +197,7 @@ impl ScorerLabelService for Arc<FakeEvaluation> {
                 by_current_judge: true,
                 calibration: ScorerCalibration::of(None),
             }],
+            pending: vec!["style".to_string()],
         })
     }
 
@@ -549,5 +550,6 @@ async fn the_owner_reads_a_runs_judgments_however_they_call() {
     assert_eq!(score["label"], serde_json::Value::Null);
     assert_eq!(score["calibration"]["needed"], 20);
     assert_eq!(score["calibration"]["calibrated"], false);
+    assert_eq!(body["pending"], serde_json::json!(["style"]));
     assert_eq!(*service.read_by.lock().expect("read"), [ALICE, EVE, ALICE]);
 }

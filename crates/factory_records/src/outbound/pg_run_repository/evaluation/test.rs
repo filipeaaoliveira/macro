@@ -9,7 +9,7 @@ use crate::domain::evaluation::{
     RunAgentRule, RunAgents, RunArm, ScorerJudge, SuiteInsert, TrialKey, TrialResult, TrialTokens,
 };
 use crate::domain::insights::{InsightsScope, RunInsightsRepository};
-use crate::domain::models::{AgentName, Role, RunId};
+use crate::domain::models::{AgentName, Role, RunId, RunOutcome};
 use crate::outbound::pg_run_repository::PgRunRepository;
 
 const EXPORT: &str = "00000000-0000-7000-8000-000000000401";
@@ -204,6 +204,60 @@ async fn a_run_keeps_that_its_task_tags_were_unread(pool: PgPool) {
         .await
         .expect("read");
     assert_eq!(unread.into_iter().collect::<Vec<_>>(), [run(IMPORT)]);
+}
+
+/// A Run's scoring state names the live Scorers that judged it and
+/// whether it is a trial, and keeps the first time its scoring finished.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn a_run_s_scoring_state_keeps_its_judges_and_when_scoring_finished(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    repo.record_run_score(run(EXPORT), &judgment("correctness", 0.9))
+        .await
+        .expect("score recorded");
+
+    let judging = repo
+        .scoring_state(run(EXPORT))
+        .await
+        .expect("read")
+        .expect("recorded");
+    repo.mark_run_scored(run(EXPORT)).await.expect("scored");
+    let scored = repo
+        .scoring_state(run(EXPORT))
+        .await
+        .expect("read")
+        .expect("recorded");
+    repo.mark_run_scored(run(EXPORT))
+        .await
+        .expect("scored again");
+    let again = repo
+        .scoring_state(run(EXPORT))
+        .await
+        .expect("read")
+        .expect("recorded");
+    let trial = repo
+        .scoring_state(run(TYPO_TRIAL))
+        .await
+        .expect("read")
+        .expect("recorded");
+    let missing = repo
+        .scoring_state(RunId::from_uuid(Uuid::now_v7()))
+        .await
+        .expect("read");
+
+    assert_eq!(judging.flow.as_deref(), Some("code"));
+    assert_eq!(judging.outcome, Some(RunOutcome::Success));
+    assert_eq!(judging.ended_at, Some(at("2026-11-10T10:00:00Z")));
+    assert_eq!(judging.judged, ["correctness"]);
+    assert!(!judging.trial);
+    assert_eq!(judging.scored_at, None);
+    assert!(scored.scored_at.is_some());
+    assert_eq!(again.scored_at, scored.scored_at);
+    assert!(trial.trial);
+    assert!(trial.judged.is_empty());
+    assert_eq!(missing, None);
 }
 
 #[sqlx::test(

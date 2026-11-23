@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT r.flow, r.outcome, r.ended_at, r.scored_at, r.definition_evaluation,\n                EXISTS (\n                    SELECT 1 FROM factory_benchmark_trial t WHERE t.run_id = r.id\n                ) AS \"trial!\",\n                ARRAY(\n                    SELECT s.scorer FROM factory_run_score s\n                    WHERE s.run_id = r.id\n                    ORDER BY s.scorer\n                ) AS \"judged!\"\n            FROM factory_run r\n            WHERE r.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "scored_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "definition_evaluation",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "trial!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "judged!",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "660b72c199afddd10057a78724078687d60aaf726d950639f2e89a200797908d"
+}

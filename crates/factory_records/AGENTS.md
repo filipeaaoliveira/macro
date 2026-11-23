@@ -332,6 +332,11 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   one of the same Benchmark of theirs runs (a trial's Run not ended, or no
   trial yet and started in the last five minutes) or its trials would pass
   `MAX_OPEN_TRIALS`. `read_evaluation` lists only suites with a trial.
+- `factory_run.scored_at` keeps when a Run's scoring finished
+  (`mark_run_scored`, the first time only). `scoring_state` reads it with
+  the Run's Flow, end, kept evaluation, whether it is a trial and the live
+  Scorers that judged it, for the scores' `pending`. A retry does not copy
+  it: the retry is scored on its own.
 - A trial's judgments (`factory_benchmark_trial_score`) never go in
   `factory_run_score`, and `read_insights` and `read_evaluation` leave Runs
   of the `benchmark` Flow out, so a Benchmark moves no live number.

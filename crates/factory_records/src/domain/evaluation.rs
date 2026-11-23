@@ -180,6 +180,30 @@ pub struct ScoringSubject {
     pub evaluation: Option<serde_json::Value>,
 }
 
+/// How far a Run's scoring has come, as `GET /runs/{id}/scores` reads it to
+/// tell which live Scorers will still judge the Run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoringState {
+    /// The built-in Flow it walks.
+    pub flow: Option<String>,
+    /// How it ended; none while it goes.
+    pub outcome: Option<RunOutcome>,
+    /// When it ended; none while it goes.
+    pub ended_at: Option<DateTime<Utc>>,
+    /// When its scoring finished: every Scorer whose sample took it judged
+    /// it, or scoring gave up on the rest. None until then, and for a Run
+    /// that ended before Runs kept it.
+    pub scored_at: Option<DateTime<Utc>>,
+    /// Whether it is a Benchmark trial, which the live Scorers never judge.
+    pub trial: bool,
+    /// The live Scorers that judged it already.
+    pub judged: Vec<String>,
+    /// The Scorers, Experiments and Benchmarks of the Factory Definition it
+    /// started under, as it kept them; none for a Run that started under
+    /// no Definition.
+    pub evaluation: Option<serde_json::Value>,
+}
+
 /// A suite to record before its trials start.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSuite<'a> {
@@ -488,6 +512,16 @@ pub trait EvaluationRepository: Send + Sync + 'static {
         &self,
         run_id: RunId,
     ) -> impl Future<Output = Result<Option<ScoringSubject>, Self::Err>> + Send;
+
+    /// How far the Run's scoring has come; none when it is not recorded.
+    fn scoring_state(
+        &self,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<Option<ScoringState>, Self::Err>> + Send;
+
+    /// Keep that the Run's scoring finished, once: a later call keeps the
+    /// first time.
+    fn mark_run_scored(&self, run_id: RunId) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Keep a live Scorer's judgment of a Run, unless it has one.
     fn record_run_score(

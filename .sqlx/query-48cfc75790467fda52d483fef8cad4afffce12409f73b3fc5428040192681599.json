@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory_run SET scored_at = now() WHERE id = $1 AND scored_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48cfc75790467fda52d483fef8cad4afffce12409f73b3fc5428040192681599"
+}

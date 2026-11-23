@@ -667,6 +667,16 @@ is 404; and a Scorer name outside the name rules is 400 before anything
 is read. `GET /runs/{id}/scores` lists the Run's judgments with their
 labels for its owner, however they call (an API key, an agent session
 or an internal caller for them too), as `GET /insights/evaluation` does.
+It also names the Scorers that will still judge the Run (`pending`,
+`evaluation::service::pending_scorers`): those of the Scorers it is
+scored with (its Definition's kept evaluation, or the deployment's) whose
+sample takes it and that have not judged it; none for a cancelled Run, one
+lost to infrastructure, or a Benchmark trial; and none once its scoring
+finished (`factory_run.scored_at`, kept by `score_run` once every judge it
+asked judged, or on its last attempt however that went) or
+`SCORING_WINDOW` (an hour) after it ended, which covers a scoring that
+never kept its end (Runs before `scored_at`, an attempt that ran out of
+time). A reader stops reading the scores again once `pending` is empty.
 
 A Scorer's judge is the model the Scorers judge with
 (`FACTORY_SCORER_MODEL`) and the Scorer's instructions with what it
