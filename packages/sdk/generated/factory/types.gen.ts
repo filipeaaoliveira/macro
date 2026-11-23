@@ -1725,6 +1725,13 @@ export type OutcomeCounts = {
      */
     manual: number;
     /**
+     * Of the Runs counted above by how they ended, those a retry took
+     * over: their attempt went on in the retry, a Run of its own, counted
+     * by how it went. A failed Run and its successful retry are one
+     * failure, here as retried, and one success.
+     */
+    retried: number;
+    /**
      * Runs still going.
      */
     running: number;
@@ -2289,6 +2296,7 @@ export type Run = {
      * What the Run was asked to do.
      */
     request: string;
+    retry?: null | RunRetry;
     standingRules?: null | RunRules;
     /**
      * The Macro task the Run works on: its task document's id. None when
@@ -2530,6 +2538,29 @@ export type RunLink = {
  * How a Run ended.
  */
 export type RunOutcome = 'success' | 'manual' | 'blocked' | 'failed' | 'cancelled' | 'infrastructure' | 'flawed';
+
+/**
+ * What a Run that retries another keeps of it: the Run it retries, the
+ * branch it works on, and the Steps before its own.
+ */
+export type RunRetry = {
+    /**
+     * The Run whose branch it works on, pushes to and proposes from: the
+     * first of the Runs it retries, so a retry of a retry keeps the one
+     * branch.
+     */
+    branchOf: RunId;
+    /**
+     * The place its own first Step takes. The Steps before it are those
+     * the retried Run took before the entry it stopped at, kept with
+     * their outputs and answered Gates.
+     */
+    firstSeq: number;
+    /**
+     * The Run it retries.
+     */
+    retriedFrom: RunId;
+};
 
 /**
  * The Standing Rules a Run keeps from when it was created.
@@ -3884,6 +3915,36 @@ export type FlawFactoryRunResponses = {
 };
 
 export type FlawFactoryRunResponse = FlawFactoryRunResponses[keyof FlawFactoryRunResponses];
+
+export type RetryFactoryRunData = {
+    body?: never;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+    };
+    query?: never;
+    url: '/runs/{id}/retry';
+};
+
+export type RetryFactoryRunErrors = {
+    401: ErrorResponse;
+    403: RunErrorResponse;
+    404: ErrorResponse;
+    409: RunErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+    503: ErrorResponse;
+};
+
+export type RetryFactoryRunError = RetryFactoryRunErrors[keyof RetryFactoryRunErrors];
+
+export type RetryFactoryRunResponses = {
+    201: RunDetail;
+};
+
+export type RetryFactoryRunResponse = RetryFactoryRunResponses[keyof RetryFactoryRunResponses];
 
 export type GetFactoryRunScoresData = {
     body?: never;

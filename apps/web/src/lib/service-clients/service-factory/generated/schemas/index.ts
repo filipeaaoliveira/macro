@@ -247,6 +247,8 @@ export * from './runOutcome';
 export * from './runProjectId';
 export * from './runPullRequestUrl';
 export * from './runRepository';
+export * from './runRetry';
+export * from './runRetryProperty';
 export * from './runRules';
 export * from './runRulesProjectId';
 export * from './runScore';

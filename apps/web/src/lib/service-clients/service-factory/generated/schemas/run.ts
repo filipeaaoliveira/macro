@@ -16,6 +16,7 @@ import type { RunId } from './runId';
 import type { RunProjectId } from './runProjectId';
 import type { RunPullRequestUrl } from './runPullRequestUrl';
 import type { RunRepository } from './runRepository';
+import type { RunRetryProperty } from './runRetryProperty';
 import type { RunStandingRules } from './runStandingRules';
 import type { RunTaskId } from './runTaskId';
 
@@ -49,6 +50,7 @@ the pull request Steps last found it; none until one is found. */
   repository?: RunRepository;
   /** What the Run was asked to do. */
   request: string;
+  retry?: RunRetryProperty;
   standingRules?: RunStandingRules;
   /** The Macro task the Run works on: its task document's id. None when
 the Run has no task, or its task was deleted. */
