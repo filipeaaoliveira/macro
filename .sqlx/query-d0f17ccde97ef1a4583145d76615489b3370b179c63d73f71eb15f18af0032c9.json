@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT run_id, seq, test, file, old_text, new_text, command, status, checked_commit,\n                   output, recorded_at\n            FROM factory_break_record\n            WHERE run_id = ANY($1)\n            ORDER BY run_id, seq, recorded_at, test\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "test",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "file",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "old_text",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "new_text",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "command",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "checked_commit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "output",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "recorded_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d0f17ccde97ef1a4583145d76615489b3370b179c63d73f71eb15f18af0032c9"
+}

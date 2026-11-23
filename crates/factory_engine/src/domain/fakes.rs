@@ -2,6 +2,7 @@
 
 mod automations;
 mod board;
+mod breaks;
 mod evaluation;
 mod flaws;
 mod gate_owner;
@@ -160,6 +161,8 @@ pub(crate) struct FakeRepo {
     pub(crate) ci_quarantines: Arc<Mutex<Vec<factory_records::domain::quality::CiQuarantine>>>,
     /// Each Step's rounds of checks, in order.
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
+    /// The break records kept, in order, each with its Step.
+    pub(crate) breaks: Arc<Mutex<Vec<(StepKey, factory_records::domain::breaks::BreakRecord)>>>,
     /// The task documents that exist.
     pub(crate) tasks: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The documents that exist and are not tasks.
@@ -1832,6 +1835,22 @@ impl RunRepository for FakeRepo {
                     .is_some_and(|end| end.outcome == CheckRoundOutcome::Failed)
         });
         Ok(failed.map(|(_, kept)| *kept.fix_action_id.get_or_insert(fix_action_id)))
+    }
+
+    async fn record_break(
+        &self,
+        key: StepKey,
+        record: &factory_records::domain::breaks::NewBreakRecord,
+    ) -> Result<(), FakeError> {
+        self.keep_break(key, record);
+        Ok(())
+    }
+
+    async fn runs_break_records(
+        &self,
+        ids: &[RunId],
+    ) -> Result<factory_records::domain::breaks::RunsBreakRecords, FakeError> {
+        Ok(self.breaks_of(ids))
     }
 
     async fn step_sessions(&self, id: RunId) -> Result<Vec<Uuid>, FakeError> {
