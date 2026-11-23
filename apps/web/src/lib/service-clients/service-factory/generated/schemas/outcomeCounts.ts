@@ -42,6 +42,14 @@ factory's plumbing, not its work.
    */
   manual: number;
   /**
+   * Of the Runs counted above by how they ended, those a retry took
+over: their attempt went on in the retry, a Run of its own, counted
+by how it went. A failed Run and its successful retry are one
+failure, here as retried, and one success.
+   * @minimum 0
+   */
+  retried: number;
+  /**
    * Runs still going.
    * @minimum 0
    */

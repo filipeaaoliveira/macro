@@ -175,10 +175,18 @@ pub struct OutcomeCounts {
     /// Runs that succeeded, and whose result a Scorer or a person found
     /// wrong afterwards.
     pub flawed: u32,
+    /// Of the Runs counted above by how they ended, those a retry took
+    /// over: their attempt went on in the retry, a Run of its own, counted
+    /// by how it went. A failed Run and its successful retry are one
+    /// failure, here as retried, and one success.
+    pub retried: u32,
 }
 
 impl OutcomeCounts {
-    fn add(&mut self, outcome: Option<RunOutcome>) {
+    fn add(&mut self, outcome: Option<RunOutcome>, retried: bool) {
+        if retried {
+            self.retried += 1;
+        }
         let count = match outcome {
             None => &mut self.running,
             Some(RunOutcome::Success) => &mut self.success,
@@ -569,14 +577,19 @@ fn summarize(
         .collect();
     let mut flows: BTreeMap<Option<String>, OutcomeCounts> = BTreeMap::new();
     let mut run_seconds = Vec::new();
+    let retried: std::collections::HashSet<RunId> = records.retried.iter().copied().collect();
     for run in &records.runs {
         let outcome = run.end.map(|(outcome, _)| outcome);
-        totals.add(outcome);
+        let was_retried = retried.contains(&run.id);
+        totals.add(outcome, was_retried);
         let day = run.created_at.with_timezone(&query.time_zone).date_naive();
         if let Some(counts) = days.get_mut(&day) {
-            counts.add(outcome);
+            counts.add(outcome, was_retried);
         }
-        flows.entry(run.flow.clone()).or_default().add(outcome);
+        flows
+            .entry(run.flow.clone())
+            .or_default()
+            .add(outcome, was_retried);
         if let Some((outcome, ended_at)) = run.end
             && outcome != RunOutcome::Cancelled
         {

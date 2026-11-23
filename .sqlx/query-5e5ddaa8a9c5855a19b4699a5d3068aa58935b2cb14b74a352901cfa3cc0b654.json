@@ -1,0 +1,232 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq\n            FROM factory_run\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "request",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "task_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_in_person",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "control_file_patterns",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 11,
+        "name": "control_files_team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "tampered_files",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 13,
+        "name": "named_control_files",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 14,
+        "name": "control_files_unlisted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "standing_rules",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 16,
+        "name": "standing_rules_source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "standing_rules_project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 18,
+        "name": "automation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 19,
+        "name": "automation_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "automation_trigger",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "definition_repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "definition_commit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "pull_request_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 26,
+        "name": "flawed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 27,
+        "name": "flawed_by_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 28,
+        "name": "flawed_by_scorer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 29,
+        "name": "flaw_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 30,
+        "name": "token_budget",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 31,
+        "name": "token_budget_stop",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 32,
+        "name": "token_budget_used",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 33,
+        "name": "retried_from",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 34,
+        "name": "branch_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 35,
+        "name": "first_seq",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5e5ddaa8a9c5855a19b4699a5d3068aa58935b2cb14b74a352901cfa3cc0b654"
+}

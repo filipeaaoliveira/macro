@@ -103,7 +103,7 @@ fn a_flow_is_found_by_its_name_only() {
 }
 
 /// Every entry an agent does names the Role it fills, or the Roles of its
-/// review panel, and the built-in Flows need six.
+/// review panel, and the built-in Flows need eight.
 #[test]
 fn every_agent_entry_names_its_role() {
     for flow in BUILT_IN_FLOWS {
@@ -112,7 +112,14 @@ fn every_agent_entry_names_its_role() {
             .expect("reads");
         for entry in read.entries {
             let agent_step = [
-                "plan", "write", "review", "fix", "ci_fix", "accept", "update",
+                "plan",
+                "plan_review",
+                "write",
+                "review",
+                "fix",
+                "ci_fix",
+                "accept",
+                "update",
             ]
             .contains(&entry.step.as_str());
             assert_eq!(
@@ -135,6 +142,7 @@ fn every_agent_entry_names_its_role() {
         [
             "correctness-reviewer",
             "fixer",
+            "plan-reviewer",
             "planner",
             "scope-reviewer",
             "tests-reviewer",

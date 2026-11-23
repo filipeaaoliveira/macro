@@ -5,7 +5,7 @@ use chrono::Utc;
 use factory_records::domain::gate_replies::GateReplyRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
-    Gate, GateModelReading, MAX_NOTE_BYTES, Outcome, Run, StandInAnswer, Step, StepKey,
+    EntryId, Gate, GateModelReading, MAX_NOTE_BYTES, Outcome, Run, StandInAnswer, Step, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
@@ -17,6 +17,7 @@ use factory_records::domain::standing_rules::RuleGateKind;
 use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
 use crate::domain::gate_owner::{notice_id, notice_may_be_out, stand_in_id, stand_in_notice};
 use crate::domain::models::StepError;
+use crate::domain::plan_review::{blockers_left, earlier_gate_entry};
 use crate::domain::ports::{
     GateModel, GateNotifier, GateReplyService, ModelPick, ModelQuestion, NoOwnerGates,
     NoTaskThread, TaskThread,
@@ -141,6 +142,12 @@ where
         } else {
             false
         };
+        let plan_blockers_left = asked.kind == RuleGateKind::Plan
+            && steps
+                .iter()
+                .find(|step| step.seq == asked.key.seq)
+                .and_then(|step| step.end.as_ref())
+                .is_some_and(|end| blockers_left(&end.output));
         let facts = StandInFacts {
             kind: asked.kind,
             person_only: asked.person_only,
@@ -152,6 +159,7 @@ where
             fix_rounds: asked.fix_rounds,
             fix_limit: asked.fix_limit,
             repeated_blockers: repeated,
+            plan_blockers_left,
         };
         let rules = run.standing_rules.map(|rules| rules.definition);
         Ok(may_stand_in(rules, &facts, answers))
@@ -383,11 +391,25 @@ where
         let Some(asked) = steps.iter().find(|step| step.seq == key.seq) else {
             return Ok(None);
         };
-        let past = self
+        let mut past = self
             .repo
             .past_answers(&run.user_id, &asked.entry, run.id, PAST_ANSWERS_READ)
             .await
             .map_err(internal)?;
+        // Plan Gates were asked at `plan` before plans were reviewed: the
+        // owner's answers there count, after the newer ones.
+        let room = usize::from(PAST_ANSWERS_READ).saturating_sub(past.len());
+        if room > 0
+            && let Some(earlier) = earlier_gate_entry(asked.entry.as_str())
+            && let Ok(earlier) = EntryId::try_from(earlier.to_string())
+        {
+            let older = self
+                .repo
+                .past_answers(&run.user_id, &earlier, run.id, PAST_ANSWERS_READ)
+                .await
+                .map_err(internal)?;
+            past.extend(older.into_iter().take(room));
+        }
         let plan = steps
             .iter()
             .rev()

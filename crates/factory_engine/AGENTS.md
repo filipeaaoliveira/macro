@@ -254,6 +254,49 @@ workflow takes it, a link once linked, and an answer in `factory_answer_gate`, f
 `AnswerGate::standing` (left out when none, so histories replay as before; the
 workflow only hands it on). The Run API lists them as `standingActs`.
 
+`POST /runs/{id}/retry` (`domain/service/retry.rs`) retries a Run of the
+caller's that ended `failed`, `infrastructure` or `blocked` (409 otherwise,
+and for a Benchmark trial, a self-improvement Run or a Run that kept no
+Flow): a new Run of the same task, request, Flow (the one the Run kept),
+Factory Definition commit, rules and Agents, whose `retry` names the Run it
+retries (`retriedFrom`), the Run whose branch it works on (`branchOf`, the
+first of a chain of retries) and the place of its own first Step
+(`firstSeq`). It starts at the entry of the Run's latest own Step, at the
+first Step of that visit (`retry_start`: the Run's own Steps right before
+it at consecutive places with the same entry and visit number, since a
+reset, and each retry, counts visits from 1 again; never below a retry's
+`firstSeq`). A retry that took no Step of its own is retried where it
+started, so a review panel's round or a Step an
+agent's question went on from runs again whole; the
+Steps before it that ended are kept as the retry's own, at their places,
+with their answered Gates, sessions and the review rounds that ended
+before it, so the plan, the branch and the Blockers a fix reads are not
+made again. Its workflow starts there (`RunStart::start_at`,
+`Interpreter::start_at`): visits and facts start afresh, and the retry
+takes as many Steps of its own as a new Run. Every Step works on the
+branch of `branchOf` (`StepInput::branch`, `AgentTask::branch`), so it
+pushes to, reviews and proposes from the retried Run's branch and pull
+request; Scorers read its change there too (`ScoringSubject::branch_of`).
+Its first own Step's prompt says it takes over a failed Step's checkout,
+which may hold that Step's unfinished changes (`RESUMED_RUN_NOTE`). A Run
+is retried at most once (`AlreadyRetried`, 409; retry the newest retry
+instead); a retry is held to the Queue limit a new Run would be, and an
+agent acting for the owner needs a Standing Role that allows `start`. The
+retry is created in person only when its owner retried it in person, from
+an account that is not an agent's. The kept Steps' sessions count against
+its token budget, so a Run its budget stopped stops again; Insights, the
+quality view and the arm and Agent Rule tallies count kept Steps, Gates,
+sessions and review rounds once, on the Run that made them, and a Run and
+its retries as one attempt of their arm (the newest among the Runs
+read). Insights counts a Run a retry took over by how it ended and as
+`retried` (`OutcomeCounts::retried`). A retry's start writes its Flow as
+`retry_flow` (`RunStart`'s `Serialize`), which a worker from before
+retries cannot read: its workflow task fails until a newer worker takes
+it, rather than walk the retry from its first entry. Each of a retry's
+Step requests carries `branch_of`, which such a worker's activities
+refuse (`StepRequest` denies unknown fields), so none works on a branch of
+the retry's own. Deploy every worker before the API all the same.
+
 Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
 `deny_unknown_fields`, and an agent Step reads its Run's kept Agents
 (`SessionAgent::run_agents`). A worker from before them fails every agent Step
@@ -1521,6 +1564,36 @@ list must add it).
   latest `plan` Step's (`AcceptanceChecks::of_run`); checks that do not
   read, or were dropped for their size, are logged, and `accept`'s report
   says so, its verifier checking every clause by hand.
+- Plan review (`src/domain/plan_review.rs`,
+  `src/domain/built_in_steps/plan_review.rs`): on a repository the planner
+  also ends its plan with a size block (`built_in_steps/plan_size.md`), a
+  fenced `json` block before the acceptance checks: `size` `fits`, with
+  the `files` it touches (`add`, `edit`, `delete`, at most 40) and
+  `doneWhen`, each Done-when item of the request quoted with the plan work
+  that does it; or `oversized`, with `why` and 2 to 8 `children` (a `name`
+  and a `request` each). The `code` Flow's `plan-review` entry runs
+  `plan_review` (the `plan-reviewer` Role, which takes `reviewer`'s Agents
+  when a definition does not list it). Its mechanical checks read the
+  block: a block that does not read, an edited or deleted file the base
+  (the pinned commit, else the base branch) does not hold, an added one it
+  does, or a Done-when item of the request (the list under its `Done when`
+  heading) the block maps to no work is a Blocker, and the Step ends
+  `blockers` without asking the reviewer. The Control Files the plan
+  changes are flagged, for the reviewer and the Gate. A plan the checks
+  pass goes to the plan reviewer, which ends `pass` or `blockers` with a
+  `json` block of Blockers (`problem`, `why`). `blockers` goes back to
+  `plan`, whose next visit reads the review in its history; the third
+  visit, or a pass, ends `reviewed`, after which the plan Gate opens, its
+  output the review's result. A person's `revise` resets the entry's
+  rounds. An `oversized` plan ends `oversized` when the entry routes it,
+  and `split` files each child through `ChildTasks` (as a follow-up task
+  is filed: the owner's, in the project of the Run's task, its body
+  linking that task), with an id fixed by the Run, the Step and the child
+  (`child_task_id`; for a retry, by the Run whose branch it works on), so
+  a retried `split`, or a retry of a Run that failed at it, files no
+  second task; it ends
+  `done` with their links, and the Run ends `manual`. Where nothing files
+  tasks (`NoChildTasks`), `split` ends `failed`.
 - Trust: the checks live in the plan Step's recorded output, never in the
   branch, so the writer and fixer cannot change the commands. They are an
   agent's commands, not people's: `.macro/checks.json` is written and
@@ -2394,6 +2467,9 @@ Definition.
 - `src/domain/definition.rs` and `src/domain/service/definition.rs`: the
   Factory Definition's files, their checks, and reading a team's at its
   head; `definition_template/`: the starter Definition.
+- `src/domain/plan_review.rs` and `src/domain/built_in_steps/plan_review.rs`:
+  a plan's size block, the mechanical checks of a plan, the `plan_review`
+  Step and the `split` Step.
 - `src/domain/verification.rs`, `src/domain/acceptance.rs` and
   `src/domain/built_in_steps/accept.rs`: the verify Phase, the plan's
   acceptance checks and the `accept` Step.
@@ -2742,6 +2818,11 @@ Definition.
   that base. A Run
   stuck at its merge holds the Runs behind it until it ends, merges, or
   has been away from its merge longer than `QUEUE_PLACE_KEPT`.
+- A worker older than `plan_review` and `split` cannot serve a Run of the
+  `code` Flow that names them: deploy every worker before the API starts
+  such Runs. A Run started before them keeps its Flow, with the plan Gate
+  on `plan`, and never reaches them. A Definition whose `code` Flow still
+  gates `plan` keeps working as before.
 - A worker older than `accept` cannot serve a Run of the `code` Flow that
   names it: deploy every worker before the API starts such Runs. A Run
   started before it never reaches it.

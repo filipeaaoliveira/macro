@@ -199,16 +199,21 @@ fn the_review_panel_roles_default_to_the_reviewer() {
         [agent("backup"), agent("primary")]
     );
     assert_eq!(own_tests.for_role(&role("verifier")), [agent("primary")]);
+    // So does the plan reviewer.
+    assert_eq!(
+        single.for_role(&role("plan-reviewer")),
+        [agent("backup"), agent("primary")]
+    );
 
     let refused = no_reviewer.fills_built_in_flows();
     assert_eq!(
         refused,
         Err(AgentDefinitionError::UnfilledReviewer(role(
-            "scope-reviewer"
+            "plan-reviewer"
         )))
     );
     let message = refused.expect_err("refused").to_string();
-    assert!(message.contains("scope-reviewer") && message.contains("`reviewer`"));
+    assert!(message.contains("plan-reviewer") && message.contains("`reviewer`"));
 }
 
 /// Runs started on the single-reviewer `code` Flow review with `reviewer`
@@ -225,6 +230,7 @@ fn the_reviewer_stays_required_for_runs_in_flight() {
             "scope-reviewer": ["primary"],
             "tests-reviewer": ["primary"],
             "verifier": ["primary"],
+            "plan-reviewer": ["primary"],
             "fixer": ["primary"]
         }
     }))

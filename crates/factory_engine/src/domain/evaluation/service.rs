@@ -447,7 +447,8 @@ where
             return Ok(RunChange::Missing);
         };
         let owner = &subject.user_id;
-        let branch = run_branch(subject.run_id);
+        // A retry's change is on the branch of the Run it retries.
+        let branch = run_branch(subject.branch_of);
         let found = self.github.find(owner, &repository, &branch).await?;
         let merged = found
             .as_ref()

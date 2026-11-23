@@ -9,7 +9,7 @@ use factory_records::domain::evaluation::RunAgentRule;
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
     DefinitionRead, EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome,
-    SteerRefusal, Step, StepKey,
+    RunRetry, SteerRefusal, Step, StepKey,
 };
 use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRound};
 use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
@@ -27,17 +27,63 @@ use crate::domain::token_budget::RunTokenBudget;
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// A retry's start (one with [`Self::start_at`]) writes its Flow as
+/// `retry_flow`, not `flow`: a worker that predates retries requires
+/// `flow`, so it cannot read a retry's start and fails its workflow task,
+/// which Temporal tries again until a worker that reads it takes it,
+/// rather than walk the retry from its Flow's first entry. Every other
+/// start writes `flow`, as before.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RunStart {
     /// The Run, already recorded.
     pub run_id: RunId,
     /// The Flow it walks.
+    #[serde(alias = "retry_flow")]
     pub flow: Flow,
     /// Whether the Run keeps a token budget, which the workflow checks
     /// before each agent Step. Left out when it keeps none, so the start of
     /// a Run without one reads as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub token_budget: bool,
+    /// Where a retry starts: none for a Run that starts at its Flow's first
+    /// entry, and left out then, so its start reads as before.
+    #[serde(default)]
+    pub start_at: Option<StartAt>,
+}
+
+impl Serialize for RunStart {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let fields = 2 + usize::from(self.token_budget) + usize::from(self.start_at.is_some());
+        let mut start = serializer.serialize_struct("RunStart", fields)?;
+        start.serialize_field("run_id", &self.run_id)?;
+        match &self.start_at {
+            None => start.serialize_field("flow", &self.flow)?,
+            Some(_) => start.serialize_field("retry_flow", &self.flow)?,
+        }
+        if self.token_budget {
+            start.serialize_field("token_budget", &self.token_budget)?;
+        }
+        if let Some(at) = &self.start_at {
+            start.serialize_field("start_at", at)?;
+        }
+        start.end()
+    }
+}
+
+/// Where a retry's workflow starts: at the entry the Run it retries stopped
+/// at, past the Steps it kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartAt {
+    /// The entry it starts at.
+    pub entry: EntryId,
+    /// The place its first Step takes; the places before it hold the Steps
+    /// it kept.
+    pub first_seq: u16,
+    /// The Run whose branch its Steps work on, which each Step's request
+    /// carries ([`StepRequest::branch_of`]).
+    pub branch_of: RunId,
 }
 
 /// One Step for a worker to run. A field it does not know is refused, so a
@@ -77,6 +123,12 @@ pub struct StepRequest {
     /// answer. None for a Step that starts its work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumes: Option<u16>,
+    /// For a Step of a retry, the Run whose branch it works on. A worker
+    /// from before retries refuses the field, so it never runs a retry's
+    /// Step on a branch of the retry's own; a newer one takes it. None,
+    /// and left out, for any other Run's Step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_of: Option<RunId>,
 }
 
 impl StepRequest {
@@ -93,6 +145,7 @@ impl StepRequest {
             may_ask: false,
             questions_left: 0,
             resumes: None,
+            branch_of: None,
         }
     }
 
@@ -110,6 +163,7 @@ impl StepRequest {
             may_ask: false,
             questions_left: 0,
             resumes: None,
+            branch_of: None,
         }
     }
 
@@ -189,9 +243,34 @@ pub struct StepInput<'a> {
     /// only when its entry routes it, so a Run on an older Flow goes on as
     /// that Flow did.
     pub routes: &'a [Outcome],
+    /// The most visits the Step's entry has in the Flow the Run walks;
+    /// none when it is unbounded or the Flow does not read.
+    pub max_visits: Option<u16>,
+    /// The retry the Step's Run is, if it is one: the Run it retries, the
+    /// one whose branch it works on, and the place of its first own Step.
+    pub retry: Option<RunRetry>,
 }
 
 impl StepInput<'_> {
+    /// The Run whose branch the Step works on: its own Run, or for a
+    /// retry, the first Run it retries.
+    pub fn branch_run(&self) -> RunId {
+        self.retry.map_or(self.key.run_id, |retry| retry.branch_of)
+    }
+
+    /// The branch the Step's Run pushes to and proposes from: its own
+    /// Run's, or for a retry, the one of the Run it retries.
+    pub fn branch(&self) -> String {
+        run_branch(self.branch_run())
+    }
+
+    /// Whether the Step is a retry's first own Step, which takes over the
+    /// branch, and the checkout, where the retried Run's Step failed.
+    pub fn resumes_failed_run(&self) -> bool {
+        self.retry
+            .is_some_and(|retry| retry.first_seq == self.key.seq)
+    }
+
     /// Whether the Step's entry routes `outcome`.
     pub fn routes(&self, outcome: &str) -> bool {
         self.routes.iter().any(|routed| routed.as_str() == outcome)
@@ -216,6 +295,9 @@ pub struct AgentTask {
     /// The repository the agent works in, as its
     /// `https://github.com/owner/name` URL, if the Run works on one.
     pub repo_url: Option<String>,
+    /// The Run whose branch the agent works on, when it is not its own
+    /// Run's: a retry works on the branch of the Run it retries.
+    pub branch_of: Option<RunId>,
     /// When to stop waiting for the agent's answer, at the latest, when the
     /// Step sets a time of its own; the attempt's own deadline holds too.
     pub answer_by: Option<DateTime<Utc>>,
@@ -231,6 +313,14 @@ pub struct AgentTask {
     /// session of the Step runs before its first prompt; none when the Run
     /// works on no repository or its base declares no setup.
     pub setup: Option<RepositorySetup>,
+}
+
+impl AgentTask {
+    /// The branch the agent works on: its Step's Run's, or for a retry,
+    /// the one of the Run it retries.
+    pub fn branch(&self) -> String {
+        run_branch(self.branch_of.unwrap_or(self.key.run_id))
+    }
 }
 
 /// What the Run's owner's Step Terminal asks of the agent session a Step
@@ -1250,6 +1340,15 @@ pub enum FactoryError {
     /// again.
     #[error("the run has ended")]
     RunEnded,
+    /// The Run cannot be retried: it has not ended, it ended other than
+    /// `failed`, `infrastructure` or `blocked`, it is a Benchmark trial or
+    /// a self-improvement Run, or it keeps no Flow to start again.
+    #[error("only a run that ended failed, infrastructure or blocked can be retried")]
+    NotRetriable,
+    /// The Run was retried already: a Run is retried at most once, so two
+    /// retries never work on one branch. Retry the newest retry instead.
+    #[error("the run was retried already")]
+    AlreadyRetried,
     /// A note to a Step's agent carries no words.
     #[error("a note must not be empty")]
     EmptyNote,

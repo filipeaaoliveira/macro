@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_run_task_tags_unread (run_id, recorded_at)\n            SELECT $1, recorded_at FROM factory_run_task_tags_unread WHERE run_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "009e514d2bfe209676c3bf7f9fdfe69831f85232bc0c7d38e301739b9fd34056"
+}

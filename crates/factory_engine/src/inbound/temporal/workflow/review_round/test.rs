@@ -152,6 +152,7 @@ impl Work for Script {
                 tampered: false,
                 held: false,
                 repeated_blockers: false,
+                plan_blockers_left: false,
                 dismissed: false,
             };
             if let Some(ruled) = rule_answer(self.rules, &facts, &opening.answers) {
@@ -216,6 +217,7 @@ async fn walk_entry(
             most: 2,
             owner_answers: true,
         },
+        branch_of: None,
     };
     let mut held = Vec::new();
     let mut next = 6;
@@ -525,6 +527,7 @@ async fn reviewers_of_a_flow_without_questions_never_ask() {
             most: 0,
             owner_answers: true,
         },
+        branch_of: None,
     };
     let mut held = Vec::new();
 

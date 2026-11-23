@@ -28,7 +28,7 @@ use super::checks_round::{lost, records};
 use super::{BuiltInStepError, BuiltInSteps, REVIEW_FOCUS, REVIEW_PANEL_INSTRUCTIONS, outcomes};
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentTurn, StepInput, StepReport};
-use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
+use crate::domain::ports::{ChildTasks, MainWatches, PullRequests, StepAgent};
 use crate::domain::review_rounds::{
     ReviewerAnswer, ReviewerAnswerError, carried_blockers, dropped_in_visit, findings_block,
     fit_findings, places_meet,
@@ -38,12 +38,13 @@ use crate::domain::review_rounds::{
 /// later prompts: a reviewer's Step runs no checks, so it is the first.
 const REASK_PLACE: u16 = 1;
 
-impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+impl<A, G, R, M, C> BuiltInSteps<A, G, R, M, C>
 where
     A: StepAgent,
     G: PullRequests,
     R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
+    C: ChildTasks,
 {
     /// Have the reviewer of `input` review in `round`, record what it found
     /// on the round, and end with its summary and Blockers written out.

@@ -19,9 +19,9 @@ mod fix_answer;
 #[cfg(test)]
 mod test;
 
-pub(crate) use answer::json_block;
 use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
+pub(crate) use answer::{json_block, json_blocks};
 pub(crate) use brief::escape;
 pub use brief::{
     BRIEF_BUDGET, DISPUTE_BUDGET, FindingsBlock, blockers_brief, carried_blockers,
@@ -515,7 +515,7 @@ where
             return Ok(recorded.failure.is_none());
         }
 
-        let head = match self.head(&run, run_id).await? {
+        let head = match self.head(&run).await? {
             Ok(head) => head,
             // A round that cannot open says why, on the Run, and fails.
             Err(why) => {
@@ -600,12 +600,11 @@ where
     G: PullRequests,
     T: TaskDirectory,
 {
-    /// The commit of `run`'s branch on GitHub, or why a round cannot be
-    /// opened on it.
+    /// The commit of `run`'s branch on GitHub (for a retry, the branch of
+    /// the Run it retries), or why a round cannot be opened on it.
     async fn head(
         &self,
         run: &factory_records::domain::models::Run,
-        run_id: RunId,
     ) -> Result<Result<String, &'static str>, StepError> {
         let Some(repository) = run.repository.as_ref() else {
             return Ok(Err("The run works on no repository."));
@@ -615,7 +614,7 @@ where
         };
         let head = self
             .github
-            .branch_head(&run.user_id, &code, &run_branch(run_id))
+            .branch_head(&run.user_id, &code, &run_branch(run.branch_of()))
             .await;
         match head {
             Ok(Some(head)) => Ok(Ok(head)),

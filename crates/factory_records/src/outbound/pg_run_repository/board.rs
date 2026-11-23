@@ -49,6 +49,9 @@ struct BoardRunRow {
     token_budget: Option<i64>,
     token_budget_stop: Option<String>,
     token_budget_used: Option<i64>,
+    retried_from: Option<Uuid>,
+    branch_run_id: Option<Uuid>,
+    first_seq: Option<i32>,
     task_name: Option<String>,
     task_live: bool,
     state: String,
@@ -96,6 +99,9 @@ impl TryFrom<BoardRunRow> for BoardRun {
             token_budget: row.token_budget,
             token_budget_stop: row.token_budget_stop,
             token_budget_used: row.token_budget_used,
+            retried_from: row.retried_from,
+            branch_run_id: row.branch_run_id,
+            first_seq: row.first_seq,
         })?;
         Ok(BoardRun {
             run,
@@ -173,6 +179,8 @@ impl RunBoardRepository for PgRunRepository {
                 r.flawed_by_scorer AS "flawed_by_scorer?", r.flaw_reason AS "flaw_reason?",
                 r.token_budget AS "token_budget?", r.token_budget_stop AS "token_budget_stop?",
                 r.token_budget_used AS "token_budget_used?",
+                r.retried_from AS "retried_from?", r.branch_run_id AS "branch_run_id?",
+                r.first_seq AS "first_seq?",
                 r.task_name AS "task_name?", r.task_live AS "task_live!",
                 r.state AS "state!"
             FROM (
@@ -291,6 +299,8 @@ impl RunBoardRepository for PgRunRepository {
                 r.flawed_by_scorer AS "flawed_by_scorer?", r.flaw_reason AS "flaw_reason?",
                 r.token_budget AS "token_budget?", r.token_budget_stop AS "token_budget_stop?",
                 r.token_budget_used AS "token_budget_used?",
+                r.retried_from AS "retried_from?", r.branch_run_id AS "branch_run_id?",
+                r.first_seq AS "first_seq?",
                 r.task_name AS "task_name?", r.task_live AS "task_live!",
                 r.state AS "state!"
             FROM (
@@ -428,6 +438,8 @@ impl RunBoardRepository for PgRunRepository {
                 r.flawed_by_scorer AS "flawed_by_scorer?", r.flaw_reason AS "flaw_reason?",
                 r.token_budget AS "token_budget?", r.token_budget_stop AS "token_budget_stop?",
                 r.token_budget_used AS "token_budget_used?",
+                r.retried_from AS "retried_from?", r.branch_run_id AS "branch_run_id?",
+                r.first_seq AS "first_seq?",
                 CASE WHEN task.live THEN d.name END AS "task_name?",
                 task.live AS "task_live!",
                 place.state AS "state!"

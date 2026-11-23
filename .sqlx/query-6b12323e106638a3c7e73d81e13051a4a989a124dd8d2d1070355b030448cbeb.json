@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_run_agent_rule (run_id, role, rule, agent)\n            SELECT $1, role, rule, agent FROM factory_run_agent_rule WHERE run_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b12323e106638a3c7e73d81e13051a4a989a124dd8d2d1070355b030448cbeb"
+}

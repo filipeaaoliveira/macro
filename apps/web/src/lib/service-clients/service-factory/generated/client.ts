@@ -1638,6 +1638,99 @@ export const flawFactoryRun = async (
 };
 
 /**
+ * @summary Retry one of the caller's Runs that ended `failed`, `infrastructure` or
+`blocked`: a new Run of the same task, Flow and Factory Definition
+commit, on the same branch, that keeps the Steps the Run took before the
+entry it stopped at, with their outputs, and starts there; its
+`retry.retriedFrom` names the Run it retries. A Run is retried once: a
+second retry, a running Run, a Run that ended otherwise, a Benchmark
+trial and a self-improvement Run are refused (409), as is a retry past
+the caller's Queue limit (`queueFull`). An agent acting for the owner
+needs a Standing Role that allows `start`, as a new Run does.
+ */
+export type retryFactoryRunResponse201 = {
+  data: RunDetail;
+  status: 201;
+};
+
+export type retryFactoryRunResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type retryFactoryRunResponse403 = {
+  data: RunErrorResponse;
+  status: 403;
+};
+
+export type retryFactoryRunResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type retryFactoryRunResponse409 = {
+  data: RunErrorResponse;
+  status: 409;
+};
+
+export type retryFactoryRunResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type retryFactoryRunResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type retryFactoryRunResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
+export type retryFactoryRunResponseSuccess = retryFactoryRunResponse201 & {
+  headers: Headers;
+};
+export type retryFactoryRunResponseError = (
+  | retryFactoryRunResponse401
+  | retryFactoryRunResponse403
+  | retryFactoryRunResponse404
+  | retryFactoryRunResponse409
+  | retryFactoryRunResponse500
+  | retryFactoryRunResponse502
+  | retryFactoryRunResponse503
+) & {
+  headers: Headers;
+};
+
+export type retryFactoryRunResponse =
+  | retryFactoryRunResponseSuccess
+  | retryFactoryRunResponseError;
+
+export const getRetryFactoryRunUrl = (id: RunId) => {
+  return `/runs/${id}/retry`;
+};
+
+export const retryFactoryRun = async (
+  id: RunId,
+  options?: RequestInit
+): Promise<retryFactoryRunResponse> => {
+  const res = await fetch(getRetryFactoryRunUrl(id), {
+    ...options,
+    method: 'POST',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: retryFactoryRunResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as retryFactoryRunResponse;
+};
+
+/**
  * @summary The live Scorers' judgments of one of the caller's Runs, by Scorer, each
 with whether it passed, the caller's label of it, whether the Scorer's
 current judge (its model and instructions now) made it, and how far that

@@ -19,6 +19,7 @@ fn blockers_facts() -> StandInFacts {
         fix_rounds: 0,
         fix_limit: 2,
         repeated_blockers: false,
+        plan_blockers_left: false,
     }
 }
 
@@ -175,4 +176,29 @@ fn with_the_owner_section_on_repeated_blockers_are_the_owner_s() {
     assert!(!may_stand_in(Some(owner_gates), &repeated, &fix_or_stop));
     // Without the owner section, the stand-in reads them as the rule does.
     assert!(may_stand_in(Some(BLOCKERS), &repeated, &fix_or_stop));
+}
+
+/// A plan its review's last round left Blockers in is the owner's to read:
+/// the stand-in never answers its Gate.
+#[test]
+fn a_plan_with_blockers_left_is_the_owner_s() {
+    let plan_rules = OrchestratorDefinition {
+        stand_in: StandInKinds {
+            plan: true,
+            blockers: false,
+        },
+        ..BLOCKERS
+    };
+    let clean = StandInFacts {
+        kind: RuleGateKind::Plan,
+        ..blockers_facts()
+    };
+    let left = StandInFacts {
+        plan_blockers_left: true,
+        ..clean
+    };
+    let approve_or_revise = [outcome("approve"), outcome("revise")];
+
+    assert!(may_stand_in(Some(plan_rules), &clean, &approve_or_revise));
+    assert!(!may_stand_in(Some(plan_rules), &left, &approve_or_revise));
 }

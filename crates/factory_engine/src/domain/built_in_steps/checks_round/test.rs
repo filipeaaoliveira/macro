@@ -349,6 +349,8 @@ fn input() -> StepInput<'static> {
         owner_notes: &[],
         base_commit: None,
         routes: &[],
+        max_visits: Some(3),
+        retry: None,
     }
 }
 

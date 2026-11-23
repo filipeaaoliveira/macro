@@ -50,6 +50,7 @@ const counts = (changes: Partial<OutcomeCounts> = {}): OutcomeCounts => ({
   cancelled: 0,
   infrastructure: 0,
   flawed: 0,
+  retried: 0,
   ...changes,
 });
 
@@ -62,6 +63,7 @@ const add = (a: OutcomeCounts, b: OutcomeCounts): OutcomeCounts => ({
   cancelled: a.cancelled + b.cancelled,
   infrastructure: a.infrastructure + b.infrastructure,
   flawed: a.flawed + b.flawed,
+  retried: a.retried + b.retried,
 });
 
 const RUNS: Run[] = [

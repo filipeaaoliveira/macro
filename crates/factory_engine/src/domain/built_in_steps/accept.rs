@@ -36,11 +36,10 @@ use factory_records::domain::review_rounds::ReviewRoundRepository;
 use super::checks_round::{ATTEMPT_CHECKS_FOR, Checked, fit, lost, records};
 use super::{BuiltInStepError, BuiltInSteps, cut, outcomes};
 use crate::domain::acceptance::{AcceptanceCheck, AcceptanceChecks};
-use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::checks::RepositoryCheck;
-use crate::domain::flow::{StepName, StepUse};
+use crate::domain::flow::StepName;
 use crate::domain::models::{StepInput, StepReport};
-use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
+use crate::domain::ports::{ChildTasks, MainWatches, PullRequests, StepAgent};
 use crate::domain::review_rounds::escape;
 use crate::domain::verification::VERIFY_FILE;
 
@@ -101,12 +100,13 @@ fn checking(check: &AcceptanceCheck) -> Checking<'_> {
     }
 }
 
-impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+impl<A, G, R, M, C> BuiltInSteps<A, G, R, M, C>
 where
     A: StepAgent,
     G: PullRequests,
     R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
+    C: ChildTasks,
 {
     /// Have the verifier check the head of the Run's branch, and the
     /// factory run the plan's acceptance checks on it.
@@ -208,7 +208,7 @@ where
             Some(round)
         };
 
-        let last_visit = self.at_last_accept(input).await?;
+        let last_visit = self.at_last_visit(input, None).await?;
         Ok(verdict(
             &target,
             &checks,
@@ -219,10 +219,15 @@ where
         ))
     }
 
-    /// Whether this `accept` Step is its entry's last visit, as the `code`
-    /// Flow bounds it: a failure then ends the Run's acceptance.
-    async fn at_last_accept(&self, input: StepInput<'_>) -> Result<bool, BuiltInStepError> {
-        let Some(most) = accept_visits() else {
+    /// Whether this Step is its entry's last visit, as the Flow the Run
+    /// walks bounds it, else as `unbounded` says: a failure then ends the
+    /// Run's acceptance, or puts a plan to its Gate with its Blockers.
+    pub(super) async fn at_last_visit(
+        &self,
+        input: StepInput<'_>,
+        unbounded: Option<u16>,
+    ) -> Result<bool, BuiltInStepError> {
+        let Some(most) = input.max_visits.or(unbounded) else {
             return Ok(false);
         };
         let steps = self
@@ -318,18 +323,6 @@ where
                 .await?;
         }
     }
-}
-
-/// The most visits the `code` Flow gives its `accept` entry.
-fn accept_visits() -> Option<u16> {
-    let flow = BuiltInFlow::named("code")?
-        .read(|_| Some(StepUse::Work))
-        .ok()?;
-    let accept = flow
-        .entries
-        .iter()
-        .find(|entry| entry.step.as_str() == "accept")?;
-    accept.max_visits.map(|most| u16::from(most.get()))
 }
 
 /// What the verifier is told: the Step's instructions, where the change

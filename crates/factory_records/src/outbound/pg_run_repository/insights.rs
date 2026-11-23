@@ -130,7 +130,10 @@ impl RunInsightsRepository for PgRunRepository {
         }
 
         // The Runs' Steps are read through `factory_step`'s primary key, Run
-        // by Run, newest Run first.
+        // by Run, newest Run first. A retry's Steps before its own
+        // (`first_seq`) are the retried Run's, kept for its later Steps to
+        // read: they, their Gates and their sessions count once, on the Run
+        // that took them, so every read below leaves them out.
         let ids: Vec<Uuid> = runs.iter().map(|run| run.id.as_uuid()).collect();
 
         // Durations are kept to the millisecond. A Step's duration is its own
@@ -167,7 +170,7 @@ impl RunInsightsRepository for PgRunRepository {
                 LEFT JOIN factory_gate g
                     ON g.run_id = s.run_id AND g.seq = s.seq AND g.rule IS NULL AND NOT g.by_stand_in
                         AND g.agent_session_id IS NULL
-                WHERE s.run_id = ANY($1)
+                WHERE s.run_id = ANY($1) AND s.seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = s.run_id)
             ),
             by_entry AS (
                 SELECT
@@ -267,7 +270,8 @@ impl RunInsightsRepository for PgRunRepository {
                 LEFT JOIN factory_gate g
                     ON g.run_id = s.run_id AND g.seq = s.seq AND g.rule IS NULL AND NOT g.by_stand_in
                         AND g.agent_session_id IS NULL
-                WHERE s.run_id = ANY($1) AND s.outcome IS DISTINCT FROM 'question'
+                WHERE s.run_id = ANY($1) AND s.seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = s.run_id)
+                    AND s.outcome IS DISTINCT FROM 'question'
                     AND NOT (s.outcome = 'no_result' AND g.answer IS DISTINCT FROM 'stop')
             )
             SELECT entry AS "entry!", 'outcome' AS "kind!", outcome AS "value!", count(*) AS "count!"
@@ -328,7 +332,7 @@ impl RunInsightsRepository for PgRunRepository {
                         ) AS visits
                     FROM factory_step s
                     LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
-                    WHERE s.run_id = ANY($1)
+                    WHERE s.run_id = ANY($1) AND s.seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = s.run_id)
                     GROUP BY s.entry, s.run_id
                 ) t
                 JOIN unnest($1::uuid[]) WITH ORDINALITY AS r(id, place) ON r.id = t.run_id
@@ -368,12 +372,12 @@ impl RunInsightsRepository for PgRunRepository {
                 WHERE run_id = ANY($1)
                 OFFSET 0
             ) steps
-            WHERE session_id IS NOT NULL
+            WHERE session_id IS NOT NULL AND seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = steps.run_id)
             UNION
             SELECT u.run_id, u.seq, s.entry, u.session_id
             FROM factory_step_used_session u
             JOIN factory_step s ON s.run_id = u.run_id AND s.seq = u.seq
-            WHERE u.run_id = ANY($1)
+            WHERE u.run_id = ANY($1) AND u.seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = u.run_id)
             "#,
             &ids,
         )
@@ -390,6 +394,21 @@ impl RunInsightsRepository for PgRunRepository {
         })
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
 
+        // The Runs a retry took over, through `factory_run_retried_from_idx`.
+        let retried = sqlx::query_scalar!(
+            r#"
+            SELECT retried_from AS "retried_from!"
+            FROM factory_run
+            WHERE retried_from = ANY($1)
+            "#,
+            &ids,
+        )
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(RunId::from_uuid)
+        .collect();
+
         transaction.commit().await?;
         Ok(InsightsRecords {
             runs,
@@ -398,6 +417,7 @@ impl RunInsightsRepository for PgRunRepository {
             counts,
             trouble,
             sessions,
+            retried,
         })
     }
 }
