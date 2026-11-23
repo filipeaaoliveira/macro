@@ -11,13 +11,15 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::ci_retries::{quarantines_of, retry_result};
 use super::review_rounds::stored_word;
 use super::{PgRunRepository, PgRunRepositoryErr, number};
 use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::insights::{RunSummary, TITLE_CHARS};
 use crate::domain::models::{RunId, RunOutcome};
 use crate::domain::quality::{
-    BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWait, CiWaitRecord, LastCiWait, QualityRecords,
+    BlockerRecord, CiJob, CiJobResult, CiRetryRecord, CiVerdict, CiWait, CiWaitRecord, LastCiWait,
+    QualityRecords,
     QualityRun, QualityScope, QualitySession, ReviewRoundRecord, ReviewerRecord,
     RunQualityRepository,
 };
@@ -483,6 +485,37 @@ impl RunQualityRepository for PgRunRepository {
         })
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
 
+        // The CI jobs the Runs' `ci` Steps reran, and the jobs quarantined
+        // in the repositories read.
+        let ci_retries = sqlx::query!(
+            r#"
+            SELECT run_id, name, result
+            FROM factory_ci_retry
+            WHERE run_id = ANY($1)
+            ORDER BY run_id, seq, name
+            "#,
+            &ids,
+        )
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(|row| {
+            Ok(CiRetryRecord {
+                run_id: RunId::from_uuid(row.run_id),
+                name: row.name,
+                result: retry_result(row.result)?,
+            })
+        })
+        .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
+        let quarantined_in: Vec<String> = match &scope.repository {
+            Some(repository) => vec![repository.to_lowercase()],
+            None => repositories
+                .iter()
+                .map(|repository| repository.to_lowercase())
+                .collect(),
+        };
+        let ci_quarantines = quarantines_of(&mut transaction, &quarantined_in).await?;
+
         transaction.commit().await?;
         Ok(QualityRecords {
             runs,
@@ -492,6 +525,8 @@ impl RunQualityRepository for PgRunRepository {
             review_rounds,
             reviewers,
             blockers,
+            ci_retries,
+            ci_quarantines,
         })
     }
 }
