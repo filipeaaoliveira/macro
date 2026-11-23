@@ -298,7 +298,7 @@ export function runOptions(runId: string) {
 }
 
 /** How the live Scorers' judgments of one of the person's Runs are read. */
-export function runScoresOptions(runId: string) {
+function runScoresOptions(runId: string) {
   return queryOptions({
     queryKey: factoryRunKeys.runScores(runId).queryKey,
     queryFn: ({ signal }) =>
