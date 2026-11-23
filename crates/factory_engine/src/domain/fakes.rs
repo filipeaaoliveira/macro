@@ -149,7 +149,10 @@ pub(crate) struct FakeRepo {
     pub(crate) ci_waits: Arc<Mutex<Vec<factory_records::domain::quality::CiWait>>>,
     /// The known flakes each Run keeps.
     pub(crate) known_ci_flakes: Arc<Mutex<BTreeMap<RunId, Vec<String>>>>,
-    /// The failures other pull requests had, as every Run reads them.
+    /// The Runs whose flaky evidence was read, once per read.
+    pub(crate) ci_flakes_reads: Arc<Mutex<Vec<RunId>>>,
+    /// The failures other pull requests proved flaky, as every Run reads
+    /// them.
     pub(crate) ci_failures: Arc<Mutex<Vec<factory_records::domain::quality::FlakyCiFailure>>>,
     /// The reruns each `ci` Step asked for, in order.
     pub(crate) ci_retries: Arc<Mutex<Vec<(StepKey, factory_records::domain::quality::CiRetry)>>>,
@@ -722,11 +725,13 @@ impl RunRepository for FakeRepo {
         &self,
         id: RunId,
         repository: &str,
-        _since: chrono::DateTime<Utc>,
+        _pull_request: Option<&str>,
+        since: chrono::DateTime<Utc>,
     ) -> Result<factory_records::domain::quality::CiFlakes, FakeError> {
         if self.fails("ci_flakes") {
             return Err(FakeError);
         }
+        self.ci_flakes_reads.lock().expect("reads").push(id);
         Ok(factory_records::domain::quality::CiFlakes {
             known: self
                 .known_ci_flakes
@@ -740,8 +745,10 @@ impl RunRepository for FakeRepo {
                 .lock()
                 .expect("quarantines")
                 .iter()
-                .filter(|quarantine| quarantine.repository == repository)
-                .map(|quarantine| quarantine.name.clone())
+                .filter(|quarantine| {
+                    quarantine.repository == repository && quarantine.last_passed_at >= since
+                })
+                .map(|quarantine| quarantine.failure.clone())
                 .collect(),
             failures: self.ci_failures.lock().expect("failures").clone(),
         })
@@ -766,11 +773,12 @@ impl RunRepository for FakeRepo {
         key: StepKey,
         head_sha: &str,
         retries: &[factory_records::domain::quality::CiRetryRequest],
-    ) -> Result<(), FakeError> {
+    ) -> Result<Vec<String>, FakeError> {
         if self.fails("request_ci_retries") {
             return Err(FakeError);
         }
         let mut kept = self.ci_retries.lock().expect("retries");
+        let mut added = Vec::new();
         for retry in retries {
             let asked = kept
                 .iter()
@@ -782,14 +790,18 @@ impl RunRepository for FakeRepo {
                         name: retry.name.clone(),
                         head_sha: head_sha.to_string(),
                         job_id: retry.job_id,
+                        workflow_run_id: retry.workflow_run_id,
+                        failed_step: retry.failed_step.clone(),
+                        failure: retry.failure.clone(),
                         matched: retry.matched,
                         result: None,
                         requested_at: Utc::now(),
                     },
                 ));
+                added.push(retry.name.clone());
             }
         }
-        Ok(())
+        Ok(added)
     }
 
     async fn settle_ci_retries(
@@ -816,13 +828,15 @@ impl RunRepository for FakeRepo {
         _since: chrono::DateTime<Utc>,
         threshold: u32,
     ) -> Result<Vec<String>, FakeError> {
-        let passed = |name: &str| {
+        let passed = |failure: &factory_records::domain::quality::CiFailureIdentity| {
             self.ci_retries
                 .lock()
                 .expect("retries")
                 .iter()
                 .filter(|(_, retry)| {
-                    retry.name == name
+                    retry.name == failure.name
+                        && retry.failed_step == failure.failed_step
+                        && retry.failure == failure.failure
                         && retry.result
                             == Some(factory_records::domain::quality::CiRetryResult::Passed)
                 })
@@ -830,22 +844,32 @@ impl RunRepository for FakeRepo {
         };
         let mut made = Vec::new();
         for job in jobs {
-            let retries = u32::try_from(passed(&job.name)).unwrap_or(u32::MAX);
+            let retries = u32::try_from(passed(&job.failure)).unwrap_or(u32::MAX);
+            if retries < threshold {
+                continue;
+            }
             let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
-            let kept = quarantines.iter().any(|quarantine| {
-                quarantine.repository == repository && quarantine.name == job.name
+            let kept = quarantines.iter_mut().find(|quarantine| {
+                quarantine.repository == repository && quarantine.failure == job.failure
             });
-            if retries >= threshold && !kept {
-                quarantines.push(factory_records::domain::quality::CiQuarantine {
-                    repository: repository.to_string(),
-                    name: job.name.clone(),
-                    run_id: id,
-                    passed_retries: retries,
-                    task_id: job.task_id,
-                    filed: false,
-                    quarantined_at: Utc::now(),
-                });
-                made.push(job.name.clone());
+            match kept {
+                Some(kept) => {
+                    kept.passed_retries = retries;
+                    kept.last_passed_at = Utc::now();
+                }
+                None => {
+                    quarantines.push(factory_records::domain::quality::CiQuarantine {
+                        repository: repository.to_string(),
+                        failure: job.failure.clone(),
+                        run_id: Some(id),
+                        passed_retries: retries,
+                        task_id: job.task_id,
+                        filed: false,
+                        quarantined_at: Utc::now(),
+                        last_passed_at: Utc::now(),
+                    });
+                    made.push(job.failure.name.clone());
+                }
             }
         }
         Ok(made)
@@ -860,22 +884,25 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("quarantines")
             .iter()
-            .filter(|quarantine| quarantine.run_id == id && !quarantine.filed)
+            .filter(|quarantine| quarantine.run_id == Some(id) && !quarantine.filed)
             .cloned()
             .collect())
     }
 
-    async fn mark_ci_quarantine_filed(
-        &self,
-        repository: &str,
-        name: &str,
-    ) -> Result<(), FakeError> {
+    async fn mark_ci_quarantine_filed(&self, task_id: Uuid) -> Result<(), FakeError> {
         for quarantine in self.ci_quarantines.lock().expect("quarantines").iter_mut() {
-            if quarantine.repository == repository && quarantine.name == name {
+            if quarantine.task_id == task_id {
                 quarantine.filed = true;
             }
         }
         Ok(())
+    }
+
+    async fn lift_ci_quarantine(&self, task_id: Uuid) -> Result<bool, FakeError> {
+        let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
+        let before = quarantines.len();
+        quarantines.retain(|quarantine| quarantine.task_id != task_id);
+        Ok(quarantines.len() < before)
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
@@ -1903,8 +1930,11 @@ pub(crate) struct FakeGithubState {
     pub(crate) finished_reads: Vec<String>,
     /// The GitHub Actions jobs reruns were asked for, in order.
     pub(crate) reruns: Vec<u64>,
-    /// What GitHub answers a rerun with; `Started` when none is set.
-    pub(crate) rerun_answer: Option<JobRerun>,
+    /// What GitHub answers a rerun with, by job id; `Started` for a job
+    /// not named here.
+    pub(crate) rerun_answers: BTreeMap<u64, JobRerun>,
+    /// The jobs whose rerun fails to be asked, as GitHub down does.
+    pub(crate) rerun_fails: BTreeSet<u64>,
     /// The jobs that finished on every commit once a rerun started, in
     /// place of [`Self::finished`], when set.
     pub(crate) finished_after_rerun: Option<Vec<FinishedJob>>,
@@ -2246,7 +2276,14 @@ impl PullRequests for FakeGithub {
     ) -> Result<JobRerun, FakeGithubError> {
         let mut state = self.state();
         state.reruns.push(job_id);
-        let answer = state.rerun_answer.clone().unwrap_or(JobRerun::Started);
+        if state.rerun_fails.contains(&job_id) {
+            return Err(FakeGithubError::Down);
+        }
+        let answer = state
+            .rerun_answers
+            .get(&job_id)
+            .cloned()
+            .unwrap_or(JobRerun::Started);
         if answer == JobRerun::Started {
             if let Some(finished) = state.finished_after_rerun.take() {
                 state.finished = finished;

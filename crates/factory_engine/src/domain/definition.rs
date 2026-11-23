@@ -668,7 +668,7 @@ pub async fn read_definition<F: DefinitionFiles>(
             .map_err(DefinitionError::AgentRule)?;
     }
 
-    let rules: DefinitionRules = json(files, RULES_FILE).await?.unwrap_or_default();
+    let mut rules: DefinitionRules = json(files, RULES_FILE).await?.unwrap_or_default();
     if let Some(patterns) = &rules.control_files {
         if patterns.len() > MAX_DEFINITION_CONTROL_FILES {
             return Err(DefinitionError::TooManyControlFiles.into());
@@ -687,11 +687,16 @@ pub async fn read_definition<F: DefinitionFiles>(
     if token_budget.is_some_and(|budget| !(MIN_TOKEN_BUDGET..=MAX_TOKEN_BUDGET).contains(&budget)) {
         return Err(DefinitionError::TokenBudget.into());
     }
+    // A known flake is kept as GitHub names the job, without the spaces
+    // around it a hand-written file may add.
+    for name in &mut rules.known_flakes {
+        *name = name.trim().to_string();
+    }
     let named: BTreeSet<&str> = rules.known_flakes.iter().map(String::as_str).collect();
     let well_named = rules
         .known_flakes
         .iter()
-        .all(|name| !name.trim().is_empty() && name.len() <= KNOWN_FLAKE_BYTES);
+        .all(|name| !name.is_empty() && name.len() <= KNOWN_FLAKE_BYTES);
     if rules.known_flakes.len() > MAX_KNOWN_FLAKES
         || named.len() < rules.known_flakes.len()
         || !well_named

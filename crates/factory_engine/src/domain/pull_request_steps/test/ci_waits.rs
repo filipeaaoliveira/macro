@@ -17,6 +17,7 @@ fn finished(name: &str, state: CheckState, failed_step: Option<&str>) -> Finishe
         detail: None,
         annotations: Vec::new(),
         actions_job_id: None,
+        workflow_run_id: None,
     }
 }
 

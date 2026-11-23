@@ -338,6 +338,8 @@ async fn rules_the_factory_does_not_take_do_not_read() {
         r#"["e2e", "e2e"]"#.to_string(),
         r#"[" "]"#.to_string(),
         format!("[{}]", too_many.join(", ")),
+        format!(r#"["{}"]"#, "j".repeat(1025)),
+        r#"["e2e", " e2e "]"#.to_string(),
     ] {
         assert_eq!(
             read(with(

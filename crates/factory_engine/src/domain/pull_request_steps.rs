@@ -42,6 +42,7 @@ use factory_records::domain::models::{ControlFileChanges, Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::quality::{CiJob, CiJobResult, CiVerdict, CiWait};
 use factory_records::domain::review_rounds::ReviewRoundRepository;
+use factory_records::domain::standing_rules::StandingRule;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::checks::CHECKS_FILE;
@@ -57,7 +58,7 @@ use crate::domain::ports::{MainWatches, PullRequests, Retryable};
 use crate::domain::quality::ci_jobs;
 use crate::domain::setup::SETUP_FILE;
 use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
-use flaky_ci::RedNext;
+use flaky_ci::{FlakyWatch, RedNext, RedRead};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a
 /// Step attempt's 30 minutes, so the Step ends `timeout` rather than failing.
@@ -1011,6 +1012,8 @@ where
         // read, so a Run that comes here without `publish`, as from
         // `update`, shows its latest checks.
         let mut reported = false;
+        // What the wait learned of its flaky reds, read once.
+        let mut flaky = FlakyWatch::default();
         loop {
             let (pull_request, checks) = self
                 .find_with_checks(&input, &repository, required.as_ref(), &mut kept)
@@ -1063,9 +1066,14 @@ where
                 }
                 Verdict::Red(failed) => {
                     last_green = None;
-                    let next = self
-                        .after_red(&input, &repository, &checks, &heads, deadline, now)
-                        .await?;
+                    let red = RedRead {
+                        pull_request: &pull_request.url,
+                        checks: &checks,
+                        heads: &heads,
+                        deadline,
+                        now,
+                    };
+                    let next = self.after_red(&input, &repository, red, &mut flaky).await?;
                     match next {
                         RedNext::Hold => held_red = Some(failed),
                         RedNext::RerunRunning => {}
@@ -1099,6 +1107,24 @@ where
                     self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Red, deadline)
                         .await;
                     return Ok(red_report(&pull_request, &head, &failed, ""));
+                }
+                // A rerun still running is the red it was asked for.
+                let running = self.expire_reruns(&input, &head).await?;
+                if !running.is_empty() {
+                    self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Red, deadline)
+                        .await;
+                    let names: Vec<String> =
+                        running.iter().map(|name| format!("- {name}")).collect();
+                    return Ok(report(
+                        "red",
+                        format!(
+                            "{}\n\nThese checks failed on {head}, and their reruns under the `{}` rule did not finish within {} minutes:\n\n{}",
+                            named(&pull_request),
+                            StandingRule::RerunFlakyCi,
+                            CI_WAIT.as_secs() / 60,
+                            names.join("\n")
+                        ),
+                    ));
                 }
                 self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Timeout, deadline)
                     .await;

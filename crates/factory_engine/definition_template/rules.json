@@ -4,8 +4,7 @@
     "blockers": true,
     "merge": false,
     "ownerGates": true,
-    "taskThread": true,
-    "rerunFlakyCi": true
+    "taskThread": true
   },
   "controlFiles": [
     ".github/workflows/**",

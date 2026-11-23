@@ -6,22 +6,34 @@
 
 use factory_records::domain::models::Run;
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::quality::CiQuarantine;
+use factory_records::domain::quality::{CiQuarantine, FLAKY_PERIOD};
 
 use crate::domain::ports::{FollowUpMade, FollowUpTask, QuarantineTasks};
-use crate::domain::quality::FLAKY_PERIOD;
+
+/// Where `quarantine`'s job failed, for a person: its step and its test.
+fn failure_words(quarantine: &CiQuarantine) -> String {
+    let mut words = String::new();
+    if let Some(step) = &quarantine.failure.failed_step {
+        words.push_str(&format!(" in the step `{step}`"));
+    }
+    if let Some(test) = &quarantine.failure.failure {
+        words.push_str(&format!(" on `{test}`"));
+    }
+    words
+}
 
 /// The task filed for `quarantine`, which `run` made.
 fn quarantine_task(run: &Run, quarantine: &CiQuarantine) -> FollowUpTask {
     FollowUpTask {
-        name: format!("Fix the flaky CI job {}", quarantine.name),
+        name: format!("Fix the flaky CI job {}", quarantine.failure.name),
         markdown: format!(
-            "The CI job `{name}` in {repository} failed and then passed when it ran again \
-             {passed} times in {days} days, so the factory quarantined it: a `ci` Step now \
-             reruns it once when it alone turns a pull request red, before any CI fix.\n\n\
-             Find why it fails only some of the time, and fix it. Factory Run {run_id} \
-             quarantined it.",
-            name = quarantine.name,
+            "The CI job `{name}` in {repository} failed{how} and then passed when it ran \
+             again {passed} times in {days} days, so the factory quarantined that failure: \
+             a `ci` Step now reruns it once when it alone turns a pull request red, before \
+             any CI fix.\n\nFind why it fails only some of the time, and fix it. Factory \
+             Run {run_id} quarantined it.",
+            name = quarantine.failure.name,
+            how = failure_words(quarantine),
             repository = quarantine.repository,
             passed = quarantine.passed_retries,
             days = FLAKY_PERIOD.num_days(),
@@ -52,19 +64,20 @@ pub(crate) async fn file_tasks<R: RunRepository, Q: QuarantineTasks>(
             .await;
         match filed {
             Ok(Some(FollowUpMade::Made | FollowUpMade::OtherId(_))) => {
-                let marked = repo
-                    .mark_ci_quarantine_filed(&quarantine.repository, &quarantine.name)
-                    .await;
+                let marked = repo.mark_ci_quarantine_filed(quarantine.task_id).await;
                 if let Err(error) = marked {
-                    tracing::error!(%error, job = quarantine.name, "a filed quarantine task could not be kept");
+                    tracing::error!(%error, job = quarantine.failure.name, "a filed quarantine task could not be kept");
                 }
             }
             Ok(Some(FollowUpMade::Refused)) => {
-                tracing::error!(job = quarantine.name, "the quarantine task was refused");
+                tracing::error!(
+                    job = quarantine.failure.name,
+                    "the quarantine task was refused"
+                );
             }
             Ok(None) => {}
             Err(error) => {
-                tracing::error!(%error, job = quarantine.name, "the quarantine task could not be filed");
+                tracing::error!(%error, job = quarantine.failure.name, "the quarantine task could not be filed");
             }
         }
     }

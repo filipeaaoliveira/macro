@@ -22,7 +22,7 @@ use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, JobRerun,
     Merging, OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState,
-    PullRequestText, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
+    PullRequestText, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch, workflow_run_of,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -514,7 +514,13 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                         .join("\n")
                 })
                 .filter(|detail| !detail.is_empty());
-            let actions_job_id = (run.app_slug.as_deref() == Some(ACTIONS_APP)).then_some(run.id);
+            let actions = run.app_slug.as_deref() == Some(ACTIONS_APP);
+            let actions_job_id = actions.then_some(run.id);
+            let workflow_run_id = run
+                .html_url
+                .as_deref()
+                .filter(|_| actions)
+                .and_then(workflow_run_of);
             jobs.push(FinishedJob {
                 name: run.name,
                 state,
@@ -522,6 +528,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 detail,
                 annotations,
                 actions_job_id,
+                workflow_run_id,
             });
         }
         for status in statuses.items {
@@ -536,6 +543,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 detail: None,
                 annotations: Vec::new(),
                 actions_job_id: None,
+                workflow_run_id: None,
             });
         }
         Ok(jobs)

@@ -2669,9 +2669,15 @@ Definition.
 - A worker older than `selfImprovement` in `scorers.json` cannot read a
   Definition that sets it (`deny_unknown_fields`); one that leaves the
   defaults keeps the JSON it kept before.
-- Run the `factory_ci_quarantine` migration before deploying the factory:
-  the default rules now store `rerun_flaky_ci` on each Run, which the old
-  check refuses. A `ci` Step reruns only GitHub Actions jobs, with the
-  owner's token: one that may not write Actions gets the rerun declined,
-  and the red goes to `ci-fix` as before. A red the rule may rerun is held
-  until the head's other checks finish, so its `ci-fix` starts later.
+- Run the `factory_ci_quarantine` migrations (the table one, then the two
+  concurrent index builds) before deploying the factory. A worker older
+  than `rerun_flaky_ci` cannot read a Run whose kept rules store it, nor a
+  Definition whose `rules.json` sets `rerunFlakyCi` or `knownFlakes`
+  (`deny_unknown_fields`): deploy every worker and the API together after
+  the migrations, as for `selfImprovement`, and only then turn the rule on.
+  The rule is off by default. A `ci` Step reruns only GitHub Actions jobs,
+  with the owner's token: one that may not write Actions gets the rerun
+  declined, and the red goes to `ci-fix` as before. A red the rule may
+  rerun is held until the head's other checks finish, or at most three
+  minutes after its jobs' workflow runs completed, so its `ci-fix` starts
+  later.

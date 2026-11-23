@@ -97,9 +97,11 @@ Outside the files, all must be done:
   in a row.
 - `ownerGates` and `taskThread`: left as is, both on (The rules this
   template sets, below).
-- `rerunFlakyCi`: left as is, on. When every job that turned the pull
-  request red is a known flake, the `ci` Step reruns those jobs once on
-  GitHub before any CI fix. Left out, off.
+- `rerunFlakyCi`: left out, off, as in this template. Set it to `true` to
+  have the `ci` Step rerun, once and before any CI fix, the jobs that
+  turned a pull request red when every one of them is a known flake. The
+  Run owner's GitHub token must be able to write Actions (rerun a job):
+  without that, GitHub declines the rerun and the red goes to the fix.
 - `quietGates`: left out, every Gate no rule or stand-in answers notifies
   the Run's owner.
 - `queueLimit`: from 1 to 1000, how many of a person's Runs may wait on
@@ -113,10 +115,11 @@ Outside the files, all must be done:
   default whole, holds at most 195 patterns, and an empty list checks no
   file. Left as is, the factory's default and this Definition's own files.
 - `knownFlakes`: the CI jobs known to be flaky, by name as GitHub shows
-  them, at most 100. With `rerunFlakyCi` on, a red of only these jobs is
-  rerun once. A job is also taken for flaky when the same failure turned
-  other pull requests of the repository red, or when it is quarantined.
-  Left out, none.
+  them, at most 100, each at most 1024 bytes. With `rerunFlakyCi` on, a
+  red of only these jobs is rerun once. A failure (the job, its failed
+  step and its test) also counts as flaky when it is quarantined, or when
+  it proved flaky on two other pull requests of the repository in 30 days:
+  its rerun passed, or the same commit went green after it. Left out, none.
 
 `scorers.json` (may):
 
@@ -291,10 +294,6 @@ holds something shaped like one does not read.
 - `ownerGates`: the owner's comments on the Run's task reach the next agent
   Step, and Blockers a rule's fix left unchanged wait for them.
 - `taskThread`: a Run on a task posts its main updates to the task.
-- `rerunFlakyCi`: a red of only known flaky CI jobs is rerun once before any
-  CI fix. A job whose reruns passed three times in 30 days is quarantined:
-  a task is filed for it, Insights lists it, and it counts as a known flake
-  from then on.
 
 A Run on this repository always counts this Definition's own files as
 Control Files, and its change to one is Tampered even when its request names
@@ -303,6 +302,11 @@ merges, whatever `merge` says. So `controlFiles` lists at most 195
 patterns, leaving room for the 5 the Run adds.
 
 It leaves off:
+
+- `rerunFlakyCi`: turn it on to rerun a red of only known flaky CI jobs once
+  before any CI fix. A failure whose reruns passed three times in 30 days
+  is quarantined: a task is filed for it, Insights lists it, and it counts
+  as a known flake until no rerun of it passed for 30 days.
 
 - `quietGates`: every Gate no rule or stand-in answers notifies the Run's
   owner. Set it to `true` to stop those notifications; the Gates still wait

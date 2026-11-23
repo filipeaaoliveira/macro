@@ -62,17 +62,13 @@ const RUNS_LINKED: usize = 5;
 /// rather than the pull request's own.
 const FLAKY_PULL_REQUESTS: usize = 2;
 
-/// On how many other pull requests a red job's failure must have happened
-/// for a `ci` Step to take it for flaky: with its own, as many as CI health
-/// calls flaky.
-pub(crate) const FLAKY_OTHER_PULL_REQUESTS: u32 = FLAKY_PULL_REQUESTS as u32 - 1;
+/// On how many other pull requests a red job's failure must have proved
+/// flaky (its rerun passed, or the same head went green after it) for a
+/// `ci` Step to take it for flaky.
+pub(crate) const FLAKY_OTHER_PULL_REQUESTS: u32 = 2;
 
-/// How far back a `ci` Step reads other pull requests' failures to tell a
-/// flaky red, and a job's passed retries to quarantine it.
-pub(crate) const FLAKY_PERIOD: chrono::TimeDelta = chrono::TimeDelta::days(30);
-
-/// How many passed retries of a job in a repository, over
-/// [`FLAKY_PERIOD`], quarantine it.
+/// How many passed retries of a failure in a repository, over the records'
+/// `FLAKY_PERIOD`, quarantine it.
 pub(crate) const QUARANTINE_PASSED_RETRIES: u32 = 3;
 
 // What CI health records.
@@ -478,8 +474,9 @@ pub struct CiRetryCounts {
     pub refused: u32,
 }
 
-/// A CI job quarantined in a repository: its reruns passed often enough
-/// that it counts as a known flake there.
+/// A failure of a CI job quarantined in a repository: its reruns passed
+/// often enough that it counts as a known flake there, until no rerun of
+/// it passed for 30 days.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CiQuarantined {
@@ -487,10 +484,16 @@ pub struct CiQuarantined {
     pub repository: String,
     /// The job.
     pub job: String,
-    /// The passed retries that quarantined it.
+    /// The first of its steps that failed, when it was read.
+    pub step: Option<String>,
+    /// The test that failed, as its check run annotated it.
+    pub failure: Option<String>,
+    /// Its passed retries, as last counted.
     pub passed_retries: u32,
     /// When it was quarantined.
     pub quarantined_at: DateTime<Utc>,
+    /// When a rerun of it last passed.
+    pub last_passed_at: DateTime<Utc>,
     /// The task filed for it, once filed.
     pub task_id: Option<Uuid>,
 }
@@ -922,9 +925,12 @@ fn ci_health(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) -> Ci
             .iter()
             .map(|quarantine| CiQuarantined {
                 repository: quarantine.repository.clone(),
-                job: quarantine.name.clone(),
+                job: quarantine.failure.name.clone(),
+                step: quarantine.failure.failed_step.clone(),
+                failure: quarantine.failure.failure.clone(),
                 passed_retries: quarantine.passed_retries,
                 quarantined_at: quarantine.quarantined_at,
+                last_passed_at: quarantine.last_passed_at,
                 task_id: quarantine.filed.then_some(quarantine.task_id),
             })
             .collect(),

@@ -446,6 +446,21 @@ pub struct FinishedJob {
     /// job of the same name. None for another app's check run, or a
     /// commit status, which the factory cannot rerun.
     pub actions_job_id: Option<u64>,
+    /// For a GitHub Actions job, the workflow run it is in, as its page
+    /// names it: a rerun of the job is a new job of the same run.
+    pub workflow_run_id: Option<u64>,
+}
+
+/// The GitHub Actions workflow run a job's page, `url`, is under
+/// (`…/actions/runs/{id}/job/{job}`); none for another page.
+pub(crate) fn workflow_run_of(url: &str) -> Option<u64> {
+    let (_, after) = url.split_once("/actions/runs/")?;
+    let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+    let rest = &after[digits.len()..];
+    if !rest.starts_with("/job/") {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 /// What GitHub answered a rerun of a failed GitHub Actions job.

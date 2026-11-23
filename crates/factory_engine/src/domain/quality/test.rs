@@ -138,6 +138,7 @@ fn finished(state: CheckState, step: Option<&str>, detail: Option<&str>) -> Fini
         detail: detail.map(str::to_string),
         annotations: Vec::new(),
         actions_job_id: None,
+        workflow_run_id: None,
     }
 }
 
@@ -1043,7 +1044,9 @@ async fn a_repository_is_matched_however_it_is_written() {
 /// once it is filed.
 #[test]
 fn ci_health_counts_reruns_and_lists_quarantines() {
-    use factory_records::domain::quality::{CiQuarantine, CiRetryRecord, CiRetryResult};
+    use factory_records::domain::quality::{
+        CiFailureIdentity, CiQuarantine, CiRetryRecord, CiRetryResult,
+    };
 
     let rerun = |result: Option<CiRetryResult>| CiRetryRecord {
         run_id: run(1).run.id,
@@ -1053,12 +1056,17 @@ fn ci_health_counts_reruns_and_lists_quarantines() {
     let task = Uuid::from_u128(77);
     let quarantine = |name: &str, filed: bool| CiQuarantine {
         repository: "https://github.com/macro/app".to_string(),
-        name: name.to_string(),
-        run_id: run(1).run.id,
+        failure: CiFailureIdentity {
+            name: name.to_string(),
+            failed_step: Some("Run e2e".to_string()),
+            failure: None,
+        },
+        run_id: Some(run(1).run.id),
         passed_retries: 3,
         task_id: task,
         filed,
         quarantined_at: at("2026-11-02T12:00:00Z"),
+        last_passed_at: at("2026-11-03T12:00:00Z"),
     };
     let records = QualityRecords {
         runs: vec![run(1)],
