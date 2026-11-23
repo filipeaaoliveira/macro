@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_break_record\n                (run_id, seq, test, file, old_text, new_text, command, status, checked_commit,\n                 output)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n            ON CONFLICT (run_id, seq, test) DO UPDATE SET\n                file = EXCLUDED.file,\n                old_text = EXCLUDED.old_text,\n                new_text = EXCLUDED.new_text,\n                command = EXCLUDED.command,\n                status = EXCLUDED.status,\n                checked_commit = EXCLUDED.checked_commit,\n                output = EXCLUDED.output,\n                recorded_at = now()\n            WHERE factory_break_record.status = 'interrupted'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ced8988b6b5337ac8331c565dacae5e7997340460973be411e9d45d0f8c7f123"
+}

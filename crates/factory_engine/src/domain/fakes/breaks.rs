@@ -1,21 +1,24 @@
 //! The in-memory stand-in for break records.
 
 use chrono::Utc;
-use factory_records::domain::breaks::{BreakRecord, NewBreakRecord, RunsBreakRecords};
+use factory_records::domain::breaks::{BreakRecord, BreakStatus, NewBreakRecord, RunsBreakRecords};
 use factory_records::domain::models::{RunId, StepKey};
 
 use super::FakeRepo;
 
 impl FakeRepo {
     /// Keep `record` for the Step `key`, unless it keeps one for its test:
-    /// the first stays, as in Postgres.
+    /// the first stays, unless it was interrupted, as in Postgres.
     pub(crate) fn keep_break(&self, key: StepKey, record: &NewBreakRecord) {
         let mut breaks = self.breaks.lock().expect("breaks");
-        if breaks
+        if let Some(at) = breaks
             .iter()
-            .any(|(step, kept)| *step == key && kept.test == record.test)
+            .position(|(step, kept)| *step == key && kept.test == record.test)
         {
-            return;
+            if breaks[at].1.status != BreakStatus::Interrupted {
+                return;
+            }
+            breaks.remove(at);
         }
         breaks.push((
             key,

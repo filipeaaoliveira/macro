@@ -53,6 +53,9 @@ pub enum BreakStatus {
     /// The factory ran no command where the Step's agent works, or ran no
     /// checks: the break is the agent's word only.
     Unchecked,
+    /// The run ended before it said how the test went: the session's
+    /// command was stopped or lost. A later attempt runs it again.
+    Interrupted,
 }
 
 /// One break a Step's agent reported, and how it went.

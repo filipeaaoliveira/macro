@@ -153,6 +153,7 @@ async fn every_status_is_kept_and_read_back(pool: PgPool) {
         BreakStatus::Unreadable,
         BreakStatus::Dropped,
         BreakStatus::Unchecked,
+        BreakStatus::Interrupted,
     ];
     for (at, status) in statuses.iter().enumerate() {
         repo.record_break(key, &record(&format!("test_{at}"), *status, ""))
@@ -164,4 +165,40 @@ async fn every_status_is_kept_and_read_back(pool: PgPool) {
 
     let read: Vec<BreakStatus> = records[&run].iter().map(|record| record.status).collect();
     assert_eq!(read, statuses);
+}
+
+/// An interrupted run's record is replaced by the next run's; that one,
+/// as any other, stays.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn an_interrupted_record_is_replaced_by_the_next_run_s(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let run = run_with_steps(&repo, &[1]).await;
+    let key = StepKey {
+        run_id: run,
+        seq: 1,
+    };
+
+    repo.record_break(
+        key,
+        &record("toggle_saves", BreakStatus::Interrupted, "cut"),
+    )
+    .await
+    .expect("record");
+    repo.record_break(
+        key,
+        &record("toggle_saves", BreakStatus::Verified, "1 failed"),
+    )
+    .await
+    .expect("record again");
+    repo.record_break(key, &record("toggle_saves", BreakStatus::NotRun, "later"))
+        .await
+        .expect("record a third time");
+
+    let records = repo.runs_break_records(&[run]).await.expect("read");
+    assert_eq!(records[&run].len(), 1);
+    assert_eq!(records[&run][0].status, BreakStatus::Verified);
+    assert_eq!(records[&run][0].output, "1 failed");
 }

@@ -5,7 +5,8 @@
 -- runs each break on the commit whose checks passed (the test without the
 -- break, then with it) and records how it went. The reviewers read the
 -- records, and the Run's page lists them. A Step records each test's break
--- once, and its records go with the Step.
+-- once (an interrupted run's record is replaced by the next run's), and
+-- its records go with the Step.
 --
 -- The new table references factory_step, which takes a SHARE ROW EXCLUSIVE
 -- lock on it until this transaction ends. Give up rather than queue behind
@@ -25,11 +26,12 @@ CREATE TABLE factory_break_record (
     -- it; not_applied: the file does not hold the text to replace;
     -- unreadable: the agent's line does not read as a break; dropped: no
     -- time was left, or too many were reported; unchecked: the factory ran
-    -- nothing where the agent works.
+    -- nothing where the agent works; interrupted: the run ended before it
+    -- said how the test went, and a later run replaces the record.
     status text NOT NULL CHECK (
         status IN (
             'verified', 'not_reproduced', 'not_run', 'not_applied', 'unreadable', 'dropped',
-            'unchecked'
+            'unchecked', 'interrupted'
         )
     ),
     checked_commit text CHECK (checked_commit ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'),

@@ -410,7 +410,9 @@ pub trait RunRepository: Send + Sync + 'static {
 
     /// Record how the break of the test `record.test` that the Step `key`'s
     /// agent reported went. A break whose record is kept keeps it, so a
-    /// retried round records each break once.
+    /// retried round records each break once, unless it was
+    /// [`BreakStatus::Interrupted`](crate::domain::breaks::BreakStatus::Interrupted):
+    /// a later run's record replaces that one.
     fn record_break(
         &self,
         key: StepKey,
