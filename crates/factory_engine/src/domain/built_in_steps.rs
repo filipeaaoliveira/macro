@@ -32,7 +32,7 @@ use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository}
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::acceptance::plan_output;
-use crate::domain::agents::{PLAN_REVIEWER, REVIEWER_ROLES, VERIFIER};
+use crate::domain::agents::{PLAN_REVIEWER, REVIEWER, REVIEWER_ROLES, VERIFIER};
 use crate::domain::checks::fence_for;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
@@ -427,6 +427,8 @@ where
         // from a Step whose agent stopped without a result with the owner's
         // ask to try again: the agent has the Step's instructions and its
         // work so far there.
+        let role = agent_role(step, input.role)
+            .ok_or_else(|| BuiltInStepError::NotAnAgentStep(step.clone()))?;
         let asked_prompt = match input.resumes {
             Some(asked) => {
                 let answered = going_on_prompt(input.earlier, asked, input.questions_left)
@@ -434,7 +436,7 @@ where
                     .ok_or(BuiltInStepError::Unanswered(asked))?;
                 format!("{answered}{}", owner_notes_brief(input.owner_notes))
             }
-            None => prompt(instructions, &outcomes, input),
+            None => prompt(instructions, &outcomes, input, &role),
         };
         let setup = self.setup(input).await?;
         let asked_prompt = match &setup {
@@ -447,8 +449,6 @@ where
             key: input.key,
             owner: input.owner.clone(),
             step: step.clone(),
-            role: agent_role(step, input.role)
-                .ok_or_else(|| BuiltInStepError::NotAnAgentStep(step.clone()))?,
             prompt: asked_prompt,
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
@@ -461,12 +461,13 @@ where
             afresh: input.resumes.map(|_| {
                 format!(
                     "{}{}{}",
-                    prompt(instructions, &outcomes, input),
+                    prompt(instructions, &outcomes, input, &role),
                     setup.as_ref().map(setup_note).unwrap_or_default(),
                     SESSION_LOST_NOTE
                 )
             }),
             setup,
+            role,
         };
         let answer = match self.agent.answer(task).await {
             Ok(answer) => answer,
@@ -820,7 +821,7 @@ const HISTORY_BUDGET: usize = 48 * 1024;
 /// questions the owner answered ([`answers_brief`]), the notes the owner
 /// left on the Run's task since its latest Gate ([`owner_notes_brief`]),
 /// then the Run's earlier Steps ([`history`]).
-fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> String {
+fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>, role: &Role) -> String {
     let outcomes = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
@@ -835,7 +836,11 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
         .repository
         .map(|repository| workplace(repository, &input.branch(), input.base_commit))
         .unwrap_or_default();
-    let workplace = if input.repository.is_some() && input.resumes_failed_run() {
+    // Only an agent that changes its checkout is told what the failed Step
+    // may have left in it: one that reads only keeps, finishes or discards
+    // nothing.
+    let workplace = if input.repository.is_some() && input.resumes_failed_run() && !reads_only(role)
+    {
         format!("{workplace}{RESUMED_RUN_NOTE}")
     } else {
         workplace
@@ -856,6 +861,18 @@ pub(crate) const RESUMED_RUN_NOTE: &str = "\nThis run retries a run that failed 
 the branch already holds what that run's earlier steps pushed, and your working tree may \
 still hold the failed step's unfinished, uncommitted changes. Run `git status` and \
 `git log` first, and keep, finish or discard those changes on purpose before you go on.\n";
+
+/// Whether an agent in `role` only reads its checkout, as its instructions
+/// say: the planner, a reviewer, the verifier and the plan reviewer change,
+/// commit and push nothing.
+fn reads_only(role: &Role) -> bool {
+    let role = role.as_str();
+    role == "planner"
+        || role == REVIEWER
+        || REVIEWER_ROLES.contains(&role)
+        || role == VERIFIER
+        || role == PLAN_REVIEWER
+}
 
 /// Where the agent works: a checkout of the Run's repository, on the Run's
 /// branch `branch`, made from `base_commit` when the Run pins one, else

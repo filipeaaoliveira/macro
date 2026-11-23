@@ -779,3 +779,40 @@ async fn an_unbounded_review_goes_to_the_gate_at_its_third_round() {
 
     assert_eq!(report.outcome.as_str(), "reviewed", "{}", report.output);
 }
+
+/// A retry that starts at the plan review hands it the retried Run's
+/// checkout, but the plan reviewer changes nothing in it: it is not told
+/// to keep, finish or discard what the failed Step left there.
+#[tokio::test]
+async fn a_retry_s_plan_reviewer_is_not_told_to_tidy_the_checkout() {
+    let reviewer = Reviewer::answering(vec![(
+        "pass",
+        "Checked the files and the test.\n\n```json\n{\"blockers\": []}\n```".to_string(),
+    )]);
+    let repo = FakeRepo::default();
+    let earlier = [ended(1, "plan", 1, "done", &plan_editing("src/slug.rs"))];
+    let retried = RunId::generate();
+    let input = StepInput {
+        retry: Some(RunRetry {
+            retried_from: retried,
+            branch_of: retried,
+            first_seq: 2,
+        }),
+        ..review_input(key(2), &earlier, None, &ROUTES)
+    };
+    assert!(input.resumes_failed_run());
+
+    run_visit(&reviewer, &github(), &repo, "plan_review", input, 1)
+        .await
+        .expect("reviewed");
+
+    let tasks = reviewer.tasks.lock().expect("tasks");
+    assert_eq!(tasks[0].role.as_str(), "plan-reviewer");
+    assert!(
+        tasks[0]
+            .prompt
+            .contains(&format!("git push origin factory/{retried}")),
+        "it still works on the retried run's branch"
+    );
+    assert!(!tasks[0].prompt.contains(super::super::RESUMED_RUN_NOTE));
+}

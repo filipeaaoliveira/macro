@@ -323,9 +323,9 @@ async fn an_agent_step_works_in_the_run_s_repository_on_its_branch() {
     );
 }
 
-/// A retry's first Step works on the branch of the Run it retries, and is
-/// told its checkout may hold the failed Step's unfinished changes; a later
-/// Step of the retry is not.
+/// A retry's first Step works on the branch of the Run it retries, and its
+/// fixer is told its checkout may hold the failed Step's unfinished
+/// changes; a later Step of the retry is not.
 #[tokio::test]
 async fn a_retry_s_first_step_is_told_it_takes_over_a_failed_step_s_checkout() {
     let agent = FakeAgent::ending_with("done");
@@ -351,8 +351,8 @@ async fn a_retry_s_first_step_is_told_it_takes_over_a_failed_step_s_checkout() {
         ..first
     };
 
-    steps.run(&step("plan"), first).await.expect("plan");
-    steps.run(&step("plan"), later).await.expect("plan");
+    steps.run(&step("ci_fix"), first).await.expect("fix");
+    steps.run(&step("ci_fix"), later).await.expect("fix");
 
     let tasks = agent.tasks.lock().expect("tasks");
     assert!(tasks[0].prompt.contains(super::RESUMED_RUN_NOTE));
