@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { ScorerCalibration } from './scorerCalibration';
 import type { ScorerInsightInstructions } from './scorerInsightInstructions';
 import type { ScorerInsightMeanScore } from './scorerInsightMeanScore';
 import type { ScorerInsightSamplePercent } from './scorerInsightSamplePercent';
@@ -12,6 +13,9 @@ import type { ScorerInsightSamplePercent } from './scorerInsightSamplePercent';
  * A Scorer and its live judgments of the period's Runs.
  */
 export interface ScorerInsight {
+  /** How far its current judge agrees with the person's labels of its
+judgments, over all of their Runs, not only the period's. */
+  calibration: ScorerCalibration;
   /** The Flows whose Runs it judges; every Flow when empty. */
   flows: string[];
   /** What it judges; none for a Scorer no longer defined whose

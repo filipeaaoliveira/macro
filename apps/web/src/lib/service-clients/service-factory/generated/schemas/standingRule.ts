@@ -16,4 +16,5 @@ export const StandingRule = {
   approve_plan: 'approve_plan',
   fix_blockers: 'fix_blockers',
   merge_when_green: 'merge_when_green',
+  rerun_flaky_ci: 'rerun_flaky_ci',
 } as const;

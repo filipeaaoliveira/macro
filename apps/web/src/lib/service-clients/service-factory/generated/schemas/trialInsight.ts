@@ -4,7 +4,9 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+
 import type { RunId } from './runId';
+import type { TrialInsightEndedAt } from './trialInsightEndedAt';
 import type { TrialInsightRunOutcome } from './trialInsightRunOutcome';
 import type { TrialInsightScore } from './trialInsightScore';
 import type { TrialInsightTokens } from './trialInsightTokens';
@@ -14,6 +16,9 @@ import type { TrialScore } from './trialScore';
  * One trial of a suite.
  */
 export interface TrialInsight {
+  /** When its Run ended; none while it goes. With `startedAt`, the time
+the trial took. */
+  endedAt?: TrialInsightEndedAt;
   /** Its Run. */
   runId: RunId;
   runOutcome?: TrialInsightRunOutcome;
@@ -23,6 +28,8 @@ none for a Run that ended `infrastructure`, whose work never ran. */
   score?: TrialInsightScore;
   /** Its Benchmark's Scorers' judgments. */
   scores: TrialScore[];
+  /** When its Run was created, which starts its workflow. */
+  startedAt: string;
   /** The frozen task. */
   task: string;
   tokens?: TrialInsightTokens;

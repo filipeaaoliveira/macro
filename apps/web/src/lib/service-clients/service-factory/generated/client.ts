@@ -25,6 +25,7 @@ import type {
   GetFactoryInsightsParams,
   GetFactoryQualityParams,
   HandBackRequest,
+  LabelScoreRequest,
   LinkTaskRequest,
   ListFactoryBoardParams,
   NoteStepRequest,
@@ -38,6 +39,8 @@ import type {
   RunErrorResponse,
   RunId,
   RunInsights,
+  RunScores,
+  ScorerLabel,
   SessionStepRef,
   SetAutomationEnabledRequest,
   SetControlFilesRequest,
@@ -1630,6 +1633,164 @@ export const flawFactoryRun = async (
     status: res.status,
     headers: res.headers,
   } as flawFactoryRunResponse;
+};
+
+/**
+ * @summary The live Scorers' judgments of one of the caller's Runs, by Scorer, each
+with whether it passed, the caller's label of it, whether the Scorer's
+current judge (its model and instructions now) made it, and how far that
+judge agrees with the caller's labels over all of their Runs: a Scorer
+is `calibrated` once they labelled `needed` of its current judge's
+judgments and it agreed with at least `threshold` of them. Only the
+Run's owner reads it (404 otherwise). As `GET /insights/evaluation`, it
+reads for the owner however they call: their own session, an API key or
+token, an agent session acting for them, or an internal caller for them.
+ */
+export type getFactoryRunScoresResponse200 = {
+  data: RunScores;
+  status: 200;
+};
+
+export type getFactoryRunScoresResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryRunScoresResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type getFactoryRunScoresResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryRunScoresResponseSuccess =
+  getFactoryRunScoresResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryRunScoresResponseError = (
+  | getFactoryRunScoresResponse401
+  | getFactoryRunScoresResponse404
+  | getFactoryRunScoresResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryRunScoresResponse =
+  | getFactoryRunScoresResponseSuccess
+  | getFactoryRunScoresResponseError;
+
+export const getGetFactoryRunScoresUrl = (id: RunId) => {
+  return `/runs/${id}/scores`;
+};
+
+export const getFactoryRunScores = async (
+  id: RunId,
+  options?: RequestInit
+): Promise<getFactoryRunScoresResponse> => {
+  const res = await fetch(getGetFactoryRunScoresUrl(id), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryRunScoresResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryRunScoresResponse;
+};
+
+/**
+ * @summary Label a live Scorer's judgment of one of the caller's Runs with whether
+the Run should have passed on its dimension, replacing the label it had.
+Insights compare the labels with the judge's passes to calibrate the
+Scorer. Only the Run's owner labels it, in their own signed-in session
+and never from an agent's account (403 otherwise); a Run that is not
+theirs, or a Scorer that did not judge it, is 404, and a Scorer name
+outside the name rules is 400.
+ */
+export type labelFactoryRunScoreResponse200 = {
+  data: ScorerLabel;
+  status: 200;
+};
+
+export type labelFactoryRunScoreResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type labelFactoryRunScoreResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type labelFactoryRunScoreResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type labelFactoryRunScoreResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type labelFactoryRunScoreResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type labelFactoryRunScoreResponseSuccess =
+  labelFactoryRunScoreResponse200 & {
+    headers: Headers;
+  };
+export type labelFactoryRunScoreResponseError = (
+  | labelFactoryRunScoreResponse400
+  | labelFactoryRunScoreResponse401
+  | labelFactoryRunScoreResponse403
+  | labelFactoryRunScoreResponse404
+  | labelFactoryRunScoreResponse500
+) & {
+  headers: Headers;
+};
+
+export type labelFactoryRunScoreResponse =
+  | labelFactoryRunScoreResponseSuccess
+  | labelFactoryRunScoreResponseError;
+
+export const getLabelFactoryRunScoreUrl = (id: RunId, scorer: string) => {
+  return `/runs/${id}/scores/${scorer}/label`;
+};
+
+export const labelFactoryRunScore = async (
+  id: RunId,
+  scorer: string,
+  labelScoreRequest: LabelScoreRequest,
+  options?: RequestInit
+): Promise<labelFactoryRunScoreResponse> => {
+  const res = await fetch(getLabelFactoryRunScoreUrl(id, scorer), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(labelScoreRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: labelFactoryRunScoreResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as labelFactoryRunScoreResponse;
 };
 
 /**

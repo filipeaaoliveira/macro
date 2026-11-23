@@ -1707,6 +1707,166 @@
         }
       }
     },
+    "/runs/{id}/scores": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "The live Scorers' judgments of one of the caller's Runs, by Scorer, each\nwith whether it passed, the caller's label of it, whether the Scorer's\ncurrent judge (its model and instructions now) made it, and how far that\njudge agrees with the caller's labels over all of their Runs: a Scorer\nis `calibrated` once they labelled `needed` of its current judge's\njudgments and it agreed with at least `threshold` of them. Only the\nRun's owner reads it (404 otherwise). As `GET /insights/evaluation`, it\nreads for the owner however they call: their own session, an API key or\ntoken, an agent session acting for them, or an internal caller for them.",
+        "operationId": "get_factory_run_scores",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunScores"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/scores/{scorer}/label": {
+      "put": {
+        "tags": ["factory"],
+        "summary": "Label a live Scorer's judgment of one of the caller's Runs with whether\nthe Run should have passed on its dimension, replacing the label it had.\nInsights compare the labels with the judge's passes to calibrate the\nScorer. Only the Run's owner labels it, in their own signed-in session\nand never from an agent's account (403 otherwise); a Run that is not\ntheirs, or a Scorer that did not judge it, is 404, and a Scorer name\noutside the name rules is 400.",
+        "operationId": "label_factory_run_score",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "scorer",
+            "in": "path",
+            "description": "The Scorer's name.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9_-]{1,64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelScoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorerLabel"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{id}/steps/{seq}/answer": {
       "post": {
         "tags": ["factory"],
@@ -3845,7 +4005,9 @@
           "ciFixRounds",
           "runsWithCiFixes",
           "reviewFixRounds",
-          "recurring"
+          "recurring",
+          "retries",
+          "quarantined"
         ],
         "properties": {
           "causes": {
@@ -3876,6 +4038,13 @@
             },
             "description": "Each job, the reddest first."
           },
+          "quarantined": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CiQuarantined"
+            },
+            "description": "The jobs quarantined in the repositories read, by repository and\nname: whoever's Run quarantined them, as a repository's flaky jobs\nare every Run's there."
+          },
           "recurring": {
             "type": "array",
             "items": {
@@ -3888,6 +4057,10 @@
             "format": "int32",
             "description": "Those that ended red.",
             "minimum": 0
+          },
+          "retries": {
+            "$ref": "#/components/schemas/CiRetryCounts",
+            "description": "How the Runs' reruns of flaky jobs ended, under the\n`rerun_flaky_ci` rule."
           },
           "reviewFixRounds": {
             "type": "integer",
@@ -3961,6 +4134,81 @@
           "repository": {
             "type": ["string", "null"],
             "description": "The repository it runs in, by URL."
+          }
+        }
+      },
+      "CiQuarantined": {
+        "type": "object",
+        "description": "A failure of a CI job quarantined in a repository: its reruns passed\noften enough that it counts as a known flake there, until no rerun of\nit passed for 30 days.",
+        "required": [
+          "repository",
+          "job",
+          "passedRetries",
+          "quarantinedAt",
+          "lastPassedAt"
+        ],
+        "properties": {
+          "failure": {
+            "type": ["string", "null"],
+            "description": "The test that failed, as its check run annotated it."
+          },
+          "job": {
+            "type": "string",
+            "description": "The job."
+          },
+          "lastPassedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a rerun of it last passed."
+          },
+          "passedRetries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its passed retries, as last counted.",
+            "minimum": 0
+          },
+          "quarantinedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was quarantined."
+          },
+          "repository": {
+            "type": "string",
+            "description": "The repository, by its URL in lower case."
+          },
+          "step": {
+            "type": ["string", "null"],
+            "description": "The first of its steps that failed, when it was read."
+          },
+          "taskId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The task filed for it, once filed."
+          }
+        }
+      },
+      "CiRetryCounts": {
+        "type": "object",
+        "description": "How the reruns of flaky CI jobs ended; those still running are not\ncounted.",
+        "required": ["passed", "failed", "refused"],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Failed again, so the change went to a CI fix.",
+            "minimum": 0
+          },
+          "passed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Passed when they ran again: passed retries, each a CI fix round\nthe Run did not spend.",
+            "minimum": 0
+          },
+          "refused": {
+            "type": "integer",
+            "format": "int32",
+            "description": "GitHub would not rerun them.",
+            "minimum": 0
           }
         }
       },
@@ -5114,6 +5362,18 @@
           }
         }
       },
+      "LabelScoreRequest": {
+        "type": "object",
+        "description": "A person's label of a Scorer's judgment.",
+        "required": ["passed"],
+        "properties": {
+          "passed": {
+            "type": "boolean",
+            "description": "Whether the Run should have passed on the Scorer's dimension."
+          }
+        },
+        "additionalProperties": false
+      },
       "Lines": {
         "type": "object",
         "description": "The lines of a file a finding is about, from 1, both included.",
@@ -5241,6 +5501,10 @@
           "quietGates": {
             "type": "boolean",
             "description": "Whether the Run's owner is left unnotified when a Gate waits on\nthem: off, as when a definition is sent without it, every Gate no\nrule or stand-in answers (a Flow's Gate or an agent's question)\nnotifies them, pushed to their phone, whether or not the Run has a\ntask. On, they are not notified; the Gate still waits on them and\nis listed as waiting. A notify-only Gate's notice and the\nstand-in's are sent either way."
+          },
+          "rerunFlakyCi": {
+            "type": "boolean",
+            "description": "Rerun, once, the failed CI jobs of a pull request whose every red\njob is a known flake, before any CI fix (`rerun_flaky_ci`): a job\nthe Run's Factory Definition names in `knownFlakes`, one\nquarantined in its repository, or one whose same failure turned\nother pull requests red. A definition sent without it has it off."
           },
           "standIn": {
             "$ref": "#/components/schemas/StandInKinds",
@@ -6521,6 +6785,81 @@
           }
         }
       },
+      "RunScore": {
+        "type": "object",
+        "description": "A live Scorer's judgment of one Run, as the Run view shows it.",
+        "required": [
+          "scorer",
+          "score",
+          "passed",
+          "reason",
+          "model",
+          "judgedAt",
+          "byCurrentJudge",
+          "calibration"
+        ],
+        "properties": {
+          "byCurrentJudge": {
+            "type": "boolean",
+            "description": "Whether the Scorer's current judge made it: only then does its\nlabel count toward the Scorer's calibration."
+          },
+          "calibration": {
+            "$ref": "#/components/schemas/ScorerCalibration",
+            "description": "How far the Scorer's current judge agrees with the owner's labels."
+          },
+          "judgedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it judged."
+          },
+          "label": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ScorerLabel",
+                "description": "The Run's owner's label of it, if they gave one."
+              }
+            ]
+          },
+          "model": {
+            "type": "string",
+            "description": "The model that judged."
+          },
+          "passed": {
+            "type": "boolean",
+            "description": "Whether the score passes: at least half."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why, as the judge said."
+          },
+          "score": {
+            "type": "number",
+            "format": "double",
+            "description": "From 0 to 1."
+          },
+          "scorer": {
+            "type": "string",
+            "description": "The Scorer."
+          }
+        }
+      },
+      "RunScores": {
+        "type": "object",
+        "description": "The live Scorers' judgments of one Run.",
+        "required": ["scores"],
+        "properties": {
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunScore"
+            },
+            "description": "One for each Scorer that judged it, by Scorer."
+          }
+        }
+      },
       "RunTokenBudget": {
         "type": "object",
         "description": "A Run's token budget as the Run API shows it.",
@@ -6570,11 +6909,54 @@
           }
         }
       },
+      "ScorerCalibration": {
+        "type": "object",
+        "description": "How far a Scorer's judge agrees with a person's labels of its judgments\nof their Runs, over all of their Runs.",
+        "required": ["labelled", "agreed", "needed", "threshold", "calibrated"],
+        "properties": {
+          "agreed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of those it passed exactly when the person did.",
+            "minimum": 0
+          },
+          "agreement": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "`agreed` over `labelled`; none when none is labelled."
+          },
+          "calibrated": {
+            "type": "boolean",
+            "description": "Whether it has both: until then, nothing should act on its numbers."
+          },
+          "labelled": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of its judgments the person labelled.",
+            "minimum": 0
+          },
+          "needed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The labels it needs to be calibrated.",
+            "minimum": 0
+          },
+          "threshold": {
+            "type": "number",
+            "format": "double",
+            "description": "The agreement it needs."
+          }
+        }
+      },
       "ScorerInsight": {
         "type": "object",
         "description": "A Scorer and its live judgments of the period's Runs.",
-        "required": ["name", "flows", "judged", "passed"],
+        "required": ["name", "flows", "judged", "passed", "calibration"],
         "properties": {
+          "calibration": {
+            "$ref": "#/components/schemas/ScorerCalibration",
+            "description": "How far its current judge agrees with the person's labels of its\njudgments, over all of their Runs, not only the period's."
+          },
           "flows": {
             "type": "array",
             "items": {
@@ -6612,6 +6994,22 @@
             "format": "int32",
             "description": "The percentage of those Runs it judges; none when no longer defined.",
             "minimum": 0
+          }
+        }
+      },
+      "ScorerLabel": {
+        "type": "object",
+        "description": "A person's label of a live Scorer's judgment of one of their Runs:\nwhether the Run should have passed on the Scorer's dimension.",
+        "required": ["passed", "labelledAt"],
+        "properties": {
+          "labelledAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was labelled, the last time."
+          },
+          "passed": {
+            "type": "boolean",
+            "description": "Whether it should have passed."
           }
         }
       },
@@ -6845,7 +7243,12 @@
       "StandingRule": {
         "type": "string",
         "description": "A Standing Rule: the answer the factory gives a Gate of one kind on its\nown, when what the rule requires holds.",
-        "enum": ["approve_plan", "fix_blockers", "merge_when_green"]
+        "enum": [
+          "approve_plan",
+          "fix_blockers",
+          "merge_when_green",
+          "rerun_flaky_ci"
+        ]
       },
       "StandingRulesSettings": {
         "type": "object",
@@ -7244,8 +7647,13 @@
       "TrialInsight": {
         "type": "object",
         "description": "One trial of a suite.",
-        "required": ["task", "runId", "scores"],
+        "required": ["task", "runId", "startedAt", "scores"],
         "properties": {
+          "endedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When its Run ended; none while it goes. With `startedAt`, the time\nthe trial took."
+          },
           "runId": {
             "$ref": "#/components/schemas/RunId",
             "description": "Its Run."
@@ -7272,6 +7680,11 @@
               "$ref": "#/components/schemas/TrialScore"
             },
             "description": "Its Benchmark's Scorers' judgments."
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When its Run was created, which starts its workflow."
           },
           "task": {
             "type": "string",

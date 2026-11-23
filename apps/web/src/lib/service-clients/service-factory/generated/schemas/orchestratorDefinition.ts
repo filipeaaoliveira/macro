@@ -62,6 +62,12 @@ task. On, they are not notified; the Gate still waits on them and
 is listed as waiting. A notify-only Gate's notice and the
 stand-in's are sent either way. */
   quietGates?: boolean;
+  /** Rerun, once, the failed CI jobs of a pull request whose every red
+job is a known flake, before any CI fix (`rerun_flaky_ci`): a job
+the Run's Factory Definition names in `knownFlakes`, one
+quarantined in its repository, or one whose same failure turned
+other pull requests red. A definition sent without it has it off. */
+  rerunFlakyCi?: boolean;
   /** The kinds of Gate the stand-in answers for the Run's owner, after
 the rules and before the person; off for every kind when left out. */
   standIn?: StandInKinds;

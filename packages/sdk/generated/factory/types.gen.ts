@@ -548,6 +548,12 @@ export type CiHealth = {
      */
     jobs: Array<CiJobHealth>;
     /**
+     * The jobs quarantined in the repositories read, by repository and
+     * name: whoever's Run quarantined them, as a repository's flaky jobs
+     * are every Run's there.
+     */
+    quarantined: Array<CiQuarantined>;
+    /**
      * Failures, by test or named step, on two or more pull requests,
      * newest first.
      */
@@ -556,6 +562,11 @@ export type CiHealth = {
      * Those that ended red.
      */
     redWaits: number;
+    /**
+     * How the Runs' reruns of flaky jobs ended, under the
+     * `rerun_flaky_ci` rule.
+     */
+    retries: CiRetryCounts;
     /**
      * Rounds Runs spent fixing reviewers' Blockers, apart from CI.
      */
@@ -607,6 +618,66 @@ export type CiJobHealth = {
      * The repository it runs in, by URL.
      */
     repository?: string | null;
+};
+
+/**
+ * A failure of a CI job quarantined in a repository: its reruns passed
+ * often enough that it counts as a known flake there, until no rerun of
+ * it passed for 30 days.
+ */
+export type CiQuarantined = {
+    /**
+     * The test that failed, as its check run annotated it.
+     */
+    failure?: string | null;
+    /**
+     * The job.
+     */
+    job: string;
+    /**
+     * When a rerun of it last passed.
+     */
+    lastPassedAt: string;
+    /**
+     * Its passed retries, as last counted.
+     */
+    passedRetries: number;
+    /**
+     * When it was quarantined.
+     */
+    quarantinedAt: string;
+    /**
+     * The repository, by its URL in lower case.
+     */
+    repository: string;
+    /**
+     * The first of its steps that failed, when it was read.
+     */
+    step?: string | null;
+    /**
+     * The task filed for it, once filed.
+     */
+    taskId?: string | null;
+};
+
+/**
+ * How the reruns of flaky CI jobs ended; those still running are not
+ * counted.
+ */
+export type CiRetryCounts = {
+    /**
+     * Failed again, so the change went to a CI fix.
+     */
+    failed: number;
+    /**
+     * Passed when they ran again: passed retries, each a CI fix round
+     * the Run did not spend.
+     */
+    passed: number;
+    /**
+     * GitHub would not rerun them.
+     */
+    refused: number;
 };
 
 /**
@@ -1416,6 +1487,16 @@ export type InsightDay = {
 };
 
 /**
+ * A person's label of a Scorer's judgment.
+ */
+export type LabelScoreRequest = {
+    /**
+     * Whether the Run should have passed on the Scorer's dimension.
+     */
+    passed: boolean;
+};
+
+/**
  * The lines of a file a finding is about, from 1, both included.
  */
 export type Lines = {
@@ -1559,6 +1640,14 @@ export type OrchestratorDefinition = {
      * stand-in's are sent either way.
      */
     quietGates?: boolean;
+    /**
+     * Rerun, once, the failed CI jobs of a pull request whose every red
+     * job is a known flake, before any CI fix (`rerun_flaky_ci`): a job
+     * the Run's Factory Definition names in `knownFlakes`, one
+     * quarantined in its repository, or one whose same failure turned
+     * other pull requests red. A definition sent without it has it off.
+     */
+    rerunFlakyCi?: boolean;
     /**
      * The kinds of Gate the stand-in answers for the Run's owner, after
      * the rules and before the person; off for every kind when left out.
@@ -2431,6 +2520,56 @@ export type RunRules = {
 };
 
 /**
+ * A live Scorer's judgment of one Run, as the Run view shows it.
+ */
+export type RunScore = {
+    /**
+     * Whether the Scorer's current judge made it: only then does its
+     * label count toward the Scorer's calibration.
+     */
+    byCurrentJudge: boolean;
+    /**
+     * How far the Scorer's current judge agrees with the owner's labels.
+     */
+    calibration: ScorerCalibration;
+    /**
+     * When it judged.
+     */
+    judgedAt: string;
+    label?: null | ScorerLabel;
+    /**
+     * The model that judged.
+     */
+    model: string;
+    /**
+     * Whether the score passes: at least half.
+     */
+    passed: boolean;
+    /**
+     * Why, as the judge said.
+     */
+    reason: string;
+    /**
+     * From 0 to 1.
+     */
+    score: number;
+    /**
+     * The Scorer.
+     */
+    scorer: string;
+};
+
+/**
+ * The live Scorers' judgments of one Run.
+ */
+export type RunScores = {
+    /**
+     * One for each Scorer that judged it, by Scorer.
+     */
+    scores: Array<RunScore>;
+};
+
+/**
  * A Run's token budget as the Run API shows it.
  */
 export type RunTokenBudget = {
@@ -2469,9 +2608,45 @@ export type RunTokens = {
 };
 
 /**
+ * How far a Scorer's judge agrees with a person's labels of its judgments
+ * of their Runs, over all of their Runs.
+ */
+export type ScorerCalibration = {
+    /**
+     * How many of those it passed exactly when the person did.
+     */
+    agreed: number;
+    /**
+     * `agreed` over `labelled`; none when none is labelled.
+     */
+    agreement?: number | null;
+    /**
+     * Whether it has both: until then, nothing should act on its numbers.
+     */
+    calibrated: boolean;
+    /**
+     * How many of its judgments the person labelled.
+     */
+    labelled: number;
+    /**
+     * The labels it needs to be calibrated.
+     */
+    needed: number;
+    /**
+     * The agreement it needs.
+     */
+    threshold: number;
+};
+
+/**
  * A Scorer and its live judgments of the period's Runs.
  */
 export type ScorerInsight = {
+    /**
+     * How far its current judge agrees with the person's labels of its
+     * judgments, over all of their Runs, not only the period's.
+     */
+    calibration: ScorerCalibration;
     /**
      * The Flows whose Runs it judges; every Flow when empty.
      */
@@ -2501,6 +2676,21 @@ export type ScorerInsight = {
      * The percentage of those Runs it judges; none when no longer defined.
      */
     samplePercent?: number | null;
+};
+
+/**
+ * A person's label of a live Scorer's judgment of one of their Runs:
+ * whether the Run should have passed on the Scorer's dimension.
+ */
+export type ScorerLabel = {
+    /**
+     * When it was labelled, the last time.
+     */
+    labelledAt: string;
+    /**
+     * Whether it should have passed.
+     */
+    passed: boolean;
 };
 
 /**
@@ -2693,7 +2883,7 @@ export type StandingRoleName = string;
  * A Standing Rule: the answer the factory gives a Gate of one kind on its
  * own, when what the rule requires holds.
  */
-export type StandingRule = 'approve_plan' | 'fix_blockers' | 'merge_when_green';
+export type StandingRule = 'approve_plan' | 'fix_blockers' | 'merge_when_green' | 'rerun_flaky_ci';
 
 /**
  * The Standing Rules a person's Runs are created with: their team's
@@ -2971,6 +3161,11 @@ export type TokenCounts = {
  */
 export type TrialInsight = {
     /**
+     * When its Run ended; none while it goes. With `startedAt`, the time
+     * the trial took.
+     */
+    endedAt?: string | null;
+    /**
      * Its Run.
      */
     runId: RunId;
@@ -2985,6 +3180,10 @@ export type TrialInsight = {
      * Its Benchmark's Scorers' judgments.
      */
     scores: Array<TrialScore>;
+    /**
+     * When its Run was created, which starts its workflow.
+     */
+    startedAt: string;
     /**
      * The frozen task.
      */
@@ -3654,6 +3853,64 @@ export type FlawFactoryRunResponses = {
 };
 
 export type FlawFactoryRunResponse = FlawFactoryRunResponses[keyof FlawFactoryRunResponses];
+
+export type GetFactoryRunScoresData = {
+    body?: never;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+    };
+    query?: never;
+    url: '/runs/{id}/scores';
+};
+
+export type GetFactoryRunScoresErrors = {
+    401: ErrorResponse;
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryRunScoresError = GetFactoryRunScoresErrors[keyof GetFactoryRunScoresErrors];
+
+export type GetFactoryRunScoresResponses = {
+    200: RunScores;
+};
+
+export type GetFactoryRunScoresResponse = GetFactoryRunScoresResponses[keyof GetFactoryRunScoresResponses];
+
+export type LabelFactoryRunScoreData = {
+    body: LabelScoreRequest;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+        /**
+         * The Scorer's name.
+         */
+        scorer: string;
+    };
+    query?: never;
+    url: '/runs/{id}/scores/{scorer}/label';
+};
+
+export type LabelFactoryRunScoreErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type LabelFactoryRunScoreError = LabelFactoryRunScoreErrors[keyof LabelFactoryRunScoreErrors];
+
+export type LabelFactoryRunScoreResponses = {
+    200: ScorerLabel;
+};
+
+export type LabelFactoryRunScoreResponse = LabelFactoryRunScoreResponses[keyof LabelFactoryRunScoreResponses];
 
 export type AnswerFactoryGateData = {
     body: AnswerGateRequest;
