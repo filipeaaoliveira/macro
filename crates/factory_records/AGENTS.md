@@ -139,7 +139,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261123092916_factory_ci_quarantine.sql`,
   `20261123100012_factory_scorer_label.sql`,
   `20261123100332_factory_run_repo_url_index.sql`,
-  `20261123100336_factory_ci_wait_recorded_index.sql`), `factory_step_steer`,
+  `20261123100336_factory_ci_wait_recorded_index.sql`,
+  `20261123130000_factory_break_record.sql`), `factory_break_record`,
+  `factory_step_steer`,
   `factory_run_score`, `factory_scorer_label`, `factory_run_arm`, `factory_run_agent_rule`,
   `factory_run_task_tags_unread`,
   `factory_benchmark_suite`,
@@ -233,6 +235,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   the commit its first run was on (`checked_commit`); a round the agent
   reported has no `results` and no commit.
   `list_steps` and `list_runs_steps` attach them to their Steps.
+- A Step's break records (`factory_break_record`,
+  `src/domain/breaks.rs`, `src/outbound/pg_run_repository/breaks.rs`) keep
+  how each test's break the Step's agent reported went, once per Step and
+  test: `record_break` keeps the first, so a retried round records each
+  break once (an `interrupted` record is replaced by the next run's).
+  `runs_break_records` reads some Runs' records, by Step. A retry copies
+  the records of the Steps it keeps.
 - A review round (`factory_review_round`) is keyed by the place of its first
   Step and recorded before its Steps start, so it references the Run, not a
   Step; `start_review_round` keeps its first record. `record_findings`

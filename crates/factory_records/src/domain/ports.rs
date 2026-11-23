@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::breaks::{NewBreakRecord, RunsBreakRecords};
 use crate::domain::models::{
     BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, DefinitionRead, EntryId, GateAnswer, HandBack, HandedBack, NewRetry,
@@ -422,6 +423,24 @@ pub trait RunRepository: Send + Sync + 'static {
         round: u8,
         fix_action_id: Uuid,
     ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
+
+    /// Record how the break of the test `record.test` that the Step `key`'s
+    /// agent reported went. A break whose record is kept keeps it, so a
+    /// retried round records each break once, unless it was
+    /// [`BreakStatus::Interrupted`](crate::domain::breaks::BreakStatus::Interrupted):
+    /// a later run's record replaces that one.
+    fn record_break(
+        &self,
+        key: StepKey,
+        record: &NewBreakRecord,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The break records of the Runs `ids`, by Run: each Run's by Step, then
+    /// in the order they were recorded. A Run with none is left out.
+    fn runs_break_records(
+        &self,
+        ids: &[RunId],
+    ) -> impl Future<Output = Result<RunsBreakRecords, Self::Err>> + Send;
 
     /// Keep `sha` as the commit whose checks passed, which the Run asks a
     /// person to merge, replacing the one kept before: only that commit

@@ -411,6 +411,59 @@ export type BoardScope = 'mine' | 'team';
 export type BoardState = 'running' | 'waiting' | 'held' | 'stopped' | 'finished';
 
 /**
+ * One break a Step's agent reported, and how it went.
+ */
+export type BreakRecord = {
+    /**
+     * The commit it ran on; none when it did not run.
+     */
+    checkedCommit?: string | null;
+    /**
+     * The command that runs the test, from the repository's root.
+     */
+    command: string;
+    /**
+     * The file the break edits, from the repository's root.
+     */
+    file: string;
+    /**
+     * What it puts in its place.
+     */
+    newText: string;
+    /**
+     * The text the break replaces: its first place in the file.
+     */
+    oldText: string;
+    /**
+     * The end of what the test printed with the break, or without it when
+     * that run failed; or why it did not run.
+     */
+    output: string;
+    /**
+     * When it was recorded.
+     */
+    recordedAt: string;
+    /**
+     * The Step whose agent reported it.
+     */
+    seq: number;
+    /**
+     * How it went.
+     */
+    status: BreakStatus;
+    /**
+     * The test, as the agent named it; the whole line for one that does
+     * not read.
+     */
+    test: string;
+};
+
+/**
+ * How a break went.
+ */
+export type BreakStatus = 'verified' | 'not_reproduced' | 'hung' | 'not_run' | 'not_applied' | 'unreadable' | 'dropped' | 'unchecked' | 'interrupted';
+
+/**
  * Why a Run's token budget ended it, before an agent Step.
  */
 export type BudgetStop = {
@@ -2379,6 +2432,12 @@ export type RunDetail = {
      * dropped.
      */
     blockerResolutions: BlockerResolutions;
+    /**
+     * The breaks its write and fix Steps reported for the tests they
+     * added, by Step, each with how the factory's run of it went: in a
+     * Run's own read (`GET /runs/{id}`) only, empty in a list of Runs.
+     */
+    breakRecords: Array<BreakRecord>;
     mainHold?: null | MainHold;
     /**
      * Its review rounds, in order, each with what its reviewers found.

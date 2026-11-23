@@ -1879,3 +1879,65 @@ describe('RunView plan review and split', () => {
     expect(link.getAttribute('href')).toContain(CHILD);
   });
 });
+
+describe('RunView break records', () => {
+  it('lists each Step’s break records under it, warning on a test left unproven', async () => {
+    const { setRun } = mount({});
+    const step = (seq: number, entry: string): RunStep => ({
+      seq,
+      entry,
+      visit: 1,
+      startedAt: '2026-11-16T09:00:00Z',
+      end: { outcome: 'done', output: '', endedAt: '2026-11-16T09:01:00Z' },
+    });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'blocked', endedAt: '2026-11-16T10:00:00Z' },
+      steps: [step(1, 'plan'), step(2, 'write'), step(3, 'fix')],
+      breakRecords: [
+        {
+          seq: 2,
+          test: 'parses a due date',
+          file: 'src/due.ts',
+          oldText: 'return date;',
+          newText: 'return null;',
+          status: 'verified',
+          checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+          output: '1 failed',
+        },
+        {
+          seq: 3,
+          test: 'sorts by due date',
+          file: 'src/sort.ts',
+          oldText: 'a - b',
+          newText: 'b - a',
+          status: 'not_reproduced',
+          checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+          output: '1 passed',
+        },
+      ],
+    });
+
+    const records = (seq: number) =>
+      document.querySelector(
+        `[data-factory-run-step="${seq}"] [data-break-records]`
+      ) as HTMLElement | null;
+    await waitFor(() => expect(records(2)).not.toBeNull());
+    expect(records(1)).toBeNull();
+
+    const written = within(records(2) as HTMLElement);
+    expect(written.getByText('Break records')).toBeTruthy();
+    expect(written.getByText('parses a due date')).toBeTruthy();
+    expect(written.getByText('src/due.ts')).toBeTruthy();
+    expect(written.getByText('− return date;')).toBeTruthy();
+    expect(written.getByText('+ return null;')).toBeTruthy();
+    const verified = written.getByText('Verified');
+    expect(verified.getAttribute('data-break-tone')).toBeNull();
+
+    const fixed = within(records(3) as HTMLElement);
+    expect(fixed.getByText('sorts by due date')).toBeTruthy();
+    expect(fixed.queryByText('parses a due date')).toBeNull();
+    const unproven = fixed.getByText('Passed with the break');
+    expect(unproven.getAttribute('data-break-tone')).toBe('warning');
+  });
+});

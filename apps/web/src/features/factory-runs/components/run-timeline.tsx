@@ -9,10 +9,14 @@ import { createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
 import { flowWordLabel, flowWordText, outcomeTone } from '../core/flow-words';
 import {
   type BaseRequiredChecks,
+  type BreakRecord,
+  type BreakStatus,
+  breakRecordsOf,
   type CheckRound,
   type FiledTask,
   findingCounts,
   findingsOf,
+  isBlockingBreak,
   isQuestion,
   type MainHold,
   type ReviewFinding,
@@ -58,6 +62,8 @@ export function RunTimeline(props: {
   baseRequiredChecks?: BaseRequiredChecks;
   baseBranch?: string;
   reviewRounds?: ReviewRound[];
+  /** The breaks its write and fix Steps reported, each under its Step. */
+  breakRecords?: BreakRecord[];
   /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
   outputOpen: (step: RunStep) => boolean;
   time: (value: string) => string;
@@ -71,6 +77,7 @@ export function RunTimeline(props: {
           <TimelineStep
             step={step}
             reviewRounds={props.reviewRounds ?? []}
+            breakRecords={props.breakRecords ?? []}
             steps={props.steps}
             first={index() === 0}
             latest={index() === props.steps.length - 1}
@@ -96,6 +103,7 @@ export function RunTimeline(props: {
 function TimelineStep(props: {
   step: RunStep;
   reviewRounds: ReviewRound[];
+  breakRecords: BreakRecord[];
   steps: RunStep[];
   first: boolean;
   latest: boolean;
@@ -117,6 +125,7 @@ function TimelineStep(props: {
   const details = () => output() !== '' || reports().length > 0;
   const round = () => roundStartingAt(props.reviewRounds, props.step.seq);
   const findings = () => findingsOf(props.reviewRounds, props.step.seq);
+  const breaks = () => breakRecordsOf(props.breakRecords, props.step.seq);
 
   return (
     // Rail and dot sit where the agent activity timeline puts them
@@ -334,6 +343,9 @@ function TimelineStep(props: {
           <CheckRoundNote round={round} stepEnded={Boolean(props.step.end)} />
         )}
       </For>
+      <Show when={breaks().length > 0}>
+        <BreakRecordsNote records={breaks()} />
+      </Show>
       <Show when={round()}>
         {(round) => (
           <ReviewRoundNote
@@ -465,6 +477,61 @@ function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
       </span>
       <span class="block text-ink-muted">{checks().join(', ')}</span>
     </StepNote>
+  );
+}
+
+const BREAK_STATUSES = {
+  verified: 'factoryRuns.breakVerified',
+  not_reproduced: 'factoryRuns.breakNotReproduced',
+  hung: 'factoryRuns.breakHung',
+  not_run: 'factoryRuns.breakNotRun',
+  not_applied: 'factoryRuns.breakNotApplied',
+  unreadable: 'factoryRuns.breakUnreadable',
+  dropped: 'factoryRuns.breakDropped',
+  unchecked: 'factoryRuns.breakUnchecked',
+  interrupted: 'factoryRuns.breakInterrupted',
+} as const satisfies Record<BreakStatus, string>;
+
+/**
+ * The breaks a write or fix Step reported for the tests it added: each
+ * test, how the factory's run of its break went (in the warning tone when
+ * the test is left unproven), and the edit the break makes.
+ */
+function BreakRecordsNote(props: { records: BreakRecord[] }) {
+  return (
+    <section data-break-records aria-label={t('factoryRuns.breakRecords')}>
+      <StepNote>{t('factoryRuns.breakRecords')}</StepNote>
+      <For each={props.records}>
+        {(record) => (
+          <StepNote>
+            <span class="flex min-w-0 items-center gap-2">
+              <Badge
+                variant="outline"
+                size="xs"
+                data-break-status={record.status}
+                data-break-tone={
+                  isBlockingBreak(record.status) ? 'warning' : undefined
+                }
+                class={cn(
+                  'shrink-0',
+                  isBlockingBreak(record.status) && OUTCOME_TONES.sentBack
+                )}
+              >
+                {t(BREAK_STATUSES[record.status])}
+              </Badge>
+              <span class="min-w-0 truncate font-mono">{record.test}</span>
+            </span>
+            <span class="block font-mono text-ink-muted">{record.file}</span>
+            <span class="block whitespace-pre-wrap font-mono text-ink-muted">
+              {t('factoryRuns.breakOldText', { text: record.oldText })}
+            </span>
+            <span class="block whitespace-pre-wrap font-mono text-ink-muted">
+              {t('factoryRuns.breakNewText', { text: record.newText })}
+            </span>
+          </StepNote>
+        )}
+      </For>
+    </section>
   );
 }
 

@@ -2,6 +2,7 @@
 
 mod automations;
 mod board;
+mod breaks;
 mod check_rounds;
 mod ci_retries;
 mod evaluation;
@@ -29,6 +30,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::automations::{RunAutomation, TriggerKind};
+use crate::domain::breaks::{NewBreakRecord, RunsBreakRecords};
 use crate::domain::models::{
     AgentName, AskedBack, BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, DefinitionRead, EntryId, Gate, GateAnswer, GateKind,
@@ -180,6 +182,9 @@ pub enum PgRunRepositoryErr {
     /// more than one marker.
     #[error("a stored flaw has only part of its mark")]
     PartialFlaw,
+    /// A stored break record's status is not one this code knows.
+    #[error("unknown break status {0:?}")]
+    UnknownBreakStatus(String),
     /// A verified round's results do not read as each check's name, exit
     /// code and output.
     #[error("a round's check results do not read")]
@@ -994,6 +999,26 @@ impl RunRepository for PgRunRepository {
             FROM factory_step_used_session u
             JOIN factory_step s ON s.run_id = $1 AND s.seq = u.seq
             WHERE u.run_id = $2
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        // The breaks they recorded, which the tests reviewer and the Run's
+        // page read.
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_break_record (
+                run_id, seq, test, file, old_text, new_text, command, status, checked_commit,
+                output, recorded_at
+            )
+            SELECT
+                $1, b.seq, b.test, b.file, b.old_text, b.new_text, b.command, b.status,
+                b.checked_commit, b.output, b.recorded_at
+            FROM factory_break_record b
+            JOIN factory_step s ON s.run_id = $1 AND s.seq = b.seq
+            WHERE b.run_id = $2
             "#,
             retry.id.as_uuid(),
             retry.retried.as_uuid(),
@@ -2502,6 +2527,16 @@ impl RunRepository for PgRunRepository {
         fix_action_id: Uuid,
     ) -> Result<Option<Uuid>, Self::Err> {
         self.fix_check_round(key, round, fix_action_id).await
+    }
+
+    #[tracing::instrument(err, skip(self, record), fields(test = %record.test))]
+    async fn record_break(&self, key: StepKey, record: &NewBreakRecord) -> Result<(), Self::Err> {
+        self.insert_break(key, record).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn runs_break_records(&self, ids: &[RunId]) -> Result<RunsBreakRecords, Self::Err> {
+        self.select_runs_breaks(ids).await
     }
 
     #[tracing::instrument(err, skip(self))]

@@ -84,6 +84,20 @@ export default {
   checksRound: 'Checks, round {{round}}',
   checksRunning: 'Checks running…',
   checksUnfinished: 'Didn’t finish',
+  // A break: an edit a Step's agent says makes a test it added fail, and
+  // how the factory's run of it went.
+  breakRecords: 'Break records',
+  breakVerified: 'Verified',
+  breakNotReproduced: 'Passed with the break',
+  breakHung: 'Hung with the break',
+  breakNotRun: 'Failed without the break',
+  breakNotApplied: 'Break not applied',
+  breakUnreadable: 'Unreadable',
+  breakDropped: 'Not run',
+  breakUnchecked: 'Unchecked',
+  breakInterrupted: 'Interrupted',
+  breakOldText: '− {{text}}',
+  breakNewText: '+ {{text}}',
   mainHold: 'Main hold',
   mainHoldBody:
     'Checks fail on {{branch}}, so this run won’t merge until they pass again.',

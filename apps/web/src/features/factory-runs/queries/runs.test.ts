@@ -74,6 +74,7 @@ const started: RunDetail = {
     disputedDropped: 0,
     dismissed: 0,
   },
+  breakRecords: [],
   reviewRounds: [
     {
       round: 1,
@@ -131,6 +132,7 @@ describe('createAppRunsContext', () => {
 
     const run: Run = {
       id: 'run-2',
+      breakRecords: [],
       standingActs: [],
       agentRules: [],
       taskTagsUnread: false,
@@ -660,6 +662,48 @@ describe('createAppRunsContext', () => {
     expect(client.getQueryData<Run>(key)?.tokenBudget?.used).toBe(50_000);
     seedRun(client, run);
     expect(client.getQueryData<Run>(key)?.tokenBudget).toBeUndefined();
+  });
+
+  it('reads a Run’s break records, and keeps them when a list seeds it again', async () => {
+    const client = new QueryClient();
+    vi.mocked(factoryClient.getRun).mockResolvedValue(
+      ok({
+        ...started,
+        breakRecords: [
+          {
+            seq: 1,
+            test: 'parses a due date',
+            file: 'src/due.ts',
+            oldText: 'return date;',
+            newText: 'return null;',
+            command: 'bun test src/due.test.ts',
+            status: 'verified',
+            checkedCommit: null,
+            output: '1 failed',
+            recordedAt: '2026-11-16T09:05:00Z',
+          },
+        ],
+      })
+    );
+
+    const run = await client.fetchQuery(runOptions('run-2'));
+    const record = {
+      seq: 1,
+      test: 'parses a due date',
+      file: 'src/due.ts',
+      oldText: 'return date;',
+      newText: 'return null;',
+      status: 'verified',
+      checkedCommit: undefined,
+      output: '1 failed',
+    };
+    expect(run.breakRecords).toEqual([record]);
+
+    // A list reads no break records: the Run's own read keeps its.
+    seedRun(client, { ...run, breakRecords: [] });
+    expect(
+      client.getQueryData<Run>(runOptions('run-2').queryKey)?.breakRecords
+    ).toEqual([record]);
   });
 
   it('stops reading a Run again once it has ended', async () => {

@@ -559,6 +559,13 @@ where
             .map_err(internal)?
             .is_empty();
         let token_budget = self.token_budget(&run).await?;
+        let break_records = self
+            .repo
+            .runs_break_records(&[run.id])
+            .await
+            .map_err(internal)?
+            .remove(&run.id)
+            .unwrap_or_default();
         Ok(RunDetail {
             run,
             steps: with_pause_ends(steps),
@@ -570,6 +577,7 @@ where
             agent_rules,
             task_tags_unread,
             token_budget,
+            break_records,
         })
     }
 
@@ -636,6 +644,8 @@ where
             let standing_acts = standing_acts.remove(&run.id).unwrap_or_default();
             let agent_rules = agent_rules.remove(&run.id).unwrap_or_default();
             let task_tags_unread = tags_unread.contains(&run.id);
+            // Break records are read for one Run's detail only.
+            let break_records = Vec::new();
             // A list shows each Run's budget, not its use: reading the
             // usage log for every Run listed would cost a read each.
             let token_budget = budget_of(&run).map(|budget| RunTokenBudget {
@@ -655,6 +665,7 @@ where
                 agent_rules,
                 task_tags_unread,
                 token_budget,
+                break_records,
             });
         }
         Ok(details)

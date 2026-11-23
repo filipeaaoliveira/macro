@@ -1493,6 +1493,76 @@ async fn a_run_s_flow_keeps_how_many_questions_its_agents_may_ask() {
     }
 }
 
+/// A Run's read lists the breaks its Steps reported, each with how it
+/// went; a list of Runs leaves them out.
+#[tokio::test]
+async fn a_run_s_read_lists_its_break_records() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    let task_id = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task_id);
+    let mut ids = Vec::new();
+    for test in ["toggle_saves", "toggle_keeps"] {
+        let RunInsert::Inserted(run) = repo
+            .insert_run(NewRun {
+                id: RunId::generate(),
+                flow: "code",
+                request: "Add dark mode",
+                user_id: &julia(),
+                task_id: Some(task_id),
+                project_id: None,
+                repository: None,
+                created_in_person: false,
+                control_file_patterns: &[],
+                control_files_team_id: None,
+                standing_rules: RunRules::DEFAULT,
+                automation: None,
+                definition: None,
+                kept_flow: None,
+            })
+            .await
+            .expect("insert")
+        else {
+            panic!("the task exists");
+        };
+        let key = StepKey {
+            run_id: run.id,
+            seq: 1,
+        };
+        let entry = EntryId::try_from("write".to_string()).expect("entry");
+        repo.start_step(key, &entry, 1).await.expect("start");
+        let reported = crate::domain::breaks::read_line(&format!(
+            "BREAK {test}: src/toggle.rs \"true\" -> \"false\" run `cargo test {test}`"
+        ))
+        .expect("a break");
+        repo.keep_break(
+            key,
+            &reported.record(
+                factory_records::domain::breaks::BreakStatus::Verified,
+                Some(&"a".repeat(40)),
+                "1 failed",
+            ),
+        );
+        ids.push(run.id);
+    }
+
+    let read = service.get_run(&julia(), ids[0]).await.expect("get");
+    let listed = service
+        .list_task_runs(&julia(), task_id)
+        .await
+        .expect("list");
+
+    assert_eq!(read.break_records.len(), 1);
+    assert_eq!(read.break_records[0].test, "toggle_saves");
+    assert_eq!(
+        read.break_records[0].status,
+        factory_records::domain::breaks::BreakStatus::Verified
+    );
+    // A list of Runs reads no break records: they are a Run's own read's.
+    assert_eq!(listed.len(), 2);
+    assert!(listed.iter().all(|detail| detail.break_records.is_empty()));
+}
+
 /// A Step's entry bounds its visits; a Run whose Flow is unknown is
 /// bounded as the built-in `code` Flow bounds the Step.
 #[test]

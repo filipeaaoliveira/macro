@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type BreakRecord,
+  type BreakStatus,
+  breakRecordsOf,
   gateAsker,
+  isBlockingBreak,
   isRetriable,
   type Run,
   type RunStep,
@@ -222,5 +226,48 @@ describe('splitChildTasks', () => {
     expect(
       splitChildTasks(split(`Filed ${mention(A, 'Add the column')}`))
     ).toEqual([]);
+  });
+});
+
+describe('break records', () => {
+  const record = (seq: number, status: BreakStatus): BreakRecord => ({
+    seq,
+    test: `test ${seq}`,
+    file: 'src/due.ts',
+    oldText: 'return date;',
+    newText: 'return null;',
+    status,
+    output: '',
+  });
+
+  it('lists the breaks of one Step, in their order', () => {
+    const records = [
+      record(2, 'verified'),
+      record(4, 'hung'),
+      record(2, 'not_run'),
+    ];
+    expect(breakRecordsOf(records, 2).map((one) => one.status)).toEqual([
+      'verified',
+      'not_run',
+    ]);
+    expect(breakRecordsOf(records, 3)).toEqual([]);
+  });
+
+  it('blocks on a break that leaves its test unproven', () => {
+    const blocking: BreakStatus[] = [
+      'not_reproduced',
+      'not_run',
+      'not_applied',
+      'unreadable',
+      'hung',
+    ];
+    const others: BreakStatus[] = [
+      'verified',
+      'dropped',
+      'unchecked',
+      'interrupted',
+    ];
+    for (const status of blocking) expect(isBlockingBreak(status)).toBe(true);
+    for (const status of others) expect(isBlockingBreak(status)).toBe(false);
   });
 });

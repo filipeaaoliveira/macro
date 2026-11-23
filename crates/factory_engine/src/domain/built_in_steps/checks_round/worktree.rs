@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
+use crate::domain::breaks::{Break, MARKER};
 pub(super) use crate::domain::check_context::is_commit;
 use crate::domain::check_context::{BASE_VARIABLE, CHANGED_VARIABLE, CheckContext, Listing};
 use crate::domain::shell_lock::take_lock;
@@ -185,6 +186,160 @@ lock=\"$worktree.lock\"
     )
 }
 
+/// How large a break's test run's output file may grow before its
+/// watchdog, which looks each second, cuts it to its last
+/// [`BREAK_OUT_KEEP_BYTES`].
+pub(super) const BREAK_OUT_CAP_BYTES: u64 = 8 * 1024 * 1024;
+
+/// What a break's output file is cut to past [`BREAK_OUT_CAP_BYTES`].
+pub(super) const BREAK_OUT_KEEP_BYTES: u64 = 64 * 1024;
+
+/// How much of the end of each of a break's test runs is shown, in bytes:
+/// both runs' and the markers stay well under the 16 KiB a runtime that
+/// keeps one merged stream returns.
+pub(super) const BREAK_TAIL_BYTES: usize = 1_500;
+
+/// Run one break, `reported`, in the round `round`'s worktree, holding the
+/// worktree's lock as a check does: first put every tracked file back as
+/// the commit has it (a break an earlier run left is undone), then run the
+/// test's command for at most `timeout_secs`, after `environment` (what
+/// the round's checks run after: the repository's setup `env`), and told
+/// the change's `context` as a check is; when it passed, replace the first
+/// old text in the break's file with the new text, run the command again,
+/// and put the file back. The file is rewritten rather than copied back
+/// with its old time, so a build tool that goes by times builds it again.
+///
+/// Each run is a process group of its own (`set -m`), watched by a shell
+/// watchdog of its own group: past `timeout_secs` of wall time (a
+/// `SECONDS` deadline, not a count of sleeps) it marks the run hung,
+/// sends the whole group `TERM`, and `KILL` ten seconds later, so a test
+/// stops on time whatever children it started, and the run ends with
+/// [`crate::domain::breaks::HUNG_STATUS`]. Once the test's shell returns,
+/// on time or not, its group and the watchdog's are killed, so nothing the
+/// test left running outlives it or prints after it. Its output goes to a
+/// file outside the worktree's tree, opened to append, which the watchdog
+/// cuts to its last [`BREAK_OUT_KEEP_BYTES`] whenever it is past
+/// [`BREAK_OUT_CAP_BYTES`] (no limit is set on what else the test writes,
+/// such as a build's files), and only the
+/// last [`BREAK_TAIL_BYTES`] are printed, on the standard error. No
+/// `timeout` is used, so nothing depends on its flags. The markers [`crate::domain::breaks::BreakRun`] reads
+/// are printed last, on the standard output, each with `nonce`, so a
+/// runtime that merges both streams and keeps only their end still returns
+/// them, and nothing the test prints reads as one. A run stopped before its
+/// end prints none.
+///
+/// A file that is not a regular file in the worktree, or whose path goes
+/// through a symbolic link (checked again just before the edit, as the
+/// test's first run may have changed the tree), or that lacks the old text,
+/// is not broken; a
+/// read break's new text always differs from its old, so a replacement
+/// changes the file. The edit needs only POSIX `awk`, which reads the texts
+/// from its environment, as they are.
+pub(super) fn break_command(
+    round: Uuid,
+    reported: &Break,
+    environment: &str,
+    nonce: &str,
+    timeout_secs: u64,
+    lock_wait_secs: u64,
+    context: &CheckContext,
+) -> String {
+    format!(
+        "{GIT}{BASE}worktree=\"$base/{round}\"
+lock=\"$worktree.lock\"
+{take_lock}cd \"$worktree\" || exit 1
+{exports}g reset --hard -q HEAD || exit 1
+file={file}
+saved=\"$worktree.break\"
+out=\"$worktree.break.out\"
+marks=
+mark() {{ marks=\"${{marks}}{MARKER} {nonce}: $1
+\"; }}
+finish() {{ printf '%s' \"$marks\"; exit 0; }}
+run_test() {{
+  rm -f \"$out\" \"$out.hung\"
+  set -m
+  : > \"$out\"
+  (
+    exec bash --noprofile --norc -c {command} 9>&- >>\"$out\" 2>&1 </dev/null
+  ) &
+  group=$!
+  (
+    end=$((SECONDS + {timeout_secs}))
+    while [ \"$SECONDS\" -lt \"$end\" ]; do
+      sleep 1
+      size=$(( $(wc -c < \"$out\" 2>/dev/null || echo 0) ))
+      if [ \"$size\" -gt {out_cap} ]; then
+        tail -c {out_keep} \"$out\" > \"$out.tail\" && cat \"$out.tail\" > \"$out\"
+        rm -f \"$out.tail\"
+      fi
+    done
+    : > \"$out.hung\"
+    kill -TERM -- \"-$group\" 2>/dev/null
+    sleep 10
+    kill -KILL -- \"-$group\" 2>/dev/null
+  ) 9>&- >/dev/null 2>&1 </dev/null &
+  watchdog=$!
+  set +m
+  wait \"$group\"
+  ran=$?
+  kill -KILL -- \"-$group\" 2>/dev/null
+  kill -KILL -- \"-$watchdog\" 2>/dev/null
+  wait \"$watchdog\" 2>/dev/null
+  if [ -e \"$out.hung\" ]; then ran={hung}; fi
+  echo \"--- the test $1 exited with status $ran; the end of its output:\" >&2
+  tail -c {tail} \"$out\" >&2
+  echo >&2
+  rm -f \"$out\" \"$out.hung\" \"$out.tail\"
+  return $ran
+}}
+in_tree() {{
+  rest=$file
+  at=
+  while [ -n \"$rest\" ]; do
+    part=${{rest%%/*}}
+    if [ \"$part\" = \"$rest\" ]; then rest=; else rest=${{rest#*/}}; fi
+    at=${{at:+$at/}}$part
+    [ -L \"$at\" ] && return 1
+  done
+  [ -f \"$file\" ]
+}}
+in_tree || {{ mark 'not-applied: no such file'; finish; }}
+run_test 'without the break'
+unbroken=$?
+mark \"unbroken $unbroken\"
+[ \"$unbroken\" -eq 0 ] || finish
+in_tree || {{ mark 'not-applied: no such file'; finish; }}
+cat \"$file\" > \"$saved\" || exit 1
+BREAK_OLD={old} BREAK_NEW={new} awk '
+  !done {{ at = index($0, ENVIRON[\"BREAK_OLD\"]) }}
+  !done && at > 0 {{ $0 = substr($0, 1, at - 1) ENVIRON[\"BREAK_NEW\"] substr($0, at + length(ENVIRON[\"BREAK_OLD\"])); done = 1 }}
+  {{ print }}
+  END {{ exit done ? 0 : 3 }}
+' \"$saved\" > \"$file\"
+applied=$?
+if [ \"$applied\" -eq 0 ]; then
+  run_test 'with the break'
+  mark \"broken $?\"
+else
+  mark 'not-applied: the file does not hold the old text'
+fi
+cat \"$saved\" > \"$file\" && rm -f \"$saved\" && mark restored
+finish",
+        file = shell_quote(&reported.file),
+        command = shell_quote(&format!("{environment}{}", reported.command)),
+        old = shell_quote(&reported.old_text),
+        new = shell_quote(&reported.new_text),
+        nonce = nonce,
+        tail = BREAK_TAIL_BYTES,
+        out_cap = BREAK_OUT_CAP_BYTES,
+        out_keep = BREAK_OUT_KEEP_BYTES,
+        hung = crate::domain::breaks::HUNG_STATUS,
+        take_lock = take_lock(lock_wait_secs),
+        exports = context_exports(context),
+    )
+}
+
 /// Remove the round `round`'s worktree, its lock and its list of changed
 /// paths, from the checkout the command runs in.
 pub(super) fn remove_command(round: Uuid) -> String {
@@ -192,7 +347,7 @@ pub(super) fn remove_command(round: Uuid) -> String {
         "{GIT}{BASE}worktree=\"$base/{round}\"
 g worktree remove --force \"$worktree\" 2>/dev/null || rm -rf \"$worktree\"
 g worktree prune
-rm -rf \"$worktree.lock\" \"$worktree.lock.d\" \"$worktree.changed\" \"$worktree.changed.new\""
+rm -rf \"$worktree.lock\" \"$worktree.lock.d\" \"$worktree.changed\" \"$worktree.changed.new\" \"$worktree.break\" \"$worktree.break.out\""
     )
 }
 

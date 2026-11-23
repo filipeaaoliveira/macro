@@ -5,6 +5,7 @@ mod test;
 
 use bot_id::BotId;
 use chrono::{DateTime, Utc};
+use factory_records::domain::breaks::BreakRecord;
 use factory_records::domain::evaluation::RunAgentRule;
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
@@ -866,6 +867,10 @@ pub struct RunDetail {
     /// Its token budget and what its agent Steps used of it; none for a
     /// Run that keeps no budget.
     pub token_budget: Option<RunTokenBudget>,
+    /// The breaks its write and fix Steps reported for the tests they
+    /// added, by Step, each with how the factory's run of it went: in a
+    /// Run's own read (`GET /runs/{id}`) only, empty in a list of Runs.
+    pub break_records: Vec<BreakRecord>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their

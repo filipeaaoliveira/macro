@@ -6,6 +6,7 @@
  */
 
 import type { BlockerResolutions } from './blockerResolutions';
+import type { BreakRecord } from './breakRecord';
 import type { ReviewRound } from './reviewRound';
 import type { Run } from './run';
 import type { RunAgentRule } from './runAgentRule';
@@ -28,6 +29,10 @@ listed. */
   /** What became of its Blockers: fixed, or disputed and then upheld or
 dropped. */
   blockerResolutions: BlockerResolutions;
+  /** The breaks its write and fix Steps reported for the tests they
+added, by Step, each with how the factory's run of it went: in a
+Run's own read (`GET /runs/{id}`) only, empty in a list of Runs. */
+  breakRecords: BreakRecord[];
   mainHold?: RunDetailMainHold;
   /** Its review rounds, in order, each with what its reviewers found. */
   reviewRounds: ReviewRound[];

@@ -413,3 +413,55 @@ async fn a_retried_re_ask_asks_in_the_same_prompt() {
     assert_eq!(turns.len(), 2);
     assert_eq!(turns[0].action_id, turns[1].action_id);
 }
+
+/// The tests reviewer is told how the factory ran each new test's break,
+/// as data; another reviewer is not.
+#[tokio::test]
+async fn the_tests_reviewer_reads_the_break_records() {
+    let repo = FakeRepo::default();
+    let (run_id, round) = second_round(&repo, &[], false).await;
+    let write = StepKey { run_id, seq: 2 };
+    let entry = EntryId::try_from("write".to_string()).expect("entry");
+    repo.start_step(write, &entry, 1).await.expect("start");
+    let reported = crate::domain::breaks::read_line(
+        "BREAK toggle_saves: src/toggle.rs \"true\" -> \"false\" run `cargo test toggle`",
+    )
+    .expect("a break");
+    repo.keep_break(
+        write,
+        &reported.record(
+            factory_records::domain::breaks::BreakStatus::NotReproduced,
+            Some(&"a".repeat(40)),
+            "1 passed",
+        ),
+    );
+    let tests = Role::try_from("tests-reviewer".to_string()).expect("valid");
+    let reviewer = Reviewer::answering(("pass", PASSES), ("pass", PASSES));
+    let correctness = Reviewer::answering(("pass", PASSES), ("pass", PASSES));
+
+    steps(&reviewer, &repo)
+        .run(
+            &review(),
+            StepInput {
+                role: Some(&tests),
+                ..reviewing(run_id, &round)
+            },
+        )
+        .await
+        .expect("review");
+    steps(&correctness, &repo)
+        .run(&review(), reviewing(run_id, &round))
+        .await
+        .expect("review");
+
+    let prompt = reviewer.tasks.lock().expect("tasks")[0].prompt.clone();
+    assert!(prompt.contains("You review the change's tests"), "{prompt}");
+    assert!(prompt.contains("## Break records"), "{prompt}");
+    assert!(
+        prompt.contains("1. not reproduced: it passed with the break too, so it does not catch it (step 2). Test `toggle_saves`."),
+        "{prompt}"
+    );
+    assert!(prompt.contains("It said: 1 passed"), "{prompt}");
+    let other = correctness.tasks.lock().expect("tasks")[0].prompt.clone();
+    assert!(!other.contains("Break records"), "{other}");
+}
