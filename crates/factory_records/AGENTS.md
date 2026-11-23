@@ -28,6 +28,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/quality.rs` and `src/outbound/pg_run_repository/quality.rs`:
   `RunQualityRepository`, the reads behind CI health, review quality, cost
   and autonomy, and the `ci` Step's waits (`record_ci_wait`).
+- `src/outbound/pg_run_repository/ci_retries.rs`: the `ci` Step's flaky CI
+  reruns (`factory_ci_retry`), the jobs quarantined in a repository
+  (`factory_ci_quarantine`), and the known flakes a Run keeps from its
+  Factory Definition (`factory_run.known_ci_flakes`).
 - `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
   `MainHoldRepository`, the merges Runs made and the Main Holds on the base
   branches they merge to.
@@ -132,7 +136,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261120020100_factory_run_task_tags_unread.sql`,
   `20261120030000_factory_review_dispute.sql`,
   `20261120030100_factory_review_dispute_validate.sql`,
+  `20261123092916_factory_ci_quarantine.sql`,
   `20261123100012_factory_scorer_label.sql`,
+  `20261123100332_factory_run_repo_url_index.sql`,
+  `20261123100336_factory_ci_wait_recorded_index.sql`,
   `20261123130000_factory_break_record.sql`), `factory_break_record`,
   `factory_step_steer`,
   `factory_run_score`, `factory_scorer_label`, `factory_run_arm`, `factory_run_agent_rule`,
@@ -141,7 +148,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
   `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait`,
-  `factory_ci_job` and `factory_step_used_session`.
+  `factory_ci_job`, `factory_ci_retry`, `factory_ci_quarantine` and
+  `factory_step_used_session`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -474,6 +482,34 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   open Run an Automation started on a task, which `insert_run` answers as
   `RunInsert::TaskBusy`; `running_run_on_task` reads any open Run on a task
   through `factory_run_task_owner_idx`.
+
+- Flaky CI reruns (`20261123092916_factory_ci_quarantine.sql`): the
+  Standing Rule `rerun_flaky_ci` lets a `ci` Step rerun, once and before
+  any CI fix, the failed jobs of a red that are all known flakes.
+  `factory_run.known_ci_flakes` keeps the jobs the Run's Factory Definition
+  names as known flakes (`knownFlakes` in its `rules.json`), as read when
+  the Run started (`keep_known_ci_flakes`); null when it names none.
+  `factory_ci_retry` keeps one rerun per Step and job: the failed GitHub
+  job (`job_id`) and its workflow run (`workflow_run_id`, which keeps its
+  id when the job runs again), why it was taken for flaky (`matched`:
+  `known`, `quarantined` or `record`) and, once it settles, its `result`
+  (`passed`, `failed` or `refused`) with `settled_at`. `request_ci_retries`
+  returns only the rows it added, so of two attempts only the first asks
+  GitHub; `settle_ci_retries` keeps the first result. `ci_flakes` reads a
+  Run's known flakes, its repository's live quarantines and the failures
+  other pull requests proved flaky (a passed rerun, or the same head green
+  later), each counted once per pull request, through
+  `factory_run_repo_url_idx` (`20261123100332_factory_run_repo_url_index.sql`)
+  and `factory_ci_wait_recorded_at_idx`
+  (`20261123100336_factory_ci_wait_recorded_index.sql`).
+  `factory_ci_quarantine` keeps a failure, by repository (its URL in lower
+  case), job, failed step and test, whose reruns passed often enough there
+  (`quarantine_ci_jobs`); a quarantine already kept keeps its task and Run
+  and moves `passed_retries` and `last_passed_at` on. It lapses 30 days
+  after its last passed rerun and is lifted by deleting it
+  (`lift_ci_quarantine`). Its `task_id` is kept before the task is filed,
+  and `filed` set once it is (`mark_ci_quarantine_filed`), so filing again
+  makes no second task. It outlives its Run (`run_id` is set null).
 
 - `factory_merge` keeps one row per Run that merged (`record_merge`, safe
   to repeat), with the base it merged into and the time on the worker's

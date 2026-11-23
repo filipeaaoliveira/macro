@@ -510,6 +510,21 @@ export const factoryExcluded = [
   'getFactoryDefinition',
   'getFactoryInsights',
   'getFactoryStandingRules',
+  // Insights' quality and evaluation sections are the web app's pages of the
+  // person's own Runs; an agent reads the Runs themselves.
+  'getFactoryEvaluation',
+  'getFactoryQuality',
+  // The agent session's view asks which Step it works in, to send the
+  // person to steer it from its Run.
+  'getFactorySessionStep',
+  // Only the person in their own session marks a Run's result flawed.
+  'flawFactoryRun',
+  // Only the person in their own session steers a running Step from its
+  // Step Terminal: a note, pause, resume or stop.
+  'noteFactoryStep',
+  'pauseFactoryStep',
+  'resumeFactoryStep',
+  'stopFactoryStep',
   // A Run's Scorer results and the person's labels on them calibrate the
   // Scorer from Insights; the label is the person's own judgment.
   'getFactoryRunScores',
