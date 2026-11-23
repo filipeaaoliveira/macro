@@ -675,35 +675,66 @@ export const SPLIT_ENTRY = 'split';
 /** A task a Run filed, by its id and name. */
 export type FiledTask = { id: string; name: string };
 
-const TASK_MENTION = /<m-document-mention>([\s\S]*?)<\/m-document-mention>/g;
+/**
+ * What ends the header the engine's split writes above the list of the
+ * child tasks it filed (`split_task` in `built_in_steps/plan_review.rs`).
+ */
+const FILED_HEADER = "child tasks, filed as the run's owner.";
+
+/** One line of the filed list: `- ` and a task's document mention. */
+const FILED_LINE = /^- <m-document-mention>(.*)<\/m-document-mention>$/;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The task a filed line's mention names, if it reads as one. */
+function filedTask(json: string): FiledTask | undefined {
+  try {
+    const mention: unknown = JSON.parse(json);
+    if (
+      mention &&
+      typeof mention === 'object' &&
+      'documentId' in mention &&
+      typeof mention.documentId === 'string' &&
+      UUID.test(mention.documentId) &&
+      'documentName' in mention &&
+      typeof mention.documentName === 'string'
+    ) {
+      return { id: mention.documentId, name: mention.documentName };
+    }
+  } catch {
+    // A mention that doesn't read links no task.
+  }
+  return undefined;
+}
 
 /**
- * The child tasks a `split` Step filed, as its output links them: a
- * document mention each, in order. None for another Step, or one that
- * filed none; a mention that doesn't read is left out.
+ * The child tasks a `split` Step filed: the list under the header its
+ * output opens with, one task mention a line, in order. A task the plan's
+ * reasons mention, in the header, is not one it filed. None for another
+ * Step, or one that filed none.
  */
 export function splitChildTasks(
   step: Pick<RunStep, 'entry' | 'end'>
 ): FiledTask[] {
   if (step.entry !== SPLIT_ENTRY || !step.end) return [];
+  const output = step.end.output;
+  const header = output.indexOf(FILED_HEADER);
+  if (header < 0) return [];
+  const lines = output
+    .slice(output.indexOf('\n', header) + 1 || output.length)
+    .split('\n');
   const tasks: FiledTask[] = [];
-  for (const match of step.end.output.matchAll(TASK_MENTION)) {
-    try {
-      const mention: unknown = JSON.parse(match[1] ?? '');
-      if (
-        mention &&
-        typeof mention === 'object' &&
-        'documentId' in mention &&
-        typeof mention.documentId === 'string' &&
-        'documentName' in mention &&
-        typeof mention.documentName === 'string' &&
-        !tasks.some((task) => task.id === mention.documentId)
-      ) {
-        tasks.push({ id: mention.documentId, name: mention.documentName });
-      }
-    } catch {
-      // A mention that doesn't read links no task.
+  for (const line of lines) {
+    const text = line.trim();
+    // Blank lines lead to the list; the list ends at its first other line.
+    if (text === '') {
+      if (tasks.length > 0) break;
+      continue;
     }
+    const match = FILED_LINE.exec(text);
+    if (!match) break;
+    const task = filedTask(match[1] ?? '');
+    if (task && !tasks.some((filed) => filed.id === task.id)) tasks.push(task);
   }
   return tasks;
 }

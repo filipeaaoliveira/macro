@@ -1824,6 +1824,7 @@ describe('RunView', () => {
 });
 
 describe('RunView plan review and split', () => {
+  const CHILD = '01a2077b-0000-7000-8000-00000000000a';
   it('shows a plan review’s blockers and an oversized plan as sent back, and links a split’s child tasks', async () => {
     const { setRun } = mount({});
     const mention = (id: string, name: string) =>
@@ -1852,7 +1853,16 @@ describe('RunView plan review and split', () => {
         step(1, 'plan', 'done'),
         step(2, 'plan-review', 'blockers'),
         step(3, 'plan-review', 'oversized'),
-        step(4, 'split', 'done', `- ${mention('task-a', 'Add the column')}`),
+        step(
+          4,
+          'split',
+          'done',
+          [
+            "The task is too big for one run (two services): its plan split it into 1 child tasks, filed as the run's owner. The run ends here; start a run on each child task.",
+            '',
+            `- ${mention(CHILD, 'Add the column')}`,
+          ].join('\n')
+        ),
       ],
     });
 
@@ -1866,6 +1876,6 @@ describe('RunView plan review and split', () => {
     expect(screen.getAllByText('Plan review').length).toBeGreaterThan(0);
     expect(screen.getByText('Split into 1 child task')).toBeTruthy();
     const link = screen.getByRole('link', { name: 'Add the column' });
-    expect(link.getAttribute('href')).toContain('task-a');
+    expect(link.getAttribute('href')).toContain(CHILD);
   });
 });

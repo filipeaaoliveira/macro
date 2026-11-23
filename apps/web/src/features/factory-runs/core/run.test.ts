@@ -156,6 +156,9 @@ describe('retries', () => {
 });
 
 describe('splitChildTasks', () => {
+  const A = '01a2077b-0000-7000-8000-00000000000a';
+  const B = '01a2077b-0000-7000-8000-00000000000b';
+  const PARENT = '01a2077b-0000-7000-8000-0000000000ff';
   const mention = (id: string, name: string) =>
     `<m-document-mention>${JSON.stringify({
       documentId: id,
@@ -163,6 +166,9 @@ describe('splitChildTasks', () => {
       blockName: 'md',
       blockParams: {},
     })}</m-document-mention>`;
+  // As the engine's split writes its output.
+  const header = (why: string, count: number) =>
+    `The task is too big for one run (${why}): its plan split it into ${count} child tasks, filed as the run's owner. The run ends here; start a run on each child task.`;
   const split = (output: string): RunStep => ({
     seq: 3,
     entry: 'split',
@@ -171,25 +177,50 @@ describe('splitChildTasks', () => {
     end: { outcome: 'done', output, endedAt: '2026-11-16T09:01:00Z' },
   });
 
-  it('reads the child tasks a split filed, in order, from their mentions', () => {
+  it('reads the child tasks a split filed, in order, from its list', () => {
     const output = [
-      'The task is too big for one run (two services): its plan split it into 2 child tasks.',
+      header('two services', 2),
       '',
-      `- ${mention('task-a', 'Add the column')}`,
-      `- ${mention('task-b', 'Show it in the list')}`,
-      `- ${mention('task-a', 'Add the column')}`,
+      `- ${mention(A, 'Add the column')}`,
+      `- ${mention(B, 'Show it in the list')}`,
+      `- ${mention(A, 'Add the column')}`,
       '- <m-document-mention>{not json}</m-document-mention>',
     ].join('\n');
 
     expect(splitChildTasks(split(output))).toEqual([
-      { id: 'task-a', name: 'Add the column' },
-      { id: 'task-b', name: 'Show it in the list' },
+      { id: A, name: 'Add the column' },
+      { id: B, name: 'Show it in the list' },
     ]);
   });
 
-  it('reads no child tasks from another Step, or a split still running', () => {
-    const output = `- ${mention('task-a', 'Add the column')}`;
+  it('leaves out a task the plan’s reasons mention, ids that are no task’s, and the refused', () => {
+    const output = [
+      // The plan's reasons can list tasks of their own, on lines above
+      // the factory's list.
+      header(
+        `it spans two services:\n- ${mention(PARENT, 'The parent')}\n- the list`,
+        3
+      ),
+      '',
+      `- ${mention(A, 'Add the column')}`,
+      `- ${mention('task-b', 'Not an id')}`,
+      '',
+      'Document storage refused these, so file them by hand:',
+      '',
+      `- ${mention(B, 'Refused')}`,
+    ].join('\n');
+
+    expect(splitChildTasks(split(output))).toEqual([
+      { id: A, name: 'Add the column' },
+    ]);
+  });
+
+  it('reads no child tasks from another Step, a split still running, or one with no list', () => {
+    const output = `${header('big', 1)}\n\n- ${mention(A, 'Add the column')}`;
     expect(splitChildTasks({ ...split(output), entry: 'plan' })).toEqual([]);
     expect(splitChildTasks({ ...split(output), end: undefined })).toEqual([]);
+    expect(
+      splitChildTasks(split(`Filed ${mention(A, 'Add the column')}`))
+    ).toEqual([]);
   });
 });
