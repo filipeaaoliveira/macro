@@ -30,13 +30,16 @@ use crate::domain::flow::StepName;
 use crate::domain::models::{AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::review_rounds::{
-    ReviewerAnswer, ReviewerAnswerError, carried_blockers, dropped_in_visit, findings_block,
-    fit_findings, places_meet,
+    ReviewerAnswer, ReviewerAnswerError, breaks_brief, carried_blockers, dropped_in_visit,
+    findings_block, fit_findings, places_meet,
 };
 
 /// The place of the prompt that asks a reviewer again among its Step's
 /// later prompts: a reviewer's Step runs no checks, so it is the first.
 const REASK_PLACE: u16 = 1;
+
+/// The review panel's Role that reads the break records.
+const TESTS_REVIEWER: &str = "tests-reviewer";
 
 impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
@@ -86,7 +89,22 @@ where
                     .iter()
                     .any(|step| step.seq == seq && step.role.as_ref() == input.role)
         });
-        let instructions = panel_instructions(round, input.role, &carried, &rules, &dropped);
+        let mut instructions = panel_instructions(round, input.role, &carried, &rules, &dropped);
+        // The tests reviewer reads what the factory saw of each new test's
+        // break.
+        if input
+            .role
+            .is_some_and(|role| role.as_str() == TESTS_REVIEWER)
+        {
+            let breaks = repo
+                .runs_break_records(&[input.key.run_id])
+                .await
+                .map_err(records)?
+                .remove(&input.key.run_id)
+                .unwrap_or_default();
+            instructions.push('\n');
+            instructions.push_str(&breaks_brief(&breaks));
+        }
         let report = self
             .ask_agent_in_repository(step, &instructions, review_outcomes(), input)
             .await?;

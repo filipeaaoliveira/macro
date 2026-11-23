@@ -24,8 +24,8 @@ use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
 pub(crate) use brief::escape;
 pub use brief::{
-    BRIEF_BUDGET, DISPUTE_BUDGET, FindingsBlock, blockers_brief, carried_blockers,
-    dropped_in_visit, fenced_review, findings_block, fit_findings,
+    BREAKS_BUDGET, BRIEF_BUDGET, DISPUTE_BUDGET, FindingsBlock, blockers_brief, breaks_brief,
+    carried_blockers, dropped_in_visit, fenced_review, findings_block, fit_findings,
 };
 pub use fix_answer::fix_answers;
 

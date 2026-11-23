@@ -1054,6 +1054,41 @@ agent's work, cut to the 64 KiB a Step keeps. The rounds show on the Step
 `LocalAgent` runs no command, and answers a round of checks `failed`: no
 check ran.
 
+Break records prove each new test fails when the code it covers breaks
+(`src/domain/breaks.rs`, `checks_round/breaks.rs`). The `write` and `fix`
+prompts ask for one line per test the agent adds, ``BREAK <test>: <file>
+"<old text>" -> "<new text>" run `<command>` ``: the file from the
+repository's root (no `..`, `.`, `.git` or absolute path), the texts on one
+line, the new one never the old, and a command with no backtick. The lines
+are read from every hand back of the Step's rounds (its work and each fix of
+a failed round), a later line for a test replacing an earlier one. Once the
+factory's own run of a round's checks passes, before the round ends, each
+break not yet recorded runs in the round's worktree, on the commit the
+checks passed on (`worktree::break_command`, under the round's lock): every
+tracked file is reset to the commit, the command runs (`BREAK_TEST_TIMEOUT`,
+five minutes), and only when it passed is the first old text in the file
+replaced with the new (POSIX `awk`, the texts read from its environment),
+the command run again, and the file rewritten as it was (a new time, so a
+build tool builds it again). The test's output goes to the standard error;
+the standard output holds only the markers `BreakRun` reads. A break is
+`verified` when the test passed without it and failed with it,
+`not_reproduced` when it passed with it too, `not_run` when it failed
+without it (or printed no marker), `not_applied` when the file is missing or
+lacks the old text, `unreadable` for a `BREAK` line that does not read,
+`dropped` past 20 breaks (`MAX_BREAKS`) or when the Step's rounds have no
+time left for both runs, and `unchecked` when the factory ran no command
+(the agent's session runs none, or the base declares no checks this change
+reaches). Each is recorded once per Step and test (`record_break`, the
+first kept), as it ends, so a retry runs only the breaks still to run; one
+that would not end in the attempt, or finds the lock held, fails the
+attempt for a retry. The `tests-reviewer` of a review panel reads the Run's
+records, the latest of each test, in a block marked as data
+(`review_rounds::breaks_brief`, 8 KiB), and raises a Blocker for a test the
+change adds with no record or whose break did not fail it
+(`review_focus/tests.md`). The Run API lists them (`breakRecords` on a
+Run's detail). A round the agent runs (no `exec`) and a red Step run no
+break.
+
 Each check the engine runs is told the change it checks
 (`src/domain/check_context.rs`), since its worktree may hold only the
 checked commit (fetched at depth 1 in a shallow clone), so git alone
@@ -2389,6 +2424,9 @@ Definition.
   back, the diff a finding is in, and opening and closing a round.
 - `src/domain/built_in_steps/checks_round.rs` and `src/domain/checks.rs`:
   the checks rounds of `write` and `fix`, and the checks file they read.
+- `src/domain/breaks.rs` and `src/domain/built_in_steps/checks_round/breaks.rs`:
+  the break lines a `write` or `fix` agent reports for its new tests, and
+  the round that runs them.
 - `src/domain/control_files.rs`: Control Files, the default patterns, and
   what makes a Run Tampered.
 - `src/domain/definition.rs` and `src/domain/service/definition.rs`: the

@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
+use crate::domain::breaks::{Break, MARKER};
 pub(super) use crate::domain::check_context::is_commit;
 use crate::domain::check_context::{BASE_VARIABLE, CHANGED_VARIABLE, CheckContext, Listing};
 use crate::domain::shell_lock::take_lock;
@@ -185,6 +186,63 @@ lock=\"$worktree.lock\"
     )
 }
 
+/// Run one break, `reported`, in the round `round`'s worktree, holding the
+/// worktree's lock as a check does: first put every tracked file back as
+/// the commit has it (a break an earlier run left is undone), then run the
+/// test's command for at most `timeout_secs`; when it passed, replace the
+/// first old text in the break's file with the new text, run the command
+/// again, and put the file back. The file is rewritten rather than copied
+/// back with its old time, so a build tool that goes by times builds it
+/// again. The test's output goes to the standard error; the standard
+/// output holds only the markers [`crate::domain::breaks::BreakRun`]
+/// reads. A file that is not a regular file in the worktree, or that lacks
+/// the old text, is not broken; a read break's new text always differs
+/// from its old, so a replacement changes the file. The edit needs only
+/// POSIX `awk`, which reads the texts from its environment, as they are.
+pub(super) fn break_command(
+    round: Uuid,
+    reported: &Break,
+    timeout_secs: u64,
+    lock_wait_secs: u64,
+    context: &CheckContext,
+) -> String {
+    format!(
+        "{GIT}{BASE}worktree=\"$base/{round}\"
+lock=\"$worktree.lock\"
+{take_lock}cd \"$worktree\" || exit 1
+{exports}g reset --hard -q HEAD || exit 1
+file={file}
+saved=\"$worktree.break\"
+run_test() {{ timeout --kill-after=10 {timeout_secs} bash --noprofile --norc -c {command} 9>&- 1>&2; }}
+if [ -L \"$file\" ] || [ ! -f \"$file\" ]; then echo '{MARKER} not-applied: no such file'; exit 0; fi
+run_test
+unbroken=$?
+echo \"{MARKER} unbroken $unbroken\"
+[ \"$unbroken\" -eq 0 ] || exit 0
+cat \"$file\" > \"$saved\" || exit 1
+BREAK_OLD={old} BREAK_NEW={new} awk '
+  !done {{ at = index($0, ENVIRON[\"BREAK_OLD\"]) }}
+  !done && at > 0 {{ $0 = substr($0, 1, at - 1) ENVIRON[\"BREAK_NEW\"] substr($0, at + length(ENVIRON[\"BREAK_OLD\"])); done = 1 }}
+  {{ print }}
+  END {{ exit done ? 0 : 3 }}
+' \"$saved\" > \"$file\"
+applied=$?
+if [ \"$applied\" -eq 0 ]; then
+  run_test
+  echo \"{MARKER} broken $?\"
+else
+  echo '{MARKER} not-applied: the file does not hold the old text'
+fi
+cat \"$saved\" > \"$file\" && rm -f \"$saved\" && echo '{MARKER} restored'",
+        file = shell_quote(&reported.file),
+        command = shell_quote(&reported.command),
+        old = shell_quote(&reported.old_text),
+        new = shell_quote(&reported.new_text),
+        take_lock = take_lock(lock_wait_secs),
+        exports = context_exports(context),
+    )
+}
+
 /// Remove the round `round`'s worktree, its lock and its list of changed
 /// paths, from the checkout the command runs in.
 pub(super) fn remove_command(round: Uuid) -> String {
@@ -192,7 +250,7 @@ pub(super) fn remove_command(round: Uuid) -> String {
         "{GIT}{BASE}worktree=\"$base/{round}\"
 g worktree remove --force \"$worktree\" 2>/dev/null || rm -rf \"$worktree\"
 g worktree prune
-rm -rf \"$worktree.lock\" \"$worktree.lock.d\" \"$worktree.changed\" \"$worktree.changed.new\""
+rm -rf \"$worktree.lock\" \"$worktree.lock.d\" \"$worktree.changed\" \"$worktree.changed.new\" \"$worktree.break\""
     )
 }
 

@@ -6,6 +6,8 @@ use std::time::{Duration, SystemTime};
 
 use super::*;
 
+mod breaks;
+
 const ROUND: Uuid = Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
 
 /// A repository whose pushed commit says `pushed`, whose agent then

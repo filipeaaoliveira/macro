@@ -8,7 +8,7 @@ use super::*;
 /// Both checks of [`CHECKS`] run: the branch changed both their paths.
 const BOTH: &[&str] = &["apps/web/src/main.ts", "crates/app/src/lib.rs"];
 
-fn ran(exit_code: i32, stdout: &str) -> Ran {
+pub(super) fn ran(exit_code: i32, stdout: &str) -> Ran {
     Ok(SessionCommandOutput {
         exit_code,
         stdout: stdout.to_string(),
@@ -18,7 +18,7 @@ fn ran(exit_code: i32, stdout: &str) -> Ran {
 
 /// An agent whose session runs commands, each ending as `runs` say in
 /// turn, and whose later prompts end as `later` say.
-fn verifying(runs: Vec<Ran>, later: Vec<Scripted>) -> ScriptedAgent {
+pub(super) fn verifying(runs: Vec<Ran>, later: Vec<Scripted>) -> ScriptedAgent {
     ScriptedAgent {
         checkout: Some(Arc::new(Mutex::new(runs.into()))),
         ..ScriptedAgent::new("done", later)
@@ -37,7 +37,7 @@ fn commands(agent: &ScriptedAgent) -> Vec<String> {
 
 /// [`run`], for a Step whose agent works in a session it claimed, as a
 /// real agent's does.
-async fn run_in_session(
+pub(super) async fn run_in_session(
     agent: &ScriptedAgent,
     github: &FakeGithub,
     repo: &FakeRepo,

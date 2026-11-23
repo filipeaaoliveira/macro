@@ -21,6 +21,7 @@ use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
 
 mod acceptance;
+mod breaks;
 mod pushed;
 mod setup;
 mod verified;

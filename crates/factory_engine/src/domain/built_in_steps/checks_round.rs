@@ -15,6 +15,10 @@
 //! prompt is sent, so a retried Step goes on with the round it was at,
 //! never starts one twice, and asks under the prompt ids it recorded.
 //!
+//! A verified round whose checks passed then runs, in its worktree, the
+//! breaks the agent reported for its new tests ([`breaks`]), before it
+//! ends.
+//!
 //! The checks file is read from the Run's base branch, which the agent does
 //! not push to, once: the first round keeps it, with the checks it runs, and
 //! every later round goes by that record. A later round runs the checks the
@@ -31,6 +35,7 @@
 //! attempt (`SESSION_DEADLINE` from when the wait began): a later prompt's
 //! wait that ends there is retried and goes on with the same turn.
 
+mod breaks;
 #[cfg(test)]
 mod test;
 mod worktree;
@@ -50,6 +55,7 @@ use factory_records::domain::review_rounds::{FixStatus, ReviewRound, ReviewRound
 use tokio::time::Instant;
 use uuid::Uuid;
 
+use self::breaks::{BreakPlace, NOT_RUN_BY_FACTORY};
 use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};
 use crate::domain::check_context::CheckContext;
 use crate::domain::checks::{
@@ -377,6 +383,8 @@ where
         work_output: &str,
     ) -> Result<Option<StepReport>, BuiltInStepError> {
         let Some(text) = self.pull_requests.declared_checks(&input).await? else {
+            self.record_unchecked(input, Some(work_output), NOT_RUN_BY_FACTORY)
+                .await?;
             return Ok(Some(StepReport {
                 outcome: Outcome::done(),
                 output: work_output.to_string(),
@@ -397,6 +405,8 @@ where
         let changed = self.pull_requests.branch_changes(&input).await?;
         let checks = declared.for_changes(changed.as_deref(), &[]);
         if checks.is_empty() {
+            self.record_unchecked(input, Some(work_output), NOT_RUN_BY_FACTORY)
+                .await?;
             return Ok(Some(StepReport {
                 outcome: Outcome::done(),
                 output: work_output.to_string(),
@@ -542,6 +552,10 @@ where
             .end_check_round(input.key, round.round, outcome, &answer.text)
             .await
             .map_err(records)?;
+        if outcome == CheckRoundOutcome::Passed && matches!(target, Checked::Branch { .. }) {
+            self.record_unchecked(input, None, NOT_RUN_BY_FACTORY)
+                .await?;
+        }
         Ok(Ran::Ended)
     }
 
@@ -754,6 +768,19 @@ where
         }
 
         let (outcome, report) = verified_end(round, &results);
+        // The breaks run on the commit whose checks passed, before the
+        // round ends, so a retry finds the round open and goes on with the
+        // breaks still to run.
+        if outcome == CheckRoundOutcome::Passed && matches!(target, Checked::Branch { .. }) {
+            let place = BreakPlace {
+                role: &role,
+                round: round_id,
+                commit: &commit,
+                context: &context,
+            };
+            self.run_breaks(input, &place, answer_by, checks_until)
+                .await?;
+        }
         repo.end_check_round(input.key, round.round, outcome, &report)
             .await
             .map_err(records)?;

@@ -4,6 +4,7 @@ pub mod acceptance;
 pub mod agents;
 pub mod automations;
 pub mod board;
+pub mod breaks;
 pub mod built_in_flows;
 pub mod built_in_steps;
 pub mod check_context;
