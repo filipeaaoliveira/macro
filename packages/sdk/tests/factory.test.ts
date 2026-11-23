@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { Macro } from '../src/macro';
+import { MacroApiError } from '../src/utils/unwrap';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -176,4 +177,31 @@ test('a run retried already is refused', async () => {
   );
 
   await expect(macro().factory.byId(RUN).retry()).rejects.toThrow();
+});
+
+test('a retry past the queue limit is refused with its code', async () => {
+  globalThis.fetch = Object.assign(
+    async () =>
+      Response.json(
+        { message: 'too many runs wait on you', code: 'queueFull' },
+        { status: 409 },
+      ),
+    { preconnect: originalFetch.preconnect },
+  );
+
+  const refused = await macro()
+    .factory.byId(RUN)
+    .retry()
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+  expect(refused).toBeInstanceOf(MacroApiError);
+  if (!(refused instanceof MacroApiError)) throw new Error('not refused');
+  expect(refused.status).toBe(409);
+  expect(refused.data).toEqual({
+    message: 'too many runs wait on you',
+    code: 'queueFull',
+  });
 });
