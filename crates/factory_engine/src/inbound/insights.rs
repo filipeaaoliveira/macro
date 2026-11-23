@@ -27,8 +27,9 @@ use crate::domain::insights::{
     TokenCounts, TroubleRun, UsageInsight,
 };
 use crate::domain::quality::{
-    BlockerCount, CiCause, CiCauseCounts, CiHealth, CiJobHealth, DeliveryInsight, QualityInsights,
-    QualityQuery, RecurringBlocker, RecurringCiFailure, ReviewQuality,
+    BlockerCount, CiCause, CiCauseCounts, CiHealth, CiJobHealth, CiQuarantined, CiRetryCounts,
+    DeliveryInsight, QualityInsights, QualityQuery, RecurringBlocker, RecurringCiFailure,
+    ReviewQuality,
 };
 
 /// Router state for Run insights.
@@ -239,6 +240,8 @@ impl IntoResponse for InsightsError {
         CiCause,
         CiCauseCounts,
         CiJobHealth,
+        CiRetryCounts,
+        CiQuarantined,
         RecurringCiFailure,
         ReviewQuality,
         BlockerCount,

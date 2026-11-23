@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory_ci_quarantine SET filed = true WHERE task_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6d04334a1c2f3f1c5ca43b8f6ba4af4d3153274d682be1831b99a22f421c8c57"
+}

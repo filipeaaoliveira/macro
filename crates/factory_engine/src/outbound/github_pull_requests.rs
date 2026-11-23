@@ -12,15 +12,17 @@ use github::domain::models::{
     GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
 };
 use github::domain::ports::GithubOauth;
-use github::outbound::github_oauth_client::{FileTooLarge, GithubBranchUpdate, GithubOauthImpl};
+use github::outbound::github_oauth_client::{
+    FileTooLarge, GithubBranchUpdate, GithubJobRerun, GithubOauthImpl,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
-    CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
-    RequiredChecks, run_branch,
+    CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, JobRerun,
+    Merging, OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState,
+    PullRequestText, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch, workflow_run_of,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -50,6 +52,9 @@ pub enum GithubPullRequestsErr {
     /// GitHub did not answer, or refused.
     #[error("github failed: {0}")]
     Github(#[from] GithubError),
+    /// A pull request has more comments than are read.
+    #[error("the pull request has more comments than are read")]
+    TooManyComments,
 }
 
 /// An outage passes: GitHub throttling or failing, a request that got no
@@ -61,7 +66,7 @@ impl Retryable for GithubPullRequestsErr {
     fn retryable(&self) -> bool {
         match self {
             Self::Token(_) | Self::Github(GithubError::Upstream(_)) => true,
-            Self::NotLinked | Self::Github(_) => false,
+            Self::NotLinked | Self::Github(_) | Self::TooManyComments => false,
         }
     }
 }
@@ -509,12 +514,21 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                         .join("\n")
                 })
                 .filter(|detail| !detail.is_empty());
+            let actions = run.app_slug.as_deref() == Some(ACTIONS_APP);
+            let actions_job_id = actions.then_some(run.id);
+            let workflow_run_id = run
+                .html_url
+                .as_deref()
+                .filter(|_| actions)
+                .and_then(workflow_run_of);
             jobs.push(FinishedJob {
                 name: run.name,
                 state,
                 failed_step,
                 detail,
                 annotations,
+                actions_job_id,
+                workflow_run_id,
             });
         }
         for status in statuses.items {
@@ -528,9 +542,29 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 failed_step: None,
                 detail: None,
                 annotations: Vec::new(),
+                actions_job_id: None,
+                workflow_run_id: None,
             });
         }
         Ok(jobs)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn rerun_actions_job(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        job_id: u64,
+    ) -> Result<JobRerun, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let rerun = self
+            .github
+            .rerun_actions_job(&token, repository.owner(), repository.name(), job_id)
+            .await?;
+        Ok(match rerun {
+            GithubJobRerun::Started => JobRerun::Started,
+            GithubJobRerun::Declined(message) => JobRerun::Declined(message),
+        })
     }
 
     #[tracing::instrument(err, skip(self, owner))]
@@ -652,6 +686,111 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             GithubOpenPullRequestOutcome::Opened(_) => Opening::Opened,
             GithubOpenPullRequestOutcome::Rejected(why) => Opening::Refused(why),
         })
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn pull_request_text(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+    ) -> Result<PullRequestText, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let text = self
+            .github
+            .pull_request_text(&token, repository.owner(), repository.name(), number)
+            .await?;
+        Ok(PullRequestText {
+            body: text.body.unwrap_or_default(),
+            author_id: text.author_id,
+        })
+    }
+
+    #[tracing::instrument(err, skip(self, owner, body))]
+    async fn edit_pull_request_body(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        body: &str,
+    ) -> Result<(), GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .edit_pull_request_body(&token, repository.owner(), repository.name(), number, body)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn writer_account(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<u64, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self.github.token_account_id(&token).await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn pull_request_comments(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+    ) -> Result<Vec<PullRequestComment>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let listed = self
+            .github
+            .list_issue_comments(&token, repository.owner(), repository.name(), number)
+            .await?;
+        // A comment of the report past what was read would be written again.
+        if !listed.complete {
+            return Err(GithubPullRequestsErr::TooManyComments);
+        }
+        Ok(listed
+            .items
+            .into_iter()
+            .map(|comment| PullRequestComment {
+                id: comment.id,
+                body: comment.body,
+                author_id: comment.author_id,
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(err, skip(self, owner, body))]
+    async fn comment_on_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        body: &str,
+    ) -> Result<(), GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .create_issue_comment(&token, repository.owner(), repository.name(), number, body)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner, body))]
+    async fn edit_pull_request_comment(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        comment_id: u64,
+        body: &str,
+    ) -> Result<(), GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .edit_issue_comment(
+                &token,
+                repository.owner(),
+                repository.name(),
+                comment_id,
+                body,
+            )
+            .await?)
     }
 
     #[tracing::instrument(err, skip(self, owner))]

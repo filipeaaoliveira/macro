@@ -29,6 +29,7 @@ const BLOCKERS: OrchestratorDefinition = OrchestratorDefinition {
     owner_gates: false,
     quiet_gates: false,
     task_thread: false,
+    rerun_flaky_ci: false,
     queue_limit: None,
     token_budget: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -162,6 +163,7 @@ fn with_the_owner_section_on_repeated_blockers_are_the_owner_s() {
     let owner_gates = OrchestratorDefinition {
         owner_gates: true,
         task_thread: false,
+        rerun_flaky_ci: false,
         queue_limit: None,
         token_budget: None,
         orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {

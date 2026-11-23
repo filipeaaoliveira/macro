@@ -3,6 +3,7 @@
 mod automations;
 mod board;
 mod check_rounds;
+mod ci_retries;
 mod evaluation;
 mod flaws;
 mod gate_replies;
@@ -875,6 +876,79 @@ impl RunRepository for PgRunRepository {
         before: u16,
     ) -> Result<Option<crate::domain::quality::LastCiWait>, Self::Err> {
         quality::last_ci_wait(&self.pool, run_id, before).await
+    }
+
+    #[tracing::instrument(err, skip(self, names))]
+    async fn keep_known_ci_flakes(&self, id: RunId, names: &[String]) -> Result<(), Self::Err> {
+        ci_retries::keep_known_ci_flakes(&self.pool, id, names).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn ci_flakes(
+        &self,
+        id: RunId,
+        repository: &str,
+        pull_request: Option<&str>,
+        since: DateTime<Utc>,
+    ) -> Result<crate::domain::quality::CiFlakes, Self::Err> {
+        ci_retries::ci_flakes(&self.pool, id, repository, pull_request, since).await
+    }
+
+    #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
+    async fn ci_retries(
+        &self,
+        key: StepKey,
+    ) -> Result<Vec<crate::domain::quality::CiRetry>, Self::Err> {
+        ci_retries::ci_retries(&self.pool, key).await
+    }
+
+    #[tracing::instrument(err, skip(self, retries), fields(run_id = %key.run_id, seq = key.seq))]
+    async fn request_ci_retries(
+        &self,
+        key: StepKey,
+        head_sha: &str,
+        retries: &[crate::domain::quality::CiRetryRequest],
+    ) -> Result<Vec<String>, Self::Err> {
+        ci_retries::request_ci_retries(&self.pool, key, head_sha, retries).await
+    }
+
+    #[tracing::instrument(err, skip(self, settled), fields(run_id = %key.run_id, seq = key.seq))]
+    async fn settle_ci_retries(
+        &self,
+        key: StepKey,
+        settled: &[(String, crate::domain::quality::CiRetryResult)],
+    ) -> Result<(), Self::Err> {
+        ci_retries::settle_ci_retries(&self.pool, key, settled).await
+    }
+
+    #[tracing::instrument(err, skip(self, jobs))]
+    async fn quarantine_ci_jobs(
+        &self,
+        id: RunId,
+        repository: &str,
+        jobs: &[crate::domain::quality::NewCiQuarantine],
+        since: DateTime<Utc>,
+        threshold: u32,
+    ) -> Result<Vec<String>, Self::Err> {
+        ci_retries::quarantine_ci_jobs(&self.pool, id, repository, jobs, since, threshold).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn unfiled_ci_quarantines(
+        &self,
+        id: RunId,
+    ) -> Result<Vec<crate::domain::quality::CiQuarantine>, Self::Err> {
+        ci_retries::unfiled_ci_quarantines(&self.pool, id).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn mark_ci_quarantine_filed(&self, task_id: Uuid) -> Result<(), Self::Err> {
+        ci_retries::mark_ci_quarantine_filed(&self.pool, task_id).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn lift_ci_quarantine(&self, task_id: Uuid) -> Result<bool, Self::Err> {
+        ci_retries::lift_ci_quarantine(&self.pool, task_id).await
     }
 
     #[tracing::instrument(err, skip(self, changes))]

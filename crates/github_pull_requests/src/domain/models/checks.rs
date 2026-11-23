@@ -132,6 +132,8 @@ pub struct GithubCheckRunResult {
     pub output_title: Option<String>,
     /// The summary of its output.
     pub output_summary: Option<String>,
+    /// Its page; for a GitHub Actions job, under its workflow run's.
+    pub html_url: Option<String>,
 }
 
 /// One step of a GitHub Actions job, in the job's order.

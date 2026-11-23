@@ -442,6 +442,34 @@ pub struct FinishedJob {
     /// The failures a check run that failed annotated, such as the tests
     /// that failed, when they could be read.
     pub annotations: Vec<FailureAnnotation>,
+    /// For a GitHub Actions job, its id, which reruns it; a rerun is a new
+    /// job of the same name. None for another app's check run, or a
+    /// commit status, which the factory cannot rerun.
+    pub actions_job_id: Option<u64>,
+    /// For a GitHub Actions job, the workflow run it is in, as its page
+    /// names it: a rerun of the job is a new job of the same run.
+    pub workflow_run_id: Option<u64>,
+}
+
+/// The GitHub Actions workflow run a job's page, `url`, is under
+/// (`…/actions/runs/{id}/job/{job}`); none for another page.
+pub(crate) fn workflow_run_of(url: &str) -> Option<u64> {
+    let (_, after) = url.split_once("/actions/runs/")?;
+    let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+    let rest = &after[digits.len()..];
+    if !rest.starts_with("/job/") {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// What GitHub answered a rerun of a failed GitHub Actions job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobRerun {
+    /// GitHub queued it to run again.
+    Started,
+    /// GitHub would not rerun it, with its message.
+    Declined(String),
 }
 
 /// A failure a check run annotated: a test that failed, or an error of the
@@ -567,6 +595,26 @@ pub struct OpenPullRequest {
     pub title: String,
     /// Its description.
     pub body: String,
+}
+
+/// A comment in a pull request's conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestComment {
+    /// GitHub's id of the comment, which edits it.
+    pub id: u64,
+    /// Its text.
+    pub body: String,
+    /// GitHub's id of the account that wrote it, if GitHub names one.
+    pub author_id: Option<u64>,
+}
+
+/// A pull request's description, and who opened it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestText {
+    /// Its description; empty when it has none.
+    pub body: String,
+    /// GitHub's id of the account that opened it, if GitHub names one.
+    pub author_id: Option<u64>,
 }
 
 /// What asking GitHub to open a pull request came to.

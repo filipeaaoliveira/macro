@@ -3,6 +3,7 @@
 
 mod board;
 mod definition;
+pub(crate) mod quarantine;
 mod standing;
 #[cfg(test)]
 mod test;
@@ -59,9 +60,9 @@ use crate::domain::models::{
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
-    AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread,
-    PullRequests, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor, StepService,
-    TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
+    AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoQuarantineTasks,
+    NoTaskThread, PullRequests, QuarantineTasks, Retryable, RunWorkflows, RunWorkflowsError,
+    StepExecutor, StepService, TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
 use crate::domain::standing_rules::{
     GateFacts, RuleAnswer, any_dismissed, kind_answers, offers_kind_answers, repeated_blockers,
@@ -1081,6 +1082,20 @@ where
                 });
             }
         };
+
+        // The Run keeps its Definition's known flaky CI jobs before its
+        // workflow starts, as it keeps its rules: a change merged later
+        // does not change which jobs its `ci` Steps rerun.
+        let known_flakes = definition
+            .as_ref()
+            .map(|pinned| pinned.definition.rules.known_flakes.as_slice())
+            .unwrap_or_default();
+        if !known_flakes.is_empty()
+            && let Err(error) = self.repo.keep_known_ci_flakes(run_id, known_flakes).await
+        {
+            self.forget_unstarted(run_id).await;
+            return Err(FactoryError::Internal(internal(error)));
+        }
 
         // The Run keeps its trial, or the arms of its Flow's Experiments,
         // before its workflow starts, so its first Step already runs on
@@ -2135,12 +2150,20 @@ pub const DEFAULT_QUESTIONS: u8 = 2;
 /// thread section is on has its updates posted to its task through
 /// `thread`, once each is recorded.
 #[derive(Debug, Clone)]
-pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates, P = NoTaskThread> {
+pub struct StepServiceImpl<
+    R,
+    E,
+    N = NoOwnerGates,
+    T = NoOwnerGates,
+    P = NoTaskThread,
+    Q = NoQuarantineTasks,
+> {
     repo: R,
     executor: E,
     notifier: N,
     notes: T,
     thread: P,
+    quarantine_tasks: Q,
     usage: Option<UsageLog>,
 }
 
@@ -2163,12 +2186,13 @@ where
             notifier: NoOwnerGates,
             notes: NoOwnerGates,
             thread: NoTaskThread,
+            quarantine_tasks: NoQuarantineTasks,
             usage: None,
         }
     }
 }
 
-impl<R, E, N, T, P> StepServiceImpl<R, E, N, T, P>
+impl<R, E, N, T, P, Q> StepServiceImpl<R, E, N, T, P, Q>
 where
     R: RunRepository
         + ReviewRoundRepository
@@ -2179,6 +2203,7 @@ where
     N: GateNotifier,
     T: TaskNotes,
     P: TaskThread,
+    Q: QuarantineTasks,
 {
     /// The service, telling Runs' owners of their waiting Gates through
     /// `notifier`, and reading their comments on the Runs' tasks through
@@ -2188,26 +2213,49 @@ where
         self,
         notifier: N2,
         notes: T2,
-    ) -> StepServiceImpl<R, E, N2, T2, P> {
+    ) -> StepServiceImpl<R, E, N2, T2, P, Q> {
         StepServiceImpl {
             repo: self.repo,
             executor: self.executor,
             notifier,
             notes,
             thread: self.thread,
+            quarantine_tasks: self.quarantine_tasks,
             usage: self.usage,
         }
     }
 
     /// The service, posting Runs' updates to their tasks through `thread`,
     /// for the Runs whose task thread section is on.
-    pub fn with_task_thread<P2: TaskThread>(self, thread: P2) -> StepServiceImpl<R, E, N, T, P2> {
+    pub fn with_task_thread<P2: TaskThread>(
+        self,
+        thread: P2,
+    ) -> StepServiceImpl<R, E, N, T, P2, Q> {
         StepServiceImpl {
             repo: self.repo,
             executor: self.executor,
             notifier: self.notifier,
             notes: self.notes,
             thread,
+            quarantine_tasks: self.quarantine_tasks,
+            usage: self.usage,
+        }
+    }
+
+    /// The service, filing through `tasks` a task for each CI job a Run's
+    /// `ci` Step quarantined, as the Run's owner, once the Run ends.
+    /// Without it, quarantines are kept and listed, but no task is filed.
+    pub fn with_quarantine_tasks<Q2: QuarantineTasks>(
+        self,
+        tasks: Q2,
+    ) -> StepServiceImpl<R, E, N, T, P, Q2> {
+        StepServiceImpl {
+            repo: self.repo,
+            executor: self.executor,
+            notifier: self.notifier,
+            notes: self.notes,
+            thread: self.thread,
+            quarantine_tasks: tasks,
             usage: self.usage,
         }
     }
@@ -2297,7 +2345,7 @@ where
     }
 }
 
-impl<R, E, N, T, P> StepService for StepServiceImpl<R, E, N, T, P>
+impl<R, E, N, T, P, Q> StepService for StepServiceImpl<R, E, N, T, P, Q>
 where
     R: RunRepository
         + ReviewRoundRepository
@@ -2308,6 +2356,7 @@ where
     N: GateNotifier,
     T: TaskNotes,
     P: TaskThread,
+    Q: QuarantineTasks,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
     async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError> {
@@ -2787,6 +2836,7 @@ where
         if let Some(notice) = budget_notice(&run) {
             self.notifier.notify(notice).await;
         }
+        quarantine::file_tasks(&self.repo, &self.quarantine_tasks, &run).await;
         self.post(finish.run_id, RunUpdate::Ended).await;
         Ok(())
     }

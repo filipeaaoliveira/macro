@@ -27,8 +27,12 @@ use github_pull_requests::domain::models::{is_github_owner, is_github_repository
 /// GitHub gives.
 pub const INVALID_REPOSITORY: &str = "owner or repo is not a GitHub repository name";
 
+mod actions_reruns;
+pub use actions_reruns::GithubJobRerun;
 mod branches;
 pub use branches::{CommitMade, ComparedChanges, ComparedFile, FileTooLarge};
+mod pull_request_texts;
+pub use pull_request_texts::{GithubIssueComment, GithubPullRequestText};
 mod pull_requests;
 pub use pull_requests::GithubBranchUpdate;
 #[cfg(test)]

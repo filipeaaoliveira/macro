@@ -889,6 +889,38 @@ while an Actions suite sits empty. Its guarantees:
   reports only by status (as some deploy previews do) keeps CI waiting until
   it times out.
 
+The pull request's description holds the request, then the Run's report,
+then the lines that name the Run and its task
+(`src/domain/pull_request_steps/description.rs`). The report is a section
+marked by HTML comments: the plan (without its acceptance block), the
+Done-when checklist with each clause's result in the latest `accept` Step,
+the review rounds with how each Blocker ended (fixed, disputed and upheld or
+dropped), the latest round of the repository's checks, and the follow-ups
+filed. `publish` opens the pull request with it, and `publish` and `ci` (once,
+on its first read, so a Run that comes back from `update` shows it) write it
+again on each visit: only the marked section is replaced, so what a person
+wrote around it stays, and a description without it gets it at its end. A
+description takes about 1% less than GitHub's 65,536 characters: the
+request is kept whole lines (cut by characters only when its first line
+alone does not fit), and the rest of it, then what does not fit of the
+report, go into numbered comments, each found again by its marker and
+edited in place; one no longer needed, or a second of one number, says so.
+Only comments by the GitHub account the owner's token acts as (`GET
+/user`) count, whoever opened the pull request: a marker anyone else writes
+is never edited, and when that account cannot be read no comment is
+written. Every marker names the Run
+(`run=<id>`), and only this Run's count: the section is the first of its
+start markers that its end marker closes, and its other sections and lone
+markers are removed until none is left. The request and what agents wrote
+are escaped one way, code included: `&`, `<` and `>` as entities, and a
+word joiner after `@` before a name, `#` before a number, `GH-` and a
+closing keyword before a link or a Markdown link; web and email addresses
+get no joiner. Follow-ups are not named by their task id, which would link the
+pull request to them. Writing the report reads before it writes, writes
+only what changed, and a failure is logged without failing the Step; when
+`publish` cannot read the review rounds, it opens the pull request without
+them, and a later write adds them.
+
 On a repository, `write` and `fix` then run the repository's own checks
 (`src/domain/built_in_steps/checks_round.rs`). The repository declares them
 in `.macro/checks.json` on its base branch (`src/domain/checks.rs`): each a
@@ -2381,6 +2413,12 @@ Definition.
 - `src/domain/quality.rs`: CI health, review quality, cost per merged
   pull request and the autonomy rate (`GET /insights/quality`), and how a
   `ci` wait's finished jobs are classed before they are kept.
+- `src/domain/pull_request_steps/flaky_ci.rs`: the `rerun_flaky_ci`
+  Standing Rule: a red of only known flaky jobs (the Definition's
+  `knownFlakes`, a job quarantined in the repository, or the same failure
+  on other pull requests) is rerun once through GitHub before `ci-fix`;
+  passed retries quarantine a job, and `service/quarantine.rs` files its
+  task as the Run ends.
 - `src/domain/evaluation.rs`: Scorers, Experiments and Benchmarks, their
   sampling and arm assignment; `evaluation/service.rs` scores a Run that
   ended; `evaluation/insights.rs` the evaluation insights and suites.
@@ -2653,3 +2691,15 @@ Definition.
 - A worker older than `selfImprovement` in `scorers.json` cannot read a
   Definition that sets it (`deny_unknown_fields`); one that leaves the
   defaults keeps the JSON it kept before.
+- Run the `factory_ci_quarantine` migrations (the table one, then the two
+  concurrent index builds) before deploying the factory. A worker older
+  than `rerun_flaky_ci` cannot read a Run whose kept rules store it, nor a
+  Definition whose `rules.json` sets `rerunFlakyCi` or `knownFlakes`
+  (`deny_unknown_fields`): deploy every worker and the API together after
+  the migrations, as for `selfImprovement`, and only then turn the rule on.
+  The rule is off by default. A `ci` Step reruns only GitHub Actions jobs,
+  with the owner's token: one that may not write Actions gets the rerun
+  declined, and the red goes to `ci-fix` as before. A red the rule may
+  rerun is held until the head's other checks finish, or at most three
+  minutes after its jobs' workflow runs completed, so its `ci-fix` starts
+  later.

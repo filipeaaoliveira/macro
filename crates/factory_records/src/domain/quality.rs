@@ -1,6 +1,7 @@
 //! What CI health, review quality, cost and autonomy read from a person's
-//! Runs, and how a Run's `ci` Step keeps each wait on its pull request's
-//! checks.
+//! Runs, how a Run's `ci` Step keeps each wait on its pull request's
+//! checks, and the reruns of flaky CI jobs it asks for and the jobs it
+//! quarantines.
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -135,6 +136,199 @@ pub struct LastCiWait {
     pub jobs: Vec<String>,
 }
 
+/// How far back a failure's proof of flakiness counts: the reruns and
+/// greens that prove it, and the passed retries that keep a quarantine
+/// from lapsing.
+pub const FLAKY_PERIOD: chrono::TimeDelta = chrono::TimeDelta::days(30);
+
+/// Why a `ci` Step took a failed CI job for flaky, and reran it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CiRetryMatch {
+    /// The Run's Factory Definition names it in `knownFlakes`.
+    Known,
+    /// It is quarantined in the Run's repository.
+    Quarantined,
+    /// The same failure turned other pull requests of the repository red.
+    Record,
+}
+
+impl CiRetryMatch {
+    /// The word it is kept as.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Known => "known",
+            Self::Quarantined => "quarantined",
+            Self::Record => "record",
+        }
+    }
+
+    /// The match kept as `word`.
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            "known" => Some(Self::Known),
+            "quarantined" => Some(Self::Quarantined),
+            "record" => Some(Self::Record),
+            _ => None,
+        }
+    }
+}
+
+/// How a rerun of a failed CI job ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CiRetryResult {
+    /// The job passed when it ran again: a passed retry.
+    Passed,
+    /// It failed again, or its rerun never showed.
+    Failed,
+    /// GitHub would not rerun it.
+    Refused,
+}
+
+impl CiRetryResult {
+    /// The word it is kept as.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::Refused => "refused",
+        }
+    }
+
+    /// The result kept as `word`.
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            "passed" => Some(Self::Passed),
+            "failed" => Some(Self::Failed),
+            "refused" => Some(Self::Refused),
+            _ => None,
+        }
+    }
+}
+
+/// A failed CI job a `ci` Step asks GitHub to rerun.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CiRetryRequest {
+    /// The job's name. At most [`CI_NAME_BYTES`].
+    pub name: String,
+    /// The GitHub Actions job that failed.
+    pub job_id: u64,
+    /// The workflow run the job is in, when its page names it: a rerun of
+    /// the job is a new job of the same run.
+    pub workflow_run_id: Option<u64>,
+    /// The first of its steps that failed, when it was read. At most
+    /// [`CI_NAME_BYTES`].
+    pub failed_step: Option<String>,
+    /// The first test its check run annotated as failed, when it did. At
+    /// most [`CI_NAME_BYTES`].
+    pub failure: Option<String>,
+    /// Why it was taken for flaky.
+    pub matched: CiRetryMatch,
+}
+
+/// A rerun a `ci` Step asked for, as kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CiRetry {
+    /// The job's name.
+    pub name: String,
+    /// The commit whose checks it reran.
+    pub head_sha: String,
+    /// The GitHub Actions job that failed, which its rerun replaces.
+    pub job_id: u64,
+    /// The workflow run the job is in, when its page named it.
+    pub workflow_run_id: Option<u64>,
+    /// The first of its steps that failed, when it was read.
+    pub failed_step: Option<String>,
+    /// The first test its check run annotated as failed, when it did.
+    pub failure: Option<String>,
+    /// Why it was taken for flaky.
+    pub matched: CiRetryMatch,
+    /// How it ended; none while it runs.
+    pub result: Option<CiRetryResult>,
+    /// When it was asked for.
+    pub requested_at: DateTime<Utc>,
+}
+
+/// A failure of a CI job, as CI health tells failures apart: the job, the
+/// first of its steps that failed, and the first test it annotated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CiFailureIdentity {
+    /// The job's name.
+    pub name: String,
+    /// The first of its steps that failed, when it was read.
+    pub failed_step: Option<String>,
+    /// The first test its check run annotated as failed, when it did.
+    pub failure: Option<String>,
+}
+
+/// A failure of a CI job proved flaky on other pull requests of a
+/// repository: its rerun passed, or the same head went green after it
+/// with no new commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlakyCiFailure {
+    /// The job's name.
+    pub name: String,
+    /// The first of its steps that failed, when it was read.
+    pub failed_step: Option<String>,
+    /// The first test its check run annotated as failed, when it did.
+    pub failure: Option<String>,
+    /// On how many other pull requests it proved flaky.
+    pub pull_requests: u32,
+}
+
+/// What a `ci` Step reads to tell whether a red is flaky.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CiFlakes {
+    /// The jobs the Run's Factory Definition names as known flakes.
+    pub known: Vec<String>,
+    /// The failures quarantined in the Run's repository, not lapsed.
+    pub quarantined: Vec<CiFailureIdentity>,
+    /// The failures proved flaky on other pull requests of the repository
+    /// over the period read, the most widespread first.
+    pub failures: Vec<FlakyCiFailure>,
+}
+
+/// A failure to quarantine, with the id of the task filed for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewCiQuarantine {
+    /// The failure.
+    pub failure: CiFailureIdentity,
+    /// The id the task filed for it takes.
+    pub task_id: Uuid,
+}
+
+/// A failure of a CI job quarantined in a repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CiQuarantine {
+    /// The repository, by its URL in lower case.
+    pub repository: String,
+    /// The failure.
+    pub failure: CiFailureIdentity,
+    /// The Run whose rerun crossed the threshold, which files its task;
+    /// none once that Run was deleted.
+    pub run_id: Option<RunId>,
+    /// The passed retries that quarantined it, as last counted.
+    pub passed_retries: u32,
+    /// The id of the task filed for it.
+    pub task_id: Uuid,
+    /// Whether the task was filed yet.
+    pub filed: bool,
+    /// When it was quarantined.
+    pub quarantined_at: DateTime<Utc>,
+    /// When a rerun of it last passed: it lapses 30 days after.
+    pub last_passed_at: DateTime<Utc>,
+}
+
+/// A rerun of a CI job by one of a scope's Runs, as CI health counts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CiRetryRecord {
+    /// The Run.
+    pub run_id: RunId,
+    /// The job's name.
+    pub name: String,
+    /// How it ended; none while it runs.
+    pub result: Option<CiRetryResult>,
+}
+
 /// The Runs CI health and review quality read: those of an
 /// [`InsightsScope`], of one repository or of all of them.
 #[derive(Debug, Clone, PartialEq)]
@@ -264,6 +458,11 @@ pub struct QualityRecords {
     pub reviewers: Vec<ReviewerRecord>,
     /// The Blockers their reviewers found, in order.
     pub blockers: Vec<BlockerRecord>,
+    /// The CI jobs their `ci` Steps reran, in order.
+    pub ci_retries: Vec<CiRetryRecord>,
+    /// The CI jobs quarantined in the scope's repositories, by repository
+    /// and name.
+    pub ci_quarantines: Vec<CiQuarantine>,
 }
 
 /// Reads what CI health, review quality, cost and autonomy show about a

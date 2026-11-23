@@ -43,6 +43,7 @@ const STAND_IN_ONLY: OrchestratorDefinition = OrchestratorDefinition {
     owner_gates: false,
     quiet_gates: false,
     task_thread: false,
+    rerun_flaky_ci: false,
     queue_limit: None,
     token_budget: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
