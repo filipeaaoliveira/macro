@@ -63,7 +63,9 @@ export function RunContent(props: {
           </Show>
           {/* Only the Run's owner reads and labels its Scorers' judgments. */}
           <Show when={props.controller.owned() && props.run.end}>
-            <RunScores runId={props.run.id} />
+            {(end) => (
+              <RunScores runId={props.run.id} endedAt={end().endedAt} />
+            )}
           </Show>
           <RunSteps
             steps={props.run.steps}

@@ -91,11 +91,12 @@ function ScoreRow(props: { runId: string; score: RunScore }) {
  * dimension. Their labels calibrate the Scorer. Nothing shows while no
  * Scorer judged the Run.
  */
-export function RunScores(props: { runId: string }) {
+export function RunScores(props: { runId: string; endedAt: string }) {
   const context = useRunsContext();
   const source = context.runScores(
     () => props.runId,
-    () => true
+    () => true,
+    () => props.endedAt
   );
 
   return (

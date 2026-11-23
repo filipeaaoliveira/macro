@@ -5,6 +5,7 @@ import {
   type RunScore,
   type ScorerCalibration,
   type SuiteInsight,
+  scoresRefetchInterval,
   suiteStandings,
   uncalibratedScorers,
 } from './evaluation';
@@ -290,5 +291,22 @@ describe('uncalibratedScorers', () => {
         { name: 'correct', calibration: calibration({ calibrated: true }) },
       ])
     ).toEqual(new Set(['clear']));
+  });
+});
+
+describe('scoresRefetchInterval', () => {
+  const ended = '2026-11-16T10:00:00Z';
+  const at = (minutes: number) => Date.parse(ended) + minutes * 60_000;
+
+  it('reads a newly ended run’s scores again every 15 seconds for 5 minutes, then stops', () => {
+    expect(scoresRefetchInterval(ended, at(0))).toBe(15_000);
+    expect(scoresRefetchInterval(ended, at(4.9))).toBe(15_000);
+    expect(scoresRefetchInterval(ended, at(5))).toBe(false);
+    expect(scoresRefetchInterval(ended, at(60 * 24))).toBe(false);
+  });
+
+  it('reads them once for a run with no end time it can read', () => {
+    expect(scoresRefetchInterval(undefined, at(0))).toBe(false);
+    expect(scoresRefetchInterval('not a time', at(0))).toBe(false);
   });
 });

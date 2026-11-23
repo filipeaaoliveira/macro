@@ -21,7 +21,7 @@ import type {
   RunsSource,
   StartRunFailure,
 } from '../context/runs-context';
-import type { RunScore } from '../core/evaluation';
+import { type RunScore, scoresRefetchInterval } from '../core/evaluation';
 import { type GateModelReading, type Run, runStatus } from '../core/run';
 import { factoryRunKeys } from './keys';
 
@@ -392,11 +392,16 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
 
     waitingRuns: () => toSource(useQuery(() => waitingRunsOptions(client))),
 
-    runScores: (runId: Accessor<string>, enabled: Accessor<boolean>) =>
+    runScores: (
+      runId: Accessor<string>,
+      enabled: Accessor<boolean>,
+      endedAt: Accessor<string | undefined>
+    ) =>
       toSource(
         useQuery(() => ({
           ...runScoresOptions(runId()),
           enabled: enabled() && Boolean(runId()),
+          refetchInterval: () => scoresRefetchInterval(endedAt(), Date.now()),
         }))
       ),
 

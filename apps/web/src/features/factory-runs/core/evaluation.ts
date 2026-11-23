@@ -173,3 +173,26 @@ export function uncalibratedScorers(
       .map((scorer) => scorer.name)
   );
 }
+
+/** How often a newly ended Run's scores are read again. */
+const SCORES_POLL_MS = 15_000;
+
+/**
+ * How long after a Run ends its scores are read again: its Scorers judge it
+ * once it ends, and the factory doesn't say which of them will.
+ */
+const SCORES_POLL_WINDOW_MS = 5 * 60_000;
+
+/**
+ * When to read an ended Run's scores again: every `SCORES_POLL_MS` for
+ * `SCORES_POLL_WINDOW_MS` after it ended, then no more.
+ */
+export function scoresRefetchInterval(
+  endedAt: string | undefined,
+  now: number
+): number | false {
+  if (!endedAt) return false;
+  const ended = Date.parse(endedAt);
+  if (Number.isNaN(ended)) return false;
+  return now - ended < SCORES_POLL_WINDOW_MS ? SCORES_POLL_MS : false;
+}

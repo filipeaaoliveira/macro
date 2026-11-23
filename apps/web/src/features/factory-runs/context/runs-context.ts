@@ -129,11 +129,13 @@ export type RunsContext = {
   markRunFlawed: (input: MarkRunFlawedInput) => Promise<RunActionResult>;
   /**
    * The live Scorers' judgments of one of the person's own Runs, read while
-   * `enabled`: only its owner reads them.
+   * `enabled`: only its owner reads them. They are read again for a few
+   * minutes after the Run ended at `endedAt`, as its Scorers judge it.
    */
   runScores: (
     runId: Accessor<string>,
-    enabled: Accessor<boolean>
+    enabled: Accessor<boolean>,
+    endedAt: Accessor<string | undefined>
   ) => RunsSource<RunScore[]>;
   /**
    * Labels a Scorer's judgment of the person's Run with whether it should
