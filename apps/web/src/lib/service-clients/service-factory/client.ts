@@ -33,6 +33,7 @@ import {
   getProposeFactoryDefinitionChangeUrl,
   getReplyToFactoryGateUrl,
   getResumeFactoryStepUrl,
+  getRetryFactoryRunUrl,
   getSetFactoryAutomationEnabledUrl,
   getSetFactoryControlFilesUrl,
   getSetFactoryDefinitionUrl,
@@ -147,6 +148,48 @@ async function refusal(
   const message =
     typeof body.message === 'string' ? body.message : failure.message;
   return { code: failure.code, message };
+}
+
+/** Why a retry was refused, when the service names the cause. */
+export type RetryRunErrorCode =
+  | 'QUEUE_FULL'
+  | 'NOT_IN_STANDING_ROLE'
+  | 'DEFINITION_UNREADABLE';
+
+const RETRY_RUN_ERROR_CODES = {
+  queueFull: 'QUEUE_FULL',
+  notInStandingRole: 'NOT_IN_STANDING_ROLE',
+  unreachableDefinition: 'DEFINITION_UNREADABLE',
+  invalidDefinition: 'DEFINITION_UNREADABLE',
+} as const satisfies Partial<Record<RunErrorCode, RetryRunErrorCode>>;
+
+function isRetryRefusal(
+  code: unknown
+): code is keyof typeof RETRY_RUN_ERROR_CODES {
+  return typeof code === 'string' && Object.hasOwn(RETRY_RUN_ERROR_CODES, code);
+}
+
+/**
+ * A refused retry: the cause the service names (a full Queue, no Standing
+ * Role that allows a start, a Definition that doesn't read), else the
+ * status's error (a Run retried already, or that can't be retried, is a
+ * `CONFLICT`), with the service's message either way.
+ */
+async function retryRunError(
+  response: Response
+): Promise<ResultError<FetchWithTokenErrorCode | RetryRunErrorCode>> {
+  const failure = statusError(response.status);
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!body || typeof body !== 'object') return failure;
+  const message =
+    'message' in body && typeof body.message === 'string'
+      ? body.message
+      : failure.message;
+  const code =
+    'code' in body && isRetryRefusal(body.code)
+      ? RETRY_RUN_ERROR_CODES[body.code]
+      : failure.code;
+  return { code, message };
 }
 
 /** Why a proposed change to the team's Factory Definition was refused. */
@@ -580,6 +623,20 @@ export const factoryClient = {
       `${host()}${getCancelFactoryRunUrl(encodeURIComponent(runId))}`,
       { method: 'POST' }
     ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * Retries one of the caller's Runs that ended `failed`, `infrastructure`
+   * or `blocked` (201, the new Run): it starts at the entry the Run stopped
+   * at, on its branch, keeping the Steps before it. Someone else's Run fails
+   * `NOT_FOUND`; a Run retried already, or one that can't be retried,
+   * `CONFLICT`; a full Queue, `QUEUE_FULL`.
+   */
+  retryRun(runId: string) {
+    return fetchWithToken<RunDetail, RetryRunErrorCode>(
+      `${host()}${getRetryFactoryRunUrl(encodeURIComponent(runId))}`,
+      { method: 'POST', errorResponseHandler: retryRunError }
+    );
   },
 
   /**

@@ -45,3 +45,23 @@ export function fellShort(outcome: string, answer?: string): boolean {
   if (outcome === 'no_result') return answer === 'stop';
   return SHORT_OUTCOMES.has(outcome);
 }
+
+/**
+ * Step outcomes that send work back to be done again rather than fail it:
+ * Blockers a review found, in a plan (`plan-review`) or a change, and a plan
+ * that finds its task too big for one Run (`oversized`), which goes to be
+ * split. Shown in the warning tone.
+ */
+const SENT_BACK_OUTCOMES = new Set(['blockers', 'oversized']);
+
+/** How a Step's outcome reads: fell short, sent back, or neither. */
+export type OutcomeTone = 'short' | 'sentBack' | undefined;
+
+/**
+ * The tone a Step's `outcome` is shown in, its Gate's answer `answer`
+ * deciding a `no_result`, as {@link fellShort} does.
+ */
+export function outcomeTone(outcome: string, answer?: string): OutcomeTone {
+  if (fellShort(outcome, answer)) return 'short';
+  return SENT_BACK_OUTCOMES.has(outcome) ? 'sentBack' : undefined;
+}

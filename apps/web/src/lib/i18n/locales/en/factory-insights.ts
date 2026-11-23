@@ -45,6 +45,11 @@ export default {
   outcomesChart: 'Run outcomes donut chart',
   outcomeShare: '{{outcome}}: {{count}} ({{share}})',
   oneStatePerRun: 'Each run appears in one state.',
+  retriedRuns: {
+    one: '{{count}} of these runs was retried after it ended. Its retry is a run of its own, counted by how it went.',
+    other:
+      '{{count}} of these runs were retried after they ended. Each retry is a run of its own, counted by how it went.',
+  },
   noRunsInPeriod: 'No runs in this period.',
   showCounts: 'Show counts',
   showPercentages: 'Show percentages',

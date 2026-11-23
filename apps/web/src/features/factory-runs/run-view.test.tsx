@@ -76,6 +76,7 @@ function mount(options: {
   answerGate?: RunsContext['answerGate'];
   replyToGate?: RunsContext['replyToGate'];
   cancelRun?: RunsContext['cancelRun'];
+  retryRun?: RunsContext['retryRun'];
   markRunFlawed?: RunsContext['markRunFlawed'];
   scores?: RunScore[];
   labelRunScore?: RunsContext['labelRunScore'];
@@ -112,6 +113,7 @@ function mount(options: {
     answerGate: options.answerGate ?? vi.fn(async () => DONE),
     replyToGate: options.replyToGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
+    retryRun: options.retryRun ?? vi.fn(),
     markRunFlawed: options.markRunFlawed ?? vi.fn(async () => DONE),
     runScores: () => ({
       state: () => 'ready',
@@ -1818,5 +1820,62 @@ describe('RunView', () => {
       screen.getByText(/Marked flawed by the tests-pass scorer/)
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Mark flawed' })).toBeNull();
+  });
+});
+
+describe('RunView plan review and split', () => {
+  const CHILD = '01a2077b-0000-7000-8000-00000000000a';
+  it('shows a plan review’s blockers and an oversized plan as sent back, and links a split’s child tasks', async () => {
+    const { setRun } = mount({});
+    const mention = (id: string, name: string) =>
+      `<m-document-mention>${JSON.stringify({
+        documentId: id,
+        documentName: name,
+        blockName: 'md',
+        blockParams: {},
+      })}</m-document-mention>`;
+    const step = (
+      seq: number,
+      entry: string,
+      outcome: string,
+      output = ''
+    ): RunStep => ({
+      seq,
+      entry,
+      visit: 1,
+      startedAt: '2026-11-16T09:00:00Z',
+      end: { outcome, output, endedAt: '2026-11-16T09:01:00Z' },
+    });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'manual', endedAt: '2026-11-16T10:00:00Z' },
+      steps: [
+        step(1, 'plan', 'done'),
+        step(2, 'plan-review', 'blockers'),
+        step(3, 'plan-review', 'oversized'),
+        step(
+          4,
+          'split',
+          'done',
+          [
+            "The task is too big for one run (two services): its plan split it into 1 child tasks, filed as the run's owner. The run ends here; start a run on each child task.",
+            '',
+            `- ${mention(CHILD, 'Add the column')}`,
+          ].join('\n')
+        ),
+      ],
+    });
+
+    const badge = (seq: number) =>
+      document.querySelector(
+        `[data-factory-run-step="${seq}"] [data-outcome-tone]`
+      );
+    await waitFor(() => expect(badge(2)?.textContent).toBe('Blockers'));
+    expect(badge(2)?.getAttribute('data-outcome-tone')).toBe('sentBack');
+    expect(badge(3)?.getAttribute('data-outcome-tone')).toBe('sentBack');
+    expect(screen.getAllByText('Plan review').length).toBeGreaterThan(0);
+    expect(screen.getByText('Split into 1 child task')).toBeTruthy();
+    const link = screen.getByRole('link', { name: 'Add the column' });
+    expect(link.getAttribute('href')).toContain(CHILD);
   });
 });

@@ -85,6 +85,10 @@ export function RunSummary(props: {
   status: RunStatus;
   time: (value: string) => string;
   statusRef?: (element: HTMLElement) => void;
+  /** The Run's retry, by id, when it is known. */
+  retriedBy?: string;
+  /** Opens a Run this one links: the Run it retries, or its retry. */
+  onOpenRun?: (runId: string) => void;
 }) {
   const ended = () =>
     props.status.kind === 'ended' ? props.status.endedAt : undefined;
@@ -114,6 +118,11 @@ export function RunSummary(props: {
           )}
         </Show>
       </p>
+      <RetryLinks
+        retriedFrom={props.run.retry?.retriedFrom}
+        retriedBy={props.retriedBy}
+        onOpenRun={props.onOpenRun}
+      />
       <Show when={props.run.repository}>
         {(repository) => (
           <section class="flex flex-col gap-1.5">
@@ -271,6 +280,56 @@ export function RunSummary(props: {
         )}
       </Show>
     </>
+  );
+}
+
+/**
+ * The Run a retry retries, and the retry of a Run retried, each opening in
+ * its place.
+ */
+function RetryLinks(props: {
+  retriedFrom?: string;
+  retriedBy?: string;
+  onOpenRun?: (runId: string) => void;
+}) {
+  const link = (runId: string, label: string) => (
+    <Show when={props.onOpenRun} fallback={label}>
+      {(open) => (
+        <button
+          type="button"
+          class="underline focus-visible:outline-2 focus-visible:outline-ink"
+          onClick={() => open()(runId)}
+        >
+          {label}
+        </button>
+      )}
+    </Show>
+  );
+
+  return (
+    <Show when={props.retriedFrom || props.retriedBy}>
+      <section data-run-retry class="flex flex-col gap-1.5">
+        <h3 class="text-xs font-medium text-ink-muted">
+          {t('factoryRuns.retry')}
+        </h3>
+        <Show when={props.retriedFrom}>
+          {(runId) => (
+            <p class="text-sm leading-5">
+              {t('factoryRuns.retryOf')}{' '}
+              {link(runId(), t('factoryRuns.openRetriedRun'))}
+            </p>
+          )}
+        </Show>
+        <Show when={props.retriedBy}>
+          {(runId) => (
+            <p class="text-sm leading-5">
+              {t('factoryRuns.retriedIn')}{' '}
+              {link(runId(), t('factoryRuns.openRetry'))}
+            </p>
+          )}
+        </Show>
+      </section>
+    </Show>
   );
 }
 
