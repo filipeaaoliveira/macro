@@ -606,6 +606,21 @@ arms with their Runs' outcomes and scores, the Benchmarks and the caller's
 suites of the period, each trial with when its Run started and ended
 (`startedAt`, `endedAt`), for the time it took.
 
+A Run's owner labels a live Scorer's judgment of the Run with whether it
+should have passed (`PUT /runs/{id}/scores/{scorer}/label`, `{"passed"}`;
+`evaluation/insights/calibration.rs`), in their own signed-in session and
+never from an agent's account (403); a new label replaces the last, and a
+Run not theirs, or a Scorer that did not judge it, is 404. `GET
+/runs/{id}/scores` lists the Run's judgments with their labels for its
+owner. A Scorer is calibrated once its judge agrees with the person's
+labels, over all of their Runs: at least `CALIBRATION_LABELS` (20)
+labelled, with the judge's pass (a score of at least `PASS_SCORE`) the
+label's on at least `CALIBRATION_AGREEMENT` (0.8) of them. Each Scorer in
+the insights, and each judgment of a Run, carries its `calibration`; until
+it is calibrated, nothing should act on its numbers. Calibration is each
+person's, from their own labels, as the insights are of their own Runs;
+a trial's judgments are never labelled.
+
 The Step Terminal (`src/domain/step_terminal.rs`) lets the Run's owner
 watch a running agent Step's session and steer it. A Step reads the
 session it works in while it runs and holds one (`terminal.sessionId` in

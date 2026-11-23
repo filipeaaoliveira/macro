@@ -5,7 +5,8 @@ use agent_correlation::context::{Attribution, scope_attribution};
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
-use factory_records::domain::evaluation::AgentChoices;
+use factory_records::domain::evaluation::{AgentChoices, ScorerLabel};
+use factory_records::domain::models::RunId;
 use macro_authorization::{
     AuthorizedUserApiKey, CODE_EXECUTION_HEADER, CredentialOrigin, INTERNAL_API_KEY_HEADER,
     INTERNAL_MACRO_USER_ID_HEADER, InternalAuthConfig, JwtValidator, MacroAuthorizationError,
@@ -19,6 +20,9 @@ use uuid::Uuid;
 
 use super::{EvaluationRouterState, evaluation_router};
 use crate::domain::evaluation::EvaluationDefinitionError;
+use crate::domain::evaluation::insights::calibration::{
+    RunScores, ScorerLabelError, ScorerLabelService,
+};
 use crate::domain::evaluation::insights::{
     DismissalUndoneResponse, EvaluationInsights, EvaluationService, SuiteError, SuiteStarted,
     UndoDismissalError,
@@ -78,6 +82,7 @@ struct FakeEvaluation {
     started_by: Mutex<Vec<(String, String)>>,
     acting: Mutex<Vec<Option<ActingAgent>>>,
     undone_by: Mutex<Vec<(String, Uuid)>>,
+    labelled_by: Mutex<Vec<(String, RunId, String, bool)>>,
 }
 
 /// The improvement `undo_dismissal` finds; [`ELSEWHERE`] is no Run of the
@@ -160,6 +165,48 @@ impl EvaluationService for Arc<FakeEvaluation> {
             }),
         }
     }
+}
+
+/// Only [`JUDGED`] judged the Run; any Run is the caller's.
+const JUDGED: &str = "correctness";
+
+impl ScorerLabelService for Arc<FakeEvaluation> {
+    async fn run_scores(
+        &self,
+        _actor: &MacroUserIdStr<'static>,
+        _run_id: RunId,
+    ) -> Result<RunScores, ScorerLabelError> {
+        Ok(RunScores { scores: Vec::new() })
+    }
+
+    async fn label_score(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        run_id: RunId,
+        scorer: &str,
+        passed: bool,
+    ) -> Result<ScorerLabel, ScorerLabelError> {
+        self.labelled_by.lock().expect("labelled").push((
+            actor.as_ref().to_string(),
+            run_id,
+            scorer.to_string(),
+            passed,
+        ));
+        if scorer != JUDGED {
+            return Err(ScorerLabelError::NotJudged(scorer.to_string()));
+        }
+        Ok(ScorerLabel {
+            passed,
+            labelled_at: chrono::Utc::now(),
+        })
+    }
+}
+
+fn label(run_id: RunId, scorer: &str) -> axum::http::request::Builder {
+    Request::builder()
+        .method("PUT")
+        .uri(format!("/runs/{run_id}/scores/{scorer}/label"))
+        .header("content-type", "application/json")
 }
 
 fn undo(id: Uuid) -> axum::http::request::Builder {
@@ -378,4 +425,57 @@ async fn a_refused_undo_says_why_with_its_status() {
             .expect("request");
         assert_eq!(status(&app, request).await, expected, "{id}");
     }
+}
+
+/// Only the person in their own signed-in session labels a Run's judgment,
+/// as themselves: an internal caller acting for them and an agent's code
+/// are refused before the service is asked, and a Scorer that did not
+/// judge the Run is not found.
+#[tokio::test]
+async fn only_a_person_in_their_session_labels_a_judgment() {
+    let (app, service) = app();
+    let run_id = RunId::from_uuid(Uuid::from_u128(7));
+    let body = || Body::from(r#"{"passed":false}"#);
+
+    let internal = label(run_id, JUDGED)
+        .header(INTERNAL_API_KEY_HEADER, KEY)
+        .header(INTERNAL_MACRO_USER_ID_HEADER, ALICE)
+        .body(body())
+        .expect("request");
+    let from_code = label(run_id, JUDGED)
+        .header("authorization", "Bearer alice")
+        .header(CODE_EXECUTION_HEADER, "true")
+        .body(body())
+        .expect("request");
+    assert_eq!(status(&app, internal).await, StatusCode::FORBIDDEN);
+    assert_eq!(status(&app, from_code).await, StatusCode::FORBIDDEN);
+    assert!(service.labelled_by.lock().expect("labelled").is_empty());
+
+    let in_person = label(run_id, JUDGED)
+        .header("authorization", "Bearer alice")
+        .body(body())
+        .expect("request");
+    let response = app.clone().oneshot(in_person).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body_read: serde_json::Value = serde_json::from_slice(
+        &to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body"),
+    )
+    .expect("json");
+    assert_eq!(body_read["passed"], false);
+    assert!(body_read["labelledAt"].is_string());
+
+    let unjudged = label(run_id, "tidiness")
+        .header("authorization", "Bearer alice")
+        .body(body())
+        .expect("request");
+    assert_eq!(status(&app, unjudged).await, StatusCode::NOT_FOUND);
+    assert_eq!(
+        *service.labelled_by.lock().expect("labelled"),
+        [
+            (ALICE.to_string(), run_id, JUDGED.to_string(), false),
+            (ALICE.to_string(), run_id, "tidiness".to_string(), false),
+        ]
+    );
 }

@@ -1,5 +1,8 @@
 //! Evaluation insights: the live Scorers' judgments of a person's Runs over
-//! a period, how each Experiment's arms did, and their Benchmark suites.
+//! a period, with how far each agrees with the person's labels, how each
+//! Experiment's arms did, and their Benchmark suites.
+
+pub mod calibration;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -18,6 +21,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 use uuid::Uuid;
 
+use self::calibration::ScorerCalibration;
 use super::{EvaluationDefinition, SelfImprovementDefinition, check_choices};
 use crate::domain::insights::{InsightsError, InsightsQuery, TokenCounts};
 use crate::domain::models::{ActingAgent, FactoryError};
@@ -55,6 +59,9 @@ pub struct ScorerInsight {
     pub passed: u32,
     /// Their mean score, from 0 to 1; none when it judged none.
     pub mean_score: Option<f64>,
+    /// How far it agrees with the person's labels of its judgments, over
+    /// all of their Runs, not only the period's.
+    pub calibration: ScorerCalibration,
 }
 
 /// One Scorer's judgments of one arm's Runs.
@@ -501,6 +508,11 @@ pub(crate) fn evaluation_insights(
         .into_iter()
         .map(|tally| (tally.scorer.clone(), tally))
         .collect();
+    let calibrations: BTreeMap<String, _> = records
+        .calibrations
+        .into_iter()
+        .map(|tally| (tally.scorer.clone(), tally))
+        .collect();
     let mut scorers: Vec<ScorerInsight> = definition
         .scorers()
         .iter()
@@ -514,10 +526,12 @@ pub(crate) fn evaluation_insights(
                 judged: tally.as_ref().map_or(0, |tally| tally.judged),
                 passed: tally.as_ref().map_or(0, |tally| tally.passed),
                 mean_score: tally.map(|tally| tally.mean_score),
+                calibration: ScorerCalibration::of(calibrations.get(&scorer.name)),
             }
         })
         .collect();
     scorers.extend(tallies.into_values().map(|tally| ScorerInsight {
+        calibration: ScorerCalibration::of(calibrations.get(&tally.scorer)),
         name: tally.scorer,
         instructions: None,
         flows: Vec::new(),
