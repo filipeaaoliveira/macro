@@ -858,7 +858,16 @@ where
         let pull_request = match self.find(&input, &repository).await? {
             Some(pull_request) => pull_request,
             None => {
-                let run_report = self.report(&input).await?;
+                // Review rounds that cannot be read hold nothing up: the
+                // pull request opens with what the earlier Steps say, and
+                // a later write of the report fills the rounds in.
+                let run_report = match self.report(&input).await {
+                    Ok(run_report) => run_report,
+                    Err(error) => {
+                        tracing::warn!(?error, "the run's review rounds could not be read");
+                        description::report(input.earlier, &[])
+                    }
+                };
                 let opening = self
                     .github
                     .open(

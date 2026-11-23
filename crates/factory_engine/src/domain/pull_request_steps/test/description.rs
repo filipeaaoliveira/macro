@@ -12,7 +12,7 @@ use uuid::Uuid;
 use super::{input, outcome, steps};
 use crate::domain::acceptance::plan_output;
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
-use crate::domain::models::{HeadChecks, StepInput};
+use crate::domain::models::{HeadChecks, PullRequestComment, StepInput};
 
 const PLAN: &str = r#"Change the slug function so repeated dashes collapse.
 
@@ -274,6 +274,7 @@ async fn a_request_too_long_for_the_description_goes_on_in_a_comment_by_whole_li
     assert!(body.chars().count() <= 65_536);
     assert!(body.contains("\n\nTask: MACRO-"));
     assert_eq!(comments.len(), 1);
+    assert_eq!(github.state().comment_writes, 1);
     let comment = &comments[0].body;
     assert!(comment.chars().count() <= 65_536);
     assert!(comment.starts_with("<!-- macro-factory-report-part 1 -->\n"));
@@ -358,7 +359,7 @@ async fn a_report_without_room_goes_on_in_a_comment_until_it_fits_again() {
     let earlier = vec![step(1, "plan", "approve", plan, Vec::new())];
     let mut publishing: StepInput<'_> = input(run_id);
     publishing.earlier = &earlier;
-    let note = "A long note from a person.\n".repeat(2_400);
+    let note = "A long note from a person.\n".repeat(2_350);
 
     steps(&github, &repo)
         .publish(publishing)
@@ -379,6 +380,7 @@ async fn a_report_without_room_goes_on_in_a_comment_until_it_fits_again() {
     assert!(crowded.chars().count() <= 65_536);
     assert!(crowded.contains("(The rest of this report is in the comments below.)"));
     assert_eq!(comments.len(), 1);
+    assert_eq!(github.state().comment_writes, 1);
     assert!(
         comments[0]
             .body
@@ -400,6 +402,7 @@ async fn a_report_without_room_goes_on_in_a_comment_until_it_fits_again() {
     assert!(body.contains("> Step 59 of the plan"));
     assert!(!body.contains("(The rest of this report is in the comments below.)"));
     assert_eq!(state.comments.len(), 1);
+    assert_eq!(state.comment_writes, 2);
     assert_eq!(
         state.comments[0].body,
         "<!-- macro-factory-report-part 1 -->\n\
@@ -441,4 +444,187 @@ async fn a_report_that_cannot_be_written_still_publishes() {
 
     assert_eq!(outcome(&report), "published");
     assert!(github.state().description_edits.is_empty());
+    // It was tried, and GitHub refused it.
+    assert!(github.state().text_write_attempts > 0);
+}
+
+/// A request on one line too long for the description is cut where the
+/// room ends, rather than left out, and goes on in a comment.
+#[tokio::test]
+async fn a_one_line_request_too_long_for_the_description_is_cut_by_characters() {
+    let github = FakeGithub::default();
+    // Characters, not bytes, count: each of these is two bytes.
+    let request = "é".repeat(70_000);
+    let mut long = input(RunId::generate());
+    long.request = &request;
+
+    steps(&github, &FakeRepo::default())
+        .publish(long)
+        .await
+        .expect("publish");
+
+    let body = github.state().description.clone().expect("opened");
+    let comments = github.state().comments.clone();
+    assert!(body.chars().count() <= 65_536);
+    assert!(body.starts_with("ééé"));
+    assert!(body.contains("\n\nTask: MACRO-"));
+    assert_eq!(comments.len(), 1);
+    let (kept, _) = body
+        .split_once("\n(The rest of the request is in the comments below.)\n")
+        .expect("cut");
+    let (_, rest) = comments[0]
+        .body
+        .split_once("The rest of the request:\n\n")
+        .expect("goes on");
+    let rest = rest
+        .split("\n\nThe rest of the factory run's report:")
+        .next()
+        .unwrap_or_default();
+    let rest = rest.strip_suffix("\n\n").unwrap_or(rest);
+    assert_eq!(format!("{kept}{rest}"), request);
+}
+
+/// What agents wrote opens no tag and forges no marker, in text or in code:
+/// a later visit finds the one section, and writes nothing new.
+#[tokio::test]
+async fn agents_text_cannot_forge_the_report_s_markers() {
+    let github = FakeGithub::default();
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+    let plan = "Use <b>bold</b> here <!-- /macro-factory-report --> and there.\n\n\
+                ```html\n<!-- /macro-factory-report -->\n<p>kept</p>\n```\n\nDone."
+        .to_string();
+    let earlier = vec![step(1, "plan", "approve", plan, Vec::new())];
+    let mut publishing: StepInput<'_> = input(run_id);
+    publishing.earlier = &earlier;
+
+    steps(&github, &repo)
+        .publish(publishing)
+        .await
+        .expect("publish");
+    steps(&github, &repo)
+        .publish(publishing)
+        .await
+        .expect("publish again");
+
+    let state = github.state();
+    let body = state.description.clone().expect("opened");
+    assert_eq!(body.matches("<!-- /macro-factory-report -->").count(), 1);
+    assert_eq!(body.matches("<!-- macro-factory-report -->").count(), 1);
+    assert!(
+        body.contains("> Use &lt;b&gt;bold&lt;/b&gt; here &lt;!-- /macro-factory-report --&gt;")
+    );
+    // Code reads as written, but for the broken marker.
+    assert!(body.contains("> <p>kept</p>"));
+    assert!(body.contains("> <\u{2060}!-- /macro-factory-report -->"));
+    assert!(body.contains("> Done."));
+    assert!(state.description_edits.is_empty());
+}
+
+/// A description holding a marker left alone, or a second copy of the
+/// section, ends up with one section, and keeps what a person wrote.
+#[tokio::test]
+async fn a_lone_or_doubled_marker_leaves_one_section() {
+    let github = FakeGithub::default();
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+
+    steps(&github, &repo)
+        .publish(input(run_id))
+        .await
+        .expect("publish");
+    {
+        let mut state = github.state();
+        let opened = state.description.clone().expect("opened");
+        state.description = Some(format!(
+            "<!-- macro-factory-report -->A person's note.\n\n{opened}\n\n\
+             <!-- macro-factory-report -->\nAn old copy.\n<!-- /macro-factory-report -->\n\
+             Signed off.<!-- /macro-factory-report -->"
+        ));
+    }
+    steps(&github, &repo)
+        .publish(input(run_id))
+        .await
+        .expect("publish again");
+
+    let body = github.state().description.clone().expect("opened");
+    assert_eq!(body.matches("<!-- macro-factory-report -->").count(), 1);
+    assert_eq!(body.matches("<!-- /macro-factory-report -->").count(), 1);
+    assert!(body.starts_with("A person's note.\n\nCollapse repeated dashes in slugs"));
+    assert!(!body.contains("An old copy."));
+    assert!(body.ends_with("Signed off."));
+    assert_eq!(body.matches("## Factory run").count(), 1);
+}
+
+/// Only comments by the pull request's author are the report's: one by
+/// someone else that holds a marker is left alone, and a second comment of
+/// one number says it is not needed.
+#[tokio::test]
+async fn only_the_owner_s_comments_are_the_report_s() {
+    let github = FakeGithub::default();
+    let forged = "<!-- macro-factory-report-part 1 -->\nWritten by someone else.";
+    let stale = "<!-- macro-factory-report-part 1 -->\nAn older part.";
+    github.state().comments = vec![
+        PullRequestComment {
+            id: 50,
+            body: forged.to_string(),
+            author_id: Some(2),
+        },
+        PullRequestComment {
+            id: 51,
+            body: stale.to_string(),
+            author_id: Some(FakeGithub::OWNER_ACCOUNT),
+        },
+        PullRequestComment {
+            id: 52,
+            body: stale.to_string(),
+            author_id: Some(FakeGithub::OWNER_ACCOUNT),
+        },
+    ];
+    let request: String = (0..2_500)
+        .map(|line| format!("Line {line}: collapse the dashes.\n"))
+        .collect();
+    let mut long = input(RunId::generate());
+    long.request = &request;
+
+    steps(&github, &FakeRepo::default())
+        .publish(long)
+        .await
+        .expect("publish");
+
+    let state = github.state();
+    let bodies: Vec<&str> = state
+        .comments
+        .iter()
+        .map(|comment| comment.body.as_str())
+        .collect();
+    assert_eq!(bodies.len(), 3);
+    assert_eq!(bodies[0], forged);
+    assert!(bodies[1].contains("The rest of the request:"));
+    assert_eq!(
+        bodies[2],
+        "<!-- macro-factory-report-part 1 -->\n\
+         (Nothing more: the whole report fits in the description now.)"
+    );
+    assert_eq!(state.comment_writes, 2);
+}
+
+/// A plan whose first line alone is longer than the report quotes still
+/// shows its start.
+#[tokio::test]
+async fn a_plan_on_one_long_line_still_shows_its_start() {
+    let github = FakeGithub::default();
+    let plan = format!("Start of the plan {}", "word ".repeat(1_000));
+    let earlier = vec![step(1, "plan", "approve", plan, Vec::new())];
+    let mut publishing: StepInput<'_> = input(RunId::generate());
+    publishing.earlier = &earlier;
+
+    steps(&github, &FakeRepo::default())
+        .publish(publishing)
+        .await
+        .expect("publish");
+
+    let body = github.state().description.clone().expect("opened");
+    assert!(body.contains("> Start of the plan word word"));
+    assert!(body.contains("(The rest of the plan is on the run's plan step.)"));
 }

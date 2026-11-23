@@ -11,15 +11,16 @@
 //! description with no section, as one opened before reports, gets it at
 //! its end.
 //!
-//! A description holds at most [`MAX_BODY_CHARS`]: what does not fit goes
-//! into numbered comments on the pull request, each found again by its
-//! marker and edited in place. The request is kept whole lines first; the
-//! rest of the request, then the rest of the report, go into the comments,
-//! never cut mid-line unless one line alone is longer than a comment.
+//! A description holds a little less than GitHub's 65,536 characters
+//! ([`ROOM_CHARS`]): what does not fit goes into numbered comments on the
+//! pull request, each found again by its marker and edited in place. Only
+//! comments by the pull request's author, the Run's owner, count: a marker
+//! anyone else writes is not the report's. The request is kept whole lines
+//! first; the rest of the request, then the rest of the report, go into the
+//! comments, never cut mid-line unless one line alone does not fit.
 //!
 //! What agents wrote (the plan, clauses, findings) is quoted so it mentions
-//! no one, links no issue and holds no marker: each `@` and `#` is followed
-//! by a word joiner, and no `<` or `>` is left.
+//! no one, links or closes no issue and holds no marker ([`markdown`]).
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
@@ -36,6 +37,8 @@ use crate::domain::acceptance::{Acceptance, AcceptanceCheck, AcceptanceChecks};
 use crate::domain::models::{CodeRepository, PullRequest, StepInput};
 use crate::domain::ports::{MainWatches, PullRequests};
 
+mod markdown;
+
 /// What opens the report's section in the description.
 const REPORT_START: &str = "<!-- macro-factory-report -->";
 
@@ -45,8 +48,10 @@ const REPORT_END: &str = "<!-- /macro-factory-report -->";
 /// What starts each comment the report overflows into, before its number.
 const PART_MARKER: &str = "<!-- macro-factory-report-part ";
 
-/// The most characters GitHub keeps in a comment.
-const MAX_COMMENT_CHARS: usize = 65_536;
+/// The most characters the report writes in a description or a comment:
+/// GitHub keeps [`MAX_BODY_CHARS`] in either, and this leaves about 1% to
+/// spare for how GitHub counts.
+const ROOM_CHARS: usize = MAX_BODY_CHARS / 100 * 99;
 
 /// Room a comment keeps for its marker line.
 const PART_MARKER_ROOM: usize = 64;
@@ -78,28 +83,6 @@ const PLAN_ACCEPTANCE: &str = "\n\n## Acceptance checks";
 /// The most characters of a finding, clause or reason the report quotes.
 const LINE_CHARS: usize = 300;
 
-/// A word joiner: invisible, and breaks what GitHub would read as a mention
-/// or an issue reference.
-const WORD_JOINER: char = '\u{2060}';
-
-/// `text` as the report quotes it: no `<` or `>`, so no tag or marker, and
-/// a word joiner after each `@` and `#`.
-fn quoted(text: &str) -> String {
-    let mut quoted = String::new();
-    for c in text.chars() {
-        match c {
-            '<' => quoted.push('‹'),
-            '>' => quoted.push('›'),
-            '@' | '#' => {
-                quoted.push(c);
-                quoted.push(WORD_JOINER);
-            }
-            _ => quoted.push(c),
-        }
-    }
-    quoted
-}
-
 /// `text` on one line, at most [`LINE_CHARS`], quoted.
 fn one_line(text: &str) -> String {
     let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -107,7 +90,7 @@ fn one_line(text: &str) -> String {
         Some((end, _)) => format!("{}…", &line[..end]),
         None => line,
     };
-    quoted(&line)
+    markdown::line(&line)
 }
 
 /// `text` as inline code on one line, at most [`LINE_CHARS`].
@@ -116,8 +99,6 @@ fn code(text: &str) -> String {
         .chars()
         .map(|c| match c {
             '`' => '\'',
-            '<' => '‹',
-            '>' => '›',
             c if c.is_whitespace() => ' ',
             c => c,
         })
@@ -126,7 +107,7 @@ fn code(text: &str) -> String {
         Some((end, _)) => format!("{}…", &line[..end]),
         None => line,
     };
-    format!("`{line}`")
+    format!("`{}`", markdown::in_code(&line))
 }
 
 /// The latest Step of `entry` among `earlier` that ended.
@@ -138,7 +119,8 @@ fn latest<'a>(earlier: &'a [Step], entry: &str) -> Option<&'a Step> {
 }
 
 /// The plan of the latest `plan` Step, without its acceptance checks, quoted
-/// and cut at a line to [`PLAN_CHARS`].
+/// and cut at a line to [`PLAN_CHARS`]; a first line longer than that is
+/// cut itself, so some of the plan shows.
 fn plan(earlier: &[Step]) -> Option<String> {
     let output = &latest(earlier, PLAN_ENTRY)?.end.as_ref()?.output;
     let plan = output
@@ -150,15 +132,31 @@ fn plan(earlier: &[Step]) -> Option<String> {
         return None;
     }
 
-    let mut text = String::new();
+    let mut kept: Vec<&str> = Vec::new();
     let mut chars = 0;
+    let mut cut = false;
     for line in plan.lines() {
         chars += line.chars().count() + 1;
         if chars > PLAN_CHARS {
-            text.push_str("> …\n\n(The rest of the plan is on the run's plan step.)\n");
-            return Some(text);
+            cut = true;
+            if kept.is_empty() {
+                let end = line
+                    .char_indices()
+                    .nth(PLAN_CHARS)
+                    .map_or(line.len(), |(end, _)| end);
+                kept.push(&line[..end]);
+            }
+            break;
         }
-        text.push_str(&format!("> {}\n", quoted(line)));
+        kept.push(line);
+    }
+
+    let mut text = String::new();
+    for line in markdown::lines(kept.into_iter()) {
+        text.push_str(&format!("> {line}\n"));
+    }
+    if cut {
+        text.push_str("> …\n\n(The rest of the plan is on the run's plan step.)\n");
     }
     Some(text)
 }
@@ -388,7 +386,8 @@ pub(super) fn footer(input: &StepInput<'_>) -> String {
 
 /// The whole lines of `text` that fit in `room` characters with `note`
 /// after them, then `note`, and the lines after them; all of `text`, and
-/// nothing after, when it fits.
+/// nothing after, when it fits. When not even its first line fits, it is
+/// cut where the room ends instead, so a request on one line still shows.
 fn fit(text: &str, room: usize, note: &str) -> (String, Option<String>) {
     if text.chars().count() <= room {
         return (text.to_string(), None);
@@ -408,6 +407,12 @@ fn fit(text: &str, room: usize, note: &str) -> (String, Option<String>) {
     if kept_chars + note_chars > room {
         return (String::new(), Some(text.to_string()));
     }
+    if kept_bytes == 0 {
+        kept_bytes = text
+            .char_indices()
+            .nth(room - note_chars)
+            .map_or(text.len(), |(end, _)| end);
+    }
     let mut kept = text[..kept_bytes].to_string();
     kept.push_str(note);
     (kept, Some(text[kept_bytes..].to_string()))
@@ -421,7 +426,7 @@ fn frame_chars() -> usize {
 /// The request as the description holds it, whole lines, and the rest of
 /// it, if any: the request goes first, before the report.
 fn request_split(request: &str, footer: &str) -> (String, Option<String>) {
-    let room = MAX_BODY_CHARS - footer.chars().count() - frame_chars() - 2;
+    let room = ROOM_CHARS - footer.chars().count() - frame_chars() - 2;
     fit(request, room, REQUEST_REST)
 }
 
@@ -441,7 +446,7 @@ pub(super) struct Written {
 /// report goes into the comments.
 fn with_report(before: &str, after: &str, report: &str, request_rest: Option<String>) -> Written {
     let room =
-        MAX_BODY_CHARS.checked_sub(before.chars().count() + after.chars().count() + frame_chars());
+        ROOM_CHARS.checked_sub(before.chars().count() + after.chars().count() + frame_chars());
     let Some(room) = room else {
         let rest = [request_rest, Some(report.to_string())];
         return Written {
@@ -470,17 +475,49 @@ pub(super) fn opening(request: &str, footer: &str, report: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Where the section that the start marker at `start` of `text` opens
+/// ends: after the first end marker past it, when no other start marker
+/// comes first. None for a start marker left alone.
+fn section_end(text: &str, start: usize) -> Option<usize> {
+    let after = start + REPORT_START.len();
+    let end = text[after..].find(REPORT_END)?;
+    let next_start = text[after..].find(REPORT_START);
+    if next_start.is_some_and(|next_start| next_start < end) {
+        return None;
+    }
+    Some(after + end + REPORT_END.len())
+}
+
+/// `text` without any section of the report and without any marker left
+/// alone.
+fn without_sections(text: &str) -> String {
+    let mut kept = text.to_string();
+    while let Some(start) = kept.find(REPORT_START) {
+        let end = section_end(&kept, start).unwrap_or(start + REPORT_START.len());
+        kept.replace_range(start..end, "");
+    }
+    kept.replace(REPORT_END, "")
+}
+
 /// The description `current` with its report's section replaced by
-/// `report`, or the section added at its end when it has none.
+/// `report`: the first start marker an end marker closes. Any other
+/// section, and any marker left alone, as a person's copy and paste leaves,
+/// is removed, so the description holds one. One with no section gets it
+/// at its end.
 pub(super) fn rewritten(current: &str, request: &str, footer: &str, report: &str) -> Written {
     let (_, request_rest) = request_split(request, footer);
-    let section = current.rfind(REPORT_START).and_then(|start| {
-        let end = current[start..].find(REPORT_END)? + start + REPORT_END.len();
-        Some((start, end))
-    });
+    let section = current
+        .match_indices(REPORT_START)
+        .find_map(|(start, _)| Some((start, section_end(current, start)?)));
     match section {
-        Some((start, end)) => with_report(&current[..start], &current[end..], report, request_rest),
+        Some((start, end)) => with_report(
+            &without_sections(&current[..start]),
+            &without_sections(&current[end..]),
+            report,
+            request_rest,
+        ),
         None => {
+            let current = without_sections(current);
             let kept = current.trim_end();
             let before = if kept.is_empty() {
                 String::new()
@@ -507,32 +544,43 @@ fn parts(rests: [Option<String>; 2]) -> Vec<String> {
         return Vec::new();
     }
 
-    let room = MAX_COMMENT_CHARS - PART_MARKER_ROOM;
+    let room = ROOM_CHARS - PART_MARKER_ROOM;
     let mut chunks: Vec<String> = vec![String::new()];
     let mut chunk_chars = 0;
     for line in text.split_inclusive('\n') {
-        // A line longer than a whole comment is the only one cut.
-        let mut pieces: Vec<String> = Vec::new();
-        let mut piece = String::new();
-        for c in line.chars() {
-            if piece.chars().count() == room {
-                pieces.push(std::mem::take(&mut piece));
+        // A line goes whole into the comment it fits in, else into the
+        // next one; only a line longer than a whole comment is cut, filling
+        // each comment it spans.
+        let mut rest = line;
+        while !rest.is_empty() {
+            let rest_chars = rest.chars().count();
+            let space = room - chunk_chars;
+            if rest_chars <= space {
+                if let Some(chunk) = chunks.last_mut() {
+                    chunk.push_str(rest);
+                }
+                chunk_chars += rest_chars;
+                break;
             }
-            piece.push(c);
-        }
-        pieces.push(piece);
-
-        for piece in pieces {
-            let chars = piece.chars().count();
-            if chunk_chars + chars > room {
+            if rest_chars <= room || space == 0 {
                 chunks.push(String::new());
                 chunk_chars = 0;
+                continue;
             }
-            chunk_chars += chars;
+            let end = rest
+                .char_indices()
+                .nth(space)
+                .map_or(rest.len(), |(end, _)| end);
             if let Some(chunk) = chunks.last_mut() {
-                chunk.push_str(&piece);
+                chunk.push_str(&rest[..end]);
             }
+            rest = &rest[end..];
+            chunks.push(String::new());
+            chunk_chars = 0;
         }
+    }
+    if chunks.last().is_some_and(String::is_empty) {
+        chunks.pop();
     }
     chunks
         .into_iter()
@@ -594,13 +642,17 @@ where
         pull_request: &PullRequest,
     ) -> Result<(), PullRequestStepError> {
         let report = self.report(input).await?;
-        let current = self
+        let text = self
             .github
-            .pull_request_body(input.owner, repository, pull_request.number)
+            .pull_request_text(input.owner, repository, pull_request.number)
             .await
-            .map_err(PullRequestStepError::github)?
-            .unwrap_or_default();
+            .map_err(PullRequestStepError::github)?;
+        let current = text.body;
         let written = rewritten(&current, input.request, &footer(input), &report);
+        // GitHub replaces a description whole and takes no condition on
+        // what it was: a person's edit saved between the read above and
+        // this write is lost. The window is one request long, and the
+        // section is rewritten on every visit anyway.
         if let Some(body) = written.body.filter(|body| *body != current) {
             self.github
                 .edit_pull_request_body(input.owner, repository, pull_request.number, &body)
@@ -608,9 +660,12 @@ where
                 .map_err(PullRequestStepError::github)?;
         }
 
-        // Each comment is found by its marker: one that says something else
-        // now is edited, one missing is added, and one no longer needed
-        // says so.
+        // Each comment is found by its marker, among those the pull
+        // request's author wrote, as the factory writes them as the Run's
+        // owner: a marker anyone else writes is not the report's, and is
+        // never edited. One that says something else now is edited, one
+        // missing is added, and one no longer needed, or a second of the
+        // same number, says it is not needed.
         let existing = self
             .github
             .pull_request_comments(input.owner, repository, pull_request.number)
@@ -618,10 +673,20 @@ where
             .map_err(PullRequestStepError::github)?;
         let mut found: Vec<(usize, u64, String)> = existing
             .into_iter()
+            .filter(|comment| text.author_id.is_some() && comment.author_id == text.author_id)
             .filter_map(|comment| Some((part_number(&comment.body)?, comment.id, comment.body)))
             .collect();
+        // Stable: of comments of one number, the oldest is kept.
         found.sort_by_key(|(number, _, _)| *number);
-        found.dedup_by_key(|(number, _, _)| *number);
+        let mut duplicates = Vec::new();
+        let mut index = 1;
+        while index < found.len() {
+            if found[index].0 == found[index - 1].0 {
+                duplicates.push(found.remove(index));
+            } else {
+                index += 1;
+            }
+        }
 
         for (index, part) in written.comments.iter().enumerate() {
             let number = index + 1;
@@ -641,9 +706,12 @@ where
                 }
             }
         }
-        for (number, id, body) in &found {
+        let unneeded = found
+            .iter()
+            .filter(|(number, _, _)| *number > written.comments.len());
+        for (number, id, body) in unneeded.chain(&duplicates) {
             let unused = format!("{}\n{PART_UNUSED}", part_marker(*number));
-            if *number > written.comments.len() && *body != unused {
+            if *body != unused {
                 self.github
                     .edit_pull_request_comment(input.owner, repository, *id, &unused)
                     .await

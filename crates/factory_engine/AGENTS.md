@@ -878,14 +878,23 @@ filed. `publish` opens the pull request with it, and `publish` and `ci` (once,
 on its first read, so a Run that comes back from `update` shows it) write it
 again on each visit: only the marked section is replaced, so what a person
 wrote around it stays, and a description without it gets it at its end. A
-description holds at most 65,536 characters: the request is kept whole
-lines, and the rest of it, then what does not fit of the report, go into
-numbered comments, each found again by its marker and edited in place; one
-no longer needed says so. What agents wrote is quoted so it mentions no one
-and links no issue (a word joiner after each `@` and `#`, no `<` or `>`).
-Follow-ups are not named by their task id, which would link the pull
-request to them. Writing the report reads before it writes, writes only what
-changed, and a failure is logged without failing the Step.
+description takes about 1% less than GitHub's 65,536 characters: the
+request is kept whole lines (cut by characters only when its first line
+alone does not fit), and the rest of it, then what does not fit of the
+report, go into numbered comments, each found again by its marker and
+edited in place; one no longer needed, or a second of one number, says so.
+Only comments by the pull request's author, the Run's owner, count: a
+marker anyone else writes is never edited. The section is the first start
+marker an end marker closes; other sections and lone markers are removed.
+What agents wrote is quoted so it mentions no one and links or closes no
+issue: outside code, `&lt;`/`&gt;` and a word joiner after `@` before a
+name, `#` before a number, `GH-` and a closing keyword before a link; in
+code only the opening of an HTML comment is broken, so no marker can be
+forged. Follow-ups are not named by their task id, which would link the
+pull request to them. Writing the report reads before it writes, writes
+only what changed, and a failure is logged without failing the Step; when
+`publish` cannot read the review rounds, it opens the pull request without
+them, and a later write adds them.
 
 On a repository, `write` and `fix` then run the repository's own checks
 (`src/domain/built_in_steps/checks_round.rs`). The repository declares them
