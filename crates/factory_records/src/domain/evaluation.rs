@@ -294,6 +294,10 @@ pub struct TrialRecord {
     pub task: String,
     /// Its Run.
     pub run_id: RunId,
+    /// When its Run was created, which starts its workflow.
+    pub started_at: DateTime<Utc>,
+    /// When its Run ended; none while it goes.
+    pub ended_at: Option<DateTime<Utc>>,
     /// How its Run ended; none while it goes.
     pub run_outcome: Option<RunOutcome>,
     /// Its result, once its Run ended and it was scored.

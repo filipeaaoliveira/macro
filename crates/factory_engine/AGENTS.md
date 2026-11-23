@@ -603,7 +603,8 @@ nothing is meant to be pushed to it or based on it after.
 `GET /insights/evaluation` (same
 params as `/insights`) shows each Scorer's judgments, each Experiment's
 arms with their Runs' outcomes and scores, the Benchmarks and the caller's
-suites of the period.
+suites of the period, each trial with when its Run started and ended
+(`startedAt`, `endedAt`), for the time it took.
 
 The Step Terminal (`src/domain/step_terminal.rs`) lets the Run's owner
 watch a running agent Step's session and steer it. A Step reads the

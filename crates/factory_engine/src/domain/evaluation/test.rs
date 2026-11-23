@@ -936,6 +936,8 @@ fn a_suite_counts_its_trials_lost_to_infrastructure_apart() {
     let trial = |task: &str, outcome: RunOutcome, result: Option<TrialResult>| TrialRecord {
         task: task.to_string(),
         run_id: RunId::generate(),
+        started_at: Utc::now(),
+        ended_at: Some(Utc::now()),
         run_outcome: Some(outcome),
         result,
         scores: Vec::new(),

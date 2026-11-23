@@ -705,3 +705,18 @@ async fn agent_rules_are_counted_with_the_runs_they_chose_for(pool: PgPool) {
         ("writer", "docs", "docs-writer", 2, 2, 1, 1)
     );
 }
+
+/// Each trial reads when its Run started and ended, for the time it took.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn a_trial_reads_when_its_run_started_and_ended(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+
+    let read = repo.read_evaluation(&november()).await.expect("read");
+
+    let trial = &read.suites[0].trials[0];
+    assert_eq!(trial.started_at, at("2026-11-12T09:00:00Z"));
+    assert_eq!(trial.ended_at, Some(at("2026-11-12T09:30:00Z")));
+}

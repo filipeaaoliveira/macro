@@ -771,7 +771,7 @@ impl PgRunRepository {
         let mut trials: BTreeMap<Uuid, Vec<TrialRecord>> = BTreeMap::new();
         let rows = sqlx::query!(
             r#"
-            SELECT t.suite_id, t.task, t.run_id, r.outcome, t.score,
+            SELECT t.suite_id, t.task, t.run_id, r.created_at, r.ended_at, r.outcome, t.score,
                    t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_write_tokens
             FROM factory_benchmark_trial t
             JOIN factory_run r ON r.id = t.run_id
@@ -806,6 +806,8 @@ impl PgRunRepository {
             trials.entry(row.suite_id).or_default().push(TrialRecord {
                 task: row.task,
                 run_id: RunId::from_uuid(row.run_id),
+                started_at: row.created_at,
+                ended_at: row.ended_at,
                 run_outcome: run_outcome(row.outcome)?,
                 result,
                 scores: Vec::new(),

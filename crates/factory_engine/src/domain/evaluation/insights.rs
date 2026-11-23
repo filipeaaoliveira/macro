@@ -159,6 +159,11 @@ pub struct TrialInsight {
     pub task: String,
     /// Its Run.
     pub run_id: RunId,
+    /// When its Run was created, which starts its workflow.
+    pub started_at: DateTime<Utc>,
+    /// When its Run ended; none while it goes. With `startedAt`, the time
+    /// the trial took.
+    pub ended_at: Option<DateTime<Utc>>,
     /// How its Run ended; none while it goes.
     pub run_outcome: Option<RunOutcome>,
     /// Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5
@@ -662,6 +667,8 @@ pub(crate) fn evaluation_insights(
                     TrialInsight {
                         task: trial.task,
                         run_id: trial.run_id,
+                        started_at: trial.started_at,
+                        ended_at: trial.ended_at,
                         run_outcome: trial.run_outcome,
                         score: result.map(|result| result.score),
                         tokens: trial_tokens,
