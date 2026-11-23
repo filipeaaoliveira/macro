@@ -254,6 +254,41 @@ export default {
   definitionPullRequestDraft: '(draft)',
   definitionOpensInNewTab: '(opens in a new tab)',
   definitionAdminsOnly: 'Only team admins can change it.',
+  // A change to the Definition's files, proposed as a pull request.
+  definitionChangeStart: 'Propose a change',
+  definitionChangeTitle: 'Change the definition',
+  definitionChangeHowTo:
+    'Write the whole new text of each file you change. The change opens as a pull request on the definition’s repository, and reaches runs once someone merges it. A new flow’s file needs factory.json to name the flow too.',
+  definitionChangeSummary: 'What it changes',
+  definitionChangeSummaryBlank: 'Say what the change does.',
+  definitionChangeSummaryTooLong: 'Keep it under {{max}} bytes.',
+  definitionChangeWhy: 'Why (optional)',
+  definitionChangeWhyTooLong: 'Keep it under {{max}} bytes.',
+  definitionChangeFile: 'File {{number}}',
+  definitionChangeFilePlaceholder: 'flows/code.json',
+  definitionChangeFileText: 'File {{number}}’s new text',
+  definitionChangeCurrentFile: 'The file as it is now',
+  definitionChangePathProblem:
+    'Name factory.json, agents.json, rules.json, scorers.json or a flow’s file, flows/name.json.',
+  definitionChangeDuplicateProblem: 'Another file of this change writes it.',
+  definitionChangeJsonProblem: 'This isn’t valid JSON.',
+  definitionChangeAddFile: 'Add a file',
+  definitionChangeRemoveFile: 'Remove file {{number}}',
+  definitionChangeDiscard: 'Discard',
+  definitionChangeSend: 'Open pull request',
+  definitionChangeOpened: 'Pull request opened:',
+  definitionChangeInvalid:
+    'The definition doesn’t read with this change: {{message}}',
+  definitionChangeNoPush:
+    'Your GitHub account can’t push to the definition’s repository.',
+  definitionChangeNoDefinition: 'Your team names no definition to change.',
+  definitionChangeNotOpened:
+    'GitHub didn’t open the pull request: {{message}}. Send it again to try on a new branch.',
+  definitionChangeClosed:
+    'This change’s pull request was closed without merging. Send it again to open a new one.',
+  definitionChangeForbidden: 'Only team admins can propose changes.',
+  definitionChangeFailed:
+    'The change couldn’t be sent. Send it again: if its pull request was opened, you’ll get it back.',
   definitionSave: 'Save',
   definitionRemove: 'Stop using it',
   definitionSaved: 'Factory definition saved',

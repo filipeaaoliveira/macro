@@ -2,9 +2,16 @@
 
 import { factoryClient } from '@service-factory/client';
 import type { DefinitionSettings as Settings } from '@service-factory/generated/schemas';
-import { cleanup, render, screen, within } from '@solidjs/testing-library';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@solidjs/testing-library';
 import { QueryClient, QueryClientProvider } from '@tanstack/solid-query';
-import { ok } from 'neverthrow';
+import { err, ok } from 'neverthrow';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DefinitionSettings } from './definition-settings';
 
@@ -12,6 +19,7 @@ vi.mock('@service-factory/client', () => ({
   factoryClient: {
     getDefinition: vi.fn(),
     setDefinition: vi.fn(),
+    proposeDefinitionChange: vi.fn(),
   },
 }));
 
@@ -173,5 +181,173 @@ describe('DefinitionSettings', () => {
         'Its pull requests couldn’t be listed with your GitHub account.'
       )
     ).toBeTruthy();
+  });
+
+  describe('a change to the definition', () => {
+    const admin: Settings = { ...named, canEdit: true };
+
+    async function write(changes: {
+      title?: string;
+      path?: string;
+      text?: string;
+    }) {
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Propose a change' })
+      );
+      fireEvent.input(
+        screen.getByRole('textbox', { name: 'What it changes' }),
+        {
+          target: { value: changes.title ?? 'Add a review step' },
+        }
+      );
+      fireEvent.input(screen.getByRole('textbox', { name: 'File 1' }), {
+        target: { value: changes.path ?? 'flows/notes.json' },
+      });
+      fireEvent.input(
+        screen.getByRole('textbox', { name: 'File 1’s new text' }),
+        { target: { value: changes.text ?? '{"entries": ["plan"]}' } }
+      );
+    }
+
+    const send = () =>
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Open pull request' })
+      );
+
+    it('opens a valid change as a pull request and links it', async () => {
+      vi.mocked(factoryClient.proposeDefinitionChange).mockResolvedValue(
+        ok({
+          number: 9,
+          title: 'Add a review step',
+          url: `${REPO}/pull/9`,
+          draft: false,
+        })
+      );
+      mount(admin);
+      await write({});
+      expect(
+        screen
+          .getByRole('link', {
+            name: 'The file as it is now (opens in a new tab)',
+          })
+          .getAttribute('href')
+      ).toBe(`${REPO}/blob/${HEAD}/flows/notes.json`);
+      send();
+
+      const link = await screen.findByRole('link', {
+        name: '#9 Add a review step (opens in a new tab)',
+      });
+      expect(link.getAttribute('href')).toBe(`${REPO}/pull/9`);
+      const request = vi.mocked(factoryClient.proposeDefinitionChange).mock
+        .calls[0]?.[0];
+      expect(request).toMatchObject({
+        title: 'Add a review step',
+        description: null,
+        files: { 'flows/notes.json': '{"entries": ["plan"]}' },
+      });
+      expect(request?.changeId).toMatch(/^[0-9a-f-]{36}$/);
+      // The settings are read again, to list the new pull request.
+      await waitFor(() =>
+        expect(factoryClient.getDefinition).toHaveBeenCalledTimes(2)
+      );
+      expect(
+        screen.queryByRole('group', { name: 'Change the definition' })
+      ).toBeNull();
+    });
+
+    it('sends nothing the browser can tell is wrong, and says what', async () => {
+      mount(admin);
+      await write({ path: 'README.md', text: '{"entries": [' });
+      send();
+
+      expect(
+        await screen.findByText(
+          'Name factory.json, agents.json, rules.json, scorers.json or a flow’s file, flows/name.json.'
+        )
+      ).toBeTruthy();
+      fireEvent.input(screen.getByRole('textbox', { name: 'File 1' }), {
+        target: { value: 'agents.json' },
+      });
+      send();
+      expect(await screen.findByText('This isn’t valid JSON.')).toBeTruthy();
+      expect(factoryClient.proposeDefinitionChange).not.toHaveBeenCalled();
+    });
+
+    it('shows why the definition doesn’t read with the change', async () => {
+      vi.mocked(factoryClient.proposeDefinitionChange).mockResolvedValue(
+        err([
+          {
+            code: 'INVALID_DEFINITION_CHANGE',
+            message: 'flows/notes.json: the entry review is not defined',
+          },
+        ])
+      );
+      mount(admin);
+      await write({});
+      send();
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toBe(
+        'The definition doesn’t read with this change: flows/notes.json: the entry review is not defined'
+      );
+      // The change stays, to be fixed.
+      expect(
+        (screen.getByRole('textbox', { name: 'File 1' }) as HTMLInputElement)
+          .value
+      ).toBe('flows/notes.json');
+    });
+
+    it('sends a change whose answer was lost under its id again, and a closed one under a new id', async () => {
+      vi.mocked(factoryClient.proposeDefinitionChange)
+        .mockResolvedValueOnce(
+          err([{ code: 'SERVER_ERROR', message: 'Internal server error' }])
+        )
+        .mockResolvedValueOnce(
+          err([{ code: 'DEFINITION_CHANGE_CLOSED', message: 'closed' }])
+        )
+        .mockResolvedValueOnce(
+          ok({
+            number: 10,
+            title: 'Again',
+            url: `${REPO}/pull/10`,
+            draft: false,
+          })
+        );
+      mount(admin);
+      await write({});
+      send();
+      expect(
+        await screen.findByText(
+          'The change couldn’t be sent. Send it again: if its pull request was opened, you’ll get it back.'
+        )
+      ).toBeTruthy();
+      send();
+      expect(
+        await screen.findByText(
+          'This change’s pull request was closed without merging. Send it again to open a new one.'
+        )
+      ).toBeTruthy();
+      send();
+      await screen.findByRole('link', {
+        name: '#10 Again (opens in a new tab)',
+      });
+
+      const ids = vi
+        .mocked(factoryClient.proposeDefinitionChange)
+        .mock.calls.map(([request]) => request.changeId);
+      expect(ids[1]).toBe(ids[0]);
+      expect(ids[2]).not.toBe(ids[1]);
+    });
+
+    it('offers no change to a member who doesn’t administer the team', async () => {
+      mount(named);
+
+      expect(
+        await screen.findByText('Only team admins can change it.')
+      ).toBeTruthy();
+      expect(
+        screen.queryByRole('button', { name: 'Propose a change' })
+      ).toBeNull();
+    });
   });
 });

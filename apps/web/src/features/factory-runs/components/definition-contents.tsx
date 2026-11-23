@@ -11,7 +11,7 @@ import { RULE_NAMES } from '../core/standing-rules';
  * A link to a page on GitHub, which opens in a new tab: screen readers hear
  * that too.
  */
-function ExternalLink(props: { href: string; children: JSX.Element }) {
+export function ExternalLink(props: { href: string; children: JSX.Element }) {
   return (
     <a
       class="underline"

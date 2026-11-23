@@ -63,6 +63,56 @@ describe('factoryClient routes', () => {
     });
   });
 
+  it('proposes a Definition change and names the cause of a refusal', async () => {
+    const request = {
+      changeId: '00000000-0000-4000-8000-000000000001',
+      title: 'Add a docs flow',
+      description: null,
+      files: { 'agents.json': '{}' },
+    };
+    await factoryClient.proposeDefinitionChange(request);
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/settings/definition/changes',
+      method: 'POST',
+      body: request,
+    });
+
+    const handler = vi
+      .mocked(fetchWithToken)
+      .mock.calls.at(-1)?.[1]?.errorResponseHandler;
+    if (!handler) throw new Error('No error response handler');
+    const refused = (status: number, body: unknown) =>
+      handler(new Response(JSON.stringify(body), { status }));
+
+    expect(
+      await refused(400, {
+        code: 'invalidDefinitionChange',
+        message: 'flows/docs.json: unknown entry',
+      })
+    ).toEqual({
+      code: 'INVALID_DEFINITION_CHANGE',
+      message: 'flows/docs.json: unknown entry',
+    });
+    expect(
+      await refused(409, { code: 'definitionChangeClosed', message: 'closed' })
+    ).toEqual({ code: 'DEFINITION_CHANGE_CLOSED', message: 'closed' });
+    expect(
+      await refused(409, { code: 'noDefinition', message: 'none' })
+    ).toEqual({ code: 'NO_DEFINITION', message: 'none' });
+    expect(
+      await refused(409, {
+        code: 'definitionChangeNotOpened',
+        message: 'a rule',
+      })
+    ).toEqual({ code: 'DEFINITION_CHANGE_NOT_OPENED', message: 'a rule' });
+    // A refusal with no code the change names keeps the status's, and the
+    // service's message.
+    expect(await refused(403, { message: 'admins only' })).toEqual({
+      code: 'FORBIDDEN',
+      message: 'admins only',
+    });
+  });
+
   it('starts a Run from a Flow’s name on a task', async () => {
     await factoryClient.startRun({
       flow: 'plan',

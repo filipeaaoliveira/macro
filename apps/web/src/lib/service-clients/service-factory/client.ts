@@ -30,6 +30,7 @@ import {
   getListFactoryWaitingRunsUrl,
   getNoteFactoryStepUrl,
   getPauseFactoryStepUrl,
+  getProposeFactoryDefinitionChangeUrl,
   getReplyToFactoryGateUrl,
   getResumeFactoryStepUrl,
   getSetFactoryAutomationEnabledUrl,
@@ -48,6 +49,7 @@ import type {
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionPullRequest,
   DefinitionSettings,
   DismissalUndoneResponse,
   EvaluationInsights,
@@ -58,6 +60,7 @@ import type {
   GetFactoryQualityParams,
   ListFactoryBoardParams,
   NoteStepRequest,
+  ProposeDefinitionChangeRequest,
   PullRequestRuns,
   QualityInsights,
   ReplyToGateRequest,
@@ -144,6 +147,52 @@ async function refusal(
   const message =
     typeof body.message === 'string' ? body.message : failure.message;
   return { code: failure.code, message };
+}
+
+/** Why a proposed change to the team's Factory Definition was refused. */
+export type DefinitionChangeErrorCode =
+  | 'NO_DEFINITION'
+  | 'INVALID_DEFINITION_CHANGE'
+  | 'DEFINITION_CHANGE_NOT_OPENED'
+  | 'DEFINITION_CHANGE_CLOSED'
+  | 'NO_PUSH_ACCESS';
+
+const DEFINITION_CHANGE_ERROR_CODES = {
+  noDefinition: 'NO_DEFINITION',
+  invalidDefinitionChange: 'INVALID_DEFINITION_CHANGE',
+  definitionChangeNotOpened: 'DEFINITION_CHANGE_NOT_OPENED',
+  definitionChangeClosed: 'DEFINITION_CHANGE_CLOSED',
+  noPushAccess: 'NO_PUSH_ACCESS',
+} as const satisfies Partial<Record<RunErrorCode, DefinitionChangeErrorCode>>;
+
+function isDefinitionChangeRefusal(
+  code: unknown
+): code is keyof typeof DEFINITION_CHANGE_ERROR_CODES {
+  return (
+    typeof code === 'string' &&
+    Object.hasOwn(DEFINITION_CHANGE_ERROR_CODES, code)
+  );
+}
+
+/**
+ * A refused Definition change: the cause the service names in its body's
+ * `code`, else the status's error, with the service's message either way.
+ */
+async function definitionChangeError(
+  response: Response
+): Promise<ResultError<FetchWithTokenErrorCode | DefinitionChangeErrorCode>> {
+  const failure = statusError(response.status);
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!body || typeof body !== 'object') return failure;
+  const message =
+    'message' in body && typeof body.message === 'string'
+      ? body.message
+      : failure.message;
+  const code =
+    'code' in body && isDefinitionChangeRefusal(body.code)
+      ? DEFINITION_CHANGE_ERROR_CODES[body.code]
+      : failure.code;
+  return { code, message };
 }
 
 /**
@@ -415,6 +464,26 @@ export const factoryClient = {
         method: 'PUT',
         body: JSON.stringify({ repoUrl }),
         errorResponseHandler: refusal,
+      }
+    );
+  },
+
+  /**
+   * Proposes a change to the team's Factory Definition as a pull request on
+   * its repository, and answers that pull request. Sending the same
+   * `changeId` again answers the pull request it opened, unless that was
+   * closed unmerged (`DEFINITION_CHANGE_CLOSED`). A change the Definition
+   * doesn't read with fails `INVALID_DEFINITION_CHANGE`, naming the file and
+   * the problem; someone who doesn't administer the team fails `FORBIDDEN`.
+   * Each refusal carries the service's message.
+   */
+  proposeDefinitionChange(request: ProposeDefinitionChangeRequest) {
+    return fetchWithToken<DefinitionPullRequest, DefinitionChangeErrorCode>(
+      `${host()}${getProposeFactoryDefinitionChangeUrl()}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+        errorResponseHandler: definitionChangeError,
       }
     );
   },

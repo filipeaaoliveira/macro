@@ -4,6 +4,7 @@ import { fireAndForget } from '@core/util/fireAndForget';
 import { ThrownResultError } from '@core/util/result';
 import { Button, TextField } from '@ui';
 import { createSignal, Match, Show, Switch } from 'solid-js';
+import { DefinitionChangeEditor } from '../components/definition-change-editor';
 import {
   DefinitionContents,
   DefinitionPullRequests,
@@ -17,8 +18,8 @@ import {
  * The team's Factory Definition: the repository whose files its Runs take
  * their Flows, Agents and rules from, whether it reads at its head (and why
  * not), what it holds at the commit the newest Run read, and the pull
- * requests open on it. Its admins name one or stop using it; other members
- * read it.
+ * requests open on it. Its admins name one or stop using it, and propose
+ * changes to its files as pull requests; other members read it.
  */
 export function DefinitionSettings() {
   const query = useDefinitionQuery();
@@ -135,6 +136,12 @@ export function DefinitionSettings() {
                         repoUrl={repoUrl()}
                         pullRequests={settings().openPullRequests}
                       />
+                      <Show when={settings().canEdit}>
+                        <DefinitionChangeEditor
+                          repoUrl={repoUrl()}
+                          commit={settings().commit}
+                        />
+                      </Show>
                     </>
                   )}
                 </Show>
