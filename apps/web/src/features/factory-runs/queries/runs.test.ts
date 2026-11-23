@@ -23,6 +23,7 @@ vi.mock('@service-factory/client', () => ({
     startRun: vi.fn(),
     answerGate: vi.fn(),
     cancelRun: vi.fn(),
+    retryRun: vi.fn(),
     flawRun: vi.fn(),
     steerStep: vi.fn(),
     labelRunScore: vi.fn(),
@@ -459,6 +460,85 @@ describe('createAppRunsContext', () => {
     });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: factoryRunKeys.task('task-1').queryKey,
+    });
+  });
+
+  it('puts a retry first in its task, and reads the retried Run and insights again', async () => {
+    const client = new QueryClient();
+    client.setQueryData(factoryRunKeys.task('task-1').queryKey, [older]);
+    client.setQueryData(factoryRunKeys.run('run-1').queryKey, older);
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    vi.mocked(factoryClient.retryRun).mockResolvedValue(
+      ok({
+        ...started,
+        run: {
+          ...started.run,
+          retry: { retriedFrom: 'run-1', branchOf: 'run-1', firstSeq: 2 },
+        },
+      })
+    );
+
+    const result = await createAppRunsContext(client).retryRun('run-1');
+
+    if (!result.ok) throw new Error('The retry was refused');
+    expect(result.value.id).toBe('run-2');
+    expect(result.value.retry).toEqual({
+      retriedFrom: 'run-1',
+      branchOf: 'run-1',
+      firstSeq: 2,
+    });
+    expect(
+      client
+        .getQueryData<Run[]>(factoryRunKeys.task('task-1').queryKey)
+        ?.map((run) => run.id)
+    ).toEqual(['run-2', 'run-1']);
+    expect(
+      client.getQueryData<Run>(factoryRunKeys.run('run-2').queryKey)?.id
+    ).toBe('run-2');
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: factoryRunKeys.run('run-1').queryKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: factoryRunKeys.insights._def,
+    });
+  });
+
+  it('tells a full Queue and a refused retry apart from a failed one', async () => {
+    const context = createAppRunsContext(new QueryClient());
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'QUEUE_FULL', message: 'too many wait' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'queueFull',
+    });
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'CONFLICT', message: 'the run was retried already' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'conflict',
+    });
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'NOT_IN_STANDING_ROLE', message: 'no role starts' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'notInStandingRole',
+    });
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'DEFINITION_UNREADABLE', message: 'moved' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'definitionUnreadable',
+    });
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'NOT_FOUND', message: 'Resource not found' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'failed',
     });
   });
 

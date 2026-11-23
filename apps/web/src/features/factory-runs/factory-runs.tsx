@@ -153,12 +153,35 @@ export function FactoryInsights() {
   );
 }
 
+/**
+ * Shows another Run in the pane asking, in place of the one it shows; none
+ * outside the split router.
+ */
+function useShowRunHere(): ((runId: string) => void) | undefined {
+  const router = useOptionalSplitRouter();
+  const pane = useContext(PaneContext);
+  if (!router || !pane) return;
+
+  return (runId) =>
+    fireAndForget(
+      Promise.resolve(
+        router.navigatePane(
+          pane.pane(),
+          { route: factoryRunRoute, params: { runId } },
+          { depth: pane.depth() }
+        )
+      ),
+      'factory-runs'
+    );
+}
+
 /** One Run as a page of its own, as the board and a Run's link open it. */
 export function FactoryRun(props: { runId: string }) {
+  const showRunHere = useShowRunHere();
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
       <RunsProvider value={appRunsContext()}>
-        <RunPageView runId={props.runId} />
+        <RunPageView runId={props.runId} onOpenRun={showRunHere} />
       </RunsProvider>
     </ShowFeatureFlag>
   );

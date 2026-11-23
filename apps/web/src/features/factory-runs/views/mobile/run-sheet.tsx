@@ -21,6 +21,7 @@ import {
   RunCancel,
   RunContent,
   RunLoadFailed,
+  RunRetry,
   replyToGate,
 } from '../shared/run-parts';
 import { formatRunTime } from '../shared/run-time';
@@ -137,6 +138,11 @@ export function MobileRunSheet(props: {
                 </div>
               </Show>
             )}
+          </Show>
+          <Show when={props.controller.retriable()}>
+            <div class="flex shrink-0 justify-end px-5 pb-3">
+              <RunRetry controller={props.controller} />
+            </div>
           </Show>
           <Show
             when={

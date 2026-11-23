@@ -419,6 +419,17 @@ export type RunAutomation = {
   trigger: AutomationTriggerKind;
 };
 
+/**
+ * What a Run that retries another keeps of it: the Run it retries, the Run
+ * whose branch it works on (the first of a chain of retries), and the place
+ * of its own first Step: the Steps before it are the retried Run's, kept.
+ */
+export type RunRetry = {
+  retriedFrom: string;
+  branchOf: string;
+  firstSeq: number;
+};
+
 export type Run = {
   id: string;
   request: string;
@@ -466,6 +477,8 @@ export type Run = {
   tokenBudget?: RunTokenBudget;
   /** What became of its blockers; none from a service older than disputes. */
   blockerResolutions?: BlockerResolutions;
+  /** The Run it retries, for a retry; none for a Run started afresh. */
+  retry?: RunRetry;
 };
 
 /** A Flow a person can start a Run of. */
@@ -621,4 +634,107 @@ export function terminalState(
   if (step.terminal?.stopAskedAt) return 'stopping';
   if (step.terminal?.pausedAt) return 'paused';
   return step.terminal?.betweenTurns ? 'between' : 'working';
+}
+
+/** How a Run ends that its owner can retry. */
+const RETRIABLE_OUTCOMES: ReadonlySet<RunOutcome> = new Set([
+  'failed',
+  'infrastructure',
+  'blocked',
+]);
+
+/**
+ * The Flows whose Runs the factory never retries: a Benchmark trial and a
+ * self-improvement Run belong to the suite or improvement that started
+ * them.
+ */
+const UNRETRIED_FLOWS: ReadonlySet<string> = new Set(['benchmark', 'improve']);
+
+/**
+ * The retry of `run` among `runs` (its task's), if one is listed: the Run
+ * whose `retry.retriedFrom` names it. A Run is retried at most once.
+ */
+export function retryOf(run: Pick<Run, 'id'>, runs: Run[]): Run | undefined {
+  return runs.find((other) => other.retry?.retriedFrom === run.id);
+}
+
+/**
+ * Whether `run` can be retried: it ended `failed`, `infrastructure` or
+ * `blocked`, is no Benchmark trial or self-improvement Run, and no retry of
+ * it is known.
+ */
+export function isRetriable(run: Run, retried: boolean): boolean {
+  if (!run.end || !RETRIABLE_OUTCOMES.has(run.end.outcome)) return false;
+  if (run.flow !== undefined && UNRETRIED_FLOWS.has(run.flow)) return false;
+  return !retried;
+}
+
+/** The entry of the code Flow that files an oversized plan's child tasks. */
+export const SPLIT_ENTRY = 'split';
+
+/** A task a Run filed, by its id and name. */
+export type FiledTask = { id: string; name: string };
+
+/**
+ * What ends the header the engine's split writes above the list of the
+ * child tasks it filed (`split_task` in `built_in_steps/plan_review.rs`).
+ */
+const FILED_HEADER = "child tasks, filed as the run's owner.";
+
+/** One line of the filed list: `- ` and a task's document mention. */
+const FILED_LINE = /^- <m-document-mention>(.*)<\/m-document-mention>$/;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The task a filed line's mention names, if it reads as one. */
+function filedTask(json: string): FiledTask | undefined {
+  try {
+    const mention: unknown = JSON.parse(json);
+    if (
+      mention &&
+      typeof mention === 'object' &&
+      'documentId' in mention &&
+      typeof mention.documentId === 'string' &&
+      UUID.test(mention.documentId) &&
+      'documentName' in mention &&
+      typeof mention.documentName === 'string'
+    ) {
+      return { id: mention.documentId, name: mention.documentName };
+    }
+  } catch {
+    // A mention that doesn't read links no task.
+  }
+  return undefined;
+}
+
+/**
+ * The child tasks a `split` Step filed: the list under the header its
+ * output opens with, one task mention a line, in order. A task the plan's
+ * reasons mention, in the header, is not one it filed. None for another
+ * Step, or one that filed none.
+ */
+export function splitChildTasks(
+  step: Pick<RunStep, 'entry' | 'end'>
+): FiledTask[] {
+  if (step.entry !== SPLIT_ENTRY || !step.end) return [];
+  const output = step.end.output;
+  const header = output.indexOf(FILED_HEADER);
+  if (header < 0) return [];
+  const lines = output
+    .slice(output.indexOf('\n', header) + 1 || output.length)
+    .split('\n');
+  const tasks: FiledTask[] = [];
+  for (const line of lines) {
+    const text = line.trim();
+    // Blank lines lead to the list; the list ends at its first other line.
+    if (text === '') {
+      if (tasks.length > 0) break;
+      continue;
+    }
+    const match = FILED_LINE.exec(text);
+    if (!match) break;
+    const task = filedTask(match[1] ?? '');
+    if (task && !tasks.some((filed) => filed.id === task.id)) tasks.push(task);
+  }
+  return tasks;
 }
