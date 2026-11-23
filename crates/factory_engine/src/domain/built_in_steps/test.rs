@@ -130,6 +130,7 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         owner_notes: &[],
         base_commit: None,
         routes: &[],
+        branch_of: None,
     }
 }
 

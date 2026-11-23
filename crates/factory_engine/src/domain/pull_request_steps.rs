@@ -52,7 +52,7 @@ use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, CheckState, CheckSuite, CodeRepository, FinishedJob,
     HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RequiredCheck,
-    RequiredChecks, StepInput, StepReport, run_branch,
+    RequiredChecks, StepInput, StepReport,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
 use crate::domain::quality::ci_jobs;
@@ -581,7 +581,7 @@ where
     ) -> Result<Option<String>, PullRequestStepError> {
         let (repository, _) = Self::repository(input)?;
         self.github
-            .branch_head(input.owner, &repository, &run_branch(input.key.run_id))
+            .branch_head(input.owner, &repository, &input.branch())
             .await
             .map_err(PullRequestStepError::github)
     }
@@ -593,7 +593,7 @@ where
         input: &StepInput<'_>,
     ) -> Result<Option<Vec<String>>, PullRequestStepError> {
         let (repository, recorded) = Self::repository(input)?;
-        let branch = run_branch(input.key.run_id);
+        let branch = input.branch();
         self.github
             .changed_paths(input.owner, &repository, &recorded.base_branch, &branch)
             .await
@@ -720,7 +720,7 @@ where
         fields(run_id = %input.key.run_id)
     )]
     async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
-        let branch = run_branch(input.key.run_id);
+        let branch = input.branch();
         let deleting = self.delete_branch_at(input, &branch, merged_head, merger);
         match tokio::time::timeout(BRANCH_DELETION_WAIT, deleting).await {
             Ok(Ok(())) => {}
@@ -784,7 +784,11 @@ where
 
         let deletion = self
             .github
-            .delete_run_branch(input.owner, &repository, input.key.run_id)
+            .delete_run_branch(
+                input.owner,
+                &repository,
+                input.branch_of.unwrap_or(input.key.run_id),
+            )
             .await
             .map_err(PullRequestStepError::github)?;
         if deletion == BranchDeletion::Deleted {
@@ -828,7 +832,7 @@ where
     ) -> Result<Option<PullRequest>, PullRequestStepError> {
         let found = self
             .github
-            .find(input.owner, repository, &run_branch(input.key.run_id))
+            .find(input.owner, repository, &input.branch())
             .await
             .map_err(PullRequestStepError::github)?;
         if let Some(pull_request) = &found {
@@ -895,7 +899,7 @@ where
                         input.owner,
                         &repository,
                         &OpenPullRequest {
-                            branch: run_branch(input.key.run_id),
+                            branch: input.branch(),
                             base: recorded.base_branch.clone(),
                             title: title(input.request),
                             body: description::opening(
@@ -954,12 +958,7 @@ where
         let all_runs = required.is_some_and(|required| !required.checks.is_empty());
         let (pull_request, checks) = self
             .github
-            .find_with_checks(
-                input.owner,
-                repository,
-                &run_branch(input.key.run_id),
-                all_runs,
-            )
+            .find_with_checks(input.owner, repository, &input.branch(), all_runs)
             .await
             .map_err(PullRequestStepError::github)?
             .ok_or(PullRequestStepError::NoPullRequest)?;
@@ -1605,7 +1604,7 @@ where
         loop {
             let head = self
                 .github
-                .branch_head(input.owner, repository, &run_branch(input.key.run_id))
+                .branch_head(input.owner, repository, &input.branch())
                 .await
                 .map_err(PullRequestStepError::github)?;
             if let Some(head) = head

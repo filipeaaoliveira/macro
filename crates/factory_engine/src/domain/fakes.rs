@@ -30,10 +30,10 @@ use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     BudgetStop, CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, DefinitionRead, EntryId, Gate, GateAnswer, GateKind,
-    HandBack, HandedBack, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run,
-    RunDefinition, RunEnd, RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal,
-    Steered, Step, StepEnd, StepKey, StepSession, StepSteering, StoppingSession, TaskLink,
-    TeamMembership,
+    HandBack, HandedBack, NewRetry, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces,
+    RetryInsert, Role, Run, RunDefinition, RunEnd, RunFlow, RunId, RunInsert, RunOutcome, RunRetry,
+    SessionStep, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession, StepSteering,
+    StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -625,6 +625,7 @@ impl RunRepository for FakeRepo {
             }),
             end: None,
             budget_stop: None,
+            retry: None,
         };
         if let Some(kept) = kept_flow {
             self.kept_flows
@@ -648,6 +649,116 @@ impl RunRepository for FakeRepo {
             .expect("flows")
             .insert(id, flow.to_string());
         Ok(RunInsert::Inserted(Box::new(run)))
+    }
+
+    async fn retry_run(
+        &self,
+        retry: NewRetry,
+        hold: QueueHold<'_>,
+    ) -> Result<RetryInsert, FakeError> {
+        if self.fails("retry_run") {
+            return Err(FakeError);
+        }
+        let Some(retried) = self
+            .runs
+            .lock()
+            .expect("runs")
+            .get(&retry.retried)
+            .filter(|run| run.end.is_some())
+            .cloned()
+        else {
+            return Ok(RetryInsert::NotEnded);
+        };
+        // As the database's index: a Run is retried once.
+        if self.runs.lock().expect("runs").values().any(|run| {
+            run.retry
+                .is_some_and(|kept| kept.retried_from == retry.retried)
+        }) {
+            return Ok(RetryInsert::Retried);
+        }
+        if let Some(limit) = hold.limit {
+            let places = self.queue_places(&retried.user_id, hold.asking_flows, limit);
+            if places.held() >= limit {
+                return Ok(RetryInsert::QueueFull(places));
+            }
+        }
+        let run = Run {
+            id: retry.id,
+            created_at: Utc::now(),
+            automation: None,
+            end: None,
+            budget_stop: None,
+            retry: Some(RunRetry {
+                retried_from: retry.retried,
+                branch_of: retried.branch_of(),
+                first_seq: retry.first_seq,
+            }),
+            ..retried.clone()
+        };
+        self.runs.lock().expect("runs").insert(run.id, run.clone());
+        let flow = self
+            .flows
+            .lock()
+            .expect("flows")
+            .get(&retry.retried)
+            .cloned();
+        if let Some(flow) = flow {
+            self.flows.lock().expect("flows").insert(run.id, flow);
+        }
+        fn copy<V: Clone>(map: &Mutex<BTreeMap<RunId, V>>, from: RunId, to: RunId) {
+            let mut map = map.lock().expect("kept");
+            if let Some(value) = map.get(&from).cloned() {
+                map.insert(to, value);
+            }
+        }
+        copy(&self.kept_flows, retry.retried, run.id);
+        copy(&self.definition_agents, retry.retried, run.id);
+        copy(&self.definition_evaluations, retry.retried, run.id);
+        copy(&self.known_ci_flakes, retry.retried, run.id);
+        copy(&self.merge_heads, retry.retried, run.id);
+        copy(&self.control_file_changes, retry.retried, run.id);
+        {
+            let mut evaluation = self.evaluation.lock().expect("evaluation");
+            if let Some(arms) = evaluation.arms.get(&retry.retried).cloned() {
+                evaluation.arms.insert(run.id, arms);
+            }
+            if let Some(rules) = evaluation.agent_rules.get(&retry.retried).cloned() {
+                evaluation.agent_rules.insert(run.id, rules);
+            }
+            if evaluation.task_tags_unread.contains(&retry.retried) {
+                evaluation.task_tags_unread.insert(run.id);
+            }
+        }
+        // The Steps before its own that ended, with their Gates when
+        // answered, and the review rounds that ended before it.
+        {
+            let mut steps = self.steps.lock().expect("steps");
+            let kept: Vec<_> = steps
+                .iter()
+                .filter(|(id, step)| {
+                    *id == retry.retried && step.seq < retry.first_seq && step.end.is_some()
+                })
+                .map(|(_, step)| {
+                    let mut step = step.clone();
+                    step.gate = step.gate.filter(|gate| gate.answer.is_some());
+                    step.terminal = Default::default();
+                    (run.id, step)
+                })
+                .collect();
+            steps.extend(kept);
+        }
+        {
+            let mut rounds = self.review_rounds.lock().expect("review rounds");
+            let kept: Vec<_> = rounds
+                .iter()
+                .filter(|(id, round)| {
+                    *id == retry.retried && round.seq < retry.first_seq && round.end.is_some()
+                })
+                .map(|(_, round)| (run.id, round.clone()))
+                .collect();
+            rounds.extend(kept);
+        }
+        Ok(RetryInsert::Inserted(Box::new(run)))
     }
 
     async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<TaskLink, FakeError> {
@@ -1961,6 +2072,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) reads: usize,
     /// How many times a pull request was opened.
     pub(crate) opened: usize,
+    /// The branches pull requests were opened from, in order.
+    pub(crate) opened_from: Vec<String>,
     /// GitHub's reason to refuse opening one, if it does.
     pub(crate) open_refusal: Option<String>,
     /// The descriptions pull requests were opened with.
@@ -2452,6 +2565,7 @@ impl PullRequests for FakeGithub {
             return Ok(Opening::Refused(why));
         }
         state.opened += 1;
+        state.opened_from.push(pull_request.branch.clone());
         state.bodies.push(pull_request.body.clone());
         state.description = Some(pull_request.body.clone());
         state.pull_request = Some(PullRequest {

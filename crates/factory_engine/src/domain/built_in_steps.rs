@@ -33,7 +33,7 @@ use crate::domain::agents::{REVIEWER_ROLES, VERIFIER};
 use crate::domain::checks::fence_for;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
-use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport, run_branch};
+use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport};
 use crate::domain::no_result::retry_prompt;
 use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
@@ -401,6 +401,7 @@ where
             prompt: asked_prompt,
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
+            branch_of: input.branch_of,
             answer_by,
             resumes: input.resumes,
             // Should the asking Step's session be gone, a new one is told
@@ -776,7 +777,7 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
     };
     let workplace = input
         .repository
-        .map(|repository| workplace(repository, &run_branch(input.key.run_id), input.base_commit))
+        .map(|repository| workplace(repository, &input.branch(), input.base_commit))
         .unwrap_or_default();
     format!(
         "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{ask}{workplace}\n\

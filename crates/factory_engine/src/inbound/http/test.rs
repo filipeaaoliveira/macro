@@ -408,6 +408,16 @@ impl FactoryService for FakeService {
         Err(self.refusing(actor))
     }
 
+    async fn retry_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _id: RunId,
+        acting: Option<ActingAgent>,
+    ) -> Result<RunDetail, FactoryError> {
+        self.acting.lock().expect("acting").push(acting);
+        Err(self.refusing(actor))
+    }
+
     async fn mark_run_flawed(
         &self,
         actor: &MacroUserIdStr<'static>,
@@ -783,6 +793,37 @@ async fn someone_else_s_run_is_missing_to_them() {
     assert_eq!(eve_answers, StatusCode::NOT_FOUND);
     assert_eq!(eve_cancels, StatusCode::NOT_FOUND);
     assert_eq!(alice_reads, StatusCode::OK);
+}
+
+/// Only a Run's owner retries it, and only once it ended: someone else's
+/// Run is missing to them, and a running one, or one retried already, is a
+/// conflict.
+#[tokio::test]
+async fn a_retry_reaches_only_its_owner_s_ended_run() {
+    let repo = FakeRepo::default();
+    let run = alice_s_run(&repo).await;
+    let records = records_router(&repo);
+    let retry = |router: Router, token: &'static str| async move {
+        router
+            .oneshot(call(
+                "POST",
+                &format!("/runs/{run}/retry"),
+                Caller::User(token),
+                serde_json::Value::Null,
+            ))
+            .await
+            .expect("response")
+            .status()
+    };
+
+    let eve_retries = retry(records.clone(), "eve").await;
+    let alice_retries_a_running_run = retry(records, "alice").await;
+    let retried_again = retry(router(|| FactoryError::AlreadyRetried).0, "alice").await;
+
+    assert_eq!(eve_retries, StatusCode::NOT_FOUND);
+    assert_eq!(alice_retries_a_running_run, StatusCode::CONFLICT);
+    assert_eq!(retried_again, StatusCode::CONFLICT);
+    assert!(repo.runs.lock().expect("runs").len() == 1);
 }
 
 /// A Run is linked only to a task its owner can see; a hidden task reads

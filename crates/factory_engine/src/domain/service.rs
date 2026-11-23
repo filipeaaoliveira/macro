@@ -4,6 +4,7 @@
 mod board;
 mod definition;
 pub(crate) mod quarantine;
+pub(crate) mod retry;
 mod standing;
 #[cfg(test)]
 mod test;
@@ -1182,6 +1183,7 @@ where
             run_id,
             flow,
             token_budget: budget_of(&run).is_some(),
+            start_at: None,
         };
         if let Err(error) = self.workflows.start(&start).await {
             self.forget_unstarted(run_id).await;
@@ -2098,6 +2100,15 @@ where
         }
     }
 
+    async fn retry_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        acting: Option<ActingAgent>,
+    ) -> Result<RunDetail, FactoryError> {
+        self.retry(actor, id, acting).await
+    }
+
     #[tracing::instrument(skip(self, actor, reason))]
     async fn mark_run_flawed(
         &self,
@@ -2371,15 +2382,18 @@ where
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
     async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError> {
         // A Run cancelled before its workflow started takes no Step.
-        if let Some(end) = self.run_of(&request).await?.end {
+        let run = self.run_of(&request).await?;
+        if let Some(end) = run.end {
             return Ok(StepStart::RunEnded(end.outcome));
         }
         self.repo
             .start_step(request.key, &request.entry, request.visit)
             .await
             .map_err(internal)?;
-        // The Run's first Step starting is the Run starting.
-        if request.key.seq == 1 {
+        // The Run's first Step starting is the Run starting: for a retry,
+        // the first past the Steps it kept.
+        let first_seq = run.retry.map_or(1, |retry| retry.first_seq);
+        if request.key.seq == first_seq {
             self.post(request.key.run_id, RunUpdate::Started).await;
         }
         Ok(StepStart::Started)
@@ -2461,6 +2475,7 @@ where
             owner_notes: &owner_notes,
             base_commit: base_commit.as_deref(),
             routes: &routes,
+            branch_of: run.retry.map(|retry| retry.branch_of),
         };
         let report = self
             .executor

@@ -21,7 +21,7 @@ use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
     AskedBack, ControlFileChanges, DefinitionRead, EntryId, FlawMarker, Gate, GateAnswer,
     GateModelReading, HandBack, Outcome, Run, RunDefinition, RunEnd, RunFlaw, RunId, RunOutcome,
-    StandInAnswer, Steer, SteerAction, Step, StepEnd, StepTerminal,
+    RunRetry, StandInAnswer, Steer, SteerAction, Step, StepEnd, StepTerminal,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -186,6 +186,7 @@ where
             post(stop_step_handler::<S, Auth>),
         )
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
+        .route("/runs/{id}/retry", post(retry_run_handler::<S, Auth>))
         .route("/runs/{id}/flaw", post(flaw_run_handler::<S, Auth>))
         .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
         .route("/hand-backs", post(hand_back_handler::<S, Auth>))
@@ -1038,6 +1039,49 @@ where
     Ok(StatusCode::ACCEPTED)
 }
 
+/// Retry one of the caller's Runs that ended `failed`, `infrastructure` or
+/// `blocked`: a new Run of the same task, Flow and Factory Definition
+/// commit, on the same branch, that keeps the Steps the Run took before the
+/// entry it stopped at, with their outputs, and starts there; its
+/// `retry.retriedFrom` names the Run it retries. A Run is retried once: a
+/// second retry, a running Run, a Run that ended otherwise, a Benchmark
+/// trial and a self-improvement Run are refused (409), as is a retry past
+/// the caller's Queue limit (`queueFull`). An agent acting for the owner
+/// needs a Standing Role that allows `start`, as a new Run does.
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "retry_factory_run",
+    path = "/runs/{id}/retry",
+    params(GetRunParams),
+    responses(
+        (status = 201, body = RunDetail),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = RunErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = RunErrorResponse),
+        (status = 500, body = ErrorResponse),
+        (status = 502, body = ErrorResponse),
+        (status = 503, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %params.id))]
+pub async fn retry_run_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(params): Path<GetRunParams>,
+) -> Result<(StatusCode, Json<RunDetail>), FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let acting = acting_agent(&caller.authorization, &headers);
+    let actor = caller.authorization.user.macro_user_id;
+    let detail = state.service.retry_run(&actor, params.id, acting).await?;
+    Ok((StatusCode::CREATED, Json(detail)))
+}
+
 /// Mark one of the caller's Runs flawed: it ended `success`, and they
 /// found its result wrong. The Run then reads `flawed`, with who marked it,
 /// why and when. Marking a flawed Run again keeps its first mark. Only the
@@ -1213,6 +1257,8 @@ impl FactoryError {
             | FactoryError::NotARoutine => StatusCode::FORBIDDEN,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded
+            | FactoryError::NotRetriable
+            | FactoryError::AlreadyRetried
             | FactoryError::QueueFull { .. }
             | FactoryError::AnswerRefused(_)
             | FactoryError::StepEnded
@@ -1358,6 +1404,7 @@ impl IntoResponse for FactoryError {
         resume_step_handler,
         stop_step_handler,
         cancel_run_handler,
+        retry_run_handler,
         flaw_run_handler,
         link_task_handler,
         hand_back_handler,
@@ -1397,6 +1444,7 @@ impl IntoResponse for FactoryError {
         RunEnd,
         RunOutcome,
         RunFlaw,
+        RunRetry,
         FlawMarker,
         Step,
         StepEnd,

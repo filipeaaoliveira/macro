@@ -254,6 +254,31 @@ workflow takes it, a link once linked, and an answer in `factory_answer_gate`, f
 `AnswerGate::standing` (left out when none, so histories replay as before; the
 workflow only hands it on). The Run API lists them as `standingActs`.
 
+`POST /runs/{id}/retry` (`domain/service/retry.rs`) retries a Run of the
+caller's that ended `failed`, `infrastructure` or `blocked` (409 otherwise,
+and for a Benchmark trial, a self-improvement Run or a Run that kept no
+Flow): a new Run of the same task, request, Flow (the one the Run kept),
+Factory Definition commit, rules and Agents, whose `retry` names the Run it
+retries (`retriedFrom`), the Run whose branch it works on (`branchOf`, the
+first of a chain of retries) and the place of its own first Step
+(`firstSeq`). It starts at the entry of the Run's latest Step, at the first
+Step of that entry's latest visit (`retry_start`), so a review panel's
+round or a Step an agent's question went on from runs again whole; the
+Steps before it that ended are kept as the retry's own, at their places,
+with their answered Gates, sessions and the review rounds that ended
+before it, so the plan, the branch and the Blockers a fix reads are not
+made again. Its workflow starts there (`RunStart::start_at`,
+`Interpreter::start_at`): visits and facts start afresh, and the retry
+takes as many Steps of its own as a new Run. Every Step works on the
+branch of `branchOf` (`StepInput::branch`, `AgentTask::branch`), so it
+pushes to, reviews and proposes from the retried Run's branch and pull
+request. A Run is retried at most once (`AlreadyRetried`, 409; retry the
+newest retry instead); a retry is held to the Queue limit a new Run would
+be, and an agent acting for the owner needs a Standing Role that allows
+`start`. The kept Steps' sessions count against a token budget, so a Run
+its budget stopped stops again. A worker older than `start_at` would start
+a retry at its Flow's first entry, so deploy every worker before the API.
+
 Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
 `deny_unknown_fields`, and an agent Step reads its Run's kept Agents
 (`SessionAgent::run_agents`). A worker from before them fails every agent Step

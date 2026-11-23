@@ -32,6 +32,7 @@ mod definition_changes;
 mod evaluation;
 mod gate_owner;
 mod orchestrator;
+mod retry;
 mod self_improvement;
 mod standing;
 mod standing_rules;

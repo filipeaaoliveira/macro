@@ -57,7 +57,6 @@ use crate::domain::checks::{
     kept_output,
 };
 use crate::domain::flow::StepName;
-use crate::domain::models::run_branch;
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
@@ -842,7 +841,7 @@ where
         answers: Option<&ReviewRound>,
         work_output: &str,
     ) -> Result<Option<String>, BuiltInStepError> {
-        let branch = run_branch(input.key.run_id);
+        let branch = input.branch();
         let head = match self.pull_requests.branch_head(&input).await? {
             Some(head) => head,
             None => {
