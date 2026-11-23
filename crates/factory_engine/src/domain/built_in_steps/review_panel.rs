@@ -39,7 +39,7 @@ use crate::domain::review_rounds::{
 const REASK_PLACE: u16 = 1;
 
 /// The review panel's Role that reads the break records.
-const TESTS_REVIEWER: &str = "tests-reviewer";
+pub(super) const TESTS_REVIEWER: &str = "tests-reviewer";
 
 impl<A, G, R, M, C> BuiltInSteps<A, G, R, M, C>
 where
