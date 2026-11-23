@@ -12,13 +12,16 @@ use github::domain::models::{
     GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
 };
 use github::domain::ports::GithubOauth;
-use github::outbound::github_oauth_client::{FileTooLarge, GithubBranchUpdate, GithubOauthImpl};
+use github::outbound::github_oauth_client::{
+    FileTooLarge, GithubBranchUpdate, GithubJobRerun, GithubOauthImpl,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
-    CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, Merging,
+    CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, JobRerun,
+    Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState, PullRequestText,
     RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
 };
@@ -512,12 +515,14 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                         .join("\n")
                 })
                 .filter(|detail| !detail.is_empty());
+            let actions_job_id = (run.app_slug.as_deref() == Some(ACTIONS_APP)).then_some(run.id);
             jobs.push(FinishedJob {
                 name: run.name,
                 state,
                 failed_step,
                 detail,
                 annotations,
+                actions_job_id,
             });
         }
         for status in statuses.items {
@@ -531,9 +536,28 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 failed_step: None,
                 detail: None,
                 annotations: Vec::new(),
+                actions_job_id: None,
             });
         }
         Ok(jobs)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn rerun_actions_job(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        job_id: u64,
+    ) -> Result<JobRerun, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let rerun = self
+            .github
+            .rerun_actions_job(&token, repository.owner(), repository.name(), job_id)
+            .await?;
+        Ok(match rerun {
+            GithubJobRerun::Started => JobRerun::Started,
+            GithubJobRerun::Declined(message) => JobRerun::Declined(message),
+        })
     }
 
     #[tracing::instrument(err, skip(self, owner))]

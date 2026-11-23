@@ -367,6 +367,9 @@ async fn serve<A: StepAgent + Clone>(
             steps: StepServiceImpl::new(parts.repo.clone(), steps.clone())
                 .with_owner_gates(parts.gate_notifier.clone(), parts.task_notes)
                 .with_task_thread(parts.task_thread.clone())
+                // A CI job a Run's `ci` Step quarantined as flaky gets a
+                // task, filed as the Run's owner when the Run ends.
+                .with_quarantine_tasks(parts.tasks.clone())
                 // A Run with a token budget is checked against what the
                 // usage log says its agent sessions used.
                 .with_usage(parts.usage.clone()),

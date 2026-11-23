@@ -29,6 +29,7 @@
 //! when the Runs ahead of it are still there after [`QUEUE_WAIT`].
 
 mod description;
+mod flaky_ci;
 #[cfg(test)]
 mod test;
 
@@ -49,13 +50,14 @@ use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RequiredCheck, RequiredChecks,
-    StepInput, StepReport, run_branch,
+    FinishedJob, OpenPullRequest, Opening, PullRequest, PullRequestState, RequiredCheck,
+    RequiredChecks, StepInput, StepReport, run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
 use crate::domain::quality::ci_jobs;
 use crate::domain::setup::SETUP_FILE;
 use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
+use flaky_ci::RedNext;
 
 /// How long `ci` waits for a pull request's checks to finish: short of a
 /// Step attempt's 30 minutes, so the Step ends `timeout` rather than failing.
@@ -374,6 +376,19 @@ fn report(outcome_name: &str, output: String) -> StepReport {
         outcome: outcome(outcome_name),
         output,
     }
+}
+
+/// What `ci` reports of a red on `head`: the checks that `failed`, and
+/// what the flaky rule did, `rerun`.
+fn red_report(pull_request: &PullRequest, head: &str, failed: &[String], rerun: &str) -> StepReport {
+    report(
+        "red",
+        format!(
+            "{}\n\nThese checks failed on {head}:\n\n{}{rerun}",
+            named(pull_request),
+            failed.join("\n")
+        ),
+    )
 }
 
 /// A pull request's first line for a person: its number and page.
@@ -990,6 +1005,9 @@ where
         // read, so a Run that comes here without `publish`, as from
         // `update`, shows its latest checks.
         let mut reported = false;
+        // The failed checks of a red the wait holds back while the head's
+        // other checks finish, to tell whether only flaky jobs failed.
+        let mut held_red: Option<Vec<String>> = None;
         loop {
             let (pull_request, checks) = self
                 .find_with_checks(&input, &repository, required.as_ref(), &mut kept)
@@ -1011,12 +1029,9 @@ where
                 ""
             };
             let elapsed = chrono::TimeDelta::from_std(started.elapsed()).unwrap_or_default();
-            match verdict(
-                &pull_request,
-                &checks,
-                required.as_ref(),
-                started_at + elapsed,
-            ) {
+            let now = started_at + elapsed;
+            held_red = None;
+            match verdict(&pull_request, &checks, required.as_ref(), now) {
                 Verdict::Green(passed) => {
                     let seen = (head.clone(), passed);
                     let merged = pull_request.state == PullRequestState::Merged;
@@ -1027,10 +1042,13 @@ where
                             .map_err(PullRequestStepError::records)?;
                         self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Green, deadline)
                             .await;
+                        let rerun = self
+                            .settle_green_reruns(&input, &repository, &head, now)
+                            .await?;
                         return Ok(report(
                             "green",
                             format!(
-                                "{}\n\nEvery check passed on {head}.{note}",
+                                "{}\n\nEvery check passed on {head}.{rerun}{note}",
                                 named(&pull_request)
                             ),
                         ));
@@ -1038,16 +1056,27 @@ where
                     last_green = Some(seen);
                 }
                 Verdict::Red(failed) => {
-                    self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Red, deadline)
-                        .await;
-                    return Ok(report(
-                        "red",
-                        format!(
-                            "{}\n\nThese checks failed on {head}:\n\n{}",
-                            named(&pull_request),
-                            failed.join("\n")
-                        ),
-                    ));
+                    last_green = None;
+                    let next = self
+                        .after_red(&input, &repository, &checks, &heads, deadline, now)
+                        .await?;
+                    match next {
+                        RedNext::Hold => held_red = Some(failed),
+                        RedNext::RerunRunning => {}
+                        RedNext::Red { note: rerun, kept } => {
+                            if !kept {
+                                self.keep_ci_wait(
+                                    &input,
+                                    &repository,
+                                    &heads,
+                                    CiVerdict::Red,
+                                    deadline,
+                                )
+                                .await;
+                            }
+                            return Ok(red_report(&pull_request, &head, &failed, &rerun));
+                        }
+                    }
                 }
                 Verdict::Closed => {
                     return Ok(report(
@@ -1059,6 +1088,12 @@ where
             }
 
             if tokio::time::Instant::now() + CI_POLL > deadline {
+                // A red held back while other checks ran is red still.
+                if let Some(failed) = held_red {
+                    self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Red, deadline)
+                        .await;
+                    return Ok(red_report(&pull_request, &head, &failed, ""));
+                }
                 self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Timeout, deadline)
                     .await;
                 return Ok(report(
@@ -1081,7 +1116,8 @@ where
     /// be read in time are left out, and a wait that cannot be kept in time
     /// is only logged. Each failed job's step and annotations are read only
     /// while the whole keeping ends before the wait's `deadline`. A retried
-    /// Step keeps its last wait.
+    /// Step keeps its last wait. The jobs that finished on the last head,
+    /// as GitHub gave them; none when they could not be read in time.
     async fn keep_ci_wait(
         &self,
         input: &StepInput<'_>,
@@ -1089,11 +1125,13 @@ where
         heads: &[String],
         verdict: CiVerdict,
         deadline: tokio::time::Instant,
-    ) {
+    ) -> Vec<FinishedJob> {
         let Some(head) = heads.last() else {
-            return;
+            return Vec::new();
         };
         let details = tokio::time::Instant::now() + CI_RECORD_BOUND <= deadline;
+        // The head's jobs as GitHub gave them, once read.
+        let mut read = Vec::new();
         let keeping = async {
             let jobs = match tokio::time::timeout(
                 CI_JOBS_READ_BOUND,
@@ -1101,7 +1139,10 @@ where
             )
             .await
             {
-                Ok(jobs) => jobs,
+                Ok((jobs, finished)) => {
+                    read = finished;
+                    jobs
+                }
                 Err(_) => {
                     tracing::warn!("the finished CI jobs took too long to read");
                     Vec::new()
@@ -1125,13 +1166,15 @@ where
                 "keeping the ci wait took too long; the step's verdict stands without it"
             );
         }
+        read
     }
 
     /// The jobs a wait keeps: those that finished on the last of `heads`
     /// (none for a timeout, whose jobs had not finished), and those
     /// cancelled on the heads a newer push replaced: earlier heads of this
     /// wait, and the head the Run's last wait read, less the jobs that wait
-    /// kept there, the newest first, at most [`REPLACED_HEADS_READ`].
+    /// kept there, the newest first, at most [`REPLACED_HEADS_READ`]. With
+    /// them, the last head's jobs as GitHub gave them.
     async fn ci_wait_jobs(
         &self,
         input: &StepInput<'_>,
@@ -1139,11 +1182,11 @@ where
         heads: &[String],
         verdict: CiVerdict,
         details: bool,
-    ) -> Vec<CiJob> {
+    ) -> (Vec<CiJob>, Vec<FinishedJob>) {
         let Some((head, earlier)) = heads.split_last() else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
-        let mut jobs = if verdict == CiVerdict::Timeout {
+        let finished = if verdict == CiVerdict::Timeout {
             Vec::new()
         } else {
             match self
@@ -1151,13 +1194,14 @@ where
                 .finished_jobs(input.owner, repository, head, details)
                 .await
             {
-                Ok(jobs) => ci_jobs(&jobs),
+                Ok(jobs) => jobs,
                 Err(error) => {
                     tracing::warn!(%error, "the finished CI jobs could not be read");
                     Vec::new()
                 }
             }
         };
+        let mut jobs = ci_jobs(&finished);
 
         let last_wait = match self
             .repo
@@ -1213,7 +1257,7 @@ where
                 }
             }
         }
-        jobs
+        (jobs, finished)
     }
 
     /// Before a person is asked to merge, check the pull request's head is

@@ -442,6 +442,19 @@ pub struct FinishedJob {
     /// The failures a check run that failed annotated, such as the tests
     /// that failed, when they could be read.
     pub annotations: Vec<FailureAnnotation>,
+    /// For a GitHub Actions job, its id, which reruns it; a rerun is a new
+    /// job of the same name. None for another app's check run, or a
+    /// commit status, which the factory cannot rerun.
+    pub actions_job_id: Option<u64>,
+}
+
+/// What GitHub answered a rerun of a failed GitHub Actions job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobRerun {
+    /// GitHub queued it to run again.
+    Started,
+    /// GitHub would not rerun it, with its message.
+    Declined(String),
 }
 
 /// A failure a check run annotated: a test that failed, or an error of the

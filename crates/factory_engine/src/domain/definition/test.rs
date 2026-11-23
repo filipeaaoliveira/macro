@@ -6,7 +6,7 @@ use factory_records::domain::standing_rules::OrchestratorDefinition;
 
 use super::{
     DEFINITION_FILE_PATTERNS, DefinitionError, DefinitionFiles, DefinitionReadError,
-    FactoryDefinition, read_definition,
+    FactoryDefinition, MAX_KNOWN_FLAKES, read_definition,
 };
 use crate::domain::agents::AgentDefinitionError;
 use crate::domain::built_in_steps::built_in_step_use;
@@ -331,6 +331,28 @@ async fn rules_the_factory_does_not_take_do_not_read() {
             "a budget of {budget}"
         );
     }
+    let too_many: Vec<String> = (0..=MAX_KNOWN_FLAKES).map(|job| format!("\"job {job}\"")).collect();
+    for flakes in [
+        r#"["e2e", "e2e"]"#.to_string(),
+        r#"[" "]"#.to_string(),
+        format!("[{}]", too_many.join(", ")),
+    ] {
+        assert_eq!(
+            read(with("rules.json", &format!(r#"{{ "knownFlakes": {flakes} }}"#))).await,
+            Err(DefinitionError::KnownFlakes),
+            "known flakes {flakes}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_definition_names_its_known_flakes() {
+    let named = read(with("rules.json", r#"{ "knownFlakes": ["e2e (macos)", "lint"] }"#))
+        .await
+        .expect("a definition with known flakes reads");
+    assert_eq!(named.rules.known_flakes, ["e2e (macos)", "lint"]);
+    let without = read(files()).await.expect("a definition without rules reads");
+    assert!(without.rules.known_flakes.is_empty());
 }
 
 /// A token budget in range reads with the rules, and is kept on each Run

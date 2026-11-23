@@ -34,7 +34,7 @@ use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
     BranchUpdating, CodeRepository, CommitMade, ControlFilesSettings, DefinitionPullRequest,
-    DefinitionSettings, FactoryError, FinishedJob, FlowSummary, HeadChecks, Merging,
+    DefinitionSettings, FactoryError, FinishedJob, FlowSummary, HeadChecks, JobRerun, Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestText, RepositoryAccess,
     RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
@@ -319,6 +319,15 @@ pub trait PullRequests: Send + Sync + 'static {
         sha: &str,
         details: bool,
     ) -> impl Future<Output = Result<Vec<FinishedJob>, Self::Err>> + Send;
+
+    /// Ask GitHub to run the failed GitHub Actions job `job_id` of
+    /// `repository` again, alone.
+    fn rerun_actions_job(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        job_id: u64,
+    ) -> impl Future<Output = Result<JobRerun, Self::Err>> + Send;
 
     /// The commit at the head of `branch` of `repository`, with the checks
     /// on it, read with one token: what a watch of a base branch reads on
@@ -653,6 +662,44 @@ pub trait TaskThread: Send + Sync + 'static {
 
     /// The link that opens the Run `run_id` in Macro.
     fn run_link(&self, run_id: RunId) -> String;
+}
+
+/// Where a task is filed for each CI job a Run's `ci` Step quarantined
+/// as flaky.
+pub trait QuarantineTasks: Send + Sync + 'static {
+    /// The error type returned when the task cannot be filed now.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// File `task` as `user_id`'s, with the id `task_id`, in the project
+    /// of the task document `of` when it has one, unless a task with that
+    /// id is already there: then it was filed before. Whether it is filed,
+    /// or none when nothing files tasks.
+    fn file_quarantine(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        task: &FollowUpTask,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<Option<FollowUpMade>, Self::Err>> + Send;
+}
+
+/// Where nothing files quarantine tasks: quarantines are kept and listed,
+/// with no task.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoQuarantineTasks;
+
+impl QuarantineTasks for NoQuarantineTasks {
+    type Err = std::convert::Infallible;
+
+    async fn file_quarantine(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        _of: Option<Uuid>,
+        _task: &FollowUpTask,
+        _task_id: Uuid,
+    ) -> Result<Option<FollowUpMade>, Self::Err> {
+        Ok(None)
+    }
 }
 
 /// The task thread where nothing serves it: no update is posted.
