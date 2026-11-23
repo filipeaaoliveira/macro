@@ -883,14 +883,17 @@ request is kept whole lines (cut by characters only when its first line
 alone does not fit), and the rest of it, then what does not fit of the
 report, go into numbered comments, each found again by its marker and
 edited in place; one no longer needed, or a second of one number, says so.
-Only comments by the pull request's author, the Run's owner, count: a
-marker anyone else writes is never edited. The section is the first start
-marker an end marker closes; other sections and lone markers are removed.
-What agents wrote is quoted so it mentions no one and links or closes no
-issue: outside code, `&lt;`/`&gt;` and a word joiner after `@` before a
-name, `#` before a number, `GH-` and a closing keyword before a link; in
-code only the opening of an HTML comment is broken, so no marker can be
-forged. Follow-ups are not named by their task id, which would link the
+Only comments by the GitHub account the owner's token acts as (`GET
+/user`) count, whoever opened the pull request: a marker anyone else writes
+is never edited, and when that account cannot be read no comment is
+written. Every marker names the Run
+(`run=<id>`), and only this Run's count: the section is the first of its
+start markers that its end marker closes, and its other sections and lone
+markers are removed until none is left. The request and what agents wrote
+are escaped one way, code included: `&`, `<` and `>` as entities, and a
+word joiner after `@` before a name, `#` before a number, `GH-` and a
+closing keyword before a link or a Markdown link; web and email addresses
+get no joiner. Follow-ups are not named by their task id, which would link the
 pull request to them. Writing the report reads before it writes, writes
 only what changed, and a failure is logged without failing the Step; when
 `publish` cannot read the review rounds, it opens the pull request without

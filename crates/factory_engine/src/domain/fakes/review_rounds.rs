@@ -129,6 +129,12 @@ impl ReviewRoundRepository for FakeRepo {
     }
 
     async fn review_rounds(&self, run_id: RunId) -> Result<Vec<ReviewRound>, FakeError> {
+        if self
+            .review_rounds_fail
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(FakeError);
+        }
         Ok(self.rounds_of_run(run_id))
     }
 

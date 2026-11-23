@@ -160,3 +160,14 @@ async fn editing_a_deleted_comment_is_refused() {
     assert!(matches!(edited, Err(GithubError::RepositoryUnavailable)));
     server.finish();
 }
+
+/// The account a token acts as is read from `/user`.
+#[tokio::test]
+async fn a_token_s_account_is_its_user() {
+    let (server, client) = answering("200 OK", r#"{"id":42,"login":"julia"}"#);
+
+    let account = client.token_account_id("token").await.unwrap();
+
+    assert_eq!(account, 42);
+    assert!(server.finish().starts_with("GET /user HTTP/1.1"));
+}

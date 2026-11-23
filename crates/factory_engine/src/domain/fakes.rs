@@ -134,6 +134,9 @@ pub(crate) struct FollowUpComment {
 #[derive(Clone, Default)]
 pub(crate) struct FakeRepo {
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
+    /// Whether reading a Run's review rounds fails, as the database down
+    /// does.
+    pub(crate) review_rounds_fail: Arc<std::sync::atomic::AtomicBool>,
     /// The merge queues and the updates of Runs' branches.
     pub(crate) queue: Arc<Mutex<merge_queue::FakeQueue>>,
     /// The built-in Flow each Run walks.
@@ -1941,6 +1944,10 @@ pub(crate) struct FakeGithubState {
     /// Whether editing its description or comments fails, as GitHub
     /// refusing the owner does.
     pub(crate) text_edits_fail: bool,
+    /// Whether the account the owner's token acts as cannot be read.
+    pub(crate) writer_unread: bool,
+    /// Who opened the pull request, when not the Run's owner's account.
+    pub(crate) opened_by: Option<u64>,
     /// How many edits of its description or comments were asked for,
     /// whether or not they failed.
     pub(crate) text_write_attempts: usize,
@@ -2417,10 +2424,21 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _number: u64,
     ) -> Result<PullRequestText, FakeGithubError> {
+        let state = self.state();
         Ok(PullRequestText {
-            body: self.state().description.clone().unwrap_or_default(),
-            author_id: Some(Self::OWNER_ACCOUNT),
+            body: state.description.clone().unwrap_or_default(),
+            author_id: Some(state.opened_by.unwrap_or(Self::OWNER_ACCOUNT)),
         })
+    }
+
+    async fn writer_account(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<u64, FakeGithubError> {
+        if self.state().writer_unread {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(Self::OWNER_ACCOUNT)
     }
 
     async fn edit_pull_request_body(

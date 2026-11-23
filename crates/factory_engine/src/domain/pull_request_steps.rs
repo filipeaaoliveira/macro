@@ -893,6 +893,7 @@ where
                             base: recorded.base_branch.clone(),
                             title: title(input.request),
                             body: description::opening(
+                                input.key.run_id,
                                 input.request,
                                 &description::footer(&input),
                                 &run_report,
