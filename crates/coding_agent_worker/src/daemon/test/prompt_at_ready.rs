@@ -65,10 +65,7 @@ impl ControlPlane {
     /// Subscribe to live events and take the logged ones after `cursor`:
     /// exactly after that event when it is logged, else from the time the
     /// UUIDv7 encodes.
-    fn resume(
-        &self,
-        cursor: Option<Uuid>,
-    ) -> (Vec<(Uuid, String)>, broadcast::Receiver<(Uuid, String)>) {
+    fn resume(&self, cursor: Option<Uuid>) -> (Vec<Published>, broadcast::Receiver<Published>) {
         let published = self.published.lock().unwrap();
         let live = self.live.subscribe();
         let Some(cursor) = cursor else {
@@ -85,6 +82,9 @@ impl ControlPlane {
         (replay, live)
     }
 }
+
+/// A published event: its id and its JSON.
+type Published = (Uuid, String);
 
 /// When a UUIDv7 was minted, as Unix seconds and nanoseconds.
 fn minted(id: &Uuid) -> Option<(u64, u32)> {

@@ -61,13 +61,12 @@ fn receipt<T: RequiredPermission>(id: String, entity_type: EntityType) -> Entity
     .unwrap()
 }
 
-fn allowed_receipts(
-    _: &InitiativeEventActor,
-    project: InitiativeId,
-    task: &str,
-) -> std::pin::Pin<
+/// What an access check answers with.
+type Receipts = std::pin::Pin<
     Box<dyn Future<Output = Result<Option<(ViewReceipt, EditReceipt)>, AccessError>> + Send>,
-> {
+>;
+
+fn allowed_receipts(_: &InitiativeEventActor, project: InitiativeId, task: &str) -> Receipts {
     let receipts = (
         receipt(project.to_string(), EntityType::Initiative),
         receipt(task.to_owned(), EntityType::Document),
