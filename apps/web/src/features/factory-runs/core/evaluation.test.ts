@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { type SuiteInsight, suiteStandings } from './evaluation';
 
+/**
+ * A finished suite of `scored` trials, all scored, unless `changes` says
+ * otherwise.
+ */
 const suite = (
   id: string,
   benchmark: string,
   meanScore: number | null,
   outputTokens: number,
-  scored: number
+  scored: number,
+  changes: Partial<SuiteInsight> = {}
 ): SuiteInsight => ({
   id,
   benchmark,
@@ -16,8 +21,22 @@ const suite = (
   infrastructure: 0,
   meanScore,
   tokens: { input: 0, output: outputTokens, cacheRead: 0, cacheWrite: 0 },
-  trials: [],
+  trials: Array.from({ length: scored }, (_, index) => ({
+    task: `task-${index}`,
+    runId: `${id}-run-${index}`,
+    score: meanScore,
+    scores: [],
+  })),
+  ...changes,
 });
+
+const marks = (standings: ReturnType<typeof suiteStandings>) =>
+  Object.fromEntries(
+    [...standings].map(([id, standing]) => [
+      id,
+      { pareto: standing.pareto, recommended: standing.recommended },
+    ])
+  );
 
 describe('suiteStandings', () => {
   it('puts on the Pareto set the suites no other beats on score and cost, and recommends the best score on it', () => {
@@ -30,7 +49,7 @@ describe('suiteStandings', () => {
       suite('mixed', 'core', 0.7, 800, 2),
     ]);
 
-    expect(Object.fromEntries(standings)).toEqual({
+    expect(marks(standings)).toEqual({
       haiku: { pareto: true, recommended: false },
       sonnet: { pareto: true, recommended: false },
       opus: { pareto: true, recommended: true },
@@ -46,10 +65,15 @@ describe('suiteStandings', () => {
       suite('late', 'core', 0.5, 1000, 4),
     ]);
 
-    expect(standings.get('late')).toEqual({ pareto: true, recommended: true });
+    expect(standings.get('late')).toEqual({
+      pareto: true,
+      recommended: true,
+      tokensPerTrial: 250,
+    });
     expect(standings.get('early')).toEqual({
       pareto: false,
       recommended: false,
+      tokensPerTrial: 400,
     });
   });
 
@@ -59,23 +83,42 @@ describe('suiteStandings', () => {
       suite('cheap', 'core', 0.8, 300, 1),
     ]);
 
-    expect(standings.get('cheap')).toEqual({ pareto: true, recommended: true });
-    expect(standings.get('dear')).toEqual({
-      pareto: false,
-      recommended: false,
+    expect(marks(standings)).toEqual({
+      cheap: { pareto: true, recommended: true },
+      dear: { pareto: false, recommended: false },
     });
   });
 
-  it('keeps both suites that tie on score and cost on the set, and recommends the first', () => {
+  it('reads scores that differ only past the shown precision as the same score', () => {
+    // 0.1 + 0.2 is a hair above 0.3, but both read 0.30: the cheaper wins.
     const standings = suiteStandings([
-      suite('first', 'core', 0.8, 300, 1),
-      suite('second', 'core', 0.8, 300, 1),
+      suite('hair', 'core', 0.1 + 0.2, 900, 1),
+      suite('cheap', 'core', 0.3, 300, 1),
     ]);
 
-    expect(standings.get('first')).toEqual({ pareto: true, recommended: true });
-    expect(standings.get('second')).toEqual({
-      pareto: true,
-      recommended: false,
+    expect(marks(standings)).toEqual({
+      cheap: { pareto: true, recommended: true },
+      hair: { pareto: false, recommended: false },
+    });
+  });
+
+  it('keeps both suites that tie on score and cost on the set, and recommends the newest', () => {
+    const standings = suiteStandings([
+      suite('older', 'core', 0.8, 300, 1, {
+        createdAt: '2026-11-10T09:00:00Z',
+      }),
+      suite('newer', 'core', 0.8, 300, 1, {
+        createdAt: '2026-11-12T09:00:00Z',
+      }),
+      suite('oldest', 'core', 0.8, 300, 1, {
+        createdAt: '2026-11-08T09:00:00Z',
+      }),
+    ]);
+
+    expect(marks(standings)).toEqual({
+      older: { pareto: true, recommended: false },
+      newer: { pareto: true, recommended: true },
+      oldest: { pareto: true, recommended: false },
     });
   });
 
@@ -88,11 +131,45 @@ describe('suiteStandings', () => {
       suite('docs-b', 'docs', 0.4, 50, 1),
     ]);
 
-    expect(Object.fromEntries(standings)).toEqual({
+    expect(marks(standings)).toEqual({
       'core-a': { pareto: true, recommended: false },
       'core-b': { pareto: true, recommended: true },
       'docs-a': { pareto: true, recommended: true },
       'docs-b': { pareto: true, recommended: false },
+    });
+  });
+
+  it('ranks a suite only once all its trials ended, lost ones included', () => {
+    // running has one of ten trials scored, with a high score for few
+    // tokens. lossy lost one of its three to infrastructure and is done.
+    const running = suite('running', 'core', 1, 10, 1);
+    const lossy = suite('lossy', 'core', 0.4, 200, 2);
+    const standings = suiteStandings([
+      suite('done', 'core', 0.6, 300, 1),
+      {
+        ...running,
+        trials: [
+          ...running.trials,
+          ...Array.from({ length: 9 }, (_, index) => ({
+            task: `waiting-${index}`,
+            runId: `running-waiting-${index}`,
+            scores: [],
+          })),
+        ],
+      },
+      {
+        ...lossy,
+        infrastructure: 1,
+        trials: [
+          ...lossy.trials,
+          { task: 'lost', runId: 'lossy-lost', scores: [] },
+        ],
+      },
+    ]);
+
+    expect(marks(standings)).toEqual({
+      done: { pareto: true, recommended: true },
+      lossy: { pareto: true, recommended: false },
     });
   });
 
@@ -101,6 +178,18 @@ describe('suiteStandings', () => {
       suite('scored', 'core', 0.5, 300, 1),
       suite('waiting', 'core', null, 0, 0),
       suite('alone', 'docs', 0.9, 100, 1),
+    ]);
+
+    expect(standings.size).toBe(0);
+  });
+
+  it('compares no suite whose trials have no score, whatever its mean says', () => {
+    // unjudged has a scored trial but no mean; empty a mean but no scored
+    // trial, which would divide its tokens by none.
+    const standings = suiteStandings([
+      suite('scored', 'core', 0.5, 300, 1),
+      suite('unjudged', 'core', null, 300, 1),
+      suite('empty', 'core', 0.5, 0, 0),
     ]);
 
     expect(standings.size).toBe(0);
