@@ -37,33 +37,56 @@ pub(crate) fn retriable(outcome: RunOutcome) -> bool {
     )
 }
 
-/// Where a retry of a Run that took `steps` in `flow` starts: the entry of
-/// its latest Step, and the place of that visit's first Step (a review
-/// panel's first reviewer, or the Step an agent's question went on from),
-/// so that visit runs again whole. The visit is the run of Steps right
-/// before the latest, at consecutive places, of the same entry and visit
-/// number: a visit number alone does not name a visit, since a reset
-/// counts an entry's visits from 1 again. The Steps before it are kept. A
-/// Run that took no Step starts again at the Flow's first entry, keeping
-/// nothing. None when its latest Step's entry is not in the Flow.
-pub(crate) fn retry_start(flow: &Flow, steps: &[Step]) -> Option<(EntryId, u16)> {
-    let mut taken: Vec<&Step> = steps.iter().collect();
-    taken.sort_by_key(|step| step.seq);
-    let Some(latest) = taken.last() else {
-        return flow.entries.first().map(|entry| (entry.id.clone(), 1));
+/// Where a retry of a Run starts, as [`retry_start`] reads its Steps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RetryStart {
+    /// At this entry, with its first Step at this place.
+    At(EntryId, u16),
+    /// Where the Run itself started: it is a retry that took no Step of its
+    /// own, so its latest Steps are the ones it kept, and a retry of it
+    /// starts again where it did.
+    AsItStarted,
+    /// Nowhere: its latest Step's entry is not in its Flow.
+    Unknown,
+}
+
+/// Where a retry of a Run that took `steps` in `flow` starts. A Run that
+/// is itself a retry took its own Steps from `first_seq` on; the ones
+/// before are kept, and are another Run's.
+///
+/// It starts at the entry of the Run's latest Step, at the place of that
+/// visit's first Step (a review panel's first reviewer, or the Step an
+/// agent's question went on from), so that visit runs again whole. The
+/// visit is the run of the Run's own Steps right before the latest, at
+/// consecutive places, of the same entry and visit number: a visit number
+/// alone does not name a visit, since a reset counts an entry's visits
+/// from 1 again, and so does each retry. The Steps before it are kept. A
+/// Run that took no Step starts again at its Flow's first entry, keeping
+/// nothing; a retry that took none starts where it started.
+pub(crate) fn retry_start(flow: &Flow, steps: &[Step], first_seq: u16) -> RetryStart {
+    let mut own: Vec<&Step> = steps.iter().filter(|step| step.seq >= first_seq).collect();
+    own.sort_by_key(|step| step.seq);
+    let Some(latest) = own.last() else {
+        if first_seq > 1 {
+            return RetryStart::AsItStarted;
+        }
+        return match flow.entries.first() {
+            Some(entry) => RetryStart::At(entry.id.clone(), 1),
+            None => RetryStart::Unknown,
+        };
     };
     if !flow.entries.iter().any(|entry| entry.id == latest.entry) {
-        return None;
+        return RetryStart::Unknown;
     }
-    let mut first_seq = latest.seq;
-    for step in taken.iter().rev().skip(1) {
+    let mut start = latest.seq;
+    for step in own.iter().rev().skip(1) {
         let same_visit = step.entry == latest.entry && step.visit == latest.visit;
-        if !same_visit || step.seq.checked_add(1) != Some(first_seq) {
+        if !same_visit || step.seq.checked_add(1) != Some(start) {
             break;
         }
-        first_seq = step.seq;
+        start = step.seq;
     }
-    Some((latest.entry.clone(), first_seq))
+    RetryStart::At(latest.entry.clone(), start)
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
@@ -123,8 +146,29 @@ where
             .filter(|kept| kept.definition.is_some())
             .and_then(|kept| walked_flow(id, kept))
             .ok_or(FactoryError::NotRetriable)?;
-        let steps = self.repo.list_steps(id).await.map_err(internal)?;
-        let (entry, first_seq) = retry_start(&flow, &steps).ok_or(FactoryError::NotRetriable)?;
+        // A retry that took no Step of its own starts again where it did,
+        // which is where a retry of the Run it retried starts.
+        let mut source = run.clone();
+        let (entry, first_seq) = loop {
+            let steps = self.repo.list_steps(source.id).await.map_err(internal)?;
+            let own_from = source.retry.map_or(1, |retry| retry.first_seq);
+            match retry_start(&flow, &steps, own_from) {
+                RetryStart::At(entry, first_seq) => break (entry, first_seq),
+                RetryStart::Unknown => return Err(FactoryError::NotRetriable),
+                RetryStart::AsItStarted => {
+                    let retried = source
+                        .retry
+                        .map(|retry| retry.retried_from)
+                        .ok_or(FactoryError::NotRetriable)?;
+                    source = self
+                        .repo
+                        .get_run(retried)
+                        .await
+                        .map_err(internal)?
+                        .ok_or(FactoryError::NotRetriable)?;
+                }
+            }
+        };
         // A retry's Steps take places past the ones it keeps: a chain of
         // retries ends once the places run out.
         if first_seq.checked_add(MAX_STEPS).is_none() {
@@ -188,7 +232,11 @@ where
             run_id: retry_id,
             flow,
             token_budget: budget_of(&retried).is_some(),
-            start_at: Some(StartAt { entry, first_seq }),
+            start_at: Some(StartAt {
+                entry,
+                first_seq,
+                branch_of: retried.branch_of(),
+            }),
         };
         if let Err(error) = self.workflows.start(&start).await {
             self.forget_unstarted(retry_id).await;

@@ -238,6 +238,47 @@ async fn infrastructure_and_flawed_runs_count_apart_from_failed_and_success() {
     assert_eq!(insights.flows[0].counts, kinds);
 }
 
+/// A Run a retry took over is counted by how it ended, and as retried, so
+/// a failure and its retry's success read as one attempt that failed, then
+/// went on, not as a failure left standing.
+#[tokio::test]
+async fn a_run_a_retry_took_over_counts_as_retried() {
+    let records = InsightsRecords {
+        runs: vec![
+            summary(
+                2,
+                Some("code"),
+                "2026-11-11T11:00:00Z",
+                Some((RunOutcome::Success, "2026-11-11T12:00:00Z")),
+            ),
+            summary(
+                1,
+                Some("code"),
+                "2026-11-11T09:00:00Z",
+                Some((RunOutcome::Infrastructure, "2026-11-11T09:30:00Z")),
+            ),
+        ],
+        retried: vec![run_id(1)],
+        ..InsightsRecords::default()
+    };
+    let service = service(records, Vec::new());
+
+    let insights = service
+        .insights(&julia(), query("2026-11-11", "2026-11-11", "UTC"))
+        .await
+        .expect("insights");
+
+    let counts = OutcomeCounts {
+        success: 1,
+        infrastructure: 1,
+        retried: 1,
+        ..OutcomeCounts::default()
+    };
+    assert_eq!(insights.totals, counts);
+    assert_eq!(insights.days[0].counts, counts);
+    assert_eq!(insights.flows[0].counts, counts);
+}
+
 #[tokio::test]
 async fn entries_follow_their_flows_order_with_their_outcomes_and_troubled_runs() {
     let records = InsightsRecords {
@@ -296,6 +337,7 @@ async fn entries_follow_their_flows_order_with_their_outcomes_and_troubled_runs(
         }],
         sessions: Vec::new(),
         capped: false,
+        retried: Vec::new(),
     };
     let service = service(records, Vec::new());
 

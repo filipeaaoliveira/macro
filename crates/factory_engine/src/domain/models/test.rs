@@ -119,6 +119,7 @@ fn a_worker_from_before_retries_cannot_read_a_retry_s_start() {
             entry: factory_records::domain::models::EntryId::try_from("reply".to_string())
                 .expect("valid"),
             first_seq: 3,
+            branch_of: factory_records::domain::models::RunId::generate(),
         }),
         ..plain.clone()
     };
@@ -135,6 +136,37 @@ fn a_worker_from_before_retries_cannot_read_a_retry_s_start() {
     );
     assert_eq!(
         serde_json::from_value::<super::RunStart>(retry_json).expect("reads"),
+        retry
+    );
+}
+
+/// A retry's Step request names the Run whose branch it works on, which a
+/// worker from before retries refuses; any other Step's request reads as
+/// before, with no such field.
+#[test]
+fn a_retry_s_step_request_names_its_branch() {
+    let flow = crate::domain::flow::Flow::parse(
+        serde_json::json!({ "entries": [{ "id": "write", "step": "write", "role": "writer" }] }),
+        |_| Some(crate::domain::flow::StepUse::Agent),
+    )
+    .expect("a flow");
+    let key = factory_records::domain::models::StepKey {
+        run_id: factory_records::domain::models::RunId::generate(),
+        seq: 3,
+    };
+    let plain = super::StepRequest::of(key, &flow.entries[0], 1);
+    let retry = super::StepRequest {
+        branch_of: Some(factory_records::domain::models::RunId::generate()),
+        ..plain.clone()
+    };
+
+    let plain_json = serde_json::to_value(&plain).expect("serializes");
+    let retry_json = serde_json::to_value(&retry).expect("serializes");
+
+    assert!(plain_json.get("branch_of").is_none());
+    assert!(retry_json.get("branch_of").is_some());
+    assert_eq!(
+        serde_json::from_value::<super::StepRequest>(retry_json).expect("reads"),
         retry
     );
 }

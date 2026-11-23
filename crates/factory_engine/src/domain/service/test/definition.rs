@@ -459,6 +459,7 @@ async fn a_run_on_the_definition_repository_guards_its_files() {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        branch_of: None,
     };
     worker.run_step(publish).await.expect("published");
     let kept = repo

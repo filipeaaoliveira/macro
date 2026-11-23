@@ -282,6 +282,8 @@ impl FlowWorkflow {
         // A Flow that cannot go on still records the Run's end, then fails
         // the workflow with why, for Temporal to show.
         let mut stopped = unstartable;
+        // A retry's Steps carry the Run whose branch they work on.
+        let branch_of = start.start_at.as_ref().map(|at| at.branch_of);
         // The Steps whose agents may still hold what their work used: from
         // a Step's work's start until its agent is stopped or let go, and
         // the Steps it goes on from, whose session it works in.
@@ -332,7 +334,11 @@ impl FlowWorkflow {
                     run_id: start.run_id,
                     seq,
                 };
-                let request = questions.offer(StepRequest::of(key, entry, visit), 0);
+                let request = StepRequest {
+                    branch_of,
+                    ..StepRequest::of(key, entry, visit)
+                };
+                let request = questions.offer(request, 0);
                 walk_step(&temporal, entry, request, questions, &mut held, &mut resume).await?
             } else {
                 let panel = Panel {
@@ -341,6 +347,7 @@ impl FlowWorkflow {
                     visit,
                     seq,
                     questions,
+                    branch_of,
                 };
                 review_round(&temporal, &panel, &mut held, &mut resume).await?
             };

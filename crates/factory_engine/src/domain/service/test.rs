@@ -292,6 +292,7 @@ fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        branch_of: None,
     }
 }
 

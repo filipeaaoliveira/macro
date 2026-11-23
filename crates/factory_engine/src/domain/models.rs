@@ -81,6 +81,9 @@ pub struct StartAt {
     /// The place its first Step takes; the places before it hold the Steps
     /// it kept.
     pub first_seq: u16,
+    /// The Run whose branch its Steps work on, which each Step's request
+    /// carries ([`StepRequest::branch_of`]).
+    pub branch_of: RunId,
 }
 
 /// One Step for a worker to run. A field it does not know is refused, so a
@@ -120,6 +123,12 @@ pub struct StepRequest {
     /// answer. None for a Step that starts its work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumes: Option<u16>,
+    /// For a Step of a retry, the Run whose branch it works on. A worker
+    /// from before retries refuses the field, so it never runs a retry's
+    /// Step on a branch of the retry's own; a newer one takes it. None,
+    /// and left out, for any other Run's Step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_of: Option<RunId>,
 }
 
 impl StepRequest {
@@ -136,6 +145,7 @@ impl StepRequest {
             may_ask: false,
             questions_left: 0,
             resumes: None,
+            branch_of: None,
         }
     }
 
@@ -153,6 +163,7 @@ impl StepRequest {
             may_ask: false,
             questions_left: 0,
             resumes: None,
+            branch_of: None,
         }
     }
 

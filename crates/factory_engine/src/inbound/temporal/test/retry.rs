@@ -24,7 +24,7 @@ use crate::domain::models::{RunStart, StartAt, run_branch};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundsImpl};
 use crate::domain::service::StepServiceImpl;
-use crate::domain::service::retry::retry_start;
+use crate::domain::service::retry::{RetryStart, retry_start};
 use crate::inbound::temporal::{WorkerServices, worker_on};
 use crate::temporal::FlowWorkflowDefinition;
 
@@ -157,7 +157,9 @@ async fn a_run_stopped_by_a_lost_session_is_retried_and_merges_without_planning_
 
         // Its retry starts where it stopped, as the Run API starts one.
         let taken = repo.list_steps(run.id).await.expect("read");
-        let (entry, first_seq) = retry_start(&flow, &taken).expect("a start");
+        let RetryStart::At(entry, first_seq) = retry_start(&flow, &taken, 1) else {
+            panic!("a start");
+        };
         let RetryInsert::Inserted(retry) = repo
             .retry_run(
                 NewRetry {
@@ -181,7 +183,11 @@ async fn a_run_stopped_by_a_lost_session_is_retried_and_merges_without_planning_
                 run_id: retry.id,
                 flow: flow.clone(),
                 token_budget: false,
-                start_at: Some(StartAt { entry, first_seq }),
+                start_at: Some(StartAt {
+                    entry,
+                    first_seq,
+                    branch_of: run.id,
+                }),
             },
             |run| async move {
                 let merge_question = run.next_gate().await;

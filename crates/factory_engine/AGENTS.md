@@ -261,10 +261,12 @@ Flow): a new Run of the same task, request, Flow (the one the Run kept),
 Factory Definition commit, rules and Agents, whose `retry` names the Run it
 retries (`retriedFrom`), the Run whose branch it works on (`branchOf`, the
 first of a chain of retries) and the place of its own first Step
-(`firstSeq`). It starts at the entry of the Run's latest Step, at the first
-Step of that visit (`retry_start`: the Steps right before it at
-consecutive places with the same entry and visit number, since a reset
-counts visits from 1 again), so a review panel's round or a Step an
+(`firstSeq`). It starts at the entry of the Run's latest own Step, at the
+first Step of that visit (`retry_start`: the Run's own Steps right before
+it at consecutive places with the same entry and visit number, since a
+reset, and each retry, counts visits from 1 again; never below a retry's
+`firstSeq`). A retry that took no Step of its own is retried where it
+started, so a review panel's round or a Step an
 agent's question went on from runs again whole; the
 Steps before it that ended are kept as the retry's own, at their places,
 with their answered Gates, sessions and the review rounds that ended
@@ -285,10 +287,15 @@ an account that is not an agent's. The kept Steps' sessions count against
 its token budget, so a Run its budget stopped stops again; Insights, the
 quality view and the arm and Agent Rule tallies count kept Steps, Gates,
 sessions and review rounds once, on the Run that made them, and a Run and
-its retries as one attempt of their arm (the newest). A retry's start
-writes its Flow as `retry_flow` (`RunStart`'s `Serialize`), which a worker
-from before retries cannot read: its workflow task fails until a newer
-worker takes it, rather than walk the retry from its first entry.
+its retries as one attempt of their arm (the newest among the Runs
+read). Insights counts a Run a retry took over by how it ended and as
+`retried` (`OutcomeCounts::retried`). A retry's start writes its Flow as
+`retry_flow` (`RunStart`'s `Serialize`), which a worker from before
+retries cannot read: its workflow task fails until a newer worker takes
+it, rather than walk the retry from its first entry. Each of a retry's
+Step requests carries `branch_of`, which such a worker's activities
+refuse (`StepRequest` denies unknown fields), so none works on a branch of
+the retry's own. Deploy every worker before the API all the same.
 
 Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
 `deny_unknown_fields`, and an agent Step reads its Run's kept Agents

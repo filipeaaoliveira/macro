@@ -2387,6 +2387,14 @@ where
         if let Some(end) = run.end {
             return Ok(StepStart::RunEnded(end.outcome));
         }
+        // A retry's Steps say which branch they work on, so a worker that
+        // cannot read that never takes one; a request that names another
+        // branch than the Run's is not the Run's workflow's.
+        if request.branch_of != run.retry.map(|retry| retry.branch_of) {
+            return Err(StepError::Final(rootcause::report!(
+                "the step's branch is not its run's"
+            )));
+        }
         self.repo
             .start_step(request.key, &request.entry, request.visit)
             .await
