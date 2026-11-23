@@ -47,6 +47,22 @@ describe('factoryClient routes', () => {
     expect(lastCall().url).toBe('https://factory.example.com/runs/run-1');
   });
 
+  it('reads a Run’s scores and labels one by its Scorer', async () => {
+    await factoryClient.getRunScores('run 1');
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/runs/run%201/scores',
+      method: 'GET',
+      body: undefined,
+    });
+
+    await factoryClient.labelRunScore('run-1', 'clear docs', false);
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/runs/run-1/scores/clear%20docs/label',
+      method: 'PUT',
+      body: { passed: false },
+    });
+  });
+
   it('starts a Run from a Flow’s name on a task', async () => {
     await factoryClient.startRun({
       flow: 'plan',

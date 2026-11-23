@@ -15,6 +15,7 @@ import {
   type RunsContext,
   RunsProvider,
 } from './context/runs-context';
+import type { RunScore } from './core/evaluation';
 import type { Run, RunStep } from './core/run';
 import { RunView } from './run-view';
 
@@ -76,6 +77,8 @@ function mount(options: {
   replyToGate?: RunsContext['replyToGate'];
   cancelRun?: RunsContext['cancelRun'];
   markRunFlawed?: RunsContext['markRunFlawed'];
+  scores?: RunScore[];
+  labelRunScore?: RunsContext['labelRunScore'];
   state?: Accessor<'pending' | 'error' | 'ready'>;
   retry?: () => void;
   viewerId?: string;
@@ -110,6 +113,12 @@ function mount(options: {
     replyToGate: options.replyToGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
     markRunFlawed: options.markRunFlawed ?? vi.fn(async () => DONE),
+    runScores: () => ({
+      state: () => 'ready',
+      data: () => options.scores ?? [],
+      retry: vi.fn(),
+    }),
+    labelRunScore: options.labelRunScore ?? vi.fn(async () => DONE),
     steerStep: vi.fn(async () => DONE),
   };
   render(() => (
@@ -1540,6 +1549,159 @@ describe('RunView', () => {
     expect(screen.getByText('Yes, in red')).toBeTruthy();
     expect(screen.queryByText('The Planner has a question')).toBeNull();
   });
+  it('shows an ended run’s scores to its owner, and labels one', async () => {
+    const labelRunScore = vi.fn(async () => DONE);
+    const scores: RunScore[] = [
+      {
+        scorer: 'clear',
+        score: 0.3,
+        passed: false,
+        reason: 'The plan skips the migration.',
+        model: 'judge-small',
+        judgedAt: '2026-11-16T09:20:00Z',
+        byCurrentJudge: true,
+        calibration: {
+          labelled: 2,
+          agreed: 1,
+          agreement: 0.5,
+          needed: 20,
+          threshold: 0.8,
+          calibrated: false,
+        },
+        label: { passed: true, labelledAt: '2026-11-16T09:30:00Z' },
+      },
+      {
+        scorer: 'correct',
+        score: 0.9,
+        passed: true,
+        reason: 'It does what was asked.',
+        model: 'judge-small',
+        judgedAt: '2026-11-16T09:20:00Z',
+        byCurrentJudge: false,
+        calibration: {
+          labelled: 20,
+          agreed: 19,
+          agreement: 0.95,
+          needed: 20,
+          threshold: 0.8,
+          calibrated: true,
+        },
+        label: null,
+      },
+    ];
+    const { setRun } = mount({ scores, labelRunScore });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+    });
+
+    const list = await screen.findByRole('list', { name: 'Scores' });
+    const [clear, correct] = within(list).getAllByRole('listitem');
+    if (!clear || !correct) throw new Error('No scores');
+    expect(within(clear).getByText('0.30')).toBeTruthy();
+    expect(within(clear).getByText('Not calibrated')).toBeTruthy();
+    expect(clear.textContent).toContain('label 18 more of its judgments');
+    expect(clear.textContent).toContain('You disagree with the judge.');
+    const pass = within(clear).getByRole('button', { name: 'Should pass' });
+    expect(pass.getAttribute('aria-pressed')).toBe('true');
+    // The label it has already is not sent again.
+    fireEvent.click(pass);
+    expect(labelRunScore).not.toHaveBeenCalled();
+
+    expect(within(correct).getByText('Calibrated')).toBeTruthy();
+    expect(correct.textContent).toContain(
+      'An earlier version of this scorer judged it'
+    );
+    expect(correct.textContent).not.toContain('You disagree');
+    fireEvent.click(
+      within(correct).getByRole('button', { name: 'Should fail' })
+    );
+    await waitFor(() =>
+      expect(labelRunScore).toHaveBeenCalledWith({
+        runId: 'run-1',
+        scorer: 'correct',
+        passed: false,
+      })
+    );
+  });
+
+  it('says when a label couldn’t be saved', async () => {
+    const labelRunScore = vi.fn(
+      async (): Promise<RunActionResult> => ({ ok: false, reason: 'failed' })
+    );
+    const { setRun } = mount({
+      scores: [
+        {
+          scorer: 'clear',
+          score: 0.3,
+          passed: false,
+          reason: 'Vague.',
+          model: 'judge-small',
+          judgedAt: '2026-11-16T09:20:00Z',
+          byCurrentJudge: true,
+          calibration: {
+            labelled: 0,
+            agreed: 0,
+            agreement: null,
+            needed: 20,
+            threshold: 0.8,
+            calibrated: false,
+          },
+          label: null,
+        },
+      ],
+      labelRunScore,
+    });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Should pass' }));
+    await waitFor(() =>
+      expect(toast.failure).toHaveBeenCalledWith('Your label couldn’t be saved')
+    );
+  });
+
+  it('shows no scores on a run someone else owns, nor on one still going', async () => {
+    const scores: RunScore[] = [
+      {
+        scorer: 'clear',
+        score: 0.3,
+        passed: false,
+        reason: 'Vague.',
+        model: 'judge-small',
+        judgedAt: '2026-11-16T09:20:00Z',
+        byCurrentJudge: true,
+        calibration: {
+          labelled: 0,
+          agreed: 0,
+          agreement: null,
+          needed: 20,
+          threshold: 0.8,
+          calibrated: false,
+        },
+        label: null,
+      },
+    ];
+    mount({ scores });
+    expect(
+      await screen.findAllByText(/Add a due date column/)
+    ).not.toHaveLength(0);
+    expect(screen.queryByRole('list', { name: 'Scores' })).toBeNull();
+    cleanup();
+
+    const { setRun } = mount({ scores, viewerId: 'macro|someone@example.com' });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+    });
+    expect(
+      await screen.findAllByText(/Add a due date column/)
+    ).not.toHaveLength(0);
+    expect(screen.queryByRole('list', { name: 'Scores' })).toBeNull();
+  });
+
   it('marks a run that ended done flawed, with what is wrong', async () => {
     const markRunFlawed = vi.fn(async () => DONE);
     const { setRun } = mount({ markRunFlawed });

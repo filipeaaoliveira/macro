@@ -463,6 +463,8 @@ function createFixtureRuns(): RunsContext {
     replyToGate: async () => ({ ok: false, reason: 'failed' }),
     cancelRun: async () => ({ ok: false, reason: 'failed' }),
     markRunFlawed: async () => ({ ok: false, reason: 'failed' }),
+    runScores: () => ready(() => []),
+    labelRunScore: async () => ({ ok: false, reason: 'failed' }),
     steerStep: async () => ({ ok: false, reason: 'failed' }),
   };
 }

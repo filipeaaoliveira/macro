@@ -67,6 +67,8 @@ function mount(viewerId: Accessor<string | undefined>) {
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
     markRunFlawed: vi.fn(),
+    runScores: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    labelRunScore: vi.fn(),
     steerStep: vi.fn(),
   };
   render(() => (

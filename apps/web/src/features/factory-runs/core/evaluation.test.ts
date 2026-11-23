@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { type SuiteInsight, suiteStandings } from './evaluation';
+import {
+  calibrationReading,
+  labelDisagrees,
+  type RunScore,
+  type ScorerCalibration,
+  type SuiteInsight,
+  suiteStandings,
+  uncalibratedScorers,
+} from './evaluation';
 
 /**
  * A finished suite of `scored` trials, all scored, unless `changes` says
@@ -200,5 +208,87 @@ describe('suiteStandings', () => {
     ]);
 
     expect(standings.size).toBe(0);
+  });
+});
+
+const calibration = (
+  changes: Partial<ScorerCalibration> = {}
+): ScorerCalibration => ({
+  labelled: 0,
+  agreed: 0,
+  agreement: null,
+  needed: 20,
+  threshold: 0.8,
+  calibrated: false,
+  ...changes,
+});
+
+describe('calibrationReading', () => {
+  it('counts the labels an unlabelled scorer still needs', () => {
+    expect(calibrationReading(calibration())).toEqual({
+      kind: 'needsLabels',
+      remaining: 20,
+    });
+    expect(
+      calibrationReading(
+        calibration({ labelled: 15, agreed: 15, agreement: 1 })
+      )
+    ).toEqual({ kind: 'needsLabels', remaining: 5 });
+  });
+
+  it('says a scorer with its labels agrees too little until the service calibrates it', () => {
+    expect(
+      calibrationReading(
+        calibration({ labelled: 20, agreed: 14, agreement: 0.7 })
+      )
+    ).toEqual({ kind: 'disagrees', agreement: 0.7, threshold: 0.8 });
+  });
+
+  it('reads a calibrated scorer with its agreement', () => {
+    expect(
+      calibrationReading(
+        calibration({
+          labelled: 20,
+          agreed: 18,
+          agreement: 0.9,
+          calibrated: true,
+        })
+      )
+    ).toEqual({ kind: 'calibrated', agreement: 0.9 });
+  });
+});
+
+describe('labelDisagrees', () => {
+  const score = (passed: boolean, label?: boolean): RunScore => ({
+    scorer: 'clear',
+    score: passed ? 0.8 : 0.2,
+    passed,
+    reason: '',
+    model: 'judge-small',
+    judgedAt: '2026-11-16T10:00:00Z',
+    byCurrentJudge: true,
+    calibration: calibration(),
+    label:
+      label === undefined
+        ? null
+        : { passed: label, labelledAt: '2026-11-17T10:00:00Z' },
+  });
+
+  it('tells a label against the judge from one with it, and none from an unlabelled judgment', () => {
+    expect(labelDisagrees(score(true, false))).toBe(true);
+    expect(labelDisagrees(score(false, true))).toBe(true);
+    expect(labelDisagrees(score(true, true))).toBe(false);
+    expect(labelDisagrees(score(false))).toBeUndefined();
+  });
+});
+
+describe('uncalibratedScorers', () => {
+  it('names the scorers not calibrated yet', () => {
+    expect(
+      uncalibratedScorers([
+        { name: 'clear', calibration: calibration() },
+        { name: 'correct', calibration: calibration({ calibrated: true }) },
+      ])
+    ).toEqual(new Set(['clear']));
   });
 });

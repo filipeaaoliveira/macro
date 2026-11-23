@@ -3,6 +3,7 @@ import type { RunDetail } from '@service-factory/generated/schemas';
 import { QueryClient, QueryObserver } from '@tanstack/solid-query';
 import { err, ok } from 'neverthrow';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { RunScore } from '../core/evaluation';
 import type { Run } from '../core/run';
 import { factoryRunKeys } from './keys';
 import {
@@ -24,6 +25,7 @@ vi.mock('@service-factory/client', () => ({
     cancelRun: vi.fn(),
     flawRun: vi.fn(),
     steerStep: vi.fn(),
+    labelRunScore: vi.fn(),
   },
 }));
 
@@ -479,6 +481,55 @@ describe('createAppRunsContext', () => {
     ).toEqual({ ok: false, reason: 'conflict' });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: factoryRunKeys.run('run-2').queryKey,
+    });
+  });
+
+  it('keeps a Scorer label it gave, and reads the calibration again', async () => {
+    const client = new QueryClient();
+    const calibration = {
+      agreed: 0,
+      agreement: null,
+      calibrated: false,
+      labelled: 0,
+      needed: 5,
+      threshold: 0.8,
+    };
+    const score = (scorer: string): RunScore => ({
+      scorer,
+      score: 0.4,
+      passed: false,
+      reason: 'Too vague',
+      model: 'judge-small',
+      judgedAt: '2026-11-16T10:00:00Z',
+      byCurrentJudge: true,
+      calibration,
+      label: null,
+    });
+    const key = factoryRunKeys.runScores('run-2').queryKey;
+    client.setQueryData(key, [score('clear'), score('correct')]);
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const label = { passed: true, labelledAt: '2026-11-17T10:00:00Z' };
+    vi.mocked(factoryClient.labelRunScore).mockResolvedValue(ok(label));
+
+    expect(
+      await createAppRunsContext(client).labelRunScore({
+        runId: 'run-2',
+        scorer: 'clear',
+        passed: true,
+      })
+    ).toEqual({ ok: true, value: undefined });
+
+    expect(factoryClient.labelRunScore).toHaveBeenCalledWith(
+      'run-2',
+      'clear',
+      true
+    );
+    expect(
+      client.getQueryData<RunScore[]>(key)?.map((read) => read.label)
+    ).toEqual([label, null]);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: key });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: factoryRunKeys.evaluation._def,
     });
   });
 

@@ -169,6 +169,19 @@ export default {
   ruleFixBlockers: 'Fix review blockers',
   ruleMergeWhenGreen: 'Merge when CI is green',
   ruleRerunFlakyCi: 'Rerun flaky CI once',
+  // The Scorers' judgments of an ended Run, and its owner's labels.
+  scores: 'Scores',
+  scoresLoadFailed: 'Scores couldn’t be loaded',
+  scorePassed: 'Passed',
+  scoreFailed: 'Failed',
+  labelScore: 'Your label for {{scorer}}',
+  labelScoreQuestion: 'Should it have passed?',
+  labelShouldPass: 'Should pass',
+  labelShouldFail: 'Should fail',
+  labelScoreFailed: 'Your label couldn’t be saved',
+  labelDisagrees: 'You disagree with the judge.',
+  scoreByEarlierJudge:
+    'An earlier version of this scorer judged it, so your label doesn’t count toward its calibration.',
   // An agent's question to the Run's owner.
   questionTitle: 'The {{role}} has a question',
   questionWaiting:

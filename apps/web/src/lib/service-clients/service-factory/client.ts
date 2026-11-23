@@ -18,9 +18,11 @@ import {
   getGetFactoryEvaluationUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryQualityUrl,
+  getGetFactoryRunScoresUrl,
   getGetFactoryRunUrl,
   getGetFactorySessionStepUrl,
   getGetFactoryStandingRulesUrl,
+  getLabelFactoryRunScoreUrl,
   getListFactoryAutomationsUrl,
   getListFactoryBoardUrl,
   getListFactoryFlowsUrl,
@@ -63,6 +65,8 @@ import type {
   RunDetail,
   RunErrorCode,
   RunInsights,
+  RunScores,
+  ScorerLabel,
   SessionStepRef,
   StandingRulesSettings,
   TaskRunsResponse,
@@ -195,6 +199,33 @@ export const factoryClient = {
     return fetchWithToken<RunDetail>(
       `${host()}${getGetFactoryRunUrl(encodeURIComponent(runId))}`,
       { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * The live Scorers' judgments of one of the caller's Runs, each with
+   * their label of it and how far the Scorer's judge agrees with their
+   * labels. Only the Run's owner reads them (`NOT_FOUND` otherwise).
+   */
+  getRunScores(runId: string, signal?: AbortSignal) {
+    return fetchWithToken<RunScores>(
+      `${host()}${getGetFactoryRunScoresUrl(encodeURIComponent(runId))}`,
+      { method: 'GET', signal }
+    ).then((result) => result.map((data) => data.scores));
+  },
+
+  /**
+   * Labels a Scorer's judgment of one of the caller's Runs with whether the
+   * Run should have passed on its dimension, replacing the label it had.
+   * Only the Run's owner, signed in, may (`FORBIDDEN`).
+   */
+  labelRunScore(runId: string, scorer: string, passed: boolean) {
+    return fetchWithToken<ScorerLabel>(
+      `${host()}${getLabelFactoryRunScoreUrl(
+        encodeURIComponent(runId),
+        encodeURIComponent(scorer)
+      )}`,
+      { method: 'PUT', body: JSON.stringify({ passed }) }
     );
   },
 

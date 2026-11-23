@@ -12,6 +12,26 @@ export default {
   judged: 'Judged',
   meanScore: 'Mean score',
   passed: 'Passed',
+  agreement: 'Agrees with you',
+  labelled: {
+    one: '{{count}} label',
+    other: '{{count}} labels',
+  },
+  calibrated: 'Calibrated',
+  uncalibrated: 'Not calibrated',
+  uncalibratedMark: '(not calibrated)',
+  calibratedLine: {
+    one: 'Its judge agrees with {{agreement}} of your {{count}} label, so its results can be trusted.',
+    other:
+      'Its judge agrees with {{agreement}} of your {{count}} labels, so its results can be trusted.',
+  },
+  needsLabelsLine: {
+    one: 'Not calibrated yet: label {{count}} more of its judgments from a run’s view.',
+    other:
+      'Not calibrated yet: label {{count}} more of its judgments from a run’s view.',
+  },
+  disagreesLine:
+    'Not calibrated: its judge agrees with {{agreement}} of your labels, and needs {{threshold}}.',
   // Self-improvement.
   selfImprovement: 'Self-improvement',
   selfImprovementDescription:

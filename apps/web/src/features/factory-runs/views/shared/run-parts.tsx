@@ -5,6 +5,7 @@ import { Button } from '@ui';
 import { Show } from 'solid-js';
 import { CancelRun, RunSteps, RunSummary } from '../../components/run-details';
 import { RunFlawNote } from '../../components/run-flaw';
+import { RunScores } from '../../components/run-scores';
 import type { RunActionResult } from '../../context/runs-context';
 import type { Run } from '../../core/run';
 import type { RunController } from '../../primitives/run-controller';
@@ -59,6 +60,10 @@ export function RunContent(props: {
           />
           <Show when={props.run.end?.flaw}>
             {(flaw) => <RunFlawNote flaw={flaw()} time={props.time} />}
+          </Show>
+          {/* Only the Run's owner reads and labels its Scorers' judgments. */}
+          <Show when={props.controller.owned() && props.run.end}>
+            <RunScores runId={props.run.id} />
           </Show>
           <RunSteps
             steps={props.run.steps}

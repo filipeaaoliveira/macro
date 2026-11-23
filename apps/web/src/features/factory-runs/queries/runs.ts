@@ -21,6 +21,7 @@ import type {
   RunsSource,
   StartRunFailure,
 } from '../context/runs-context';
+import type { RunScore } from '../core/evaluation';
 import { type GateModelReading, type Run, runStatus } from '../core/run';
 import { factoryRunKeys } from './keys';
 
@@ -296,6 +297,15 @@ export function runOptions(runId: string) {
   });
 }
 
+/** How the live Scorers' judgments of one of the person's Runs are read. */
+export function runScoresOptions(runId: string) {
+  return queryOptions({
+    queryKey: factoryRunKeys.runScores(runId).queryKey,
+    queryFn: ({ signal }) =>
+      throwOnErr(() => factoryClient.getRunScores(runId, signal)),
+  });
+}
+
 export function flowsOptions() {
   return queryOptions({
     queryKey: factoryRunKeys.flows.queryKey,
@@ -381,6 +391,14 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
       toSource(useQuery(() => runOptions(runId()))),
 
     waitingRuns: () => toSource(useQuery(() => waitingRunsOptions(client))),
+
+    runScores: (runId: Accessor<string>, enabled: Accessor<boolean>) =>
+      toSource(
+        useQuery(() => ({
+          ...runScoresOptions(runId()),
+          enabled: enabled() && Boolean(runId()),
+        }))
+      ),
 
     flows: () => toSource(useQuery(() => flowsOptions())),
 
@@ -519,6 +537,32 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
         Promise.all([
           refreshRun(client, runId, taskOfRun(client, runId)),
           client.invalidateQueries({ queryKey: factoryRunKeys.insights._def }),
+        ]),
+        'factory-runs'
+      );
+      return { ok: true, value: undefined };
+    },
+
+    async labelRunScore({ runId, scorer, passed }) {
+      const result = await factoryClient.labelRunScore(runId, scorer, passed);
+      if (result.isErr()) return failure(result.error);
+      const label = result.value;
+      client.setQueryData<RunScore[]>(
+        factoryRunKeys.runScores(runId).queryKey,
+        (scores) =>
+          scores?.map((score) =>
+            score.scorer === scorer ? { ...score, label } : score
+          )
+      );
+      // The label moves the Scorer's calibration, here and in insights.
+      fireAndForget(
+        Promise.all([
+          client.invalidateQueries({
+            queryKey: factoryRunKeys.runScores(runId).queryKey,
+          }),
+          client.invalidateQueries({
+            queryKey: factoryRunKeys.evaluation._def,
+          }),
         ]),
         'factory-runs'
       );

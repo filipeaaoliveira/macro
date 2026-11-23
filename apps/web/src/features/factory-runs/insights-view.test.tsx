@@ -344,6 +344,8 @@ function mount(options: {
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
     markRunFlawed: vi.fn(),
+    runScores: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    labelRunScore: vi.fn(),
     steerStep: vi.fn(),
   };
   render(() => (
@@ -550,6 +552,56 @@ describe('RunInsightsView', () => {
 
     fireEvent.click(trial);
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('marks a scorer not calibrated, here and beside an arm’s scores, until its judge agrees with enough labels', () => {
+    mount({ insights: november, evaluation: judged });
+
+    const scorers = screen.getByRole('heading', { name: 'Scorers' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(scorers).getByText('Not calibrated')).toBeTruthy();
+    expect(within(scorers).getByText('0 labels')).toBeTruthy();
+    expect(scorers.textContent).toContain(
+      'Not calibrated yet: label 20 more of its judgments from a run’s view.'
+    );
+    const backup = screen.getByRole('rowheader', { name: /backup/ });
+    expect(backup.parentElement?.textContent).toContain(
+      'correctness 0.90 (not calibrated)'
+    );
+  });
+
+  it('marks a calibrated scorer, with how far its judge agrees', () => {
+    const scorer = judged.scorers[0];
+    if (!scorer) throw new Error('No scorer');
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        scorers: [
+          {
+            ...scorer,
+            calibration: {
+              labelled: 20,
+              agreed: 18,
+              agreement: 0.9,
+              needed: 20,
+              threshold: 0.8,
+              calibrated: true,
+            },
+          },
+        ],
+      },
+    });
+
+    const scorers = screen.getByRole('heading', { name: 'Scorers' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(scorers).getByText('Calibrated')).toBeTruthy();
+    expect(within(scorers).getByText('90%')).toBeTruthy();
+    expect(scorers.textContent).toContain(
+      'Its judge agrees with 90% of your 20 labels'
+    );
+    const backup = screen.getByRole('rowheader', { name: /backup/ });
+    expect(backup.parentElement?.textContent).not.toContain('not calibrated');
   });
 
   it('shows each agent rule beside the runs it chose an agent for', () => {
