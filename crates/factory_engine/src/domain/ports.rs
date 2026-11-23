@@ -35,9 +35,9 @@ use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
     BranchUpdating, CodeRepository, CommitMade, ControlFilesSettings, DefinitionPullRequest,
     DefinitionSettings, FactoryError, FinishedJob, FlowSummary, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestComment, RepositoryAccess, RequiredChecks,
-    RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
-    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestText, RepositoryAccess,
+    RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
+    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -432,14 +432,14 @@ pub trait PullRequests: Send + Sync + 'static {
         pull_request: &OpenPullRequest,
     ) -> impl Future<Output = Result<Opening, Self::Err>> + Send;
 
-    /// The description of pull request `number` of `repository`; none
-    /// when it has none.
-    fn pull_request_body(
+    /// The description of pull request `number` of `repository`, and who
+    /// opened it.
+    fn pull_request_text(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         number: u64,
-    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<PullRequestText, Self::Err>> + Send;
 
     /// Replace the description of pull request `number` of `repository`
     /// with `body`.
@@ -452,7 +452,8 @@ pub trait PullRequests: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The comments in the conversation of pull request `number` of
-    /// `repository`, oldest first.
+    /// `repository`, oldest first: all of them, or an error when there are
+    /// more than are read.
     fn pull_request_comments(
         &self,
         owner: &MacroUserIdStr<'static>,

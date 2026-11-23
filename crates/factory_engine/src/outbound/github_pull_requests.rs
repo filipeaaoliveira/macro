@@ -19,8 +19,8 @@ use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState, RepositoryAccess,
-    RequiredCheck, RequiredChecks, run_branch,
+    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState, PullRequestText,
+    RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -50,6 +50,9 @@ pub enum GithubPullRequestsErr {
     /// GitHub did not answer, or refused.
     #[error("github failed: {0}")]
     Github(#[from] GithubError),
+    /// A pull request has more comments than are read.
+    #[error("the pull request has more comments than are read")]
+    TooManyComments,
 }
 
 /// An outage passes: GitHub throttling or failing, a request that got no
@@ -61,7 +64,7 @@ impl Retryable for GithubPullRequestsErr {
     fn retryable(&self) -> bool {
         match self {
             Self::Token(_) | Self::Github(GithubError::Upstream(_)) => true,
-            Self::NotLinked | Self::Github(_) => false,
+            Self::NotLinked | Self::Github(_) | Self::TooManyComments => false,
         }
     }
 }
@@ -655,17 +658,21 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
-    async fn pull_request_body(
+    async fn pull_request_text(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         number: u64,
-    ) -> Result<Option<String>, GithubPullRequestsErr> {
+    ) -> Result<PullRequestText, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
-        Ok(self
+        let text = self
             .github
-            .pull_request_body(&token, repository.owner(), repository.name(), number)
-            .await?)
+            .pull_request_text(&token, repository.owner(), repository.name(), number)
+            .await?;
+        Ok(PullRequestText {
+            body: text.body.unwrap_or_default(),
+            author_id: text.author_id,
+        })
     }
 
     #[tracing::instrument(err, skip(self, owner, body))]
@@ -695,12 +702,17 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .github
             .list_issue_comments(&token, repository.owner(), repository.name(), number)
             .await?;
+        // A comment of the report past what was read would be written again.
+        if !listed.complete {
+            return Err(GithubPullRequestsErr::TooManyComments);
+        }
         Ok(listed
             .items
             .into_iter()
             .map(|comment| PullRequestComment {
                 id: comment.id,
                 body: comment.body,
+                author_id: comment.author_id,
             })
             .collect())
     }

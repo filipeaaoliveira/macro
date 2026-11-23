@@ -576,6 +576,17 @@ pub struct PullRequestComment {
     pub id: u64,
     /// Its text.
     pub body: String,
+    /// GitHub's id of the account that wrote it, if GitHub names one.
+    pub author_id: Option<u64>,
+}
+
+/// A pull request's description, and who opened it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestText {
+    /// Its description; empty when it has none.
+    pub body: String,
+    /// GitHub's id of the account that opened it, if GitHub names one.
+    pub author_id: Option<u64>,
 }
 
 /// What asking GitHub to open a pull request came to.

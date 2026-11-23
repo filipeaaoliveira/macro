@@ -46,8 +46,8 @@ use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     DefinitionPullRequest, FinishedJob, GITHUB_COMMITTER, HeadChecks, Merging, OpenPullRequest,
-    Opening, PullRequest, PullRequestComment, PullRequestState, RepositoryAccess, RequiredChecks,
-    run_branch,
+    Opening, PullRequest, PullRequestComment, PullRequestState, PullRequestText, RepositoryAccess,
+    RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -1742,6 +1742,9 @@ pub(crate) struct FakeGithubState {
     /// Whether editing its description or comments fails, as GitHub
     /// refusing the owner does.
     pub(crate) text_edits_fail: bool,
+    /// How many edits of its description or comments were asked for,
+    /// whether or not they failed.
+    pub(crate) text_write_attempts: usize,
     /// The head commits merges were asked for, in order.
     pub(crate) merges: Vec<String>,
     /// GitHub's reason to refuse a merge, if it does.
@@ -1855,6 +1858,10 @@ pub(crate) struct FakeGithub {
 impl FakeGithub {
     /// The commit an opened pull request's head is at.
     pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// GitHub's id of the Run's owner's account, which opens the pull
+    /// request and writes the report's comments.
+    pub(crate) const OWNER_ACCOUNT: u64 = 1;
 
     /// GitHub's id of the CI app whose runs [`ci`] makes.
     pub(crate) const ACTIONS: u64 = 15368;
@@ -2184,13 +2191,16 @@ impl PullRequests for FakeGithub {
         Ok(Opening::Opened)
     }
 
-    async fn pull_request_body(
+    async fn pull_request_text(
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _number: u64,
-    ) -> Result<Option<String>, FakeGithubError> {
-        Ok(self.state().description.clone())
+    ) -> Result<PullRequestText, FakeGithubError> {
+        Ok(PullRequestText {
+            body: self.state().description.clone().unwrap_or_default(),
+            author_id: Some(Self::OWNER_ACCOUNT),
+        })
     }
 
     async fn edit_pull_request_body(
@@ -2201,6 +2211,7 @@ impl PullRequests for FakeGithub {
         body: &str,
     ) -> Result<(), FakeGithubError> {
         let mut state = self.state();
+        state.text_write_attempts += 1;
         if state.text_edits_fail {
             return Err(FakeGithubError::Refused);
         }
@@ -2226,6 +2237,7 @@ impl PullRequests for FakeGithub {
         body: &str,
     ) -> Result<(), FakeGithubError> {
         let mut state = self.state();
+        state.text_write_attempts += 1;
         if state.text_edits_fail {
             return Err(FakeGithubError::Refused);
         }
@@ -2233,6 +2245,7 @@ impl PullRequests for FakeGithub {
         state.comments.push(PullRequestComment {
             id,
             body: body.to_string(),
+            author_id: Some(Self::OWNER_ACCOUNT),
         });
         state.comment_writes += 1;
         Ok(())
@@ -2246,6 +2259,7 @@ impl PullRequests for FakeGithub {
         body: &str,
     ) -> Result<(), FakeGithubError> {
         let mut state = self.state();
+        state.text_write_attempts += 1;
         if state.text_edits_fail {
             return Err(FakeGithubError::Refused);
         }
