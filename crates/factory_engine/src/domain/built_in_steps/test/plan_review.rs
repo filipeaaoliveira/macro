@@ -566,6 +566,53 @@ async fn a_split_retried_after_a_failure_files_what_is_missing_once() {
     assert_eq!(names, ["Add the slug API", "Show slugs on the page"]);
 }
 
+/// A retry of a Run whose split failed after filing a child files the
+/// missing one under the retried Run's ids, and the filed one not again.
+#[tokio::test]
+async fn a_retry_of_a_failed_split_files_no_child_twice() {
+    let reviewer = Reviewer::answering(Vec::new());
+    let repo = FakeRepo::default();
+    let earlier = [ended(1, "plan", 1, "done", OVERSIZED)];
+    let failed_run = key(2);
+    // The first child is filed; the second fails, and the Run ends.
+    repo.failing
+        .lock()
+        .expect("failing")
+        .insert("create_follow_up", (1, 1));
+    let failed = run_visit(
+        &reviewer,
+        &github(),
+        &repo,
+        "split",
+        review_input(failed_run, &earlier, None, &[]),
+        1,
+    )
+    .await;
+    assert!(failed.is_err(), "the first Run's split fails");
+
+    let retry = StepInput {
+        retry: Some(factory_records::domain::models::RunRetry {
+            retried_from: failed_run.run_id,
+            branch_of: failed_run.run_id,
+            first_seq: 2,
+        }),
+        ..review_input(key(2), &earlier, None, &[])
+    };
+    let report = run_visit(&reviewer, &github(), &repo, "split", retry, 1)
+        .await
+        .expect("split");
+
+    assert_eq!(report.outcome, Outcome::done());
+    let names: Vec<String> = repo
+        .follow_ups
+        .lock()
+        .expect("follow ups")
+        .iter()
+        .map(|made| made.task.name.clone())
+        .collect();
+    assert_eq!(names, ["Add the slug API", "Show slugs on the page"]);
+}
+
 /// Files every child task under another id than it is asked for.
 #[derive(Clone)]
 struct ElsewhereTasks;

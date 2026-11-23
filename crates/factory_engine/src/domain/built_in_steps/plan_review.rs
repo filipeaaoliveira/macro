@@ -261,7 +261,10 @@ where
         let mut filed = Vec::new();
         let mut refused = Vec::new();
         for (index, child) in children.iter().enumerate() {
-            let task_id = child_task_id(input.key.run_id, input.key.seq, index);
+            // A retry of a Run that failed here files its children under
+            // the retried Run's ids, at the same place, so the ones filed
+            // before it failed are not filed twice.
+            let task_id = child_task_id(input.branch_run(), input.key.seq, index);
             let of = parent.as_ref().map(|(id, name)| (*id, name.as_str()));
             let task = child_task(child, of, input.key.run_id);
             let made = self

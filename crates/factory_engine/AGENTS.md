@@ -1589,7 +1589,9 @@ list must add it).
   and `split` files each child through `ChildTasks` (as a follow-up task
   is filed: the owner's, in the project of the Run's task, its body
   linking that task), with an id fixed by the Run, the Step and the child
-  (`child_task_id`), so a retried `split` files no second task; it ends
+  (`child_task_id`; for a retry, by the Run whose branch it works on), so
+  a retried `split`, or a retry of a Run that failed at it, files no
+  second task; it ends
   `done` with their links, and the Run ends `manual`. Where nothing files
   tasks (`NoChildTasks`), `split` ends `failed`.
 - Trust: the checks live in the plan Step's recorded output, never in the
