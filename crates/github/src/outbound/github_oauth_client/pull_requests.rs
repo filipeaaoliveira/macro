@@ -102,7 +102,7 @@ pub(super) fn is_repository_part(part: &str) -> bool {
 }
 
 /// What a refused read is, once throttling is ruled out.
-fn refusal(status: StatusCode) -> Option<GithubError> {
+pub(super) fn refusal(status: StatusCode) -> Option<GithubError> {
     match status {
         StatusCode::UNAUTHORIZED => Some(GithubError::ReauthenticationRequired),
         StatusCode::FORBIDDEN => Some(GithubError::Forbidden),
@@ -364,7 +364,7 @@ impl GithubOauthImpl {
     /// taken out by `items`, up to [`MAX_PAGES`]: a page shorter than a full
     /// one is the last. A list still full at its last page read is not
     /// complete.
-    async fn read_pages<T: DeserializeOwned, I>(
+    pub(super) async fn read_pages<T: DeserializeOwned, I>(
         &self,
         access_token: &str,
         path: &str,
