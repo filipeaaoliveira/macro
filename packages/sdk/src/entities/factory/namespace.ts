@@ -2,6 +2,7 @@ import type {
   FiringSkip,
   FlowSummary,
   HandBackRequest,
+  RefusedTrial,
 } from '../../../generated/factory/types.gen';
 import { unwrap } from '../../utils';
 import type { MacroClient } from '../../utils/client';
@@ -32,6 +33,19 @@ export interface AutomationFired {
   skipped?: FiringSkip;
   /** Whether this routine run fired it before, so it started nothing more. */
   repeated: boolean;
+}
+
+/** A Benchmark suite the caller started: one trial Run per frozen task. */
+export interface BenchmarkSuite {
+  /** The suite's id. */
+  id: string;
+  /** Each trial's Run, by the frozen task it replays. */
+  runs: Record<string, FactoryRun>;
+  /**
+   * The trial whose Run the factory refused, which stopped the suite: the
+   * trials before it go on.
+   */
+  refused?: RefusedTrial;
 }
 
 /**
@@ -147,6 +161,46 @@ export class FactoryNamespace {
       }),
     );
     return runs.map((detail) => FactoryRun.byId(this.client, detail.run.id));
+  }
+
+  /**
+   * Start a suite of the Benchmark `benchmark`: one trial Run, owned by the
+   * caller, of each of its frozen tasks, on the configuration `agents`
+   * gives (the Agent each Role takes in place of its first, by Role; a
+   * Role left out takes the definition's). Each trial keeps a score and
+   * the tokens its agents used once its Run ends. Refused (409) while a
+   * suite of the same Benchmark still runs or the caller has too many
+   * running trials, and (403 `notInStandingRole`) where the caller's
+   * Standing Roles let no agent start Runs. A trial whose Run is refused
+   * stops the suite: `refused` names it.
+   *
+   * @example
+   * const suite = await macro.factory.startBenchmarkSuite('smoke', {
+   *   agents: { implementer: 'fast' },
+   * });
+   *
+   * @write
+   */
+  async startBenchmarkSuite(
+    benchmark: string,
+    opts: { agents?: Record<string, string> } = {},
+  ): Promise<BenchmarkSuite> {
+    const started = unwrap(
+      await this.client.factory.startFactoryBenchmarkSuite({
+        path: { benchmark },
+        body: { agents: opts.agents },
+      }),
+    );
+    return {
+      id: started.id,
+      runs: Object.fromEntries(
+        Object.entries(started.runs).map(([task, id]) => [
+          task,
+          FactoryRun.byId(this.client, id),
+        ]),
+      ),
+      refused: started.refused ?? undefined,
+    };
   }
 
   /**
