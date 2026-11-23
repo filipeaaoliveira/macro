@@ -282,6 +282,67 @@ export type ReviewRound = {
   findings: ReviewFinding[];
 };
 
+/** How the factory's run of a reported break went. */
+export type BreakStatus =
+  | 'verified'
+  | 'not_reproduced'
+  | 'hung'
+  | 'not_run'
+  | 'not_applied'
+  | 'unreadable'
+  | 'dropped'
+  | 'unchecked'
+  | 'interrupted';
+
+/**
+ * A break a write or fix Step's agent reported for a test it added: an
+ * edit that should make the test fail, and how the factory's run of it
+ * went on the commit whose checks passed.
+ */
+export type BreakRecord = {
+  /** The Step whose agent reported it. */
+  seq: number;
+  /** The test; the whole line for one that does not read as a break. */
+  test: string;
+  /** The file the break edits, from the repository's root. */
+  file: string;
+  /** The text the break replaces. */
+  oldText: string;
+  /** What it puts in its place. */
+  newText: string;
+  status: BreakStatus;
+  /** The commit it ran on; none when it did not run. */
+  checkedCommit?: string;
+  /** The end of what the test printed, or why it did not run. */
+  output: string;
+};
+
+/**
+ * The statuses that leave a new test unproven, so the tests reviewer
+ * blocks on them: the test passed with the break, hung, failed without
+ * it, or the break could not be applied or read.
+ */
+const BLOCKING_BREAKS: ReadonlySet<BreakStatus> = new Set<BreakStatus>([
+  'not_reproduced',
+  'hung',
+  'not_run',
+  'not_applied',
+  'unreadable',
+]);
+
+/** Whether a break's status leaves its test unproven. */
+export function isBlockingBreak(status: BreakStatus): boolean {
+  return BLOCKING_BREAKS.has(status);
+}
+
+/** The breaks the Step at `seq` reported, in the order they were recorded. */
+export function breakRecordsOf(
+  records: BreakRecord[],
+  seq: number
+): BreakRecord[] {
+  return records.filter((record) => record.seq === seq);
+}
+
 /** An Agent that couldn’t start a Step, so the next one took it. */
 export type PassedOver = {
   agent: string;
@@ -477,6 +538,11 @@ export type Run = {
   tokenBudget?: RunTokenBudget;
   /** What became of its blockers; none from a service older than disputes. */
   blockerResolutions?: BlockerResolutions;
+  /**
+   * The breaks its write and fix Steps reported, by Step; only a Run's own
+   * read carries them, a list of Runs none.
+   */
+  breakRecords?: BreakRecord[];
   /** The Run it retries, for a retry; none for a Run started afresh. */
   retry?: RunRetry;
 };

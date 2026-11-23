@@ -6,6 +6,7 @@ import {
   type AutomationTriggerKind,
   anyResolved,
   type BaseRequiredChecks,
+  type BreakRecord,
   type MainHold,
   type ReviewRound,
   type Run,
@@ -341,6 +342,8 @@ export function RunSteps(props: {
   baseRequiredChecks?: BaseRequiredChecks;
   baseBranch?: string;
   reviewRounds?: ReviewRound[];
+  /** The breaks its write and fix Steps reported, each under its Step. */
+  breakRecords?: BreakRecord[];
   status: RunStatus;
   time: (value: string) => string;
   /** Opens a running Step's Step Terminal. */
@@ -363,6 +366,7 @@ export function RunSteps(props: {
           baseRequiredChecks={props.baseRequiredChecks}
           baseBranch={props.baseBranch}
           reviewRounds={props.reviewRounds}
+          breakRecords={props.breakRecords}
           time={props.time}
           onWatch={props.onWatch}
           outputOpen={(step) =>

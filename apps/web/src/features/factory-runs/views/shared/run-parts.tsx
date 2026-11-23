@@ -101,6 +101,7 @@ export function RunContent(props: {
             baseRequiredChecks={props.run.baseRequiredChecks}
             baseBranch={props.run.repository?.baseBranch}
             reviewRounds={props.run.reviewRounds}
+            breakRecords={props.run.breakRecords}
             status={status()}
             time={props.controller.stepTime}
             onWatch={

@@ -188,6 +188,17 @@ export function toRun(detail: RunDetail): Run {
           stop: detail.tokenBudget.stop ?? undefined,
         }
       : undefined,
+    // A list of Runs, and a service older than break records, send none.
+    breakRecords: (detail.breakRecords ?? []).map((record) => ({
+      seq: record.seq,
+      test: record.test,
+      file: record.file,
+      oldText: record.oldText,
+      newText: record.newText,
+      status: record.status,
+      checkedCommit: record.checkedCommit ?? undefined,
+      output: record.output,
+    })),
     // A service older than Standing Roles sends none.
     standingActs: (detail.standingActs ?? []).map((standing) => ({
       act: standing.act,
@@ -243,18 +254,22 @@ export function toRun(detail: RunDetail): Run {
 
 /**
  * Seed the Run's own read with what a list read of it. A list reads no
- * Run's token use, so the use its own read found is kept, rather than
- * shown unknown until the next read.
+ * Run's token use or break records, so what its own read found is kept,
+ * rather than shown unknown until the next read.
  */
 export function seedRun(client: QueryClient, run: Run) {
   const key = factoryRunKeys.run(run.id).queryKey;
-  const known = client.getQueryData<Run>(key)?.tokenBudget;
+  const own = client.getQueryData<Run>(key);
+  const known = own?.tokenBudget;
   const listed = run.tokenBudget;
   const tokenBudget =
     listed && listed.used === undefined && known?.used !== undefined
       ? { ...listed, used: known.used, measured: known.measured }
       : listed;
-  client.setQueryData(key, { ...run, tokenBudget });
+  const breakRecords = run.breakRecords?.length
+    ? run.breakRecords
+    : (own?.breakRecords ?? run.breakRecords);
+  client.setQueryData(key, { ...run, tokenBudget, breakRecords });
 }
 
 export function taskRunsOptions(client: QueryClient, taskId: string) {
