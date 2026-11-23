@@ -514,9 +514,9 @@ async fn agents_text_cannot_forge_the_report_s_markers() {
     assert!(
         body.contains("> Use &lt;b&gt;bold&lt;/b&gt; here &lt;!-- /macro-factory-report --&gt;")
     );
-    // Code reads as written, but for the broken marker.
-    assert!(body.contains("> <p>kept</p>"));
-    assert!(body.contains("> <\u{2060}!-- /macro-factory-report -->"));
+    // Code is escaped as any text.
+    assert!(body.contains("> &lt;p&gt;kept&lt;/p&gt;"));
+    assert!(body.contains("> &lt;!-- /macro-factory-report --&gt;"));
     assert!(body.contains("> Done."));
     assert!(state.description_edits.is_empty());
 }
@@ -627,4 +627,23 @@ async fn a_plan_on_one_long_line_still_shows_its_start() {
     let body = github.state().description.clone().expect("opened");
     assert!(body.contains("> Start of the plan word word"));
     assert!(body.contains("(The rest of the plan is on the run's plan step.)"));
+}
+
+/// The request is escaped as agents' text is: it pings no one and closes
+/// no issue from the description.
+#[tokio::test]
+async fn the_request_mentions_no_one_from_the_description() {
+    let github = FakeGithub::default();
+    let mut asking = input(RunId::generate());
+    asking.request = "Ask @alice <b>now</b>\n\nFixes https://github.com/o/r/issues/3";
+
+    steps(&github, &FakeRepo::default())
+        .publish(asking)
+        .await
+        .expect("publish");
+
+    let body = github.state().description.clone().expect("opened");
+    assert!(body.starts_with(
+        "Ask @\u{2060}alice &lt;b&gt;now&lt;/b&gt;\n\nF\u{2060}ixes https://github.com/o/r/issues/3\n\n"
+    ));
 }

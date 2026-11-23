@@ -19,8 +19,9 @@
 //! first; the rest of the request, then the rest of the report, go into the
 //! comments, never cut mid-line unless one line alone does not fit.
 //!
-//! What agents wrote (the plan, clauses, findings) is quoted so it mentions
-//! no one, links or closes no issue and holds no marker ([`markdown`]).
+//! What the factory did not write (the request, and what agents wrote: the
+//! plan, clauses, findings) is escaped so it mentions no one, links or
+//! closes no issue and holds no marker ([`markdown`]).
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
@@ -90,7 +91,7 @@ fn one_line(text: &str) -> String {
         Some((end, _)) => format!("{}…", &line[..end]),
         None => line,
     };
-    markdown::line(&line)
+    markdown::escape(&line)
 }
 
 /// `text` as inline code on one line, at most [`LINE_CHARS`].
@@ -107,7 +108,7 @@ fn code(text: &str) -> String {
         Some((end, _)) => format!("{}…", &line[..end]),
         None => line,
     };
-    format!("`{}`", markdown::in_code(&line))
+    format!("`{}`", markdown::escape(&line))
 }
 
 /// The latest Step of `entry` among `earlier` that ended.
@@ -152,8 +153,8 @@ fn plan(earlier: &[Step]) -> Option<String> {
     }
 
     let mut text = String::new();
-    for line in markdown::lines(kept.into_iter()) {
-        text.push_str(&format!("> {line}\n"));
+    for line in kept {
+        text.push_str(&format!("> {}\n", markdown::escape(line)));
     }
     if cut {
         text.push_str("> …\n\n(The rest of the plan is on the run's plan step.)\n");
@@ -423,11 +424,11 @@ fn frame_chars() -> usize {
     REPORT_START.chars().count() + REPORT_END.chars().count() + 2
 }
 
-/// The request as the description holds it, whole lines, and the rest of
-/// it, if any: the request goes first, before the report.
+/// The request as the description holds it, escaped, whole lines, and the
+/// rest of it, if any: the request goes first, before the report.
 fn request_split(request: &str, footer: &str) -> (String, Option<String>) {
     let room = ROOM_CHARS - footer.chars().count() - frame_chars() - 2;
-    fit(request, room, REQUEST_REST)
+    fit(&markdown::escape(request), room, REQUEST_REST)
 }
 
 /// A description with the Run's report, and the comments it overflows
