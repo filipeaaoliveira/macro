@@ -254,7 +254,9 @@ function SuiteRow(props: {
           </h3>
           <Show when={props.standing?.recommended}>
             <Badge variant="success" size="xs">
-              {t('factoryEvaluation.recommended')}
+              {t('factoryEvaluation.recommendedFor', {
+                benchmark: props.suite.benchmark,
+              })}
             </Badge>
           </Show>
           <Show when={props.standing?.pareto}>
@@ -271,9 +273,21 @@ function SuiteRow(props: {
         <Figure label={t('factoryEvaluation.score')}>
           {formatScore(props.suite.meanScore)}
         </Figure>
-        <Figure label={t('factoryEvaluation.tokens')}>
-          {formatTokens(tokenTotal(props.suite.tokens))}
-        </Figure>
+        {/* A ranked suite shows the cost it was ranked on. */}
+        <Show
+          when={props.standing}
+          fallback={
+            <Figure label={t('factoryEvaluation.tokens')}>
+              {formatTokens(tokenTotal(props.suite.tokens))}
+            </Figure>
+          }
+        >
+          {(standing) => (
+            <Figure label={t('factoryEvaluation.tokensPerTrial')}>
+              {formatTokens(standing().tokensPerTrial)}
+            </Figure>
+          )}
+        </Show>
         <Figure label={t('factoryEvaluation.trial')}>
           {t('factoryEvaluation.suiteScored', {
             scored: props.suite.scored,
@@ -610,6 +624,7 @@ export function EvaluationSections(props: {
   onOpenRun: (runId: string) => void;
 }) {
   const standings = createMemo(() => suiteStandings(props.evaluation.suites));
+  const paretoDescriptionId = createUniqueId();
 
   return (
     <div class="flex min-w-0 flex-col gap-5">
@@ -683,11 +698,19 @@ export function EvaluationSections(props: {
           }
         >
           <Show when={standings().size > 0}>
-            <p class="border-t border-edge-muted px-4 py-3 text-xs text-ink-muted sm:px-5">
+            <p
+              id={paretoDescriptionId}
+              class="border-t border-edge-muted px-4 py-3 text-xs text-ink-muted sm:px-5"
+            >
               {t('factoryEvaluation.paretoDescription')}
             </p>
           </Show>
-          <ul class="flex flex-col divide-y divide-edge-muted border-t border-edge-muted">
+          <ul
+            aria-describedby={
+              standings().size > 0 ? paretoDescriptionId : undefined
+            }
+            class="flex flex-col divide-y divide-edge-muted border-t border-edge-muted"
+          >
             <For
               each={props.evaluation.suites}
               fallback={<EmptyRow>{t('factoryEvaluation.noSuites')}</EmptyRow>}

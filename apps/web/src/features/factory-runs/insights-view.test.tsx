@@ -560,9 +560,10 @@ describe('RunInsightsView', () => {
 
   it('marks the benchmark’s Pareto set of suites and recommends the best score on it', () => {
     const [suite] = judged.suites;
-    if (!suite) throw new Error('No suite');
-    // Per trial: cheap 0.5 for 1,500 tokens, best 0.9 for 4,000, and dear
-    // 0.5 for 4,000, which cheap and best both beat.
+    const [trial] = suite?.trials ?? [];
+    if (!suite || !trial) throw new Error('No suite');
+    // Per trial: cheap 0.5 for 1,500 tokens over two trials, best 0.9 for
+    // 4,000, and dear 0.5 for 4,000, which cheap and best both beat.
     const tokens = (output: number) => ({
       input: 0,
       output,
@@ -574,7 +575,14 @@ describe('RunInsightsView', () => {
       evaluation: {
         ...judged,
         suites: [
-          { ...suite, id: 'cheap', agents: { writer: 'cheap' } },
+          {
+            ...suite,
+            id: 'cheap',
+            agents: { writer: 'cheap' },
+            scored: 2,
+            tokens: tokens(3000),
+            trials: [trial, { ...trial, task: 'export' }],
+          },
           {
             ...suite,
             id: 'best',
@@ -594,11 +602,28 @@ describe('RunInsightsView', () => {
 
     const row = (agent: string) =>
       screen.getByText(`writer: ${agent}`).closest('li') as HTMLElement;
-    expect(within(row('best')).queryByText('Recommended')).toBeTruthy();
+    expect(
+      within(row('best')).queryByText('Recommended for core')
+    ).toBeTruthy();
     expect(within(row('best')).queryByText('Pareto set')).toBeTruthy();
-    expect(within(row('cheap')).queryByText('Recommended')).toBeNull();
+    expect(within(row('cheap')).queryByText(/Recommended/)).toBeNull();
     expect(within(row('cheap')).queryByText('Pareto set')).toBeTruthy();
     expect(within(row('dear')).queryByText('Pareto set')).toBeNull();
+
+    // The row shows the tokens per trial it was ranked on, not its total.
+    expect(row('cheap').textContent).toContain('1.5K');
+    expect(row('cheap').textContent).not.toContain('3K');
+
+    const description = screen.getByText(/is on the Pareto set when/);
+    const suites = row('cheap').parentElement as HTMLElement;
+    expect(suites.getAttribute('aria-describedby')).toBe(description.id);
+  });
+
+  it('says nothing of a Pareto set while a benchmark has one suite', () => {
+    mount({ insights: november, evaluation: judged });
+
+    expect(screen.queryByText(/is on the Pareto set when/)).toBeNull();
+    expect(screen.queryByText('Pareto set')).toBeNull();
   });
 
   it('says how many of a suite’s trials were lost to infrastructure, with no score', () => {
