@@ -25,7 +25,7 @@
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
-use factory_records::domain::models::{CheckRoundOutcome, Step};
+use factory_records::domain::models::{CheckRoundOutcome, RunId, Step};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{
     DisputeRuling, FindingKind, FixStatus, ReviewFinding, ReviewRound, ReviewRoundOutcome,
@@ -40,14 +40,77 @@ use crate::domain::ports::{MainWatches, PullRequests};
 
 mod markdown;
 
-/// What opens the report's section in the description.
-const REPORT_START: &str = "<!-- macro-factory-report -->";
+/// The markers of one Run's report, each naming the Run: only markers with
+/// its id are its own, and request and agents' text cannot hold one
+/// ([`markdown`] escapes every `<`).
+struct Markers {
+    /// What opens the report's section in the description.
+    start: String,
+    /// What closes it.
+    end: String,
+    /// What starts each comment the report overflows into, before its
+    /// number.
+    part: String,
+}
 
-/// What closes it.
-const REPORT_END: &str = "<!-- /macro-factory-report -->";
+impl Markers {
+    /// The markers of the Run `run_id`.
+    fn of(run_id: RunId) -> Self {
+        Self {
+            start: format!("<!-- macro-factory-report run={run_id} -->"),
+            end: format!("<!-- /macro-factory-report run={run_id} -->"),
+            part: format!("<!-- macro-factory-report-part run={run_id} "),
+        }
+    }
 
-/// What starts each comment the report overflows into, before its number.
-const PART_MARKER: &str = "<!-- macro-factory-report-part ";
+    /// How many characters the report's section takes besides the report.
+    fn frame_chars(&self) -> usize {
+        self.start.chars().count() + self.end.chars().count() + 2
+    }
+
+    /// The marker line of the comment `number`, from 1.
+    fn part_marker(&self, number: usize) -> String {
+        format!("{}{number} -->", self.part)
+    }
+
+    /// The number of the report's comment `body` is, if it is one.
+    fn part_number(&self, body: &str) -> Option<usize> {
+        let (number, _) = body.strip_prefix(&self.part)?.split_once(" -->")?;
+        number.parse().ok()
+    }
+
+    /// Where the section that the start marker at `start` of `text` opens
+    /// ends: after the first end marker past it, when no other start marker
+    /// comes first. None for a start marker left alone.
+    fn section_end(&self, text: &str, start: usize) -> Option<usize> {
+        let after = start + self.start.len();
+        let end = text[after..].find(&self.end)?;
+        let next_start = text[after..].find(&self.start);
+        if next_start.is_some_and(|next_start| next_start < end) {
+            return None;
+        }
+        Some(after + end + self.end.len())
+    }
+
+    /// `text` without any section of the report and without any of its
+    /// markers left alone. Removing one can join the text around it into
+    /// another, so it removes until none is left.
+    fn without_sections(&self, text: &str) -> String {
+        let mut kept = text.to_string();
+        loop {
+            if let Some(start) = kept.find(&self.start) {
+                let end = self
+                    .section_end(&kept, start)
+                    .unwrap_or(start + self.start.len());
+                kept.replace_range(start..end, "");
+            } else if let Some(end) = kept.find(&self.end) {
+                kept.replace_range(end..end + self.end.len(), "");
+            } else {
+                return kept;
+            }
+        }
+    }
+}
 
 /// The most characters the report writes in a description or a comment:
 /// GitHub keeps [`MAX_BODY_CHARS`] in either, and this leaves about 1% to
@@ -423,15 +486,10 @@ fn fit(text: &str, room: usize, note: &str) -> (String, Option<String>) {
     (kept, Some(text[kept_bytes..].to_string()))
 }
 
-/// How many characters the report's section takes besides the report.
-fn frame_chars() -> usize {
-    REPORT_START.chars().count() + REPORT_END.chars().count() + 2
-}
-
 /// The request as the description holds it, escaped, whole lines, and the
 /// rest of it, if any: the request goes first, before the report.
-fn request_split(request: &str, footer: &str) -> (String, Option<String>) {
-    let room = ROOM_CHARS - footer.chars().count() - frame_chars() - 2;
+fn request_split(markers: &Markers, request: &str, footer: &str) -> (String, Option<String>) {
+    let room = ROOM_CHARS - footer.chars().count() - markers.frame_chars() - 2;
     fit(&markdown::escape(request), room, REQUEST_REST)
 }
 
@@ -449,94 +507,92 @@ pub(super) struct Written {
 /// `before`, the report's section holding what fits of `report`, and
 /// `after`; what is left of the request, `request_rest`, and of the
 /// report goes into the comments.
-fn with_report(before: &str, after: &str, report: &str, request_rest: Option<String>) -> Written {
-    let room =
-        ROOM_CHARS.checked_sub(before.chars().count() + after.chars().count() + frame_chars());
+fn with_report(
+    markers: &Markers,
+    before: &str,
+    after: &str,
+    report: &str,
+    request_rest: Option<String>,
+) -> Written {
+    let used = before.chars().count() + after.chars().count() + markers.frame_chars();
+    let room = ROOM_CHARS.checked_sub(used);
     let Some(room) = room else {
         let rest = [request_rest, Some(report.to_string())];
         return Written {
             body: None,
-            comments: parts(rest),
+            comments: parts(markers, rest),
         };
     };
     let (kept, report_rest) = fit(report, room, REPORT_REST);
     Written {
         body: Some(format!(
-            "{before}{REPORT_START}\n{kept}\n{REPORT_END}{after}"
+            "{before}{}\n{kept}\n{}{after}",
+            markers.start, markers.end
         )),
-        comments: parts([request_rest, report_rest]),
+        comments: parts(markers, [request_rest, report_rest]),
     }
 }
 
 /// The description a pull request is opened with: the request, the
 /// report, then the footer. The comments it overflows into are written once
 /// the pull request is open ([`PullRequestSteps::refresh_report`]).
-pub(super) fn opening(request: &str, footer: &str, report: &str) -> String {
-    let (request, request_rest) = request_split(request, footer);
+pub(super) fn opening(run_id: RunId, request: &str, footer: &str, report: &str) -> String {
+    let markers = Markers::of(run_id);
+    let (request, request_rest) = request_split(&markers, request, footer);
     // The request was cut to leave room for the section and the footer, so
     // the description always has room for them.
-    with_report(&format!("{request}\n\n"), footer, report, request_rest)
-        .body
-        .unwrap_or_default()
-}
-
-/// Where the section that the start marker at `start` of `text` opens
-/// ends: after the first end marker past it, when no other start marker
-/// comes first. None for a start marker left alone.
-fn section_end(text: &str, start: usize) -> Option<usize> {
-    let after = start + REPORT_START.len();
-    let end = text[after..].find(REPORT_END)?;
-    let next_start = text[after..].find(REPORT_START);
-    if next_start.is_some_and(|next_start| next_start < end) {
-        return None;
-    }
-    Some(after + end + REPORT_END.len())
-}
-
-/// `text` without any section of the report and without any marker left
-/// alone.
-fn without_sections(text: &str) -> String {
-    let mut kept = text.to_string();
-    while let Some(start) = kept.find(REPORT_START) {
-        let end = section_end(&kept, start).unwrap_or(start + REPORT_START.len());
-        kept.replace_range(start..end, "");
-    }
-    kept.replace(REPORT_END, "")
+    with_report(
+        &markers,
+        &format!("{request}\n\n"),
+        footer,
+        report,
+        request_rest,
+    )
+    .body
+    .unwrap_or_default()
 }
 
 /// The description `current` with its report's section replaced by
-/// `report`: the first start marker an end marker closes. Any other
-/// section, and any marker left alone, as a person's copy and paste leaves,
-/// is removed, so the description holds one. One with no section gets it
-/// at its end.
-pub(super) fn rewritten(current: &str, request: &str, footer: &str, report: &str) -> Written {
-    let (_, request_rest) = request_split(request, footer);
+/// `report`: the first start marker of the Run `run_id` that its end
+/// marker closes. Any other section of the Run, and any of its markers left
+/// alone, as a person's copy and paste leaves, is removed, so the
+/// description holds one. One with no section gets it at its end.
+pub(super) fn rewritten(
+    run_id: RunId,
+    current: &str,
+    request: &str,
+    footer: &str,
+    report: &str,
+) -> Written {
+    let markers = Markers::of(run_id);
+    let (_, request_rest) = request_split(&markers, request, footer);
     let section = current
-        .match_indices(REPORT_START)
-        .find_map(|(start, _)| Some((start, section_end(current, start)?)));
+        .match_indices(&markers.start)
+        .find_map(|(start, _)| Some((start, markers.section_end(current, start)?)));
     match section {
         Some((start, end)) => with_report(
-            &without_sections(&current[..start]),
-            &without_sections(&current[end..]),
+            &markers,
+            &markers.without_sections(&current[..start]),
+            &markers.without_sections(&current[end..]),
             report,
             request_rest,
         ),
         None => {
-            let current = without_sections(current);
+            let current = markers.without_sections(current);
             let kept = current.trim_end();
             let before = if kept.is_empty() {
                 String::new()
             } else {
                 format!("{kept}\n\n")
             };
-            with_report(&before, "", report, request_rest)
+            with_report(&markers, &before, "", report, request_rest)
         }
     }
 }
 
 /// The comments for the rest of the request and of the report: their lines
 /// in order, as few comments as hold them, each starting with its marker.
-fn parts(rests: [Option<String>; 2]) -> Vec<String> {
+fn parts(markers: &Markers, rests: [Option<String>; 2]) -> Vec<String> {
     let [request_rest, report_rest] = rests;
     let mut text = String::new();
     if let Some(rest) = request_rest {
@@ -590,19 +646,8 @@ fn parts(rests: [Option<String>; 2]) -> Vec<String> {
     chunks
         .into_iter()
         .enumerate()
-        .map(|(index, chunk)| format!("{}\n{chunk}", part_marker(index + 1)))
+        .map(|(index, chunk)| format!("{}\n{chunk}", markers.part_marker(index + 1)))
         .collect()
-}
-
-/// The marker line of the comment `number`, from 1.
-fn part_marker(number: usize) -> String {
-    format!("{PART_MARKER}{number} -->")
-}
-
-/// The number of the report's comment `body` is, if it is one.
-fn part_number(body: &str) -> Option<usize> {
-    let (number, _) = body.strip_prefix(PART_MARKER)?.split_once(" -->")?;
-    number.parse().ok()
 }
 
 impl<G, R, M> PullRequestSteps<G, R, M>
@@ -653,7 +698,14 @@ where
             .await
             .map_err(PullRequestStepError::github)?;
         let current = text.body;
-        let written = rewritten(&current, input.request, &footer(input), &report);
+        let markers = Markers::of(input.key.run_id);
+        let written = rewritten(
+            input.key.run_id,
+            &current,
+            input.request,
+            &footer(input),
+            &report,
+        );
         // GitHub replaces a description whole and takes no condition on
         // what it was: a person's edit saved between the read above and
         // this write is lost. The window is one request long, and the
@@ -679,7 +731,13 @@ where
         let mut found: Vec<(usize, u64, String)> = existing
             .into_iter()
             .filter(|comment| text.author_id.is_some() && comment.author_id == text.author_id)
-            .filter_map(|comment| Some((part_number(&comment.body)?, comment.id, comment.body)))
+            .filter_map(|comment| {
+                Some((
+                    markers.part_number(&comment.body)?,
+                    comment.id,
+                    comment.body,
+                ))
+            })
             .collect();
         // Stable: of comments of one number, the oldest is kept.
         found.sort_by_key(|(number, _, _)| *number);
@@ -715,7 +773,7 @@ where
             .iter()
             .filter(|(number, _, _)| *number > written.comments.len());
         for (number, id, body) in unneeded.chain(&duplicates) {
-            let unused = format!("{}\n{PART_UNUSED}", part_marker(*number));
+            let unused = format!("{}\n{PART_UNUSED}", markers.part_marker(*number));
             if *body != unused {
                 self.github
                     .edit_pull_request_comment(input.owner, repository, *id, &unused)

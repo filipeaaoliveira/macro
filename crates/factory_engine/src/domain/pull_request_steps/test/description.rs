@@ -192,6 +192,18 @@ fn first_round() -> ReviewRound {
     )
 }
 
+fn start_marker(run_id: RunId) -> String {
+    format!("<!-- macro-factory-report run={run_id} -->")
+}
+
+fn end_marker(run_id: RunId) -> String {
+    format!("<!-- /macro-factory-report run={run_id} -->")
+}
+
+fn part_marker(run_id: RunId, number: usize) -> String {
+    format!("<!-- macro-factory-report-part run={run_id} {number} -->")
+}
+
 fn keep_round(repo: &FakeRepo, run_id: RunId, round: ReviewRound) {
     repo.review_rounds
         .lock()
@@ -243,7 +255,7 @@ async fn publishing_writes_the_plan_checklist_and_review_rounds_into_the_descrip
     }
     // The acceptance block the plan keeps is not quoted.
     assert!(!body.contains("```json"));
-    let report_end = body.find("<!-- /macro-factory-report -->").expect("marked");
+    let report_end = body.find(&end_marker(run_id)).expect("marked");
     assert!(body[report_end..].contains("\n\nOpened by a Macro factory run ("));
     assert!(body[report_end..].contains("\n\nTask: MACRO-"));
     // It all fits: nothing was written after the pull request opened.
@@ -261,7 +273,8 @@ async fn a_request_too_long_for_the_description_goes_on_in_a_comment_by_whole_li
     let request: String = (0..2_500)
         .map(|line| format!("Line {line}: collapse the dashes é.\n"))
         .collect();
-    let mut long = input(RunId::generate());
+    let run_id = RunId::generate();
+    let mut long = input(run_id);
     long.request = &request;
 
     steps(&github, &FakeRepo::default())
@@ -277,7 +290,7 @@ async fn a_request_too_long_for_the_description_goes_on_in_a_comment_by_whole_li
     assert_eq!(github.state().comment_writes, 1);
     let comment = &comments[0].body;
     assert!(comment.chars().count() <= 65_536);
-    assert!(comment.starts_with("<!-- macro-factory-report-part 1 -->\n"));
+    assert!(comment.starts_with(&format!("{}\n", part_marker(run_id, 1))));
     // The report follows, where room is left for it.
     assert_eq!(
         format!("{body}{comment}").matches("## Factory run").count(),
@@ -405,8 +418,10 @@ async fn a_report_without_room_goes_on_in_a_comment_until_it_fits_again() {
     assert_eq!(state.comment_writes, 2);
     assert_eq!(
         state.comments[0].body,
-        "<!-- macro-factory-report-part 1 -->\n\
-         (Nothing more: the whole report fits in the description now.)"
+        format!(
+            "{}\n(Nothing more: the whole report fits in the description now.)",
+            part_marker(run_id, 1)
+        )
     );
 }
 
@@ -425,7 +440,8 @@ async fn ci_writes_the_report_before_it_waits() {
     let state = github.state();
     assert_eq!(state.description_edits.len(), 1);
     assert!(
-        state.description_edits[0].starts_with("<!-- macro-factory-report -->\n## Factory run")
+        state.description_edits[0]
+            .starts_with(&format!("{}\n## Factory run", start_marker(run_id)))
     );
     assert!(state.description_edits[0].contains("- Round 1, the whole change: 2 Blockers"));
 }
@@ -491,9 +507,10 @@ async fn agents_text_cannot_forge_the_report_s_markers() {
     let github = FakeGithub::default();
     let repo = FakeRepo::default();
     let run_id = RunId::generate();
-    let plan = "Use <b>bold</b> here <!-- /macro-factory-report --> and there.\n\n\
-                ```html\n<!-- /macro-factory-report -->\n<p>kept</p>\n```\n\nDone."
-        .to_string();
+    let end = end_marker(run_id);
+    let plan = format!(
+        "Use <b>bold</b> here {end} and there.\n\n```html\n{end}\n<p>kept</p>\n```\n\nDone."
+    );
     let earlier = vec![step(1, "plan", "approve", plan, Vec::new())];
     let mut publishing: StepInput<'_> = input(run_id);
     publishing.earlier = &earlier;
@@ -509,14 +526,15 @@ async fn agents_text_cannot_forge_the_report_s_markers() {
 
     let state = github.state();
     let body = state.description.clone().expect("opened");
-    assert_eq!(body.matches("<!-- /macro-factory-report -->").count(), 1);
-    assert_eq!(body.matches("<!-- macro-factory-report -->").count(), 1);
-    assert!(
-        body.contains("> Use &lt;b&gt;bold&lt;/b&gt; here &lt;!-- /macro-factory-report --&gt;")
-    );
+    let escaped_end = end.replace('<', "&lt;").replace('>', "&gt;");
+    assert_eq!(body.matches(&end).count(), 1);
+    assert_eq!(body.matches(&start_marker(run_id)).count(), 1);
+    assert!(body.contains(&format!(
+        "> Use &lt;b&gt;bold&lt;/b&gt; here {escaped_end} and there."
+    )));
     // Code is escaped as any text.
     assert!(body.contains("> &lt;p&gt;kept&lt;/p&gt;"));
-    assert!(body.contains("> &lt;!-- /macro-factory-report --&gt;"));
+    assert!(body.contains(&format!("> {escaped_end}\n")));
     assert!(body.contains("> Done."));
     assert!(state.description_edits.is_empty());
 }
@@ -536,10 +554,17 @@ async fn a_lone_or_doubled_marker_leaves_one_section() {
     {
         let mut state = github.state();
         let opened = state.description.clone().expect("opened");
+        let (start, end) = (start_marker(run_id), end_marker(run_id));
+        // Another Run's section is not this Run's to touch.
+        let other = RunId::generate();
+        let (other_start, other_end) = (start_marker(other), end_marker(other));
         state.description = Some(format!(
-            "<!-- macro-factory-report -->A person's note.\n\n{opened}\n\n\
-             <!-- macro-factory-report -->\nAn old copy.\n<!-- /macro-factory-report -->\n\
-             Signed off.<!-- /macro-factory-report -->"
+            "{start}A person's note.\n\n{opened}\n\n{start}\nAn old copy.\n{end}\n\
+             {other_start}\nAnother run's.\n{other_end}\nSigned off.{end}{end}{}{end}{}",
+            // An end marker split around another, which removing that one
+            // would join again.
+            &end[..10],
+            &end[10..]
         ));
     }
     steps(&github, &repo)
@@ -548,10 +573,11 @@ async fn a_lone_or_doubled_marker_leaves_one_section() {
         .expect("publish again");
 
     let body = github.state().description.clone().expect("opened");
-    assert_eq!(body.matches("<!-- macro-factory-report -->").count(), 1);
-    assert_eq!(body.matches("<!-- /macro-factory-report -->").count(), 1);
+    assert_eq!(body.matches(&start_marker(run_id)).count(), 1);
+    assert_eq!(body.matches(&end_marker(run_id)).count(), 1);
     assert!(body.starts_with("A person's note.\n\nCollapse repeated dashes in slugs"));
     assert!(!body.contains("An old copy."));
+    assert!(body.contains("\nAnother run's.\n"));
     assert!(body.ends_with("Signed off."));
     assert_eq!(body.matches("## Factory run").count(), 1);
 }
@@ -562,8 +588,9 @@ async fn a_lone_or_doubled_marker_leaves_one_section() {
 #[tokio::test]
 async fn only_the_owner_s_comments_are_the_report_s() {
     let github = FakeGithub::default();
-    let forged = "<!-- macro-factory-report-part 1 -->\nWritten by someone else.";
-    let stale = "<!-- macro-factory-report-part 1 -->\nAn older part.";
+    let run_id = RunId::generate();
+    let forged = format!("{}\nWritten by someone else.", part_marker(run_id, 1));
+    let stale = format!("{}\nAn older part.", part_marker(run_id, 1));
     github.state().comments = vec![
         PullRequestComment {
             id: 50,
@@ -584,7 +611,7 @@ async fn only_the_owner_s_comments_are_the_report_s() {
     let request: String = (0..2_500)
         .map(|line| format!("Line {line}: collapse the dashes.\n"))
         .collect();
-    let mut long = input(RunId::generate());
+    let mut long = input(run_id);
     long.request = &request;
 
     steps(&github, &FakeRepo::default())
@@ -603,8 +630,10 @@ async fn only_the_owner_s_comments_are_the_report_s() {
     assert!(bodies[1].contains("The rest of the request:"));
     assert_eq!(
         bodies[2],
-        "<!-- macro-factory-report-part 1 -->\n\
-         (Nothing more: the whole report fits in the description now.)"
+        format!(
+            "{}\n(Nothing more: the whole report fits in the description now.)",
+            part_marker(run_id, 1)
+        )
     );
     assert_eq!(state.comment_writes, 2);
 }
