@@ -176,8 +176,16 @@ async fn exclude(top: &Path) -> rootcause::Result<()> {
 /// Whether `path` is a worktree of the repository checked out at `top`.
 async fn is_worktree_of(path: &Path, top: &Path) -> bool {
     let (Ok(ours), Ok(theirs)) = (
-        git(path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await,
-        git(top, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await,
+        git(
+            path,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )
+        .await,
+        git(
+            top,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )
+        .await,
     ) else {
         return false;
     };

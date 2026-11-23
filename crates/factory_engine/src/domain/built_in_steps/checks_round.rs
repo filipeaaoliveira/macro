@@ -57,10 +57,10 @@ use crate::domain::checks::{
     kept_output,
 };
 use crate::domain::flow::StepName;
+use crate::domain::models::run_branch;
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
-use crate::domain::models::run_branch;
 use crate::domain::review_rounds::fix_answers;
 use crate::domain::setup::{RepositorySetup, SETUP_FILE, redacted};
 
@@ -818,7 +818,13 @@ where
                         "the run's branch `{branch}` is still at `{head}`, the commit review round {} reviewed",
                         round.round
                     )
-                } else if self.pull_requests.check_changes(&input, &head).await?.merge_base == head {
+                } else if self
+                    .pull_requests
+                    .check_changes(&input, &head)
+                    .await?
+                    .merge_base
+                    == head
+                {
                     let base = input.base_commit.map_or_else(
                         || {
                             input

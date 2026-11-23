@@ -558,10 +558,7 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
                 // A runtime that shares one checkout among its sessions
                 // gives the Run's branch a worktree of its own there, which
                 // the Run's Steps share and no other Run does.
-                work_branch: task
-                    .repo_url
-                    .as_ref()
-                    .map(|_| run_branch(task.key.run_id)),
+                work_branch: task.repo_url.as_ref().map(|_| run_branch(task.key.run_id)),
             })
             .await;
         match prepared {

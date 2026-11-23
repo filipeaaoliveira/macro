@@ -12,7 +12,9 @@ async fn repositories() -> Repositories {
     let root = tempfile::tempdir().unwrap();
     let seed = root.path().join("seed");
     std::fs::create_dir(&seed).unwrap();
-    git(&seed, &["init", "--initial-branch=main"]).await.unwrap();
+    git(&seed, &["init", "--initial-branch=main"])
+        .await
+        .unwrap();
     identify(&seed).await;
     std::fs::write(seed.join("file"), "first").unwrap();
     git(&seed, &["add", "file"]).await.unwrap();
@@ -76,15 +78,12 @@ async fn commit_and_push(worktree: &Path, branch: &str, file: &str) {
 
 /// The subjects of the commits `branch` of `origin` has beyond `main`.
 async fn subjects(origin: &Path, branch: &str) -> Vec<String> {
-    git(
-        origin,
-        &["log", "--format=%s", &format!("main..{branch}")],
-    )
-    .await
-    .unwrap()
-    .lines()
-    .map(str::to_owned)
-    .collect()
+    git(origin, &["log", "--format=%s", &format!("main..{branch}")])
+        .await
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect()
 }
 
 #[tokio::test]
