@@ -2,17 +2,24 @@
 //! started, and the Steps before its own, with their Gates and review
 //! rounds, and names the Run it retries.
 
+use chrono::{TimeDelta, Utc};
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::{entry, insert, julia, key, outcome, planner, session};
+use crate::domain::evaluation::EvaluationRepository as _;
+use crate::domain::insights::{InsightsScope, RunInsightsRepository as _};
 use crate::domain::models::{NewRetry, QueueHold, RetryInsert, Run, RunId, RunOutcome, RunRetry};
 use crate::domain::ports::RunRepository;
+use crate::domain::quality::{QualityScope, RunQualityRepository as _};
 use crate::domain::review_rounds::ReviewRoundRepository as _;
 use crate::outbound::pg_run_repository::PgRunRepository;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
+
+/// A session the plan's Step left for the one it ended in.
+const LEFT_SESSION: Uuid = Uuid::from_u128(0x5e55);
 
 /// Keep the retry `retry`, with no Queue limit.
 async fn retry(repo: &PgRunRepository, retry: NewRetry) -> RetryInsert {
@@ -52,6 +59,14 @@ async fn lost_at_fix(pool: &PgPool, repo: &PgRunRepository) -> RunId {
     repo.claim_session(key(id, 1), session(), &planner(), &[outcome("done")])
         .await
         .expect("claim");
+    sqlx::query!(
+        "INSERT INTO factory_step_used_session (run_id, seq, session_id) VALUES ($1, 1, $2)",
+        id.as_uuid(),
+        LEFT_SESSION,
+    )
+    .execute(pool)
+    .await
+    .expect("keep the session it left");
     repo.end_step(key(id, 1), &outcome("done"), "The plan")
         .await
         .expect("end");
@@ -97,6 +112,14 @@ async fn lost_at_fix(pool: &PgPool, repo: &PgRunRepository) -> RunId {
     .execute(pool)
     .await
     .expect("keep its blocker");
+    sqlx::query!(
+        "INSERT INTO factory_reviewer_answer (run_id, seq, round_seq, read_at) \
+         VALUES ($1, 3, 3, now())",
+        id.as_uuid(),
+    )
+    .execute(pool)
+    .await
+    .expect("keep its reviewer's answer");
     repo.end_step(key(id, 3), &outcome("changes"), "One blocker")
         .await
         .expect("end");
@@ -131,6 +154,7 @@ async fn a_retry_keeps_the_steps_before_its_own_and_names_the_run_it_retries(poo
             id,
             retried: lost,
             first_seq: 4,
+            created_in_person: false,
         },
     )
     .await
@@ -191,6 +215,23 @@ async fn a_retry_keeps_the_steps_before_its_own_and_names_the_run_it_retries(poo
         .expect("the approval is kept");
     assert_eq!(answer.note.as_deref(), Some("Keep it small"));
     assert_eq!(steps[0].agent, Some(super::agent("primary")));
+    let mut sessions = repo.step_sessions(id).await.expect("read");
+    let mut kept_sessions = repo.step_sessions(lost).await.expect("read");
+    sessions.sort();
+    kept_sessions.sort();
+    assert!(sessions.contains(&LEFT_SESSION), "{sessions:?}");
+    assert_eq!(
+        sessions, kept_sessions,
+        "the budget counts the kept sessions"
+    );
+    let answered = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "count!" FROM factory_reviewer_answer WHERE run_id = $1"#,
+        id.as_uuid(),
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(answered, 1);
     let rounds = repo.review_rounds(id).await.expect("read");
     assert_eq!(rounds.len(), 1);
     assert_eq!(rounds[0].seq, 3);
@@ -224,6 +265,7 @@ async fn a_run_is_retried_once_once_ended_and_retries_keep_its_branch(pool: PgPo
             id: RunId::generate(),
             retried: running,
             first_seq: 1,
+            created_in_person: false,
         },
     )
     .await;
@@ -233,6 +275,7 @@ async fn a_run_is_retried_once_once_ended_and_retries_keep_its_branch(pool: PgPo
             id: RunId::generate(),
             retried: RunId::from_uuid(Uuid::now_v7()),
             first_seq: 1,
+            created_in_person: false,
         },
     )
     .await;
@@ -242,6 +285,7 @@ async fn a_run_is_retried_once_once_ended_and_retries_keep_its_branch(pool: PgPo
             id: first,
             retried: lost,
             first_seq: 4,
+            created_in_person: false,
         },
     )
     .await;
@@ -251,6 +295,7 @@ async fn a_run_is_retried_once_once_ended_and_retries_keep_its_branch(pool: PgPo
             id: RunId::generate(),
             retried: lost,
             first_seq: 4,
+            created_in_person: false,
         },
     )
     .await;
@@ -261,6 +306,7 @@ async fn a_run_is_retried_once_once_ended_and_retries_keep_its_branch(pool: PgPo
             id: RunId::generate(),
             retried: first,
             first_seq: 4,
+            created_in_person: false,
         },
     )
     .await;
@@ -297,6 +343,7 @@ async fn a_retry_past_the_queue_limit_keeps_nothing(pool: PgPool) {
                 id: RunId::generate(),
                 retried: lost,
                 first_seq: 4,
+                created_in_person: false,
             },
             QueueHold {
                 limit: Some(0),
@@ -312,4 +359,92 @@ async fn a_retry_past_the_queue_limit_keeps_nothing(pool: PgPool) {
         .await
         .expect("count");
     assert_eq!(runs, 1);
+}
+
+/// What a retry kept counts once, on the Run that made it: Insights, the
+/// quality view and the evaluation tallies leave a retry's kept Steps,
+/// Gates, sessions and review rounds out, and count a Run and its retry as
+/// one attempt of their arm, the retry.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn what_a_retry_kept_counts_once_on_the_run_that_made_it(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let lost = lost_at_fix(&pool, &repo).await;
+    let id = RunId::generate();
+    let RetryInsert::Inserted(_) = retry(
+        &repo,
+        NewRetry {
+            id,
+            retried: lost,
+            first_seq: 4,
+            created_in_person: false,
+        },
+    )
+    .await
+    else {
+        panic!("an ended run is retried");
+    };
+    repo.start_step(key(id, 4), &entry("fix"), 1)
+        .await
+        .expect("start");
+    repo.end_step(key(id, 4), &outcome("done"), "Fixed it")
+        .await
+        .expect("end");
+    repo.end_run(id, RunOutcome::Success).await.expect("end");
+    let now = Utc::now();
+    let scope = InsightsScope {
+        user_id: julia(),
+        from: now - TimeDelta::days(1),
+        to: now + TimeDelta::days(1),
+        flow: None,
+        cap: 1000,
+    };
+
+    let insights = repo.read_insights(&scope).await.expect("insights");
+    let quality = repo
+        .read_quality(&QualityScope {
+            runs: scope.clone(),
+            repository: None,
+        })
+        .await
+        .expect("quality");
+    let evaluation = repo.read_evaluation(&scope).await.expect("evaluation");
+
+    let steps: Vec<(&str, u32)> = insights
+        .entries
+        .iter()
+        .map(|entry| (entry.entry.as_str(), entry.steps))
+        .collect();
+    assert_eq!(
+        steps,
+        [("fix", 2), ("plan", 1), ("review", 1), ("write", 1)],
+        "each kept step counts once"
+    );
+    let retry_sessions = insights
+        .sessions
+        .iter()
+        .filter(|session| session.run_id == id)
+        .count();
+    assert_eq!(
+        retry_sessions, 0,
+        "the kept sessions count on the retried run"
+    );
+    let retry_quality = quality
+        .runs
+        .iter()
+        .find(|run| run.run.id == id)
+        .expect("the retry");
+    assert!(retry_quality.sessions.is_empty());
+    assert!(!retry_quality.person_answered);
+    assert_eq!(quality.review_rounds.len(), 1);
+    assert_eq!(quality.blockers.len(), 1);
+    assert_eq!(quality.reviewers.len(), 1);
+    let arms: Vec<(u32, u32)> = evaluation
+        .arms
+        .iter()
+        .map(|arm| (arm.runs, arm.succeeded))
+        .collect();
+    assert_eq!(arms, [(1, 1)], "a run and its retry are one attempt");
 }

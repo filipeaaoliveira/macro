@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT run_id, seq, started_at, outcome\n            FROM factory_review_round\n            WHERE run_id = ANY($1)\n            ORDER BY run_id, seq\n            ",
+  "query": "\n            SELECT run_id, seq, started_at, outcome\n            FROM factory_review_round rr\n            WHERE run_id = ANY($1) AND seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = rr.run_id)\n            ORDER BY run_id, seq\n            ",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       true
     ]
   },
-  "hash": "a1e919a044289f51e71ad893742cb86be48ec4065e07d07b687496ccb8715412"
+  "hash": "b064153e527516e06a1fe3b9a4a4a84a8bc04a6de20f9ad9c779723adf0b2549"
 }

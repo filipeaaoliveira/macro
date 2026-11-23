@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO factory_run (\n                id, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,\n                created_in_person, control_file_patterns, control_files_team_id, tampered_files,\n                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,\n                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,\n                definition_commit, definition_agents, flow_definition, flow_asks,\n                definition_evaluation, token_budget, known_ci_flakes, retried_from, branch_run_id,\n                first_seq\n            )\n            SELECT\n                $1, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,\n                created_in_person, control_file_patterns, control_files_team_id, tampered_files,\n                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,\n                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,\n                definition_commit, definition_agents, flow_definition, flow_asks,\n                definition_evaluation, token_budget, known_ci_flakes, id, COALESCE(branch_run_id, id),\n                $3\n            FROM factory_run\n            WHERE id = $2\n            RETURNING\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq\n            ",
+  "query": "\n            INSERT INTO factory_run (\n                id, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,\n                created_in_person, control_file_patterns, control_files_team_id, tampered_files,\n                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,\n                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,\n                definition_commit, definition_agents, flow_definition, flow_asks,\n                definition_evaluation, token_budget, known_ci_flakes, retried_from, branch_run_id,\n                first_seq\n            )\n            SELECT\n                $1, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,\n                $4, control_file_patterns, control_files_team_id, tampered_files,\n                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,\n                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,\n                definition_commit, definition_agents, flow_definition, flow_asks,\n                definition_evaluation, token_budget, known_ci_flakes, id, COALESCE(branch_run_id, id),\n                $3\n            FROM factory_run\n            WHERE id = $2\n            RETURNING\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq\n            ",
   "describe": {
     "columns": [
       {
@@ -188,7 +188,8 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Int4"
+        "Int4",
+        "Bool"
       ]
     },
     "nullable": [
@@ -230,5 +231,5 @@
       true
     ]
   },
-  "hash": "0ecb3f14a1ca1fa43a9fb20a162420e4344e1eb6e82a87bee420f1e61143c598"
+  "hash": "6f8713eab758db052bb7f055b142fe8a1572206f5db55674ae78b8c7dd246d23"
 }

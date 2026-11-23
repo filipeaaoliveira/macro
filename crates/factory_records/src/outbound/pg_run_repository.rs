@@ -894,7 +894,7 @@ impl RunRepository for PgRunRepository {
             )
             SELECT
                 $1, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,
-                created_in_person, control_file_patterns, control_files_team_id, tampered_files,
+                $4, control_file_patterns, control_files_team_id, tampered_files,
                 named_control_files, control_files_unlisted, standing_rules, standing_rules_source,
                 standing_rules_project_id, project_id, pull_request_url, definition_repo_url,
                 definition_commit, definition_agents, flow_definition, flow_asks,
@@ -913,6 +913,7 @@ impl RunRepository for PgRunRepository {
             retry.id.as_uuid(),
             retry.retried.as_uuid(),
             first_seq,
+            retry.created_in_person,
         )
         .fetch_one(&mut *transaction)
         .await;
@@ -981,6 +982,21 @@ impl RunRepository for PgRunRepository {
             retry.id.as_uuid(),
             retry.retried.as_uuid(),
             first_seq,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        // The sessions they left for new ones, which the token budget
+        // counts with theirs.
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_step_used_session (run_id, seq, session_id)
+            SELECT $1, u.seq, u.session_id
+            FROM factory_step_used_session u
+            JOIN factory_step s ON s.run_id = $1 AND s.seq = u.seq
+            WHERE u.run_id = $2
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
         )
         .execute(&mut *transaction)
         .await?;
@@ -1056,6 +1072,26 @@ impl RunRepository for PgRunRepository {
                 AND EXISTS (
                     SELECT 1 FROM factory_review_round r
                     WHERE r.run_id = $1 AND r.seq = f.round_seq
+                )
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        // Which of their reviewers' answers were read, as the rounds show.
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_reviewer_answer (run_id, seq, round_seq, read_at)
+            SELECT $1, a.seq, a.round_seq, a.read_at
+            FROM factory_reviewer_answer a
+            WHERE a.run_id = $2
+                AND EXISTS (
+                    SELECT 1 FROM factory_step s WHERE s.run_id = $1 AND s.seq = a.seq
+                )
+                AND EXISTS (
+                    SELECT 1 FROM factory_review_round r
+                    WHERE r.run_id = $1 AND r.seq = a.round_seq
                 )
             "#,
             retry.id.as_uuid(),

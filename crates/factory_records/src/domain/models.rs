@@ -641,6 +641,10 @@ pub struct NewRetry {
     /// it that ended are kept as its own, with their answered Gates and the
     /// review rounds that ended before it.
     pub first_seq: u16,
+    /// Whether its owner retried it in their own signed-in session, from
+    /// an account that is not an agent's: only then does its request ask
+    /// for the Control Files it names, whoever created the Run it retries.
+    pub created_in_person: bool,
 }
 
 /// What keeping a retry came to.

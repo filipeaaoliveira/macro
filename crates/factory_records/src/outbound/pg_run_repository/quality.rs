@@ -237,7 +237,8 @@ impl RunQualityRepository for PgRunRepository {
                 EXISTS (SELECT 1 FROM factory_merge m WHERE m.run_id = r.id) AS "merged!",
                 EXISTS (
                     SELECT 1 FROM factory_gate g
-                    WHERE g.run_id = r.id AND g.answer IS NOT NULL AND g.rule IS NULL
+                    WHERE g.run_id = r.id AND g.seq >= COALESCE(r.first_seq, 1)
+                        AND g.answer IS NOT NULL AND g.rule IS NULL
                         AND NOT g.by_stand_in AND g.agent_session_id IS NULL
                 ) AS "person_answered!",
                 EXISTS (SELECT 1 FROM factory_step_steer t WHERE t.run_id = r.id) AS "steered!"
@@ -311,6 +312,11 @@ impl RunQualityRepository for PgRunRepository {
         }
         let ids: Vec<Uuid> = runs.iter().map(|run| run.run.id.as_uuid()).collect();
 
+        // A retry's Steps before its own (`first_seq`) are the retried
+        // Run's, kept for its later Steps to read: they, their Gates,
+        // sessions and review rounds count once, on the Run that took them,
+        // so the reads below leave them out.
+        //
         // The Runs' agent sessions and the bot that ran each, through
         // `factory_step`'s primary key; a Step that went on after a question
         // shares the asking Step's session, which counts once. The sessions
@@ -325,19 +331,19 @@ impl RunQualityRepository for PgRunRepository {
                 (array_agg(bot_id) FILTER (WHERE bot_id IS NOT NULL))[1] AS bot_id
             FROM (
                 (
-                    SELECT run_id, session_id, bot_id
+                    SELECT run_id, seq, session_id, bot_id
                     FROM factory_step
                     WHERE run_id = ANY($1)
                     OFFSET 0
                 )
                 UNION ALL
-                SELECT u.run_id, u.session_id,
+                SELECT u.run_id, u.seq, u.session_id,
                     CASE WHEN u.session_id = s.session_id THEN s.bot_id END
                 FROM factory_step_used_session u
                 JOIN factory_step s ON s.run_id = u.run_id AND s.seq = u.seq
                 WHERE u.run_id = ANY($1)
             ) steps
-            WHERE session_id IS NOT NULL
+            WHERE session_id IS NOT NULL AND seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = steps.run_id)
             GROUP BY run_id, session_id
             "#,
             &ids,
@@ -416,8 +422,8 @@ impl RunQualityRepository for PgRunRepository {
         let review_rounds = sqlx::query!(
             r#"
             SELECT run_id, seq, started_at, outcome
-            FROM factory_review_round
-            WHERE run_id = ANY($1)
+            FROM factory_review_round rr
+            WHERE run_id = ANY($1) AND seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = rr.run_id)
             ORDER BY run_id, seq
             "#,
             &ids,
@@ -439,7 +445,7 @@ impl RunQualityRepository for PgRunRepository {
             SELECT a.run_id, a.seq, a.round_seq, s.role, s.agent
             FROM factory_reviewer_answer a
             JOIN factory_step s ON s.run_id = a.run_id AND s.seq = a.seq
-            WHERE a.run_id = ANY($1)
+            WHERE a.run_id = ANY($1) AND a.seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = a.run_id)
             ORDER BY a.run_id, a.seq
             "#,
             &ids,
@@ -462,8 +468,9 @@ impl RunQualityRepository for PgRunRepository {
             SELECT
                 run_id, seq, round_seq, problem, fix_status, ruling,
                 kind = 'dismissed' AS "dismissed!"
-            FROM factory_review_finding
+            FROM factory_review_finding f
             WHERE run_id = ANY($1) AND kind IN ('blocker', 'dismissed')
+                AND seq >= (SELECT COALESCE(k.first_seq, 1) FROM factory_run k WHERE k.id = f.run_id)
             ORDER BY run_id, seq, place
             "#,
             &ids,
