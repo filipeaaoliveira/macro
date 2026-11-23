@@ -510,6 +510,10 @@ export const factoryExcluded = [
   'getFactoryDefinition',
   'getFactoryInsights',
   'getFactoryStandingRules',
+  // A Run's Scorer results and the person's labels on them calibrate the
+  // Scorer from Insights; the label is the person's own judgment.
+  'getFactoryRunScores',
+  'labelFactoryRunScore',
   // The board is the web app's page of Runs across tasks; an agent reads a
   // task's Runs and those waiting on the person.
   'listFactoryBoard',
