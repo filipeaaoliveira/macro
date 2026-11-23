@@ -46,7 +46,8 @@ use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     DefinitionPullRequest, FinishedJob, GITHUB_COMMITTER, HeadChecks, Merging, OpenPullRequest,
-    Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks, run_branch,
+    Opening, PullRequest, PullRequestComment, PullRequestState, RepositoryAccess, RequiredChecks,
+    run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -1729,6 +1730,18 @@ pub(crate) struct FakeGithubState {
     pub(crate) open_refusal: Option<String>,
     /// The descriptions pull requests were opened with.
     pub(crate) bodies: Vec<String>,
+    /// The pull request's description now: the one it was opened with,
+    /// as edited since.
+    pub(crate) description: Option<String>,
+    /// The descriptions it was edited to, in order.
+    pub(crate) description_edits: Vec<String>,
+    /// The comments in its conversation, oldest first.
+    pub(crate) comments: Vec<PullRequestComment>,
+    /// How many comments were added or edited.
+    pub(crate) comment_writes: usize,
+    /// Whether editing its description or comments fails, as GitHub
+    /// refusing the owner does.
+    pub(crate) text_edits_fail: bool,
     /// The head commits merges were asked for, in order.
     pub(crate) merges: Vec<String>,
     /// GitHub's reason to refuse a merge, if it does.
@@ -2160,6 +2173,7 @@ impl PullRequests for FakeGithub {
         }
         state.opened += 1;
         state.bodies.push(pull_request.body.clone());
+        state.description = Some(pull_request.body.clone());
         state.pull_request = Some(PullRequest {
             number: 7,
             url: format!("{}/pull/7", repository.url()),
@@ -2168,6 +2182,82 @@ impl PullRequests for FakeGithub {
             merge_commit: None,
         });
         Ok(Opening::Opened)
+    }
+
+    async fn pull_request_body(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+    ) -> Result<Option<String>, FakeGithubError> {
+        Ok(self.state().description.clone())
+    }
+
+    async fn edit_pull_request_body(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+        body: &str,
+    ) -> Result<(), FakeGithubError> {
+        let mut state = self.state();
+        if state.text_edits_fail {
+            return Err(FakeGithubError::Refused);
+        }
+        state.description = Some(body.to_string());
+        state.description_edits.push(body.to_string());
+        Ok(())
+    }
+
+    async fn pull_request_comments(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+    ) -> Result<Vec<PullRequestComment>, FakeGithubError> {
+        Ok(self.state().comments.clone())
+    }
+
+    async fn comment_on_pull_request(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+        body: &str,
+    ) -> Result<(), FakeGithubError> {
+        let mut state = self.state();
+        if state.text_edits_fail {
+            return Err(FakeGithubError::Refused);
+        }
+        let id = 100 + u64::try_from(state.comments.len()).expect("few comments");
+        state.comments.push(PullRequestComment {
+            id,
+            body: body.to_string(),
+        });
+        state.comment_writes += 1;
+        Ok(())
+    }
+
+    async fn edit_pull_request_comment(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        comment_id: u64,
+        body: &str,
+    ) -> Result<(), FakeGithubError> {
+        let mut state = self.state();
+        if state.text_edits_fail {
+            return Err(FakeGithubError::Refused);
+        }
+        if let Some(comment) = state
+            .comments
+            .iter_mut()
+            .find(|comment| comment.id == comment_id)
+        {
+            comment.body = body.to_string();
+        }
+        state.comment_writes += 1;
+        Ok(())
     }
 
     async fn merge(

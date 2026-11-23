@@ -19,8 +19,8 @@ use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
-    RequiredChecks, run_branch,
+    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState, RepositoryAccess,
+    RequiredCheck, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -652,6 +652,93 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             GithubOpenPullRequestOutcome::Opened(_) => Opening::Opened,
             GithubOpenPullRequestOutcome::Rejected(why) => Opening::Refused(why),
         })
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn pull_request_body(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+    ) -> Result<Option<String>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .pull_request_body(&token, repository.owner(), repository.name(), number)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner, body))]
+    async fn edit_pull_request_body(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        body: &str,
+    ) -> Result<(), GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .edit_pull_request_body(&token, repository.owner(), repository.name(), number, body)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn pull_request_comments(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+    ) -> Result<Vec<PullRequestComment>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let listed = self
+            .github
+            .list_issue_comments(&token, repository.owner(), repository.name(), number)
+            .await?;
+        Ok(listed
+            .items
+            .into_iter()
+            .map(|comment| PullRequestComment {
+                id: comment.id,
+                body: comment.body,
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(err, skip(self, owner, body))]
+    async fn comment_on_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        body: &str,
+    ) -> Result<(), GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .create_issue_comment(&token, repository.owner(), repository.name(), number, body)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner, body))]
+    async fn edit_pull_request_comment(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        comment_id: u64,
+        body: &str,
+    ) -> Result<(), GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .edit_issue_comment(
+                &token,
+                repository.owner(),
+                repository.name(),
+                comment_id,
+                body,
+            )
+            .await?)
     }
 
     #[tracing::instrument(err, skip(self, owner))]

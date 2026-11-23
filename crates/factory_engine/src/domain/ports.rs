@@ -35,9 +35,9 @@ use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
     BranchUpdating, CodeRepository, CommitMade, ControlFilesSettings, DefinitionPullRequest,
     DefinitionSettings, FactoryError, FinishedJob, FlowSummary, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
-    RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError,
-    StepInput, StepReport, StepRequest, StepStart,
+    OpenPullRequest, Opening, PullRequest, PullRequestComment, RepositoryAccess, RequiredChecks,
+    RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
+    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -431,6 +431,54 @@ pub trait PullRequests: Send + Sync + 'static {
         repository: &CodeRepository,
         pull_request: &OpenPullRequest,
     ) -> impl Future<Output = Result<Opening, Self::Err>> + Send;
+
+    /// The description of pull request `number` of `repository`; none
+    /// when it has none.
+    fn pull_request_body(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// Replace the description of pull request `number` of `repository`
+    /// with `body`.
+    fn edit_pull_request_body(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        body: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The comments in the conversation of pull request `number` of
+    /// `repository`, oldest first.
+    fn pull_request_comments(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+    ) -> impl Future<Output = Result<Vec<PullRequestComment>, Self::Err>> + Send;
+
+    /// Add `body` to the conversation of pull request `number` of
+    /// `repository`.
+    fn comment_on_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        body: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Replace the text of the comment `comment_id` of `repository` with
+    /// `body`.
+    fn edit_pull_request_comment(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        comment_id: u64,
+        body: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Ask GitHub to merge pull request `number` of `repository` while its
     /// head is the commit `head_sha`.

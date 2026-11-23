@@ -569,6 +569,15 @@ pub struct OpenPullRequest {
     pub body: String,
 }
 
+/// A comment in a pull request's conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestComment {
+    /// GitHub's id of the comment, which edits it.
+    pub id: u64,
+    /// Its text.
+    pub body: String,
+}
+
 /// What asking GitHub to open a pull request came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Opening {
