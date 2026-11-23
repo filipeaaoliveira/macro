@@ -24,12 +24,32 @@ pub struct GithubIssueComment {
     pub id: u64,
     /// Its text; empty when GitHub gives none.
     pub body: String,
+    /// The id of the GitHub account that wrote it; none when GitHub names
+    /// none, as for a deleted account.
+    pub author_id: Option<u64>,
+}
+
+/// A pull request's description and who opened it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubPullRequestText {
+    /// Its description; none when it has none.
+    pub body: Option<String>,
+    /// The id of the GitHub account that opened it; none when GitHub names
+    /// none.
+    pub author_id: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+struct Account {
+    id: u64,
 }
 
 #[derive(serde::Deserialize)]
 struct PullRequestBody {
     #[serde(default)]
     body: Option<String>,
+    #[serde(default)]
+    user: Option<Account>,
 }
 
 #[derive(serde::Deserialize)]
@@ -37,6 +57,8 @@ struct IssueCommentResponse {
     id: u64,
     #[serde(default)]
     body: Option<String>,
+    #[serde(default)]
+    user: Option<Account>,
 }
 
 /// The refusal of a request whose owner or repository is not a name GitHub
@@ -91,15 +113,15 @@ impl GithubOauthImpl {
         Err(refusal(status).unwrap_or_else(|| unexpected(status, &headers, text, context)))
     }
 
-    /// The description of pull request `number`; none when it has none.
+    /// The description of pull request `number`, and who opened it.
     #[tracing::instrument(skip(self, access_token), err)]
-    pub async fn pull_request_body(
+    pub async fn pull_request_text(
         &self,
         access_token: &str,
         owner: &str,
         repo: &str,
         number: u64,
-    ) -> Result<Option<String>, GithubError> {
+    ) -> Result<GithubPullRequestText, GithubError> {
         checked(owner, repo)?;
         let read: PullRequestBody = self
             .read(
@@ -109,7 +131,10 @@ impl GithubOauthImpl {
                 "failed to read a pull request's description",
             )
             .await?;
-        Ok(read.body)
+        Ok(GithubPullRequestText {
+            body: read.body,
+            author_id: read.user.map(|user| user.id),
+        })
     }
 
     /// Replace the description of pull request `number` with `body`.
@@ -154,6 +179,7 @@ impl GithubOauthImpl {
                     .map(|comment| GithubIssueComment {
                         id: comment.id,
                         body: comment.body.unwrap_or_default(),
+                        author_id: comment.user.map(|user| user.id),
                     })
                     .collect()
             },

@@ -14,12 +14,16 @@ fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) 
 
 #[tokio::test]
 async fn a_pull_request_s_description_is_read_and_none_when_empty() {
-    let (server, client) = answering("200 OK", r#"{"number":7,"body":"Why it changes"}"#);
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"number":7,"body":"Why it changes","user":{"id":42,"login":"julia"}}"#,
+    );
     let body = client
-        .pull_request_body("token", "macro", "app", 7)
+        .pull_request_text("token", "macro", "app", 7)
         .await
         .unwrap();
-    assert_eq!(body.as_deref(), Some("Why it changes"));
+    assert_eq!(body.body.as_deref(), Some("Why it changes"));
+    assert_eq!(body.author_id, Some(42));
     assert!(
         server
             .finish()
@@ -28,10 +32,11 @@ async fn a_pull_request_s_description_is_read_and_none_when_empty() {
 
     let (server, client) = answering("200 OK", r#"{"number":7,"body":null}"#);
     let body = client
-        .pull_request_body("token", "macro", "app", 7)
+        .pull_request_text("token", "macro", "app", 7)
         .await
         .unwrap();
-    assert_eq!(body, None);
+    assert_eq!(body.body, None);
+    assert_eq!(body.author_id, None);
     server.finish();
 }
 
@@ -53,7 +58,7 @@ async fn a_description_is_replaced_with_a_patch_of_its_body() {
 async fn comments_are_listed_added_and_edited() {
     let (server, client) = answering(
         "200 OK",
-        r#"[{"id":11,"body":"First"},{"id":12,"body":null}]"#,
+        r#"[{"id":11,"body":"First","user":{"id":42}},{"id":12,"body":null,"user":null}]"#,
     );
     let listed = client
         .list_issue_comments("token", "macro", "app", 7)
@@ -65,10 +70,12 @@ async fn comments_are_listed_added_and_edited() {
             GithubIssueComment {
                 id: 11,
                 body: "First".to_string(),
+                author_id: Some(42),
             },
             GithubIssueComment {
                 id: 12,
                 body: String::new(),
+                author_id: None,
             },
         ]
     );
@@ -108,5 +115,48 @@ async fn a_refused_edit_is_forbidden() {
         .await;
 
     assert!(matches!(edited, Err(GithubError::Forbidden)));
+    server.finish();
+}
+
+/// Comments past one page are read from the next.
+#[tokio::test]
+async fn comments_past_one_page_are_read() {
+    let full: Vec<String> = (1..=100)
+        .map(|id| format!(r#"{{"id":{id},"body":"c","user":{{"id":42}}}}"#))
+        .collect();
+    let server = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: format!("[{}]", full.join(",")),
+        },
+        MockResponse {
+            status: "200 OK",
+            body: r#"[{"id":101,"body":"last","user":{"id":42}}]"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let listed = client
+        .list_issue_comments("token", "macro", "app", 7)
+        .await
+        .unwrap();
+
+    assert_eq!(listed.items.len(), 101);
+    assert_eq!(listed.items[100].body, "last");
+    assert!(listed.complete);
+    let requests = server.finish_all();
+    assert!(requests[1].contains("per_page=100&page=2"));
+}
+
+/// Editing a comment someone deleted is a refusal, not an outage.
+#[tokio::test]
+async fn editing_a_deleted_comment_is_refused() {
+    let (server, client) = answering("404 Not Found", r#"{"message":"Not Found"}"#);
+
+    let edited = client
+        .edit_issue_comment("token", "macro", "app", 13, "Part 1")
+        .await;
+
+    assert!(matches!(edited, Err(GithubError::RepositoryUnavailable)));
     server.finish();
 }
