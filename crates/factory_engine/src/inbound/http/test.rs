@@ -798,7 +798,7 @@ async fn someone_else_s_run_is_missing_to_them() {
 
 /// Only a Run's owner retries it, and only once it ended: someone else's
 /// Run is missing to them, and a running one, or one retried already, is a
-/// conflict.
+/// conflict whose code says which.
 #[tokio::test]
 async fn a_retry_reaches_only_its_owner_s_ended_run() {
     let repo = FakeRepo::default();
@@ -814,16 +814,20 @@ async fn a_retry_reaches_only_its_owner_s_ended_run() {
             ))
             .await
             .expect("response")
-            .status()
     };
 
     let eve_retries = retry(records.clone(), "eve").await;
     let alice_retries_a_running_run = retry(records, "alice").await;
     let retried_again = retry(router(|| FactoryError::AlreadyRetried).0, "alice").await;
 
-    assert_eq!(eve_retries, StatusCode::NOT_FOUND);
-    assert_eq!(alice_retries_a_running_run, StatusCode::CONFLICT);
-    assert_eq!(retried_again, StatusCode::CONFLICT);
+    assert_eq!(eve_retries.status(), StatusCode::NOT_FOUND);
+    assert_eq!(alice_retries_a_running_run.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        body(alice_retries_a_running_run).await["code"],
+        "notRetriable"
+    );
+    assert_eq!(retried_again.status(), StatusCode::CONFLICT);
+    assert_eq!(body(retried_again).await["code"], "alreadyRetried");
     assert!(repo.runs.lock().expect("runs").len() == 1);
 }
 
