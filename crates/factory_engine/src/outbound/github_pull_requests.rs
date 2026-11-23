@@ -918,4 +918,87 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             GithubBranchDeletion::Missing => BranchDeletion::Missing,
         })
     }
+
+    #[tracing::instrument(err, skip(self, owner, branch), fields(branch = %branch.name))]
+    async fn create_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &crate::domain::models::NewBranch,
+    ) -> Result<crate::domain::models::BranchCreation, GithubPullRequestsErr> {
+        use crate::domain::models::BranchCreation;
+        use github::outbound::github_oauth_client::{GithubBranchCreation, GithubNewBranch};
+
+        let token = self.token(owner).await?;
+        let files: Vec<(&str, &str)> = branch
+            .files
+            .iter()
+            .map(|(path, text)| (path.as_str(), text.as_str()))
+            .collect();
+        let creation = self
+            .github
+            .create_branch_with_files(
+                &token,
+                repository.owner(),
+                repository.name(),
+                GithubNewBranch {
+                    name: &branch.name,
+                    base_commit: &branch.base_commit,
+                    message: &branch.message,
+                    files: &files,
+                },
+            )
+            .await?;
+        Ok(match creation {
+            GithubBranchCreation::Created => BranchCreation::Created,
+            GithubBranchCreation::Exists => BranchCreation::Exists,
+            GithubBranchCreation::Refused(why) => BranchCreation::Refused(why),
+        })
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn branch_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<Option<crate::domain::models::BranchPullRequest>, GithubPullRequestsErr> {
+        use crate::domain::models::BranchPullRequest;
+
+        let token = self.token(owner).await?;
+        let found = self
+            .github
+            .find_pull_request_by_head(&token, repository.owner(), repository.name(), branch)
+            .await?;
+        Ok(found.map(|found| BranchPullRequest {
+            pull_request: DefinitionPullRequest {
+                number: found.number,
+                title: found.title.clone(),
+                url: found.html_url.clone(),
+                draft: found.draft,
+            },
+            state: pull_request(found).state,
+        }))
+    }
+
+    /// A refusal is GitHub's answer to the person, not an outage: no link,
+    /// or one it no longer takes, and a repository hidden from them, mean
+    /// they do not reach it; a refusal of what they asked means they may
+    /// not do it.
+    fn access_refusal(
+        error: &GithubPullRequestsErr,
+    ) -> Option<crate::domain::models::AccessRefusal> {
+        use crate::domain::models::AccessRefusal;
+
+        match error {
+            GithubPullRequestsErr::NotLinked
+            | GithubPullRequestsErr::Github(
+                GithubError::ReauthenticationRequired | GithubError::RepositoryUnavailable,
+            ) => Some(AccessRefusal::Unreachable),
+            GithubPullRequestsErr::Github(GithubError::Forbidden) => {
+                Some(AccessRefusal::NotAllowed)
+            }
+            GithubPullRequestsErr::Token(_) | GithubPullRequestsErr::Github(_) => None,
+        }
+    }
 }

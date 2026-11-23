@@ -545,6 +545,31 @@ pub trait PullRequests: Send + Sync + 'static {
         repository: &CodeRepository,
         run_id: RunId,
     ) -> impl Future<Output = Result<BranchDeletion, Self::Err>> + Send;
+
+    /// Ask GitHub to create `branch` in `repository`, at one commit on top
+    /// of its base commit that writes its files. It only ever creates a
+    /// branch: one of that name already there, the default branch
+    /// included, is left as it is
+    /// ([`BranchCreation::Exists`](crate::domain::models::BranchCreation)).
+    fn create_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &crate::domain::models::NewBranch,
+    ) -> impl Future<Output = Result<crate::domain::models::BranchCreation, Self::Err>> + Send;
+
+    /// The newest pull request from `branch` of `repository`, open or not,
+    /// with its title.
+    fn branch_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<Option<crate::domain::models::BranchPullRequest>, Self::Err>> + Send;
+
+    /// Why `error` is GitHub refusing the person for good, whatever they
+    /// asked; none when it is any other failure, as an outage.
+    fn access_refusal(error: &Self::Err) -> Option<crate::domain::models::AccessRefusal>;
 }
 
 /// Asks the watch of a base branch's checks, which sets and clears its
@@ -1082,6 +1107,19 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: MacroUserIdStr<'static>,
         repo_url: Option<String>,
     ) -> impl Future<Output = Result<DefinitionSettings, FactoryError>> + Send;
+
+    /// Propose `change` to the Factory Definition of `actor`'s team as a
+    /// pull request on its repository, once the Definition reads with it,
+    /// and answer that pull request. The change `change_id` sent again
+    /// answers the pull request it opened, without checking or writing
+    /// anything. The actor must administer the team, which is checked
+    /// before the change is.
+    fn propose_definition_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        change_id: Uuid,
+        change: crate::domain::definition::ProposedChange,
+    ) -> impl Future<Output = Result<DefinitionPullRequest, FactoryError>> + Send;
 
     /// The Standing Rules `actor`'s Runs are created with: their team's
     /// Orchestrator Definition, or the factory's default, and the team's

@@ -34,6 +34,12 @@
 #[cfg(test)]
 mod test;
 
+mod change;
+pub use change::{
+    DefinitionChange, DefinitionChangeError, DefinitionChangeReadError, MAX_CHANGED_FILES,
+    ProposedChange, read_changed_definition,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 

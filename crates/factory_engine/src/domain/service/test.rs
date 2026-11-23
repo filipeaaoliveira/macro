@@ -28,6 +28,7 @@ mod automations;
 mod board;
 mod control_files;
 mod definition;
+mod definition_changes;
 mod evaluation;
 mod gate_owner;
 mod orchestrator;

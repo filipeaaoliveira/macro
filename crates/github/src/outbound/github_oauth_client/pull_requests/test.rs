@@ -117,7 +117,7 @@ async fn refusals_are_told_apart_from_throttling() {
 async fn find_pull_request_by_head_reads_the_newest_of_the_branch_with_its_head() {
     let (server, client) = answering(
         "200 OK",
-        r#"[{"number":12,"html_url":"https://github.com/macro/app/pull/12","state":"closed","merged_at":"2026-11-16T10:00:00Z","merge_commit_sha":"def456","head":{"sha":"abc123"}}]"#,
+        r#"[{"number":12,"title":"Add a flow","draft":true,"html_url":"https://github.com/macro/app/pull/12","state":"closed","merged_at":"2026-11-16T10:00:00Z","merge_commit_sha":"def456","head":{"sha":"abc123"}}]"#,
     );
 
     let found = client
@@ -127,6 +127,8 @@ async fn find_pull_request_by_head_reads_the_newest_of_the_branch_with_its_head(
         .expect("found");
 
     assert_eq!(found.number, 12);
+    assert_eq!(found.title, "Add a flow");
+    assert!(found.draft);
     assert!(found.merged);
     assert_eq!(found.head_sha, "abc123");
     assert!(server.finish().starts_with(

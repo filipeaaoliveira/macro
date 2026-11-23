@@ -200,6 +200,10 @@ where
                 .put(definition::set_definition_handler::<S, Auth>),
         )
         .route(
+            "/settings/definition/changes",
+            post(definition::propose_definition_change_handler::<S, Auth>),
+        )
+        .route(
             "/settings/standing-rules",
             get(standing_rules::get_standing_rules_handler::<S, Auth>)
                 .put(standing_rules::set_standing_rules_handler::<S, Auth>),
@@ -1183,6 +1187,7 @@ impl FactoryError {
             | FactoryError::NoPushAccess
             | FactoryError::UnreachableDefinition
             | FactoryError::InvalidDefinition(_)
+            | FactoryError::InvalidDefinitionChange(_)
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
@@ -1215,7 +1220,10 @@ impl FactoryError {
             | FactoryError::TaskBusy
             | FactoryError::NotSucceeded
             | FactoryError::FiringRepeated
-            | FactoryError::DefinitionNamed => StatusCode::CONFLICT,
+            | FactoryError::DefinitionNamed
+            | FactoryError::NoDefinition
+            | FactoryError::DefinitionChangeNotOpened(_)
+            | FactoryError::DefinitionChangeClosed(_) => StatusCode::CONFLICT,
             FactoryError::TriggerUnavailable | FactoryError::SessionUnreachable => {
                 StatusCode::BAD_GATEWAY
             }
@@ -1258,6 +1266,19 @@ pub enum RunErrorCode {
     /// Their team's Factory Definition sets this: it changes by pull
     /// request.
     DefinitionNamed,
+    /// Their team names no Factory Definition, so there is none to change.
+    NoDefinition,
+    /// The proposed change to their team's Factory Definition is refused:
+    /// the Definition does not read with it, or the change itself is
+    /// wrong; the message says which file and why.
+    InvalidDefinitionChange,
+    /// GitHub did not create the change's branch or open its pull request
+    /// (a rule of the repository, or its branch already there with no pull
+    /// request); the message says why.
+    DefinitionChangeNotOpened,
+    /// The change's pull request was closed without merging; it is not
+    /// opened again.
+    DefinitionChangeClosed,
 }
 
 /// What a refused or failed request answers: a message, and for a refusal
@@ -1285,6 +1306,12 @@ impl FactoryError {
             FactoryError::UnreachableDefinition => Some(RunErrorCode::UnreachableDefinition),
             FactoryError::InvalidDefinition(_) => Some(RunErrorCode::InvalidDefinition),
             FactoryError::DefinitionNamed => Some(RunErrorCode::DefinitionNamed),
+            FactoryError::NoDefinition => Some(RunErrorCode::NoDefinition),
+            FactoryError::InvalidDefinitionChange(_) => Some(RunErrorCode::InvalidDefinitionChange),
+            FactoryError::DefinitionChangeNotOpened(_) => {
+                Some(RunErrorCode::DefinitionChangeNotOpened)
+            }
+            FactoryError::DefinitionChangeClosed(_) => Some(RunErrorCode::DefinitionChangeClosed),
             _ => None,
         }
     }
@@ -1338,6 +1365,7 @@ impl IntoResponse for FactoryError {
         control_files::set_control_files_handler,
         definition::get_definition_handler,
         definition::set_definition_handler,
+        definition::propose_definition_change_handler,
         standing_rules::get_standing_rules_handler,
         standing_rules::set_standing_rules_handler,
         standing_rules::set_project_standing_rules_handler
@@ -1385,6 +1413,7 @@ impl IntoResponse for FactoryError {
         control_files::SetControlFilesRequest,
         DefinitionSettings,
         definition::SetDefinitionRequest,
+        definition::ProposeDefinitionChangeRequest,
         DefinitionRead,
         DefinitionContents,
         DefinitionFlow,

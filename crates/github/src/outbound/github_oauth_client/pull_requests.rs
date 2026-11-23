@@ -72,7 +72,7 @@ pub enum GithubBranchUpdate {
 /// `.` or ends with `.lock`, no `..` or `@{`, no control character, space,
 /// `~`, `^`, `:`, `?`, `*`, `[` or `\`, and not `@`, nor starting with `-`
 /// or ending with `.`.
-fn is_branch_name(branch: &str) -> bool {
+pub(super) fn is_branch_name(branch: &str) -> bool {
     const REFUSED: &[char] = &[' ', '~', '^', ':', '?', '*', '[', '\\'];
 
     let refused_char = branch
@@ -132,6 +132,10 @@ struct RepositoryPermissions {
 #[derive(serde::Deserialize)]
 struct PullRequestListItem {
     number: u64,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    draft: bool,
     html_url: String,
     state: String,
     merged_at: Option<String>,
@@ -706,6 +710,8 @@ impl GithubOauthImpl {
             .next()
             .map(|pull_request| GithubPullRequestHead {
                 number: pull_request.number,
+                title: pull_request.title,
+                draft: pull_request.draft,
                 html_url: pull_request.html_url,
                 state: pull_request.state,
                 merged: pull_request.merged_at.is_some(),
