@@ -54,7 +54,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/evaluation.rs` and
   `src/outbound/pg_run_repository/evaluation.rs`: `EvaluationRepository`,
   Experiment arms, the Agent Rules that chose a Run's Agents, Scorers'
-  judgments, Benchmark suites and trials.
+  judgments and their owners' labels of them, Benchmark suites and trials.
 - `src/domain/merge_queue.rs` and
   `src/outbound/pg_run_repository/merge_queue.rs`: `MergeQueueRepository`,
   each base branch's merge queue and merge turn, the updates of Runs'
@@ -131,8 +131,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261120020000_factory_run_agent_rule.sql`,
   `20261120020100_factory_run_task_tags_unread.sql`,
   `20261120030000_factory_review_dispute.sql`,
-  `20261120030100_factory_review_dispute_validate.sql`), `factory_step_steer`,
-  `factory_run_score`, `factory_run_arm`, `factory_run_agent_rule`,
+  `20261120030100_factory_review_dispute_validate.sql`,
+  `20261123100012_factory_scorer_label.sql`), `factory_step_steer`,
+  `factory_run_score`, `factory_scorer_label`, `factory_run_arm`, `factory_run_agent_rule`,
   `factory_run_task_tags_unread`,
   `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
@@ -303,6 +304,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - A trial's judgments (`factory_benchmark_trial_score`) never go in
   `factory_run_score`, and `read_insights` and `read_evaluation` leave Runs
   of the `benchmark` Flow out, so a Benchmark moves no live number.
+- A label (`factory_scorer_label`) references the judgment it labels
+  (`factory_run_score`), so only a judgment that exists is labelled
+  (`label_judgment` inserts from it) and the label goes with it. It keeps
+  no person: only a Run's owner labels it, so `calibrations` reads a
+  person's labels joined to their Runs, over all of them, not only a
+  period's. It counts only judgments whose model and
+  `instructions_sha256` are a given Scorer's current judge's; a judgment
+  kept before that column has none and counts for no judge.
 - A Run's or Step's end columns are all null or all set (`factory_*_end`
   checks); the row mappings refuse anything else.
 - A Run that works on code keeps its repository and base branch together

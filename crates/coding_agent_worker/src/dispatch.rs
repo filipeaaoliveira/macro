@@ -5,6 +5,7 @@ use agent_session::inbound::axum_router::{CreateAgentSessionRequest, CreateSessi
 
 use macro_user_id::user_id::MacroUserIdStr;
 
+use crate::branch_worktrees::BranchWorktrees;
 use crate::config::Workspace;
 use crate::outbound::agent_session::{ApiError, HarnessApi};
 use crate::runtime::Runtime;
@@ -29,6 +30,7 @@ pub struct Dispatcher {
     api: HarnessApi,
     runtime: Runtime,
     workspace: Workspace,
+    branches: std::sync::Arc<BranchWorktrees>,
     #[cfg(unix)]
     workspaces: Option<crate::herdr::repositories::Workspaces>,
     #[cfg(unix)]
@@ -36,11 +38,17 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-    /// Build the executor.
-    pub fn new(api: HarnessApi, runtime: Runtime, workspace: Workspace) -> Self {
+    /// Build the executor; `turns` says which sessions work where.
+    pub fn new(
+        api: HarnessApi,
+        runtime: Runtime,
+        workspace: Workspace,
+        turns: crate::turns::ActiveTurns,
+    ) -> Self {
         Self {
             api,
             runtime,
+            branches: std::sync::Arc::new(BranchWorktrees::new(workspace.path.clone(), turns)),
             workspace,
             #[cfg(unix)]
             workspaces: None,
@@ -68,10 +76,16 @@ impl Dispatcher {
         self
     }
 
+    /// Where `session` works: a Herdr worktree of its own when this daemon
+    /// drives Herdr; else, when it names the branch it works on,
+    /// `work_branch`, that branch's worktree of the shared workspace
+    /// ([`BranchWorktrees`]), so sessions on other branches never share its
+    /// files or `HEAD`; else the shared workspace itself.
     async fn workspace_for(
         &self,
         session: AgentSessionId,
         repo_url: Option<&str>,
+        work_branch: Option<&str>,
     ) -> Result<String, DispatchError> {
         #[cfg(unix)]
         if let Some(workspaces) = &self.workspaces {
@@ -101,6 +115,21 @@ impl Dispatcher {
                 "this machine does not manage repositories; choose a Herdr agent in macrod"
                     .to_owned(),
             ));
+        }
+        if let Some(branch) = work_branch {
+            match self.branches.prepare(branch).await {
+                Ok(Some(path)) => return Ok(path.to_string_lossy().into_owned()),
+                Ok(None) => tracing::warn!(
+                    %session,
+                    branch,
+                    "the workspace is no git checkout: the session works in it, shared with every other"
+                ),
+                Err(error) => {
+                    return Err(DispatchError::Workspace(format!(
+                        "the worktree of branch {branch} could not be made: {error}"
+                    )));
+                }
+            }
         }
         Ok(self.workspace.path.to_string_lossy().into_owned())
     }
@@ -142,7 +171,7 @@ impl WorkExecutor for Dispatcher {
                     &bot.as_uuid(),
                     thread_id.as_bytes(),
                 ));
-                let workspace = self.workspace_for(session, None).await?;
+                let workspace = self.workspace_for(session, None, None).await?;
                 let request = CreateAgentSessionRequest {
                     // The service mints the id: nothing here opens a surface
                     // on it before the create answers.
@@ -240,12 +269,15 @@ impl WorkExecutor for Dispatcher {
             }
             TriggerWork::OpenRequested {
                 repo_url,
+                work_branch,
                 session,
                 bot,
                 sender,
                 origin,
             } => {
-                let workspace = self.workspace_for(session, repo_url.as_deref()).await?;
+                let workspace = self
+                    .workspace_for(session, repo_url.as_deref(), work_branch.as_deref())
+                    .await?;
                 // Same create as a mention, minus the thread: the requester is
                 // waiting on this id, so the session is created under it. No
                 // prompt here - whoever asked sends their own through the

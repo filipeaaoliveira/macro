@@ -40,7 +40,9 @@ use crate::domain::setup::{RepositorySetup, SETUP_FILE, SetupCommand, output_tai
 use crate::domain::shell_lock::{LOCK_WAIT_SECS, lock_busy};
 use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 
-use crate::domain::models::{AgentAnswer, AgentCommand, AgentTask, AgentTurn, SessionSteer};
+use crate::domain::models::{
+    AgentAnswer, AgentCommand, AgentTask, AgentTurn, SessionSteer, run_branch,
+};
 use crate::domain::ports::PauseNotices;
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
 use crate::domain::step_terminal::{PAUSE_WARNING, paused_step_ends_by};
@@ -553,6 +555,10 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
                 billing: Default::default(),
                 instructions: agent.instructions.clone(),
                 repo_url: task.repo_url.clone(),
+                // A runtime that shares one checkout among its sessions
+                // gives the Run's branch a worktree of its own there, which
+                // the Run's Steps share and no other Run does.
+                work_branch: task.repo_url.as_ref().map(|_| run_branch(task.key.run_id)),
             })
             .await;
         match prepared {

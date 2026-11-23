@@ -90,6 +90,10 @@ pub enum StandingRule {
     /// Merge once CI is green, when the Run is not Tampered and its base
     /// branch has no Main Hold.
     MergeWhenGreen,
+    /// Rerun, once, the failed CI jobs of a pull request whose every red
+    /// job is a known flake, before any CI fix. It answers no Gate: the
+    /// `ci` Step keeps each rerun with the rule's name.
+    RerunFlakyCi,
 }
 
 /// The name the owner section is stored under, beside the Gate kinds.
@@ -104,6 +108,10 @@ pub const QUIET_GATES: &str = "quiet_gates";
 /// The name the task thread section is stored under, beside the Gate
 /// kinds.
 pub const TASK_THREAD: &str = "task_thread";
+
+/// The name the `rerun_flaky_ci` rule is stored under when it is on,
+/// beside the Gate kinds.
+pub const RERUN_FLAKY_CI: &str = "rerun_flaky_ci";
 
 /// The lowest Queue limit a definition may set: a limit of 1 lets a person
 /// hold one place, and a lower one would start no Run.
@@ -163,6 +171,13 @@ pub struct OrchestratorDefinition {
     /// Off, as when a definition is sent without it, a Run posts nothing.
     #[serde(default)]
     pub task_thread: bool,
+    /// Rerun, once, the failed CI jobs of a pull request whose every red
+    /// job is a known flake, before any CI fix (`rerun_flaky_ci`): a job
+    /// the Run's Factory Definition names in `knownFlakes`, one
+    /// quarantined in its repository, or one whose same failure turned
+    /// other pull requests red. A definition sent without it has it off.
+    #[serde(default)]
+    pub rerun_flaky_ci: bool,
     /// The Queue limit: the most places a person may hold in their Queue
     /// under this definition. A place is a Run of theirs waiting on them at
     /// a Gate or a question, or a Run of a Flow with a Gate that has not
@@ -241,7 +256,8 @@ const ORCHESTRATOR_BLOCKERS: &str = "orchestrator_blockers";
 impl OrchestratorDefinition {
     /// The definition that applies when a team set none: the review's
     /// Blockers are fixed on their own, as they were before Standing Rules,
-    /// and the plan and the merge wait for a person.
+    /// and the plan and the merge wait for a person. Flaky CI jobs are not
+    /// rerun: a team turns `rerun_flaky_ci` on in its rules.
     pub const DEFAULT: Self = Self {
         plan: false,
         blockers: true,
@@ -249,6 +265,7 @@ impl OrchestratorDefinition {
         owner_gates: false,
         quiet_gates: false,
         task_thread: false,
+        rerun_flaky_ci: false,
         queue_limit: None,
         token_budget: None,
         stand_in: StandInKinds {
@@ -295,7 +312,8 @@ impl OrchestratorDefinition {
     /// then the kinds the stand-in answers
     /// (`stand_in_plan`, `stand_in_blockers`), then those the Orchestrator
     /// may approve (`orchestrator_plan`, `orchestrator_blockers`), then
-    /// [`TASK_THREAD`] when its task thread section is on: what is stored of
+    /// [`TASK_THREAD`] when its task thread section is on, then
+    /// [`RERUN_FLAKY_CI`] when that rule is on: what is stored of
     /// it beside its Queue limit and token budget, which have columns of
     /// their own.
     pub fn kinds(self) -> Vec<String> {
@@ -324,12 +342,14 @@ impl OrchestratorDefinition {
         .filter(|(on, _)| *on)
         .map(|(_, kind)| kind.to_string());
         let thread = self.task_thread.then(|| TASK_THREAD.to_string());
+        let rerun = self.rerun_flaky_ci.then(|| RERUN_FLAKY_CI.to_string());
         ruled
             .chain(owner)
             .chain(quiet)
             .chain(stood_in)
             .chain(orchestrated)
             .chain(thread)
+            .chain(rerun)
             .collect()
     }
 
@@ -343,6 +363,7 @@ impl OrchestratorDefinition {
                 OWNER_GATES => definition.owner_gates = true,
                 QUIET_GATES => definition.quiet_gates = true,
                 TASK_THREAD => definition.task_thread = true,
+                RERUN_FLAKY_CI => definition.rerun_flaky_ci = true,
                 STAND_IN_PLAN => definition.stand_in.plan = true,
                 STAND_IN_BLOCKERS => definition.stand_in.blockers = true,
                 ORCHESTRATOR_PLAN => definition.orchestrator.plan = true,

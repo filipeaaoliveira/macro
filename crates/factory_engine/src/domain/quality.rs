@@ -16,6 +16,11 @@
 //! Every other failure is its own pull request's: two pull requests that
 //! each broke a test under the same generic step, or a job whose step could
 //! not be read, broke their own.
+//!
+//! The `ci` Step reads failures the same way to rerun a flaky red once
+//! (`pull_request_steps::flaky_ci`): CI health counts how those reruns
+//! ended, and lists the jobs quarantined once their reruns passed often
+//! enough.
 
 #[cfg(test)]
 mod test;
@@ -26,7 +31,8 @@ use ai_usage::domain::session_usage::{SessionTokens, SessionUsageReader};
 use chrono::{DateTime, NaiveDate, Utc};
 use factory_records::domain::models::{RunId, RunOutcome};
 use factory_records::domain::quality::{
-    CI_NAME_BYTES, CiJob, CiJobResult, CiVerdict, QualityRecords, QualityRun, QualityScope,
+    CI_NAME_BYTES, CiJob, CiJobResult, CiRetryResult, CiVerdict, QualityRecords, QualityRun,
+    QualityScope,
 };
 use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRoundOutcome};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -55,6 +61,15 @@ const RUNS_LINKED: usize = 5;
 /// On how many pull requests the same failure must happen to be flaky,
 /// rather than the pull request's own.
 const FLAKY_PULL_REQUESTS: usize = 2;
+
+/// On how many other pull requests a red job's failure must have proved
+/// flaky (its rerun passed, or the same head went green after it) for a
+/// `ci` Step to take it for flaky.
+pub(crate) const FLAKY_OTHER_PULL_REQUESTS: u32 = 2;
+
+/// How many passed retries of a failure in a repository, over the records'
+/// `FLAKY_PERIOD`, quarantine it.
+pub(crate) const QUARANTINE_PASSED_RETRIES: u32 = 3;
 
 // What CI health records.
 
@@ -436,6 +451,51 @@ pub struct CiHealth {
     /// Failures, by test or named step, on two or more pull requests,
     /// newest first.
     pub recurring: Vec<RecurringCiFailure>,
+    /// How the Runs' reruns of flaky jobs ended, under the
+    /// `rerun_flaky_ci` rule.
+    pub retries: CiRetryCounts,
+    /// The jobs quarantined in the repositories read, by repository and
+    /// name: whoever's Run quarantined them, as a repository's flaky jobs
+    /// are every Run's there.
+    pub quarantined: Vec<CiQuarantined>,
+}
+
+/// How the reruns of flaky CI jobs ended; those still running are not
+/// counted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CiRetryCounts {
+    /// Passed when they ran again: passed retries, each a CI fix round
+    /// the Run did not spend.
+    pub passed: u32,
+    /// Failed again, so the change went to a CI fix.
+    pub failed: u32,
+    /// GitHub would not rerun them.
+    pub refused: u32,
+}
+
+/// A failure of a CI job quarantined in a repository: its reruns passed
+/// often enough that it counts as a known flake there, until no rerun of
+/// it passed for 30 days.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CiQuarantined {
+    /// The repository, by its URL in lower case.
+    pub repository: String,
+    /// The job.
+    pub job: String,
+    /// The first of its steps that failed, when it was read.
+    pub step: Option<String>,
+    /// The test that failed, as its check run annotated it.
+    pub failure: Option<String>,
+    /// Its passed retries, as last counted.
+    pub passed_retries: u32,
+    /// When it was quarantined.
+    pub quarantined_at: DateTime<Utc>,
+    /// When a rerun of it last passed.
+    pub last_passed_at: DateTime<Utc>,
+    /// The task filed for it, once filed.
+    pub task_id: Option<Uuid>,
 }
 
 /// One reviewer's, or one Agent's, Blockers.
@@ -657,7 +717,7 @@ type FailureKey = (Option<String>, String, Option<String>, Option<String>);
 /// something narrower than the job's whole work; none otherwise, as for a
 /// generic step like "Run tests" or a step that could not be read, which
 /// is its pull request's own failure.
-fn failure_identity(job: &CiJob) -> Option<(Option<String>, Option<String>)> {
+pub(crate) fn failure_identity(job: &CiJob) -> Option<(Option<String>, Option<String>)> {
     match job.result {
         CiJobResult::Setup => Some((job.failed_step.clone(), job.failure.clone())),
         CiJobResult::Failed => {
@@ -859,7 +919,36 @@ fn ci_health(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) -> Ci
         runs_with_ci_fixes: u32::try_from(red_by_run.len()).unwrap_or(u32::MAX),
         review_fix_rounds: u32::try_from(review_fix_rounds).unwrap_or(u32::MAX),
         recurring,
+        retries: retry_counts(records),
+        quarantined: records
+            .ci_quarantines
+            .iter()
+            .map(|quarantine| CiQuarantined {
+                repository: quarantine.repository.clone(),
+                job: quarantine.failure.name.clone(),
+                step: quarantine.failure.failed_step.clone(),
+                failure: quarantine.failure.failure.clone(),
+                passed_retries: quarantine.passed_retries,
+                quarantined_at: quarantine.quarantined_at,
+                last_passed_at: quarantine.last_passed_at,
+                task_id: quarantine.filed.then_some(quarantine.task_id),
+            })
+            .collect(),
     }
+}
+
+/// How the scope's Runs' reruns of flaky CI jobs ended.
+fn retry_counts(records: &QualityRecords) -> CiRetryCounts {
+    let mut counts = CiRetryCounts::default();
+    for retry in &records.ci_retries {
+        match retry.result {
+            Some(CiRetryResult::Passed) => counts.passed += 1,
+            Some(CiRetryResult::Failed) => counts.failed += 1,
+            Some(CiRetryResult::Refused) => counts.refused += 1,
+            None => {}
+        }
+    }
+    counts
 }
 
 /// A Blocker's text as compared with others: in lower case, its spaces

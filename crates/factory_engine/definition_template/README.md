@@ -97,6 +97,11 @@ Outside the files, all must be done:
   in a row.
 - `ownerGates` and `taskThread`: left as is, both on (The rules this
   template sets, below).
+- `rerunFlakyCi`: left out, off, as in this template. Set it to `true` to
+  have the `ci` Step rerun, once and before any CI fix, the jobs that
+  turned a pull request red when every one of them is a known flake. The
+  Run owner's GitHub token must be able to write Actions (rerun a job):
+  without that, GitHub declines the rerun and the red goes to the fix.
 - `quietGates`: left out, every Gate no rule or stand-in answers notifies
   the Run's owner.
 - `queueLimit`: from 1 to 1000, how many of a person's Runs may wait on
@@ -109,6 +114,12 @@ Outside the files, all must be done:
 - `controlFiles`: the Control File patterns. A list replaces the factory's
   default whole, holds at most 195 patterns, and an empty list checks no
   file. Left as is, the factory's default and this Definition's own files.
+- `knownFlakes`: the CI jobs known to be flaky, by name as GitHub shows
+  them, at most 100, each at most 1024 bytes. With `rerunFlakyCi` on, a
+  red of only these jobs is rerun once. A failure (the job, its failed
+  step and its test) also counts as flaky when it is quarantined, or when
+  it proved flaky on two other pull requests of the repository in 30 days:
+  its rerun passed, or the same commit went green after it. Left out, none.
 
 `scorers.json` (may):
 
@@ -248,7 +259,7 @@ each trial with the tokens it used.
 | `factory.json` | The format's `version` (1), a `description`, and the Flows, by name. |
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
 | `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). Optional `rules`: the Agent Rules (below). |
-| `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own, and the Queue limit and token budget. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
+| `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own, and the Queue limit and token budget. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. `knownFlakes`: the CI jobs known to be flaky. Each left out takes the factory's default. |
 | `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format, and when its failures start a self-improvement Run (below). Left out, the team has none, and the defaults apply. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
 
@@ -291,6 +302,11 @@ merges, whatever `merge` says. So `controlFiles` lists at most 195
 patterns, leaving room for the 5 the Run adds.
 
 It leaves off:
+
+- `rerunFlakyCi`: turn it on to rerun a red of only known flaky CI jobs once
+  before any CI fix. A failure whose reruns passed three times in 30 days
+  is quarantined: a task is filed for it, Insights lists it, and it counts
+  as a known flake until no rerun of it passed for 30 days.
 
 - `quietGates`: every Gate no rule or stand-in answers notifies the Run's
   owner. Set it to `true` to stop those notifications; the Gates still wait

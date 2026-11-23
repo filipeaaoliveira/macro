@@ -45,8 +45,9 @@ use uuid::Uuid;
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
-    DefinitionPullRequest, FinishedJob, GITHUB_COMMITTER, HeadChecks, Merging, OpenPullRequest,
-    Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks, run_branch,
+    DefinitionPullRequest, FinishedJob, GITHUB_COMMITTER, HeadChecks, JobRerun, Merging,
+    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState, PullRequestText,
+    RepositoryAccess, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -132,6 +133,9 @@ pub(crate) struct FollowUpComment {
 #[derive(Clone, Default)]
 pub(crate) struct FakeRepo {
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
+    /// Whether reading a Run's review rounds fails, as the database down
+    /// does.
+    pub(crate) review_rounds_fail: Arc<std::sync::atomic::AtomicBool>,
     /// The merge queues and the updates of Runs' branches.
     pub(crate) queue: Arc<Mutex<merge_queue::FakeQueue>>,
     /// The built-in Flow each Run walks.
@@ -143,6 +147,17 @@ pub(crate) struct FakeRepo {
     pub(crate) steering: Arc<Mutex<HashMap<StepKey, steering::FakeSteering>>>,
     /// The CI waits kept, in order, the last of each Step.
     pub(crate) ci_waits: Arc<Mutex<Vec<factory_records::domain::quality::CiWait>>>,
+    /// The known flakes each Run keeps.
+    pub(crate) known_ci_flakes: Arc<Mutex<BTreeMap<RunId, Vec<String>>>>,
+    /// The Runs whose flaky evidence was read, once per read.
+    pub(crate) ci_flakes_reads: Arc<Mutex<Vec<RunId>>>,
+    /// The failures other pull requests proved flaky, as every Run reads
+    /// them.
+    pub(crate) ci_failures: Arc<Mutex<Vec<factory_records::domain::quality::FlakyCiFailure>>>,
+    /// The reruns each `ci` Step asked for, in order.
+    pub(crate) ci_retries: Arc<Mutex<Vec<(StepKey, factory_records::domain::quality::CiRetry)>>>,
+    /// The CI jobs quarantined, in order.
+    pub(crate) ci_quarantines: Arc<Mutex<Vec<factory_records::domain::quality::CiQuarantine>>>,
     /// Each Step's rounds of checks, in order.
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
     /// The task documents that exist.
@@ -265,6 +280,22 @@ impl UserDirectory for FakeRepo {
 }
 
 /// Every task is visible to everyone it is not hidden from.
+impl crate::domain::ports::QuarantineTasks for FakeRepo {
+    type Err = FakeError;
+
+    async fn file_quarantine(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        task: &FollowUpTask,
+        task_id: Uuid,
+    ) -> Result<Option<crate::domain::ports::FollowUpMade>, FakeError> {
+        self.create_follow_up(user_id, of, task, task_id)
+            .await
+            .map(Some)
+    }
+}
+
 impl TaskDirectory for FakeRepo {
     type Err = FakeError;
 
@@ -680,6 +711,198 @@ impl RunRepository for FakeRepo {
                     .map(|job| job.name.clone())
                     .collect(),
             }))
+    }
+
+    async fn keep_known_ci_flakes(&self, id: RunId, names: &[String]) -> Result<(), FakeError> {
+        self.known_ci_flakes
+            .lock()
+            .expect("known flakes")
+            .insert(id, names.to_vec());
+        Ok(())
+    }
+
+    async fn ci_flakes(
+        &self,
+        id: RunId,
+        repository: &str,
+        _pull_request: Option<&str>,
+        since: chrono::DateTime<Utc>,
+    ) -> Result<factory_records::domain::quality::CiFlakes, FakeError> {
+        if self.fails("ci_flakes") {
+            return Err(FakeError);
+        }
+        self.ci_flakes_reads.lock().expect("reads").push(id);
+        Ok(factory_records::domain::quality::CiFlakes {
+            known: self
+                .known_ci_flakes
+                .lock()
+                .expect("known flakes")
+                .get(&id)
+                .cloned()
+                .unwrap_or_default(),
+            quarantined: self
+                .ci_quarantines
+                .lock()
+                .expect("quarantines")
+                .iter()
+                .filter(|quarantine| {
+                    quarantine.repository == repository && quarantine.last_passed_at >= since
+                })
+                .map(|quarantine| quarantine.failure.clone())
+                .collect(),
+            failures: self.ci_failures.lock().expect("failures").clone(),
+        })
+    }
+
+    async fn ci_retries(
+        &self,
+        key: StepKey,
+    ) -> Result<Vec<factory_records::domain::quality::CiRetry>, FakeError> {
+        Ok(self
+            .ci_retries
+            .lock()
+            .expect("retries")
+            .iter()
+            .filter(|(kept, _)| *kept == key)
+            .map(|(_, retry)| retry.clone())
+            .collect())
+    }
+
+    async fn request_ci_retries(
+        &self,
+        key: StepKey,
+        head_sha: &str,
+        retries: &[factory_records::domain::quality::CiRetryRequest],
+    ) -> Result<Vec<String>, FakeError> {
+        if self.fails("request_ci_retries") {
+            return Err(FakeError);
+        }
+        let mut kept = self.ci_retries.lock().expect("retries");
+        let mut added = Vec::new();
+        for retry in retries {
+            let asked = kept
+                .iter()
+                .any(|(step, other)| *step == key && other.name == retry.name);
+            if !asked {
+                kept.push((
+                    key,
+                    factory_records::domain::quality::CiRetry {
+                        name: retry.name.clone(),
+                        head_sha: head_sha.to_string(),
+                        job_id: retry.job_id,
+                        workflow_run_id: retry.workflow_run_id,
+                        failed_step: retry.failed_step.clone(),
+                        failure: retry.failure.clone(),
+                        matched: retry.matched,
+                        result: None,
+                        requested_at: Utc::now(),
+                    },
+                ));
+                added.push(retry.name.clone());
+            }
+        }
+        Ok(added)
+    }
+
+    async fn settle_ci_retries(
+        &self,
+        key: StepKey,
+        settled: &[(String, factory_records::domain::quality::CiRetryResult)],
+    ) -> Result<(), FakeError> {
+        let mut kept = self.ci_retries.lock().expect("retries");
+        for (name, result) in settled {
+            for (step, retry) in kept.iter_mut() {
+                if *step == key && retry.name == *name && retry.result.is_none() {
+                    retry.result = Some(*result);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn quarantine_ci_jobs(
+        &self,
+        id: RunId,
+        repository: &str,
+        jobs: &[factory_records::domain::quality::NewCiQuarantine],
+        _since: chrono::DateTime<Utc>,
+        threshold: u32,
+    ) -> Result<Vec<String>, FakeError> {
+        let passed = |failure: &factory_records::domain::quality::CiFailureIdentity| {
+            self.ci_retries
+                .lock()
+                .expect("retries")
+                .iter()
+                .filter(|(_, retry)| {
+                    retry.name == failure.name
+                        && retry.failed_step == failure.failed_step
+                        && retry.failure == failure.failure
+                        && retry.result
+                            == Some(factory_records::domain::quality::CiRetryResult::Passed)
+                })
+                .count()
+        };
+        let mut made = Vec::new();
+        for job in jobs {
+            let retries = u32::try_from(passed(&job.failure)).unwrap_or(u32::MAX);
+            if retries < threshold {
+                continue;
+            }
+            let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
+            let kept = quarantines.iter_mut().find(|quarantine| {
+                quarantine.repository == repository && quarantine.failure == job.failure
+            });
+            match kept {
+                Some(kept) => {
+                    kept.passed_retries = retries;
+                    kept.last_passed_at = Utc::now();
+                }
+                None => {
+                    quarantines.push(factory_records::domain::quality::CiQuarantine {
+                        repository: repository.to_string(),
+                        failure: job.failure.clone(),
+                        run_id: Some(id),
+                        passed_retries: retries,
+                        task_id: job.task_id,
+                        filed: false,
+                        quarantined_at: Utc::now(),
+                        last_passed_at: Utc::now(),
+                    });
+                    made.push(job.failure.name.clone());
+                }
+            }
+        }
+        Ok(made)
+    }
+
+    async fn unfiled_ci_quarantines(
+        &self,
+        id: RunId,
+    ) -> Result<Vec<factory_records::domain::quality::CiQuarantine>, FakeError> {
+        Ok(self
+            .ci_quarantines
+            .lock()
+            .expect("quarantines")
+            .iter()
+            .filter(|quarantine| quarantine.run_id == Some(id) && !quarantine.filed)
+            .cloned()
+            .collect())
+    }
+
+    async fn mark_ci_quarantine_filed(&self, task_id: Uuid) -> Result<(), FakeError> {
+        for quarantine in self.ci_quarantines.lock().expect("quarantines").iter_mut() {
+            if quarantine.task_id == task_id {
+                quarantine.filed = true;
+            }
+        }
+        Ok(())
+    }
+
+    async fn lift_ci_quarantine(&self, task_id: Uuid) -> Result<bool, FakeError> {
+        let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
+        let before = quarantines.len();
+        quarantines.retain(|quarantine| quarantine.task_id != task_id);
+        Ok(quarantines.len() < before)
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
@@ -1705,6 +1928,19 @@ pub(crate) struct FakeGithubState {
     pub(crate) finished_delay: Option<std::time::Duration>,
     /// The commits whose finished jobs were read, in order.
     pub(crate) finished_reads: Vec<String>,
+    /// The GitHub Actions jobs reruns were asked for, in order.
+    pub(crate) reruns: Vec<u64>,
+    /// What GitHub answers a rerun with, by job id; `Started` for a job
+    /// not named here.
+    pub(crate) rerun_answers: BTreeMap<u64, JobRerun>,
+    /// The jobs whose rerun fails to be asked, as GitHub down does.
+    pub(crate) rerun_fails: BTreeSet<u64>,
+    /// The jobs that finished on every commit once a rerun started, in
+    /// place of [`Self::finished`], when set.
+    pub(crate) finished_after_rerun: Option<Vec<FinishedJob>>,
+    /// The checks the open pull request's head shows once a rerun started,
+    /// in place of [`Self::checks`], when set.
+    pub(crate) checks_after_rerun: Option<VecDeque<HeadChecks>>,
     /// Whether each read of finished jobs asked for details, in order.
     pub(crate) finished_details: Vec<bool>,
     /// The commit each read of the open pull request finds its head at
@@ -1729,6 +1965,25 @@ pub(crate) struct FakeGithubState {
     pub(crate) open_refusal: Option<String>,
     /// The descriptions pull requests were opened with.
     pub(crate) bodies: Vec<String>,
+    /// The pull request's description now: the one it was opened with,
+    /// as edited since.
+    pub(crate) description: Option<String>,
+    /// The descriptions it was edited to, in order.
+    pub(crate) description_edits: Vec<String>,
+    /// The comments in its conversation, oldest first.
+    pub(crate) comments: Vec<PullRequestComment>,
+    /// How many comments were added or edited.
+    pub(crate) comment_writes: usize,
+    /// Whether editing its description or comments fails, as GitHub
+    /// refusing the owner does.
+    pub(crate) text_edits_fail: bool,
+    /// Whether the account the owner's token acts as cannot be read.
+    pub(crate) writer_unread: bool,
+    /// Who opened the pull request, when not the Run's owner's account.
+    pub(crate) opened_by: Option<u64>,
+    /// How many edits of its description or comments were asked for,
+    /// whether or not they failed.
+    pub(crate) text_write_attempts: usize,
     /// The head commits merges were asked for, in order.
     pub(crate) merges: Vec<String>,
     /// GitHub's reason to refuse a merge, if it does.
@@ -1826,6 +2081,12 @@ pub(crate) struct FakeGithubState {
     /// The commit `main` moves to as a merge is asked, as when another
     /// merge lands just before it.
     pub(crate) main_moves_on_merge: Option<String>,
+    /// The branches created, in order; one named again is there already.
+    pub(crate) created_branches: Vec<crate::domain::models::NewBranch>,
+    /// GitHub's reason to decline creating a branch, as a ruleset's.
+    pub(crate) branch_refusal: Option<String>,
+    /// Whether GitHub refuses the person creating a branch.
+    pub(crate) branch_forbidden: bool,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1842,6 +2103,10 @@ pub(crate) struct FakeGithub {
 impl FakeGithub {
     /// The commit an opened pull request's head is at.
     pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// GitHub's id of the Run's owner's account, which opens the pull
+    /// request and writes the report's comments.
+    pub(crate) const OWNER_ACCOUNT: u64 = 1;
 
     /// GitHub's id of the CI app whose runs [`ci`] makes.
     pub(crate) const ACTIONS: u64 = 15368;
@@ -2009,6 +2274,34 @@ impl PullRequests for FakeGithub {
         read
     }
 
+    async fn rerun_actions_job(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        job_id: u64,
+    ) -> Result<JobRerun, FakeGithubError> {
+        let mut state = self.state();
+        state.reruns.push(job_id);
+        if state.rerun_fails.contains(&job_id) {
+            return Err(FakeGithubError::Down);
+        }
+        let answer = state
+            .rerun_answers
+            .get(&job_id)
+            .cloned()
+            .unwrap_or(JobRerun::Started);
+        if answer == JobRerun::Started {
+            if let Some(finished) = state.finished_after_rerun.take() {
+                state.finished = finished;
+                state.finished_on.clear();
+            }
+            if let Some(checks) = state.checks_after_rerun.take() {
+                state.checks = checks;
+            }
+        }
+        Ok(answer)
+    }
+
     async fn branch_checks(
         &self,
         _owner: &MacroUserIdStr<'static>,
@@ -2160,6 +2453,7 @@ impl PullRequests for FakeGithub {
         }
         state.opened += 1;
         state.bodies.push(pull_request.body.clone());
+        state.description = Some(pull_request.body.clone());
         state.pull_request = Some(PullRequest {
             number: 7,
             url: format!("{}/pull/7", repository.url()),
@@ -2168,6 +2462,100 @@ impl PullRequests for FakeGithub {
             merge_commit: None,
         });
         Ok(Opening::Opened)
+    }
+
+    async fn pull_request_text(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+    ) -> Result<PullRequestText, FakeGithubError> {
+        let state = self.state();
+        Ok(PullRequestText {
+            body: state.description.clone().unwrap_or_default(),
+            author_id: Some(state.opened_by.unwrap_or(Self::OWNER_ACCOUNT)),
+        })
+    }
+
+    async fn writer_account(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<u64, FakeGithubError> {
+        if self.state().writer_unread {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(Self::OWNER_ACCOUNT)
+    }
+
+    async fn edit_pull_request_body(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+        body: &str,
+    ) -> Result<(), FakeGithubError> {
+        let mut state = self.state();
+        state.text_write_attempts += 1;
+        if state.text_edits_fail {
+            return Err(FakeGithubError::Refused);
+        }
+        state.description = Some(body.to_string());
+        state.description_edits.push(body.to_string());
+        Ok(())
+    }
+
+    async fn pull_request_comments(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+    ) -> Result<Vec<PullRequestComment>, FakeGithubError> {
+        Ok(self.state().comments.clone())
+    }
+
+    async fn comment_on_pull_request(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+        body: &str,
+    ) -> Result<(), FakeGithubError> {
+        let mut state = self.state();
+        state.text_write_attempts += 1;
+        if state.text_edits_fail {
+            return Err(FakeGithubError::Refused);
+        }
+        let id = 100 + u64::try_from(state.comments.len()).expect("few comments");
+        state.comments.push(PullRequestComment {
+            id,
+            body: body.to_string(),
+            author_id: Some(Self::OWNER_ACCOUNT),
+        });
+        state.comment_writes += 1;
+        Ok(())
+    }
+
+    async fn edit_pull_request_comment(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        comment_id: u64,
+        body: &str,
+    ) -> Result<(), FakeGithubError> {
+        let mut state = self.state();
+        state.text_write_attempts += 1;
+        if state.text_edits_fail {
+            return Err(FakeGithubError::Refused);
+        }
+        if let Some(comment) = state
+            .comments
+            .iter_mut()
+            .find(|comment| comment.id == comment_id)
+        {
+            comment.body = body.to_string();
+        }
+        state.comment_writes += 1;
+        Ok(())
     }
 
     async fn merge(
@@ -2320,6 +2708,73 @@ impl PullRequests for FakeGithub {
             .get(&(base.clone(), head.clone()))
             .or_else(|| state.merge_bases.get(&(head, base)))
             .cloned())
+    }
+
+    async fn create_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        branch: &crate::domain::models::NewBranch,
+    ) -> Result<crate::domain::models::BranchCreation, FakeGithubError> {
+        use crate::domain::models::BranchCreation;
+
+        let mut state = self.state();
+        let there = state
+            .created_branches
+            .iter()
+            .any(|created| created.name == branch.name);
+        if there {
+            return Ok(BranchCreation::Exists);
+        }
+        if state.branch_forbidden {
+            return Err(FakeGithubError::Refused);
+        }
+        if let Some(why) = state.branch_refusal.clone() {
+            return Ok(BranchCreation::Refused(why));
+        }
+        state.created_branches.push(branch.clone());
+        Ok(BranchCreation::Created)
+    }
+
+    /// The pull request is the one GitHub holds, once a branch of that name
+    /// was created; its title is its commit's.
+    async fn branch_pull_request(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<Option<crate::domain::models::BranchPullRequest>, FakeGithubError> {
+        use crate::domain::models::BranchPullRequest;
+
+        let state = self.state();
+        if state.find_fails {
+            return Err(FakeGithubError::Down);
+        }
+        let created = state
+            .created_branches
+            .iter()
+            .find(|created| created.name == branch);
+        let (Some(created), Some(pull_request)) = (created, state.pull_request.as_ref()) else {
+            return Ok(None);
+        };
+        Ok(Some(BranchPullRequest {
+            pull_request: DefinitionPullRequest {
+                number: pull_request.number,
+                title: created.message.clone(),
+                url: pull_request.url.clone(),
+                draft: false,
+            },
+            state: pull_request.state,
+        }))
+    }
+
+    fn access_refusal(error: &FakeGithubError) -> Option<crate::domain::models::AccessRefusal> {
+        use crate::domain::models::AccessRefusal;
+
+        match error {
+            FakeGithubError::Refused => Some(AccessRefusal::NotAllowed),
+            FakeGithubError::Down | FakeGithubError::TooLarge => None,
+        }
     }
 }
 

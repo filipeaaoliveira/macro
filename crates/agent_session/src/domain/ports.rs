@@ -132,6 +132,9 @@ pub struct RequestedExternalSession {
     pub model: Option<String>,
     /// Remote repository selected for this external coding session.
     pub repo_url: Option<String>,
+    /// The branch the session works on, for a runtime that gives each
+    /// branch a worktree of its own (`AgentSessionRequestedEvent::work_branch`).
+    pub work_branch: Option<String>,
     /// Who is starting the session.
     pub source: SessionSource,
     /// Whether a routine run is listed; a person's session always is.

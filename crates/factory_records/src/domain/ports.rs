@@ -444,6 +444,90 @@ pub trait RunRepository: Send + Sync + 'static {
         before: u16,
     ) -> impl Future<Output = Result<Option<crate::domain::quality::LastCiWait>, Self::Err>> + Send;
 
+    /// Keep `names`, the CI jobs the Run's Factory Definition names as
+    /// known flakes, on the Run before its workflow starts. Keeping them
+    /// again changes nothing.
+    fn keep_known_ci_flakes(
+        &self,
+        id: RunId,
+        names: &[String],
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// What tells whether a red of the Run `id`'s pull request
+    /// `pull_request` is flaky: the known flakes the Run keeps, the
+    /// failures quarantined in its repository `repository` (its URL in
+    /// lower case) whose reruns passed since `since`, and the failures
+    /// other pull requests of the repository proved flaky since `since`: a
+    /// rerun of the failed job passed, or the same head went green after
+    /// it. Neither the Run nor its pull request counts.
+    fn ci_flakes(
+        &self,
+        id: RunId,
+        repository: &str,
+        pull_request: Option<&str>,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> impl Future<Output = Result<crate::domain::quality::CiFlakes, Self::Err>> + Send;
+
+    /// The reruns the `ci` Step `key` asked for, by job name.
+    fn ci_retries(
+        &self,
+        key: StepKey,
+    ) -> impl Future<Output = Result<Vec<crate::domain::quality::CiRetry>, Self::Err>> + Send;
+
+    /// Keep that the `ci` Step `key` asks GitHub to rerun `retries` on the
+    /// commit `head_sha`, under the `rerun_flaky_ci` rule. A job the Step
+    /// asked for before is kept as it was: a Step reruns a job once. The
+    /// names this call kept, which only it may ask GitHub to rerun.
+    fn request_ci_retries(
+        &self,
+        key: StepKey,
+        head_sha: &str,
+        retries: &[crate::domain::quality::CiRetryRequest],
+    ) -> impl Future<Output = Result<Vec<String>, Self::Err>> + Send;
+
+    /// Keep how the reruns of the `ci` Step `key` named in `settled` ended.
+    /// A rerun that ended before keeps how it ended.
+    fn settle_ci_retries(
+        &self,
+        key: StepKey,
+        settled: &[(String, crate::domain::quality::CiRetryResult)],
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Quarantine each failure of `jobs` in the repository `repository`
+    /// (its URL in lower case) whose reruns there passed `threshold` or
+    /// more times since `since`, for the Run `id` to file its task. A
+    /// failure quarantined already keeps its task, and its passed retries
+    /// and last pass are brought up to date. The names of the jobs newly
+    /// quarantined.
+    fn quarantine_ci_jobs(
+        &self,
+        id: RunId,
+        repository: &str,
+        jobs: &[crate::domain::quality::NewCiQuarantine],
+        since: chrono::DateTime<chrono::Utc>,
+        threshold: u32,
+    ) -> impl Future<Output = Result<Vec<String>, Self::Err>> + Send;
+
+    /// The quarantines the Run `id` made whose task is not filed yet.
+    fn unfiled_ci_quarantines(
+        &self,
+        id: RunId,
+    ) -> impl Future<Output = Result<Vec<crate::domain::quality::CiQuarantine>, Self::Err>> + Send;
+
+    /// Keep that the task `task_id` of a quarantine is filed.
+    fn mark_ci_quarantine_filed(
+        &self,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Lift the quarantine whose task is `task_id`: its failure is no
+    /// known flake from then on, until its reruns quarantine it again.
+    /// Whether there was one.
+    fn lift_ci_quarantine(
+        &self,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// Keep the Control Files the Run's branch changed, as last read,
     /// replacing what was kept before: none clears it. Keeping it again
     /// changes nothing.

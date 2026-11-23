@@ -19,7 +19,11 @@ export type RunFlaw = {
 };
 
 /** A Standing Rule: an answer the factory gives a kind of Gate on its own. */
-export type StandingRule = 'approve_plan' | 'fix_blockers' | 'merge_when_green';
+export type StandingRule =
+  | 'approve_plan'
+  | 'fix_blockers'
+  | 'merge_when_green'
+  | 'rerun_flaky_ci';
 
 /**
  * The answer to a Gate: a person's, a Standing Rule's (a Rule Answer), or

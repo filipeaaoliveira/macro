@@ -1,6 +1,6 @@
 //! Axum router for evaluation: the Scorers' judgments, the Experiments'
-//! arms and the Benchmark suites of the caller's own Runs, and starting a
-//! suite.
+//! arms and the Benchmark suites of the caller's own Runs, starting a
+//! suite, and labelling a Run's judgments.
 
 #[cfg(test)]
 mod test;
@@ -13,9 +13,9 @@ use axum::{
     extract::{FromRef, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
 };
-use factory_records::domain::evaluation::AgentChoices;
+use factory_records::domain::evaluation::{AgentChoices, ScorerLabel};
 use factory_records::domain::models::{AgentName, Role, RunId, RunOutcome};
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOrInternal,
@@ -24,6 +24,9 @@ use model_error_response::ErrorResponse;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::domain::evaluation::insights::calibration::{
+    RunScore, RunScores, ScorerCalibration, ScorerLabelError, ScorerLabelService,
+};
 use crate::domain::evaluation::insights::{
     ArmInsight, ArmScoreInsight, BenchmarkSummary, DismissalUndoneResponse, EvaluationInsights,
     EvaluationService, ExperimentInsight, ImprovementInsight, PendingSource, RefusedTrial,
@@ -31,7 +34,7 @@ use crate::domain::evaluation::insights::{
     TrialScore, UndoDismissalError,
 };
 use crate::domain::insights::{InsightsQuery, TokenCounts};
-use crate::inbound::http::{acting_agent, is_in_person};
+use crate::inbound::http::{GetRunParams, acting_agent, is_in_person};
 use crate::inbound::insights::InsightsParams;
 use factory_records::domain::self_improvement::ImprovementState;
 
@@ -79,9 +82,12 @@ impl<S, Auth> FromRef<EvaluationRouterState<S, Auth>> for MacroAuthorizationStat
 /// - `POST /benchmarks/{benchmark}/suites` — start a suite.
 /// - `POST /self-improvements/{id}/undo-dismissal` — send a rejected
 ///   self-improvement Run's dismissed failures back to pending.
+/// - `GET /runs/{id}/scores` — the live Scorers' judgments of one of the
+///   caller's Runs, with their labels.
+/// - `PUT /runs/{id}/scores/{scorer}/label` — label a judgment.
 pub fn evaluation_router<S, Auth, T>(state: EvaluationRouterState<S, Auth>) -> Router<T>
 where
-    S: EvaluationService,
+    S: EvaluationService + ScorerLabelService,
     Auth: MacroAuthorizationService,
     T: Send + Sync + 'static,
 {
@@ -94,6 +100,11 @@ where
         .route(
             "/self-improvements/{id}/undo-dismissal",
             post(undo_dismissal_handler::<S, Auth>),
+        )
+        .route("/runs/{id}/scores", get(run_scores_handler::<S, Auth>))
+        .route(
+            "/runs/{id}/scores/{scorer}/label",
+            put(label_score_handler::<S, Auth>),
         )
         .with_state(state)
 }
@@ -317,13 +328,154 @@ impl IntoResponse for UndoDismissalError {
     }
 }
 
+/// The live Scorers' judgments of one of the caller's Runs, by Scorer, each
+/// with whether it passed, the caller's label of it, whether the Scorer's
+/// current judge (its model and instructions now) made it, and how far that
+/// judge agrees with the caller's labels over all of their Runs: a Scorer
+/// is `calibrated` once they labelled `needed` of its current judge's
+/// judgments and it agreed with at least `threshold` of them. Only the
+/// Run's owner reads it (404 otherwise). As `GET /insights/evaluation`, it
+/// reads for the owner however they call: their own session, an API key or
+/// token, an agent session acting for them, or an internal caller for them.
+#[utoipa::path(
+    get,
+    tag = "factory",
+    operation_id = "get_factory_run_scores",
+    path = "/runs/{id}/scores",
+    params(GetRunParams),
+    responses(
+        (status = 200, body = RunScores),
+        (status = 401, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %path.id))]
+pub async fn run_scores_handler<S, Auth>(
+    State(state): State<EvaluationRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    Path(path): Path<GetRunParams>,
+) -> Result<Json<RunScores>, ScorerLabelError>
+where
+    S: ScorerLabelService,
+    Auth: MacroAuthorizationService,
+{
+    // Reading is open to whoever acts for the owner, as the insights are;
+    // only a label, which says what a person judged, needs the person.
+    let actor = caller.authorization.user.macro_user_id;
+    Ok(Json(state.service.run_scores(&actor, path.id).await?))
+}
+
+/// A person's label of a Scorer's judgment.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LabelScoreRequest {
+    /// Whether the Run should have passed on the Scorer's dimension.
+    pub passed: bool,
+}
+
+/// The judgment to label: a Run and the Scorer that judged it.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Path)]
+pub struct RunScorerPath {
+    /// The Run's id.
+    pub id: RunId,
+    /// The Scorer's name.
+    #[param(pattern = "^[a-z0-9_-]{1,64}$")]
+    pub scorer: String,
+}
+
+/// Label a live Scorer's judgment of one of the caller's Runs with whether
+/// the Run should have passed on its dimension, replacing the label it had.
+/// Insights compare the labels with the judge's passes to calibrate the
+/// Scorer. Only the Run's owner labels it, in their own signed-in session
+/// and never from an agent's account (403 otherwise); a Run that is not
+/// theirs, or a Scorer that did not judge it, is 404, and a Scorer name
+/// outside the name rules is 400.
+#[utoipa::path(
+    put,
+    tag = "factory",
+    operation_id = "label_factory_run_score",
+    path = "/runs/{id}/scores/{scorer}/label",
+    params(RunScorerPath),
+    request_body = LabelScoreRequest,
+    responses(
+        (status = 200, body = ScorerLabel),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %path.id, scorer = %path.scorer))]
+pub async fn label_score_handler<S, Auth>(
+    State(state): State<EvaluationRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(path): Path<RunScorerPath>,
+    Json(body): Json<LabelScoreRequest>,
+) -> Result<Json<ScorerLabel>, ScorerLabelError>
+where
+    S: ScorerLabelService,
+    Auth: MacroAuthorizationService,
+{
+    if !is_in_person(&caller.authorization, &headers) {
+        return Err(ScorerLabelError::NotAPerson);
+    }
+    let actor = caller.authorization.user.macro_user_id;
+    let label = state
+        .service
+        .label_score(&actor, path.id, &path.scorer, body.passed)
+        .await?;
+    Ok(Json(label))
+}
+
+impl IntoResponse for ScorerLabelError {
+    fn into_response(self) -> axum::response::Response {
+        let status_code = match self {
+            ScorerLabelError::Internal(_) => {
+                tracing::error!(error = ?self, "reading or labelling a run's judgments failed");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        message: "internal server error".into(),
+                    }),
+                )
+                    .into_response();
+            }
+            ScorerLabelError::NotFound | ScorerLabelError::NotJudged(_) => StatusCode::NOT_FOUND,
+            ScorerLabelError::NotAPerson => StatusCode::FORBIDDEN,
+            ScorerLabelError::InvalidScorer(_) => StatusCode::BAD_REQUEST,
+        };
+        (
+            status_code,
+            Json(ErrorResponse {
+                message: self.to_string().into(),
+            }),
+        )
+            .into_response()
+    }
+}
+
 /// The evaluation routes' OpenAPI document, merged into the Run API's.
 #[derive(utoipa::OpenApi)]
 #[openapi(
-    paths(evaluation_handler, start_suite_handler, undo_dismissal_handler),
+    paths(
+        evaluation_handler,
+        start_suite_handler,
+        undo_dismissal_handler,
+        run_scores_handler,
+        label_score_handler
+    ),
     components(schemas(
         EvaluationInsights,
         ScorerInsight,
+        ScorerCalibration,
+        RunScores,
+        RunScore,
+        ScorerLabel,
+        LabelScoreRequest,
         ExperimentInsight,
         ArmInsight,
         ArmScoreInsight,

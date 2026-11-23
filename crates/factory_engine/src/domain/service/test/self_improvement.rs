@@ -372,6 +372,7 @@ async fn failures_reaching_the_threshold_start_one_improvement_run() {
                 score: 0.0,
                 reason: "Wrong".to_string(),
                 model: "judge".to_string(),
+                instructions_digest: "0".repeat(64),
             }],
         );
     bench
@@ -692,6 +693,7 @@ async fn no_definition_or_no_namer_starts_nothing() {
                 score: 0.0,
                 reason: "Wrong".to_string(),
                 model: "judge".to_string(),
+                instructions_digest: "0".repeat(64),
             }],
         );
     bench
@@ -788,6 +790,7 @@ async fn insights_show_pending_failures_and_the_last_improvement_run() {
         bench.service.clone(),
         Arc::new(EvaluationDefinition::default()),
         None,
+        "anthropic/claude-haiku-5-5".to_string(),
     );
 
     bench.judged_run(0.2).await;
@@ -1564,6 +1567,7 @@ async fn undone_failures_count_toward_the_next_improvement() {
         bench.service.clone(),
         Arc::new(EvaluationDefinition::default()),
         None,
+        "anthropic/claude-haiku-5-5".to_string(),
     );
     bench.judged_run(0.2).await;
     bench.judged_run(0.2).await;
@@ -1676,6 +1680,7 @@ async fn only_the_namer_or_the_run_owner_undoes_a_dismissal() {
         bench.service.clone(),
         Arc::new(EvaluationDefinition::default()),
         None,
+        "anthropic/claude-haiku-5-5".to_string(),
     );
     bench.judged_run(0.2).await;
     bench.judged_run(0.2).await;
@@ -1791,6 +1796,7 @@ async fn a_demoted_namer_who_owns_the_run_may_not_undo_a_dismissal() {
         bench.service.clone(),
         Arc::new(EvaluationDefinition::default()),
         None,
+        "anthropic/claude-haiku-5-5".to_string(),
     );
     bench.judged_run(0.2).await;
     bench.judged_run(0.2).await;

@@ -28,6 +28,7 @@ const PLAN_AND_MERGE: OrchestratorDefinition = OrchestratorDefinition {
     owner_gates: false,
     quiet_gates: false,
     task_thread: false,
+    rerun_flaky_ci: false,
     queue_limit: None,
     token_budget: None,
     orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -47,6 +48,7 @@ const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
     owner_gates: true,
     quiet_gates: false,
     task_thread: false,
+    rerun_flaky_ci: false,
     queue_limit: None,
     token_budget: None,
     orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -66,6 +68,7 @@ const EVERY_SETTING: OrchestratorDefinition = OrchestratorDefinition {
     owner_gates: true,
     quiet_gates: true,
     task_thread: true,
+    rerun_flaky_ci: false,
     queue_limit: None,
     token_budget: None,
     orchestrator: crate::domain::standing_rules::OrchestratorKinds {

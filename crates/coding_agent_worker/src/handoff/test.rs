@@ -22,7 +22,8 @@ fn spawn_child() -> (std::process::Child, HandedOffAgent) {
         OwnedFd::from(child.stderr.take().unwrap()),
         b"{\"jsonrpc\":\"2.0\",\"method\":\"session/upd".to_vec(),
         vec!["\"agent_session:1:7\"".to_owned()],
-    );
+    )
+    .with_workplaces("{\"cwd\":{\"s1\":\"/w/run\"}}".to_owned());
     (child, agent)
 }
 
@@ -72,6 +73,7 @@ fn state_round_trips_through_the_inherited_descriptor() {
         b"{\"jsonrpc\":\"2.0\",\"method\":\"session/upd"
     );
     assert_eq!(parts.active_prompts, ["\"agent_session:1:7\""]);
+    assert_eq!(parts.workplaces, "{\"cwd\":{\"s1\":\"/w/run\"}}");
     // Adopted descriptors are close-on-exec again, so later children never
     // inherit them.
     assert_eq!(
@@ -122,6 +124,7 @@ fn a_pid_that_is_not_a_running_child_is_refused() {
             stderr: -1,
             pending_output: String::new(),
             active_prompts: Vec::new(),
+            workplaces: String::new(),
         },
     };
 
@@ -161,4 +164,12 @@ fn the_fallback_stops_the_agent_it_names() {
     // The reaper owns the child's exit status; this test must not wait too.
     let status = reaper.join().unwrap().expect("the agent was reaped");
     assert_eq!(status.terminating_signal(), Some(9));
+}
+
+/// State from an image that kept no workplaces still reads, with none.
+#[test]
+fn state_without_workplaces_reads_with_none() {
+    let raw = br#"{"version":1,"agent":{"pid":1,"stdin":-1,"stdout":-1,"stderr":-1,"pending_output":"","active_prompts":[]}}"#;
+    let state = parse_state(raw).unwrap();
+    assert_eq!(state.agent.workplaces, "");
 }

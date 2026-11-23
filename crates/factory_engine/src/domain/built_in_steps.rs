@@ -615,7 +615,7 @@ where
             BuiltInStep::Write => {
                 let outcomes = vec![Outcome::done(), Outcome::unchanged()];
                 if input.repository.is_some() {
-                    self.work_and_check(step, WRITE_INSTRUCTIONS, outcomes, input, None)
+                    self.work_and_check(step, WRITE_INSTRUCTIONS, outcomes, input, None, true)
                         .await
                 } else {
                     self.ask_agent(step, WRITE_INSTRUCTIONS, outcomes, input)
@@ -640,8 +640,15 @@ where
                     .review
                     .filter(|round| round.blockers().next().is_some());
                 let instructions = fix_instructions(blockers);
-                self.work_and_check(step, &instructions, vec![Outcome::done()], input, blockers)
-                    .await
+                self.work_and_check(
+                    step,
+                    &instructions,
+                    vec![Outcome::done()],
+                    input,
+                    blockers,
+                    true,
+                )
+                .await
             }
             BuiltInStep::CiFix => {
                 let outcomes = vec![Outcome::done()];

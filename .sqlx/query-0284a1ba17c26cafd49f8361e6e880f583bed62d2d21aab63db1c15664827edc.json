@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT known_ci_flakes AS \"known_ci_flakes?\" FROM factory_run WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "known_ci_flakes?",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "0284a1ba17c26cafd49f8361e6e880f583bed62d2d21aab63db1c15664827edc"
+}

@@ -174,6 +174,14 @@ const judged: EvaluationInsights = {
       judged: 4,
       passed: 3,
       meanScore: 0.7,
+      calibration: {
+        labelled: 0,
+        agreed: 0,
+        agreement: null,
+        needed: 20,
+        threshold: 0.8,
+        calibrated: false,
+      },
     },
   ],
   experiments: [
@@ -236,6 +244,8 @@ const judged: EvaluationInsights = {
           task: 'typo',
           runId: failedImport.id,
           runOutcome: 'manual',
+          startedAt: '2026-11-10T09:00:00Z',
+          endedAt: '2026-11-10T09:30:00Z',
           score: 0.5,
           tokens: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0 },
           scores: [{ scorer: 'correctness', score: 0.25 }],
@@ -558,6 +568,74 @@ describe('RunInsightsView', () => {
     expect(screen.queryByRole('heading', { name: 'Agent rules' })).toBeNull();
   });
 
+  it('marks the benchmark’s Pareto set of suites and recommends the best score on it', () => {
+    const [suite] = judged.suites;
+    const [trial] = suite?.trials ?? [];
+    if (!suite || !trial) throw new Error('No suite');
+    // Per trial: cheap 0.5 for 1,500 tokens over two trials, best 0.9 for
+    // 4,000, and dear 0.5 for 4,000, which cheap and best both beat.
+    const tokens = (output: number) => ({
+      input: 0,
+      output,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        suites: [
+          {
+            ...suite,
+            id: 'cheap',
+            agents: { writer: 'cheap' },
+            scored: 2,
+            tokens: tokens(3000),
+            trials: [trial, { ...trial, task: 'export' }],
+          },
+          {
+            ...suite,
+            id: 'best',
+            agents: { writer: 'best' },
+            meanScore: 0.9,
+            tokens: tokens(4000),
+          },
+          {
+            ...suite,
+            id: 'dear',
+            agents: { writer: 'dear' },
+            tokens: tokens(4000),
+          },
+        ],
+      },
+    });
+
+    const row = (agent: string) =>
+      screen.getByText(`writer: ${agent}`).closest('li') as HTMLElement;
+    expect(
+      within(row('best')).queryByText('Recommended for core')
+    ).toBeTruthy();
+    expect(within(row('best')).queryByText('Pareto set')).toBeTruthy();
+    expect(within(row('cheap')).queryByText(/Recommended/)).toBeNull();
+    expect(within(row('cheap')).queryByText('Pareto set')).toBeTruthy();
+    expect(within(row('dear')).queryByText('Pareto set')).toBeNull();
+
+    // The row shows the tokens per trial it was ranked on, not its total.
+    expect(row('cheap').textContent).toContain('1.5K');
+    expect(row('cheap').textContent).not.toContain('3K');
+
+    const description = screen.getByText(/is on the Pareto set when/);
+    const suites = row('cheap').parentElement as HTMLElement;
+    expect(suites.getAttribute('aria-describedby')).toBe(description.id);
+  });
+
+  it('says nothing of a Pareto set while a benchmark has one suite', () => {
+    mount({ insights: november, evaluation: judged });
+
+    expect(screen.queryByText(/is on the Pareto set when/)).toBeNull();
+    expect(screen.queryByText('Pareto set')).toBeNull();
+  });
+
   it('says how many of a suite’s trials were lost to infrastructure, with no score', () => {
     const [suite] = judged.suites;
     if (!suite) throw new Error('No suite');
@@ -574,6 +652,7 @@ describe('RunInsightsView', () => {
               {
                 task: 'export',
                 runId: 'run-lost',
+                startedAt: '2026-11-10T09:00:00Z',
                 runOutcome: 'infrastructure',
                 score: null,
                 tokens: null,
@@ -1017,6 +1096,8 @@ function quality(): QualityInsights {
     ci: {
       waits: 4,
       redWaits: 2,
+      quarantined: [],
+      retries: { passed: 0, failed: 0, refused: 0 },
       runs: 2,
       causes: { own: 1, setup: 2, flaky: 2, cancelled: 1 },
       jobs: [

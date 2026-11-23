@@ -81,6 +81,7 @@ export type StartRunErrorCode =
 /**
  * The codes the service refuses a start with. A person starts as themselves,
  * so Standing Roles never refuse them.
+ * The Definition change codes refuse a proposed change, never a start.
  */
 type StartRunRefusal = Exclude<
   RunErrorCode,
@@ -88,6 +89,10 @@ type StartRunRefusal = Exclude<
   | 'reservedForAPerson'
   | 'definitionNamed'
   | 'notInStandingRole'
+  | 'noDefinition'
+  | 'invalidDefinitionChange'
+  | 'definitionChangeNotOpened'
+  | 'definitionChangeClosed'
 >;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {

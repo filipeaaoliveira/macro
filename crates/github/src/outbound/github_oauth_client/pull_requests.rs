@@ -72,7 +72,7 @@ pub enum GithubBranchUpdate {
 /// `.` or ends with `.lock`, no `..` or `@{`, no control character, space,
 /// `~`, `^`, `:`, `?`, `*`, `[` or `\`, and not `@`, nor starting with `-`
 /// or ending with `.`.
-fn is_branch_name(branch: &str) -> bool {
+pub(super) fn is_branch_name(branch: &str) -> bool {
     const REFUSED: &[char] = &[' ', '~', '^', ':', '?', '*', '[', '\\'];
 
     let refused_char = branch
@@ -102,7 +102,7 @@ pub(super) fn is_repository_part(part: &str) -> bool {
 }
 
 /// What a refused read is, once throttling is ruled out.
-fn refusal(status: StatusCode) -> Option<GithubError> {
+pub(super) fn refusal(status: StatusCode) -> Option<GithubError> {
     match status {
         StatusCode::UNAUTHORIZED => Some(GithubError::ReauthenticationRequired),
         StatusCode::FORBIDDEN => Some(GithubError::Forbidden),
@@ -132,6 +132,10 @@ struct RepositoryPermissions {
 #[derive(serde::Deserialize)]
 struct PullRequestListItem {
     number: u64,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    draft: bool,
     html_url: String,
     state: String,
     merged_at: Option<String>,
@@ -290,6 +294,8 @@ struct CheckRunResultResponse {
     name: String,
     status: String,
     conclusion: Option<String>,
+    #[serde(default)]
+    html_url: Option<String>,
     app: Option<CheckRunResultApp>,
     #[serde(default)]
     output: Option<CheckRunOutput>,
@@ -364,7 +370,7 @@ impl GithubOauthImpl {
     /// taken out by `items`, up to [`MAX_PAGES`]: a page shorter than a full
     /// one is the last. A list still full at its last page read is not
     /// complete.
-    async fn read_pages<T: DeserializeOwned, I>(
+    pub(super) async fn read_pages<T: DeserializeOwned, I>(
         &self,
         access_token: &str,
         path: &str,
@@ -704,6 +710,8 @@ impl GithubOauthImpl {
             .next()
             .map(|pull_request| GithubPullRequestHead {
                 number: pull_request.number,
+                title: pull_request.title,
+                draft: pull_request.draft,
                 html_url: pull_request.html_url,
                 state: pull_request.state,
                 merged: pull_request.merged_at.is_some(),
@@ -886,6 +894,7 @@ impl GithubOauthImpl {
                         app_slug: run.app.and_then(|app| app.slug),
                         output_title,
                         output_summary,
+                        html_url: run.html_url,
                     }
                 })
                 .collect(),

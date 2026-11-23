@@ -241,6 +241,7 @@ impl<Directory: CodingAgentDirectory, Sessions: RoutineSessions, Updates: Coding
                     billing: Default::default(),
                     instructions: None,
                     repo_url: None,
+                    work_branch: None,
                     selection: ValidateRoutineSession {
                         owner: command.user_id.clone(),
                         bot_id,

@@ -46,7 +46,7 @@ use factory_records::domain::models::{
     Outcome, Role,
 };
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
+use factory_records::domain::review_rounds::{FixStatus, ReviewRound, ReviewRoundRepository};
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -57,6 +57,7 @@ use crate::domain::checks::{
     kept_output,
 };
 use crate::domain::flow::StepName;
+use crate::domain::models::run_branch;
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
@@ -167,7 +168,9 @@ where
     /// does not read. When the work answers the Blockers of the review
     /// round `answers`, what it says of each, fixed or disputed, is
     /// recorded on them once it is done, before its checks: a retry that
-    /// finds a round of checks recorded has recorded it already.
+    /// finds a round of checks recorded has recorded it already. A Step
+    /// whose work `pushes` to the Run's branch (a write or a fix) ends
+    /// `failed` when its `done` left nothing there (`Self::unpushed`).
     pub(super) async fn work_and_check(
         &self,
         step: &StepName,
@@ -175,6 +178,7 @@ where
         outcomes: Vec<Outcome>,
         input: StepInput<'_>,
         answers: Option<&ReviewRound>,
+        pushes: bool,
     ) -> Result<StepReport, BuiltInStepError> {
         let checks_until = Instant::now() + ATTEMPT_CHECKS_FOR;
         let repo = self.pull_requests.records();
@@ -200,6 +204,9 @@ where
             let work = asked?;
             if work.outcome != Outcome::done() {
                 return Ok(work);
+            }
+            if pushes && let Some(unpushed) = self.unpushed(input, answers, &work.output).await? {
+                return Ok(unpushed);
             }
             if let Some(round) = answers {
                 repo.record_fix(
@@ -777,6 +784,108 @@ where
             )));
         }
         Ok(head)
+    }
+
+    /// How a Step whose agent handed back `done`, with `work_output`, ends
+    /// when the Run's branch on GitHub does not hold its work: `failed`,
+    /// saying why, when the branch changes nothing against the Run's base,
+    /// or, for a fix that says it fixed a Blocker of the review round
+    /// `answers`, is still at the commit that round reviewed; read again
+    /// after [`BRANCH_HEAD_LAG`] before it fails. A branch GitHub does not
+    /// have is left to a retry, as a round's read of it is, until the
+    /// Step's time for rounds is up: then the Step fails saying so. None
+    /// when the
+    /// work is there, or when GitHub cannot list the branch's changes in
+    /// full. An agent that committed on another branch, or in a checkout
+    /// another Run moved, ends so rather than `done`.
+    async fn unpushed(
+        &self,
+        input: StepInput<'_>,
+        answers: Option<&ReviewRound>,
+        work_output: &str,
+    ) -> Result<Option<StepReport>, BuiltInStepError> {
+        if self
+            .not_on_branch(input, answers, work_output)
+            .await?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        tokio::time::sleep(BRANCH_HEAD_LAG).await;
+        let Some(why) = self.not_on_branch(input, answers, work_output).await? else {
+            return Ok(None);
+        };
+        tracing::warn!(
+            run_id = %input.key.run_id,
+            seq = input.key.seq,
+            %why,
+            "the agent handed back done, and its work is not on the run's branch"
+        );
+        Ok(Some(StepReport {
+            outcome: Outcome::failed(),
+            output: fit(
+                &format!(
+                    "The agent said its work was done and pushed, but {why}: its commits are not on the run's branch."
+                ),
+                work_output,
+            ),
+        }))
+    }
+
+    /// One read of [`Self::unpushed`]: why the Run's branch does not hold
+    /// the work, or none when it does. A branch GitHub does not have, even
+    /// after [`BRANCH_HEAD_LAG`], fails the attempt for a retry, until the
+    /// Step's time for rounds ([`ROUNDS_END_BY`]) is up: then it is why.
+    async fn not_on_branch(
+        &self,
+        input: StepInput<'_>,
+        answers: Option<&ReviewRound>,
+        work_output: &str,
+    ) -> Result<Option<String>, BuiltInStepError> {
+        let branch = run_branch(input.key.run_id);
+        let head = match self.pull_requests.branch_head(&input).await? {
+            Some(head) => head,
+            None => {
+                tokio::time::sleep(BRANCH_HEAD_LAG).await;
+                match self.pull_requests.branch_head(&input).await? {
+                    Some(head) => head,
+                    // The Step's last chance: it fails, saying why, rather
+                    // than run out its retries and fail saying nothing.
+                    None if Utc::now() >= self.rounds_end_by(input).await? => {
+                        return Ok(Some(format!(
+                            "the run's branch `{branch}` is not on GitHub"
+                        )));
+                    }
+                    None => return Err(retry("the run's branch is not on GitHub".to_string())),
+                }
+            }
+        };
+        let fixed = answers.filter(|round| {
+            round.head_sha.as_deref() == Some(head.as_str())
+                && fix_answers(round, work_output)
+                    .iter()
+                    .any(|answer| answer.status == FixStatus::Fixed)
+        });
+        if let Some(round) = fixed {
+            return Ok(Some(format!(
+                "the run's branch `{branch}` is still at `{head}`, the commit review round {} reviewed",
+                round.round
+            )));
+        }
+        let unchanged = self
+            .pull_requests
+            .branch_changes(&input)
+            .await?
+            .is_some_and(|changed| changed.is_empty());
+        if !unchanged {
+            return Ok(None);
+        }
+        let base = input
+            .repository
+            .map_or("", |repository| repository.base_branch.as_str());
+        Ok(Some(format!(
+            "the run's branch `{branch}` is at `{head}`, which changes nothing against its base `{base}`"
+        )))
     }
 
     /// What the round's checks on `commit` are told of the change

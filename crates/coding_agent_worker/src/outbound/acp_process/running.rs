@@ -322,8 +322,10 @@ mod handoff {
                 stderr,
                 pending_output,
                 active_prompts,
+                workplaces,
             } = agent.into_parts();
             turns.restore(active_prompts);
+            turns.restore_workplaces(&workplaces);
             let guard = ChildGuard::adopt(pid);
             Ok(Self {
                 stdin: tokio::process::ChildStdin::from_std(std::process::ChildStdin::from(stdin))?,

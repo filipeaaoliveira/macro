@@ -348,7 +348,10 @@ async fn hand_off(
     }
     let active_prompts = turns.snapshot();
     match agent.detach(HANDOFF_TIMEOUT).await {
-        Ok(running) => match running.hand_off(active_prompts) {
+        Ok(running) => match running
+            .hand_off(active_prompts)
+            .map(|handed| handed.with_workplaces(turns.workplaces_state()))
+        {
             Ok(handed) => Some(handed),
             Err(error) => {
                 tracing::warn!(error = %error, "could not hand the agent off");

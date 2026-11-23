@@ -682,6 +682,50 @@ async fn a_fix_is_given_the_blockers_of_the_latest_round() {
     assert!(open < blocker && blocker < close, "{prompt}");
 }
 
+/// A fix that says it fixed a Blocker and left the Run's branch at the
+/// commit the round reviewed fails; one that moved it goes on to its
+/// checks, and ends `done` when the base declares none.
+#[tokio::test]
+async fn a_fix_that_left_the_branch_where_the_round_reviewed_it_fails() {
+    for (head, expected) in [("bbb", Outcome::failed()), ("ccc", Outcome::done())] {
+        let agent = FakeAgent::ending_with("done");
+        let repo = FakeRepo::default();
+        let github = FakeGithub::default();
+        github.state().head = Some(head.to_string());
+        let steps = BuiltInSteps::new(
+            agent.clone(),
+            PullRequestSteps::new(github, repo.clone(), FakeWatches::default()),
+        );
+        let repository = Repository {
+            url: "https://github.com/macro/app".to_string(),
+            base_branch: "trunk".to_string(),
+        };
+        let ended_round = round(2, "bbb", "aaa", true);
+        let mut fixing = input(&[]);
+        fixing.repository = Some(&repository);
+        fixing.review = Some(&ended_round);
+        repo.review_rounds
+            .lock()
+            .expect("rounds")
+            .push((fixing.key.run_id, ended_round.clone()));
+        let entry = EntryId::try_from("fix".to_string()).expect("valid");
+        repo.start_step(fixing.key, &entry, 1).await.expect("start");
+
+        let report = steps.run(&step("fix"), fixing).await.expect("fix");
+
+        assert_eq!(report.outcome, expected, "{head}: {}", report.output);
+        if expected == Outcome::failed() {
+            assert!(
+                report
+                    .output
+                    .contains("is still at `bbb`, the commit review round 2 reviewed"),
+                "{}",
+                report.output
+            );
+        }
+    }
+}
+
 /// Each reviewer of a round says what it checked: a later Step reads them
 /// all, not only the last to end.
 #[tokio::test]

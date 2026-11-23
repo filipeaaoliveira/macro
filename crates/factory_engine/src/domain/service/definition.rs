@@ -1,6 +1,9 @@
 //! The Run API's side of the Factory Definition: reading a team's at the
 //! head of its repository's default branch, as the person who asks, and
-//! the Flow a Run of it starts with.
+//! the Flow a Run of it starts with, and changes to it proposed as pull
+//! requests (`change`).
+
+mod change;
 
 use factory_records::domain::automations::AutomationRepository;
 use factory_records::domain::board::RunBoardRepository;
@@ -28,6 +31,7 @@ use crate::domain::flow::Flow;
 use crate::domain::models::{
     CodeRepository, DEFINITION_PULL_REQUESTS_LISTED, DefinitionContents, DefinitionFlow,
     DefinitionPullRequest, DefinitionRole, DefinitionScorer, DefinitionSettings, FactoryError,
+    RepositoryAccess,
 };
 use crate::domain::ports::{
     FileRefusal, PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
@@ -104,6 +108,28 @@ impl<G: PullRequests> DefinitionFiles for RepositoryFiles<'_, G> {
                 None => RepositoryFileError::Github(error),
             })
     }
+}
+
+/// What a Definition's file GitHub will not give is, to the person who
+/// fixes it: GitHub's own words name the request, not the file's problem.
+fn refused_file(path: String, refusal: FileRefusal) -> DefinitionError {
+    match refusal {
+        FileRefusal::TooLarge => DefinitionError::TooLarge(path),
+        FileRefusal::Refused => DefinitionError::Unreadable {
+            path,
+            error: "GitHub refused to give it".to_string(),
+        },
+    }
+}
+
+/// Where a Definition is now, as one person reaches it on GitHub.
+struct DefinitionHead {
+    /// Its repository.
+    repository: CodeRepository,
+    /// What the person may do with it.
+    access: RepositoryAccess,
+    /// The commit its default branch is at.
+    commit: String,
 }
 
 /// What `definition`, read at `commit`, holds, as its setting shows it.
@@ -197,6 +223,34 @@ where
         reader: &MacroUserIdStr<'static>,
         repo_url: &str,
     ) -> Result<PinnedDefinition, FactoryError> {
+        let DefinitionHead {
+            repository,
+            access,
+            commit,
+        } = self.definition_head(reader, repo_url).await?;
+        let definition = self.definition_at(reader, &repository, &commit).await?;
+        let agents = serde_json::to_value(&definition.agents)
+            .map_err(|error| FactoryError::Internal(internal(error)))?;
+        let evaluation = serde_json::to_value(&definition.evaluation)
+            .map_err(|error| FactoryError::Internal(internal(error)))?;
+        Ok(PinnedDefinition {
+            repo_url: repository.url(),
+            branch: access.default_branch,
+            commit,
+            definition,
+            agents,
+            evaluation,
+        })
+    }
+
+    /// Where the Definition in `repo_url` is now, as `reader` reaches it on
+    /// GitHub: its repository, what they may do with it, and the commit its
+    /// default branch is at.
+    async fn definition_head(
+        &self,
+        reader: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> Result<DefinitionHead, FactoryError> {
         let repository = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
         let access = self
             .github
@@ -223,18 +277,10 @@ where
             .map_err(internal)?
             .filter(|commit| is_commit_id(commit))
             .ok_or(FactoryError::UnreachableDefinition)?;
-        let definition = self.definition_at(reader, &repository, &commit).await?;
-        let agents = serde_json::to_value(&definition.agents)
-            .map_err(|error| FactoryError::Internal(internal(error)))?;
-        let evaluation = serde_json::to_value(&definition.evaluation)
-            .map_err(|error| FactoryError::Internal(internal(error)))?;
-        Ok(PinnedDefinition {
-            repo_url: repository.url(),
-            branch: access.default_branch,
+        Ok(DefinitionHead {
+            repository,
+            access,
             commit,
-            definition,
-            agents,
-            evaluation,
         })
     }
 
@@ -259,19 +305,9 @@ where
         read_definition(&files, |step| self.executor.serves(step))
             .await
             .map_err(|error| match error {
-                // GitHub's own words name the request; the Definition's
-                // error says only what the person can fix.
-                DefinitionReadError::Files(RepositoryFileError::Refused {
-                    path,
-                    refusal: FileRefusal::TooLarge,
-                }) => FactoryError::InvalidDefinition(DefinitionError::TooLarge(path)),
-                DefinitionReadError::Files(RepositoryFileError::Refused {
-                    path,
-                    refusal: FileRefusal::Refused,
-                }) => FactoryError::InvalidDefinition(DefinitionError::Unreadable {
-                    path,
-                    error: "GitHub refused to give it".to_string(),
-                }),
+                DefinitionReadError::Files(RepositoryFileError::Refused { path, refusal }) => {
+                    FactoryError::InvalidDefinition(refused_file(path, refusal))
+                }
                 DefinitionReadError::Files(RepositoryFileError::Github(error)) => {
                     FactoryError::Internal(internal(error))
                 }

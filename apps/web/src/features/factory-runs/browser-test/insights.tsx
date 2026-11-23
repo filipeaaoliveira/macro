@@ -545,6 +545,8 @@ function qualityFixture(params: QualityParams): QualityInsights {
     ci: {
       waits: 14,
       redWaits: 5,
+      quarantined: [],
+      retries: { passed: 0, failed: 0, refused: 0 },
       runs: 9,
       causes: { own: 2, setup: 2, flaky: 2, cancelled: 1 },
       jobs: [

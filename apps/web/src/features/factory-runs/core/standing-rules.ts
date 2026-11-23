@@ -5,6 +5,7 @@ export const RULE_NAMES = {
   approve_plan: 'factoryRuns.ruleApprovePlan',
   fix_blockers: 'factoryRuns.ruleFixBlockers',
   merge_when_green: 'factoryRuns.ruleMergeWhenGreen',
+  rerun_flaky_ci: 'factoryRuns.ruleRerunFlakyCi',
 } as const satisfies Record<StandingRule, string>;
 
 /**

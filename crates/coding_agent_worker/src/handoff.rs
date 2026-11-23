@@ -47,6 +47,9 @@ pub struct HandedOffParts {
     pub pending_output: Vec<u8>,
     /// `session/prompt` request ids the agent has not answered yet.
     pub active_prompts: Vec<String>,
+    /// Where the agent's sessions work, as `ActiveTurns` keeps it (JSON);
+    /// empty when the previous image kept none.
+    pub workplaces: String,
 }
 
 /// The serialized form. Descriptor numbers are only meaningful in the image
@@ -66,6 +69,10 @@ struct AgentRecord {
     /// Hex, so the state stays text whatever the agent wrote.
     pending_output: String,
     active_prompts: Vec<String>,
+    /// Optional, so either image reads the other's state: an image that
+    /// predates it ignores it, and one that finds none keeps none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    workplaces: String,
 }
 
 /// Why handed-off state could not be used.
@@ -100,8 +107,19 @@ impl HandedOffAgent {
                 stderr,
                 pending_output,
                 active_prompts,
+                workplaces: String::new(),
             }),
         }
+    }
+
+    /// Hand `workplaces` (`ActiveTurns::workplaces_state`) over with the
+    /// agent.
+    #[must_use]
+    pub fn with_workplaces(mut self, workplaces: String) -> Self {
+        if let Some(parts) = self.parts.as_mut() {
+            parts.workplaces = workplaces;
+        }
+        self
     }
 
     /// Take the agent; it is no longer killed when this value drops.
@@ -134,6 +152,7 @@ impl HandedOffAgent {
                 stderr: parts.stderr.as_raw_fd(),
                 pending_output: hex::encode(&parts.pending_output),
                 active_prompts: parts.active_prompts.clone(),
+                workplaces: parts.workplaces.clone(),
             },
         }
     }
@@ -309,7 +328,8 @@ fn adopt(
         stderr,
         pending_output,
         record.active_prompts,
-    ))
+    )
+    .with_workplaces(record.workplaces))
 }
 
 /// The state in an unlinked file: nothing is left on disk whatever happens.

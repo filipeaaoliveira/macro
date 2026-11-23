@@ -936,6 +936,8 @@ fn a_suite_counts_its_trials_lost_to_infrastructure_apart() {
     let trial = |task: &str, outcome: RunOutcome, result: Option<TrialResult>| TrialRecord {
         task: task.to_string(),
         run_id: RunId::generate(),
+        started_at: Utc::now(),
+        ended_at: Some(Utc::now()),
         run_outcome: Some(outcome),
         result,
         scores: Vec::new(),
@@ -956,7 +958,7 @@ fn a_suite_counts_its_trials_lost_to_infrastructure_apart() {
         ..Default::default()
     };
 
-    let insights = evaluation_insights(&definition(), &query, records);
+    let insights = evaluation_insights(&definition(), &query, records, Vec::new());
 
     let suite = &insights.suites[0];
     assert_eq!(suite.scored, 2);
@@ -1071,7 +1073,7 @@ fn evaluation_insights_list_defined_and_retired_scorers_and_arms() {
         suites: Vec::new(),
     };
 
-    let insights = evaluation_insights(&definition(), &query, records);
+    let insights = evaluation_insights(&definition(), &query, records, Vec::new());
 
     let scorers: Vec<_> = insights
         .scorers

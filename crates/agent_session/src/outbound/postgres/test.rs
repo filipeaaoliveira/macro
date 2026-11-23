@@ -2451,7 +2451,7 @@ async fn participants_are_the_distinct_users_the_log_attributes(pool: PgPool) {
         .participants(session_id)
         .await
         .expect("list participants");
-    participants.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    participants.sort_by_key(|participant| participant.to_string());
 
     assert_eq!(participants, vec![alice, bob]);
 }

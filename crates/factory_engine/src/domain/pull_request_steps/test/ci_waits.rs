@@ -16,6 +16,8 @@ fn finished(name: &str, state: CheckState, failed_step: Option<&str>) -> Finishe
         failed_step: failed_step.map(str::to_string),
         detail: None,
         annotations: Vec::new(),
+        actions_job_id: None,
+        workflow_run_id: None,
     }
 }
 

@@ -515,6 +515,7 @@ where
                 score: verdict.score.clamp(0.0, 1.0),
                 reason: verdict.reason,
                 model: self.judge.model().to_string(),
+                instructions_digest: scorer.instructions_digest(),
             }),
             Ok(Err(error)) => {
                 tracing::warn!(?error, scorer = %scorer.name, "a scorer's judge failed");

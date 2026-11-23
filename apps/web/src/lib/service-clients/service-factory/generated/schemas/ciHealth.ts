@@ -7,6 +7,8 @@
 import type { CiCauseCounts } from './ciCauseCounts';
 import type { CiHealthFirstPushToGreen } from './ciHealthFirstPushToGreen';
 import type { CiJobHealth } from './ciJobHealth';
+import type { CiQuarantined } from './ciQuarantined';
+import type { CiRetryCounts } from './ciRetryCounts';
 import type { RecurringCiFailure } from './recurringCiFailure';
 
 /**
@@ -24,6 +26,10 @@ fixed.
   firstPushToGreen?: CiHealthFirstPushToGreen;
   /** Each job, the reddest first. */
   jobs: CiJobHealth[];
+  /** The jobs quarantined in the repositories read, by repository and
+name: whoever's Run quarantined them, as a repository's flaky jobs
+are every Run's there. */
+  quarantined: CiQuarantined[];
   /** Failures, by test or named step, on two or more pull requests,
 newest first. */
   recurring: RecurringCiFailure[];
@@ -32,6 +38,9 @@ newest first. */
    * @minimum 0
    */
   redWaits: number;
+  /** How the Runs' reruns of flaky jobs ended, under the
+`rerun_flaky_ci` rule. */
+  retries: CiRetryCounts;
   /**
    * Rounds Runs spent fixing reviewers' Blockers, apart from CI.
    * @minimum 0

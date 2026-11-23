@@ -510,6 +510,10 @@ export const factoryExcluded = [
   'getFactoryDefinition',
   'getFactoryInsights',
   'getFactoryStandingRules',
+  // A Run's Scorer results and the person's labels on them calibrate the
+  // Scorer from Insights; the label is the person's own judgment.
+  'getFactoryRunScores',
+  'labelFactoryRunScore',
   // The board is the web app's page of Runs across tasks; an agent reads a
   // task's Runs and those waiting on the person.
   'listFactoryBoard',
@@ -530,6 +534,9 @@ export const factoryExcluded = [
   // Only the person in their own session sets the Control Files an agent's
   // changes are checked against.
   'setFactoryControlFiles',
+  // Only the person in their own session proposes a change to the Factory
+  // Definition, as a pull request to its repository.
+  'proposeFactoryDefinitionChange',
   // Only the person in their own session names the Factory Definition
   // whose Flows, Agents and rules their team's Runs take.
   'setFactoryDefinition',

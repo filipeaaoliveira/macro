@@ -956,6 +956,7 @@ async fn a_suite_of_a_definition_s_benchmark_walks_the_benchmark_flow() {
         Arc::new(code_service(&repo, &FakeWorkflows::default(), &github)),
         Arc::new(EvaluationDefinition::default()),
         Some(deployment_agents),
+        "anthropic/claude-haiku-5-5".to_string(),
     );
     let writer = |agent: &str| -> AgentChoices {
         [(

@@ -98,6 +98,7 @@ fn owner_and_stand_in() -> RunRules {
         definition: OrchestratorDefinition {
             owner_gates: true,
             task_thread: false,
+            rerun_flaky_ci: false,
             queue_limit: None,
             token_budget: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {

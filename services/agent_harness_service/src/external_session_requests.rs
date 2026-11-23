@@ -126,6 +126,7 @@ where
         let event = AgentSessionMacroEvent::requested_event(AgentSessionRequestedEvent {
             bot_id: request.bot_id,
             repo_url: request.repo_url,
+            work_branch: request.work_branch,
             session_id,
             owner: request.owner.as_ref().to_owned(),
             origin: request.origin,

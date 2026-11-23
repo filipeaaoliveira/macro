@@ -603,7 +603,42 @@ nothing is meant to be pushed to it or based on it after.
 `GET /insights/evaluation` (same
 params as `/insights`) shows each Scorer's judgments, each Experiment's
 arms with their Runs' outcomes and scores, the Benchmarks and the caller's
-suites of the period.
+suites of the period. Each trial has when its Run was created and when it
+ended (`startedAt`, `endedAt`): the span includes any wait before its
+Steps ran, such as for a Machine, not only the work. `endedAt` is null
+until the Run ends, and a Run whose workflow never started ends only when
+a read finds it stale, so the web app should not run a live clock from
+`startedAt`.
+
+A Run's owner labels a live Scorer's judgment of the Run with whether it
+should have passed (`PUT /runs/{id}/scores/{scorer}/label`, `{"passed"}`;
+`evaluation/insights/calibration.rs`). Only the person in their own
+signed-in session labels, never an agent's account (403); a new label
+replaces the last; a Run not theirs, or a Scorer that did not judge it,
+is 404; and a Scorer name outside the name rules is 400 before anything
+is read. `GET /runs/{id}/scores` lists the Run's judgments with their
+labels for its owner, however they call (an API key, an agent session
+or an internal caller for them too), as `GET /insights/evaluation` does.
+
+A Scorer's judge is the model the Scorers judge with
+(`FACTORY_SCORER_MODEL`) and the Scorer's instructions with what it
+reads, whose SHA-256 each judgment keeps
+(`factory_run_score.instructions_sha256`,
+`ScorerDefinition::instructions_digest`). A Scorer is calibrated once its
+current judge agrees with the person's labels, over all of their Runs:
+at least `CALIBRATION_LABELS` (20) of that judge's judgments labelled,
+with its pass (a score of at least `PASS_SCORE`) the label's on at least
+`CALIBRATION_AGREEMENT` (0.8) of them. A new model or new instructions
+start the Scorer's calibration again from none; the labels of the old
+judge's judgments are kept, and count again if the judge comes back.
+Judgments made before fingerprints were kept calibrate no judge. Each
+Scorer in the insights, and each judgment of a Run, carries its
+`calibration`, and a judgment says whether the current judge made it
+(`byCurrentJudge`); until a Scorer is calibrated, nothing should act on
+its numbers. A Scorer no longer defined has no current judge and is
+never calibrated. Calibration is each person's, from their own labels,
+as the insights are of their own Runs; a trial's judgments are never
+labelled.
 
 The Step Terminal (`src/domain/step_terminal.rs`) lets the Run's owner
 watch a running agent Step's session and steer it. A Step reads the
@@ -825,10 +860,32 @@ its default branch, read then, is the Run's base (`factory_run.repo_url`,
 name the cause. Each agent Step of such a Run opens its session with that
 repository (`PrepareRoutineSession.repo_url`), so its runtime checks it out: a
 managed sandbox through the agent egress, macrod in a per-session worktree or
-its configured workspace. The prompt names the Run's branch,
-`factory/{run id}`, and its base: the agent checks the branch out, and
-`write`, `fix` and `ci_fix` commit and push it from their runtime; `review`
-changes nothing. The pull request Steps act on GitHub as the Run's owner, with
+its configured workspace. It names the Run's branch too
+(`PrepareRoutineSession.work_branch`, `factory/{run id}`), which reaches an
+external runtime on its request (`AgentSessionRequestedEvent.work_branch`): a
+macrod that shares one workspace among its sessions gives the branch a git
+worktree of its own beside it (`coding_agent_worker`'s `branch_worktrees.rs`,
+`<workspace>.macrod-worktrees/factory+<run id>`), which every Step of the Run
+works in and no other Run does, so two Runs at once on one machine never
+share a checkout's files or `HEAD`. macrod removes the worktree once no
+session used it for an hour, origin no longer lists the branch and the
+worktree holds nothing origin lacks, or once no session used it for 3 days;
+never while a turn runs in it.
+Nothing is recorded or replayed in the workflow, so no patch marker guards
+it: a Run in flight gets its worktree at its next Step. The prompt names the
+Run's branch and its base: the agent checks the branch out, and `write`,
+`fix` and `ci_fix` commit and push it from their runtime; `review` changes
+nothing. A `write` or `fix` whose agent hands back `done` with none of its
+work on the branch on GitHub ends `failed`, saying why, before its checks
+(`checks_round.rs`, `unpushed`, which `update` and conflict resolution skip):
+the branch changes nothing against the Run's base (GitHub lists no changed
+path; a list GitHub cannot give in full passes), or, for a fix that says it
+fixed a Blocker of its review round, is still at the commit that round
+reviewed. Either is read again after 2 s before the Step fails. A branch
+GitHub does not have, even after 2 s, fails the attempt for a retry, as a
+round's read of it does, until the Step's time for rounds (105 minutes) is
+up: then the Step fails saying the branch is not on GitHub. Like the
+checks, this runs in the Step's activity, behind no patch marker. The pull request Steps act on GitHub as the Run's owner, with
 the token of the GitHub account they linked to Macro, which the
 authentication service gives (`outbound/github_pull_requests.rs`, over the
 `github` crate's user-token client), read on every call. A missing link, a
@@ -866,6 +923,38 @@ while an Actions suite sits empty. Its guarantees:
   that names an app is met only by that app's check run: one such app that
   reports only by status (as some deploy previews do) keeps CI waiting until
   it times out.
+
+The pull request's description holds the request, then the Run's report,
+then the lines that name the Run and its task
+(`src/domain/pull_request_steps/description.rs`). The report is a section
+marked by HTML comments: the plan (without its acceptance block), the
+Done-when checklist with each clause's result in the latest `accept` Step,
+the review rounds with how each Blocker ended (fixed, disputed and upheld or
+dropped), the latest round of the repository's checks, and the follow-ups
+filed. `publish` opens the pull request with it, and `publish` and `ci` (once,
+on its first read, so a Run that comes back from `update` shows it) write it
+again on each visit: only the marked section is replaced, so what a person
+wrote around it stays, and a description without it gets it at its end. A
+description takes about 1% less than GitHub's 65,536 characters: the
+request is kept whole lines (cut by characters only when its first line
+alone does not fit), and the rest of it, then what does not fit of the
+report, go into numbered comments, each found again by its marker and
+edited in place; one no longer needed, or a second of one number, says so.
+Only comments by the GitHub account the owner's token acts as (`GET
+/user`) count, whoever opened the pull request: a marker anyone else writes
+is never edited, and when that account cannot be read no comment is
+written. Every marker names the Run
+(`run=<id>`), and only this Run's count: the section is the first of its
+start markers that its end marker closes, and its other sections and lone
+markers are removed until none is left. The request and what agents wrote
+are escaped one way, code included: `&`, `<` and `>` as entities, and a
+word joiner after `@` before a name, `#` before a number, `GH-` and a
+closing keyword before a link or a Markdown link; web and email addresses
+get no joiner. Follow-ups are not named by their task id, which would link the
+pull request to them. Writing the report reads before it writes, writes
+only what changed, and a failure is logged without failing the Step; when
+`publish` cannot read the review rounds, it opens the pull request without
+them, and a later write adds them.
 
 On a repository, `write` and `fix` then run the repository's own checks
 (`src/domain/built_in_steps/checks_round.rs`). The repository declares them
@@ -2122,6 +2211,49 @@ last two digits (`is_placeholder_bot`), so the template as shipped does not
 read; a person merges), which a test reads with its bots replaced; `factory_definition_check`
 (`services/factory_service`) checks one in a folder.
 
+An admin of the team changes the Definition from the factory's settings
+with `POST /settings/definition/changes` (`{"changeId", "title",
+"description"?, "files": {path: text}}`; `service/definition/change.rs`),
+which answers the pull request it opened (`DefinitionPullRequest`, with
+GitHub's own title and draft state). Only an admin, in person from an
+account that is not an agent's (403 otherwise, as for naming the
+Definition, and before the change is looked at), proposes: editing it
+changes the rules every Run of the team runs under. The change's pull
+request is looked up first, from its branch: once there, it is the answer
+whatever happened since (open or merged), and nothing is checked or
+written again, so a resend after a merge, or after the Definition moved
+on, is no error, and a late resend never brings back a branch that would
+undo later changes; one closed without merging is 409
+`definitionChangeClosed`, never opened again. Otherwise the change is
+checked as the Definition would read with it at its default branch's head
+(`read_changed_definition`, the files it writes read over the others with
+the same `read_definition` a Run's start and `factory_definition_check`
+use; 400 `invalidDefinitionChange`, naming the file and the problem). Each
+file it writes must be one the Definition then reads (`NotRead`: a Flow's
+file the manifest does not name is never checked, so a secret could hide
+in it), at least one must differ from the head's (a head file that cannot
+be read, too large or not text, differs, so a broken Definition can be
+repaired), it writes 1 to `MAX_CHANGED_FILES`, and its title is joined
+into one line. It is committed, with the admin's linked GitHub account,
+which must push to the repository (400 `noPushAccess`; a link GitHub no
+longer takes or a repository hidden from them is 400
+`unreachableDefinition`, `PullRequests::access_refusal`), as one commit
+over the head on its own new branch, `definition-change/{changeId}`
+(`PullRequests::create_branch`, which only ever creates a branch: one
+already there, the default branch included, is left as it is), and
+opened as a pull request onto the default branch, which a person merges;
+nothing is pushed to the default branch. A branch GitHub declines (a rule
+of the repository) or finds there already with no pull request (what it
+holds was never checked), and a pull request it will not open, are 409
+`definitionChangeNotOpened` with GitHub's reason. A team that names no
+Definition has none to change (409 `noDefinition`). As for any pull
+request on the Definition, the change reaches Runs only once it merges.
+Each proposal is checked alone, against the head it was made at: two
+pull requests that each read may not read once both merge (one adds a
+Flow, the other drops the Role it names). Run `factory_definition_check`
+in the Definition repository's CI, and require it on its default branch,
+so the merged result is checked too.
+
 Self-improvement (`src/domain/self_improvement.rs`): a team's Definition
 learns from the Runs that failed under it. A failure is a live Scorer's
 judgment below `PASS_SCORE` (0.5), or a Run its owner marked flawed, of a
@@ -2359,6 +2491,12 @@ Definition.
 - `src/domain/quality.rs`: CI health, review quality, cost per merged
   pull request and the autonomy rate (`GET /insights/quality`), and how a
   `ci` wait's finished jobs are classed before they are kept.
+- `src/domain/pull_request_steps/flaky_ci.rs`: the `rerun_flaky_ci`
+  Standing Rule: a red of only known flaky jobs (the Definition's
+  `knownFlakes`, a job quarantined in the repository, or the same failure
+  on other pull requests) is rerun once through GitHub before `ci-fix`;
+  passed retries quarantine a job, and `service/quarantine.rs` files its
+  task as the Run ends.
 - `src/domain/evaluation.rs`: Scorers, Experiments and Benchmarks, their
   sampling and arm assignment; `evaluation/service.rs` scores a Run that
   ended; `evaluation/insights.rs` the evaluation insights and suites.
@@ -2631,3 +2769,15 @@ Definition.
 - A worker older than `selfImprovement` in `scorers.json` cannot read a
   Definition that sets it (`deny_unknown_fields`); one that leaves the
   defaults keeps the JSON it kept before.
+- Run the `factory_ci_quarantine` migrations (the table one, then the two
+  concurrent index builds) before deploying the factory. A worker older
+  than `rerun_flaky_ci` cannot read a Run whose kept rules store it, nor a
+  Definition whose `rules.json` sets `rerunFlakyCi` or `knownFlakes`
+  (`deny_unknown_fields`): deploy every worker and the API together after
+  the migrations, as for `selfImprovement`, and only then turn the rule on.
+  The rule is off by default. A `ci` Step reruns only GitHub Actions jobs,
+  with the owner's token: one that may not write Actions gets the rerun
+  declined, and the red goes to `ci-fix` as before. A red the rule may
+  rerun is held until the head's other checks finish, or at most three
+  minutes after its jobs' workflow runs completed, so its `ci-fix` starts
+  later.

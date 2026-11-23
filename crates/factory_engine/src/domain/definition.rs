@@ -20,8 +20,10 @@
 //!   Agent Rules: the Agent a Role's Steps start with when a Run's task
 //!   carries a tag or the Run works on a repository (`agents::rules`).
 //! - `rules.json` (optional): the Standing Rules (`standingRules`, an
-//!   Orchestrator Definition) and the Control File patterns
-//!   (`controlFiles`). Left out, the factory's defaults apply.
+//!   Orchestrator Definition), the Control File patterns
+//!   (`controlFiles`), and the CI jobs known to be flaky (`knownFlakes`),
+//!   which the `rerun_flaky_ci` rule reruns once when they turn a pull
+//!   request red. Left out, the factory's defaults apply.
 //! - `scorers.json` (optional): the Scorers, Experiments and Benchmarks, in
 //!   `FACTORY_EVALUATION`'s format, of this Definition's Flows and Agents.
 //!   Left out, the team has none.
@@ -31,6 +33,12 @@
 
 #[cfg(test)]
 mod test;
+
+mod change;
+pub use change::{
+    DefinitionChange, DefinitionChangeError, DefinitionChangeReadError, MAX_CHANGED_FILES,
+    ProposedChange, read_changed_definition,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -217,7 +225,18 @@ pub struct DefinitionRules {
     /// The Control File patterns; the factory's default when left out.
     #[serde(default)]
     pub control_files: Option<Vec<String>>,
+    /// The CI jobs known to be flaky, by name as GitHub shows them: a red
+    /// of only these, under the `rerun_flaky_ci` rule, reruns them once
+    /// before any CI fix. At most [`MAX_KNOWN_FLAKES`]; none when left out.
+    #[serde(default)]
+    pub known_flakes: Vec<String>,
 }
+
+/// The most CI jobs a Definition's `rules.json` names as known flakes.
+pub const MAX_KNOWN_FLAKES: usize = 100;
+
+/// The most bytes a known flake's name takes, as a CI job's name is kept.
+const KNOWN_FLAKE_BYTES: usize = 1024;
 
 /// What is wrong with a Factory Definition.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -289,6 +308,12 @@ pub enum DefinitionError {
     /// The token budget is out of range.
     #[error("{RULES_FILE}: tokenBudget must be from {MIN_TOKEN_BUDGET} to {MAX_TOKEN_BUDGET}")]
     TokenBudget,
+    /// The known flakes are too many, or one is empty, too long or named
+    /// twice.
+    #[error(
+        "{RULES_FILE}: knownFlakes names at most {MAX_KNOWN_FLAKES} CI jobs, each once, by a name of 1 to 1024 bytes"
+    )]
+    KnownFlakes,
     /// `factory.json` names a Flow the factory keeps for itself: the
     /// benchmark Flow, or the self-improvement Flow.
     #[error(
@@ -649,7 +674,7 @@ pub async fn read_definition<F: DefinitionFiles>(
             .map_err(DefinitionError::AgentRule)?;
     }
 
-    let rules: DefinitionRules = json(files, RULES_FILE).await?.unwrap_or_default();
+    let mut rules: DefinitionRules = json(files, RULES_FILE).await?.unwrap_or_default();
     if let Some(patterns) = &rules.control_files {
         if patterns.len() > MAX_DEFINITION_CONTROL_FILES {
             return Err(DefinitionError::TooManyControlFiles.into());
@@ -667,6 +692,22 @@ pub async fn read_definition<F: DefinitionFiles>(
         .and_then(|standing_rules| standing_rules.token_budget);
     if token_budget.is_some_and(|budget| !(MIN_TOKEN_BUDGET..=MAX_TOKEN_BUDGET).contains(&budget)) {
         return Err(DefinitionError::TokenBudget.into());
+    }
+    // A known flake is kept as GitHub names the job, without the spaces
+    // around it a hand-written file may add.
+    for name in &mut rules.known_flakes {
+        *name = name.trim().to_string();
+    }
+    let named: BTreeSet<&str> = rules.known_flakes.iter().map(String::as_str).collect();
+    let well_named = rules
+        .known_flakes
+        .iter()
+        .all(|name| !name.is_empty() && name.len() <= KNOWN_FLAKE_BYTES);
+    if rules.known_flakes.len() > MAX_KNOWN_FLAKES
+        || named.len() < rules.known_flakes.len()
+        || !well_named
+    {
+        return Err(DefinitionError::KnownFlakes.into());
     }
 
     // A Definition's Scorers and Experiments judge and split its own

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::control_files::ControlFilesError;
-use crate::domain::definition::DefinitionError;
+use crate::domain::definition::{DefinitionChangeError, DefinitionError};
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 use crate::domain::gate_owner::OwnerNote;
 use crate::domain::setup::RepositorySetup;
@@ -442,6 +442,34 @@ pub struct FinishedJob {
     /// The failures a check run that failed annotated, such as the tests
     /// that failed, when they could be read.
     pub annotations: Vec<FailureAnnotation>,
+    /// For a GitHub Actions job, its id, which reruns it; a rerun is a new
+    /// job of the same name. None for another app's check run, or a
+    /// commit status, which the factory cannot rerun.
+    pub actions_job_id: Option<u64>,
+    /// For a GitHub Actions job, the workflow run it is in, as its page
+    /// names it: a rerun of the job is a new job of the same run.
+    pub workflow_run_id: Option<u64>,
+}
+
+/// The GitHub Actions workflow run a job's page, `url`, is under
+/// (`…/actions/runs/{id}/job/{job}`); none for another page.
+pub(crate) fn workflow_run_of(url: &str) -> Option<u64> {
+    let (_, after) = url.split_once("/actions/runs/")?;
+    let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+    let rest = &after[digits.len()..];
+    if !rest.starts_with("/job/") {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// What GitHub answered a rerun of a failed GitHub Actions job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobRerun {
+    /// GitHub queued it to run again.
+    Started,
+    /// GitHub would not rerun it, with its message.
+    Declined(String),
 }
 
 /// A failure a check run annotated: a test that failed, or an error of the
@@ -567,6 +595,26 @@ pub struct OpenPullRequest {
     pub title: String,
     /// Its description.
     pub body: String,
+}
+
+/// A comment in a pull request's conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestComment {
+    /// GitHub's id of the comment, which edits it.
+    pub id: u64,
+    /// Its text.
+    pub body: String,
+    /// GitHub's id of the account that wrote it, if GitHub names one.
+    pub author_id: Option<u64>,
+}
+
+/// A pull request's description, and who opened it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestText {
+    /// Its description; empty when it has none.
+    pub body: String,
+    /// GitHub's id of the account that opened it, if GitHub names one.
+    pub author_id: Option<u64>,
 }
 
 /// What asking GitHub to open a pull request came to.
@@ -863,6 +911,52 @@ pub struct DefinitionPullRequest {
     pub draft: bool,
 }
 
+/// A branch to create in a repository: one commit on top of `base_commit`
+/// that writes `files`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewBranch {
+    /// Its name.
+    pub name: String,
+    /// The commit its one commit goes on top of.
+    pub base_commit: String,
+    /// That commit's message.
+    pub message: String,
+    /// The files it writes, by their path from the repository's root, each
+    /// with its whole text; every other file stays as `base_commit` has it.
+    pub files: std::collections::BTreeMap<String, String>,
+}
+
+/// What asking GitHub to create a branch came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BranchCreation {
+    /// GitHub created it.
+    Created,
+    /// A branch of that name was already there, and was left as it is.
+    Exists,
+    /// GitHub declined to create it, for this reason, as a rule of the
+    /// repository that restricts which branches may be created does.
+    Refused(String),
+}
+
+/// The pull request from a branch, as GitHub has it now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchPullRequest {
+    /// It, as a Definition's setting lists its pull requests.
+    pub pull_request: DefinitionPullRequest,
+    /// Whether it is open, closed, or merged.
+    pub state: PullRequestState,
+}
+
+/// Why GitHub refused the person, for good, whatever was asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessRefusal {
+    /// They reach the repository but may not do this, as push to it.
+    NotAllowed,
+    /// They do not reach it: no GitHub account linked, a link GitHub no
+    /// longer takes, or a repository hidden from them.
+    Unreachable,
+}
+
 /// The Standing Rules a person's Runs are created with: their team's
 /// Orchestrator Definition, or the factory's default, and the team's
 /// Projects' own, which replace it for a Run whose task is in one.
@@ -1065,6 +1159,23 @@ pub enum FactoryError {
         "the team's factory definition sets this: change it by a pull request to the definition's repository"
     )]
     DefinitionNamed,
+    /// The team names no Factory Definition, so there is none to change.
+    #[error("the team names no factory definition: name its repository first")]
+    NoDefinition,
+    /// A change to the team's Factory Definition is refused: the
+    /// Definition does not read with it, or the change itself is wrong.
+    #[error(transparent)]
+    InvalidDefinitionChange(#[from] DefinitionChangeError),
+    /// GitHub did not create the branch or open the pull request of a
+    /// change to the team's Factory Definition, for this reason.
+    #[error("the definition change was not opened as a pull request: {0}")]
+    DefinitionChangeNotOpened(String),
+    /// The pull request a change to the team's Factory Definition opened
+    /// was closed without merging; the change is not proposed again.
+    #[error(
+        "this change's pull request, {0}, was closed without merging: propose the change again under a new changeId"
+    )]
+    DefinitionChangeClosed(String),
     /// The Gate does not offer the answer.
     #[error("the gate offers {offered:?}")]
     AnswerNotOffered {

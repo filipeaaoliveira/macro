@@ -74,6 +74,13 @@ pub struct PrepareRoutineSession {
     /// coding session started with that repository. Older callers omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_url: Option<String>,
+    /// The branch the session works on in that repository, when the caller
+    /// keeps one per piece of work: a runtime that shares one checkout among
+    /// its sessions (a paired machine) gives every session naming it one
+    /// worktree of its own. Told only to external runtimes. Older callers
+    /// omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_branch: Option<String>,
 }
 
 /// A verified, persisted session ready for its first prompt.

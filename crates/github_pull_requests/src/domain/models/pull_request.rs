@@ -823,6 +823,10 @@ pub struct GithubRepositoryAccess {
 pub struct GithubPullRequestHead {
     /// Its number in its repository.
     pub number: u64,
+    /// Its title.
+    pub title: String,
+    /// Whether it is a draft.
+    pub draft: bool,
     /// Its page on GitHub.
     pub html_url: String,
     /// GitHub's state: `open` or `closed`.

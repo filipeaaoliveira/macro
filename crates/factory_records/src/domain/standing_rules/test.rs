@@ -9,6 +9,7 @@ fn a_definition_is_stored_as_the_kinds_its_rules_decide() {
         owner_gates: false,
         quiet_gates: false,
         task_thread: false,
+        rerun_flaky_ci: false,
         queue_limit: None,
         token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -37,6 +38,7 @@ fn the_owner_section_is_stored_beside_the_kinds() {
         owner_gates: true,
         quiet_gates: false,
         task_thread: false,
+        rerun_flaky_ci: false,
         queue_limit: None,
         token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -122,6 +124,7 @@ fn the_kinds_the_stand_in_answers_are_stored_beside_the_rules() {
         owner_gates: false,
         quiet_gates: false,
         task_thread: false,
+        rerun_flaky_ci: false,
         queue_limit: None,
         token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -151,6 +154,7 @@ fn the_stand_in_never_answers_a_merge_and_is_off_by_default() {
         owner_gates: false,
         quiet_gates: false,
         task_thread: false,
+        rerun_flaky_ci: false,
         queue_limit: None,
         token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -185,6 +189,7 @@ fn the_owner_section_and_the_stand_in_are_stored_together() {
         owner_gates: true,
         quiet_gates: false,
         task_thread: false,
+        rerun_flaky_ci: false,
         queue_limit: None,
         token_budget: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -312,4 +317,30 @@ fn a_token_budget_is_read_and_sent_only_when_set() {
     // The budget has a column of its own: it is no stored kind.
     assert_eq!(sent.kinds(), without.kinds());
     assert_eq!(OrchestratorDefinition::DEFAULT.token_budget, None);
+}
+
+/// The flaky CI rerun is off in the factory's default and in a definition
+/// sent or kept without it, and is stored by its rule's name when on.
+#[test]
+fn the_flaky_ci_rerun_is_off_by_default_and_stored_by_its_rule_s_name() {
+    assert_eq!(
+        OrchestratorDefinition::from_kinds(&OrchestratorDefinition::DEFAULT.kinds())
+            .map(|kept| kept.rerun_flaky_ci),
+        Some(false)
+    );
+    let sent: OrchestratorDefinition =
+        serde_json::from_str(r#"{"plan": false, "blockers": true, "merge": false}"#)
+            .expect("a definition without the rule reads");
+    assert!(!sent.rerun_flaky_ci);
+    let on: OrchestratorDefinition = serde_json::from_str(
+        r#"{"plan": false, "blockers": false, "merge": false, "rerunFlakyCi": true}"#,
+    )
+    .expect("a definition with the rule reads");
+    assert_eq!(on.kinds(), [StandingRule::RerunFlakyCi.to_string()]);
+    assert_eq!(OrchestratorDefinition::from_kinds(&on.kinds()), Some(on));
+    assert_eq!(
+        OrchestratorDefinition::from_kinds(&["blockers".to_string()])
+            .map(|kept| kept.rerun_flaky_ci),
+        Some(false)
+    );
 }

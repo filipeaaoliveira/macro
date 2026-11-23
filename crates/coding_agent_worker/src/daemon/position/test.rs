@@ -23,6 +23,7 @@ fn request(bot: BotId, minted: SystemTime) -> TriggerEvent {
         AgentTriggerTopicEvent::New(NewAgentSessionEvent::Requested(
             AgentSessionRequestedEvent {
                 repo_url: None,
+                work_branch: None,
                 bot_id: bot,
                 session_id: AgentSessionId::new_from_uuid(Uuid::now_v7()),
                 owner: "macro|requester@example.com".to_owned(),
