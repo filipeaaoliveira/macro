@@ -620,7 +620,6 @@ where
             .runs_task_tags_unread(&ids)
             .await
             .map_err(internal)?;
-        let mut breaks = self.repo.runs_break_records(&ids).await.map_err(internal)?;
         // The Flows of the Runs that may be at their merge, in one read.
         let at_merge_ids: Vec<RunId> = runs
             .iter()
@@ -643,7 +642,8 @@ where
             let standing_acts = standing_acts.remove(&run.id).unwrap_or_default();
             let agent_rules = agent_rules.remove(&run.id).unwrap_or_default();
             let task_tags_unread = tags_unread.contains(&run.id);
-            let break_records = breaks.remove(&run.id).unwrap_or_default();
+            // Break records are read for one Run's detail only.
+            let break_records = Vec::new();
             // A list shows each Run's budget, not its use: reading the
             // usage log for every Run listed would cost a read each.
             let token_budget = budget_of(&run).map(|budget| RunTokenBudget {

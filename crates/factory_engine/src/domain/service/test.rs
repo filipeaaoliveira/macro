@@ -1492,7 +1492,7 @@ async fn a_run_s_flow_keeps_how_many_questions_its_agents_may_ask() {
 }
 
 /// A Run's read lists the breaks its Steps reported, each with how it
-/// went; a list of Runs carries each Run's own.
+/// went; a list of Runs leaves them out.
 #[tokio::test]
 async fn a_run_s_read_lists_its_break_records() {
     let repo = FakeRepo::default();
@@ -1556,24 +1556,7 @@ async fn a_run_s_read_lists_its_break_records() {
         read.break_records[0].status,
         factory_records::domain::breaks::BreakStatus::Verified
     );
-    let by_run: Vec<(RunId, Vec<String>)> = listed
-        .iter()
-        .map(|detail| {
-            (
-                detail.run.id,
-                detail
-                    .break_records
-                    .iter()
-                    .map(|record| record.test.clone())
-                    .collect(),
-            )
-        })
-        .collect();
-    assert_eq!(
-        by_run,
-        [
-            (ids[1], vec!["toggle_keeps".to_string()]),
-            (ids[0], vec!["toggle_saves".to_string()]),
-        ]
-    );
+    // A list of Runs reads no break records: they are a Run's own read's.
+    assert_eq!(listed.len(), 2);
+    assert!(listed.iter().all(|detail| detail.break_records.is_empty()));
 }

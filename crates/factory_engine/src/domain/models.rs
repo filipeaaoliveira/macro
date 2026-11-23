@@ -778,7 +778,8 @@ pub struct RunDetail {
     /// Run that keeps no budget.
     pub token_budget: Option<RunTokenBudget>,
     /// The breaks its write and fix Steps reported for the tests they
-    /// added, by Step, each with how the factory's run of it went.
+    /// added, by Step, each with how the factory's run of it went: in a
+    /// Run's own read (`GET /runs/{id}`) only, empty in a list of Runs.
     pub break_records: Vec<BreakRecord>,
 }
 

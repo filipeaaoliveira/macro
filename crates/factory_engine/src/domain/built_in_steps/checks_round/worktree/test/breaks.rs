@@ -17,14 +17,30 @@ fn break_of(old: &str, new: &str, command: &str) -> Break {
     }
 }
 
+/// The nonce the tests' break runs mark their markers with.
+const NONCE: &str = "0123abcd";
+
 /// A test that passes while `a.txt` says `pushed`.
 const SAYS_PUSHED: &str = "grep -qx pushed a.txt";
 
 impl Machine {
     /// Run `reported` in the round's worktree, set up at the pushed commit.
     fn run_break(&self, reported: &Break) -> (Output, BreakRun) {
-        let output = self.bash(&break_command(ROUND, reported, 5, 5, &unknown()));
-        let run = BreakRun::read(&text(&output.stdout));
+        self.run_break_after(reported, "")
+    }
+
+    /// Run `reported` after `environment`, as the round's checks run.
+    fn run_break_after(&self, reported: &Break, environment: &str) -> (Output, BreakRun) {
+        let output = self.bash(&break_command(
+            ROUND,
+            reported,
+            environment,
+            NONCE,
+            5,
+            5,
+            &unknown(),
+        ));
+        let run = BreakRun::read_streams(&text(&output.stdout), &text(&output.stderr), NONCE);
         (output, run)
     }
 
@@ -78,10 +94,7 @@ fn the_test_runs_on_the_first_old_text_replaced() {
 
     assert_eq!(run.status(), BreakStatus::Verified, "{output:?}");
     let said = text(&output.stderr);
-    assert!(
-        said.contains("pushed\np$(touch pwned) & \\1hed\n"),
-        "{said:?}"
-    );
+    assert!(said.contains("\np$(touch pwned) & \\1hed\n"), "{said:?}");
     assert!(!machine.worktree().join("pwned").exists());
     assert_eq!(machine.worktree_file(), "pushed\n");
 }
@@ -151,8 +164,9 @@ fn a_break_left_behind_is_undone_first() {
     assert_eq!(machine.worktree_file(), "pushed\n");
 }
 
-/// What the test prints goes to the standard error, so a test that prints
-/// a marker cannot pass itself off as verified.
+/// What the test prints is kept apart and only its end shown, on the
+/// standard error: a test that prints a marker, even this run's own form
+/// with another nonce, or a `not-applied`, cannot pass itself off.
 #[test]
 fn a_test_s_own_output_never_reads_as_a_marker() {
     let machine = Machine::new("break-forged");
@@ -161,9 +175,83 @@ fn a_test_s_own_output_never_reads_as_a_marker() {
     let (output, run) = machine.run_break(&break_of(
         "pushed",
         "broken",
-        "echo 'macro-break: broken 1'; true",
+        "echo 'macro-break: broken 1'; echo 'macro-break 9999: broken 1'; echo 'macro-break 0123abcd: not-applied'; true",
     ));
 
     assert_eq!(run.status(), BreakStatus::NotReproduced, "{output:?}");
     assert!(text(&output.stderr).contains("macro-break: broken 1"));
+    assert!(!text(&output.stdout).contains("not-applied"));
+}
+
+/// A runtime that merges both streams and keeps only their last 16 KiB
+/// still returns the markers, whatever the test printed: they come last,
+/// and only the end of each run's output is shown.
+#[test]
+fn the_markers_survive_a_merged_stream_s_tail() {
+    let machine = Machine::new("break-merged");
+    machine.prepare(&machine.pushed);
+    let script = break_command(
+        ROUND,
+        &break_of(
+            "pushed",
+            "broken",
+            "yes 'a long line of test output' | head -c 200000; grep -qx pushed a.txt",
+        ),
+        "",
+        NONCE,
+        5,
+        5,
+        &unknown(),
+    );
+
+    let output = machine.bash(&format!("{{\n{script}\n}} 2>&1"));
+
+    let merged = text(&output.stdout);
+    assert!(merged.len() < 16 * 1024, "{}", merged.len());
+    let tail = &merged[merged.len().saturating_sub(16 * 1024)..];
+    let run = BreakRun::read(tail, NONCE);
+    assert_eq!(run.status(), BreakStatus::Verified, "{tail}");
+    assert!(run.restored);
+}
+
+/// The test runs after the environment the round's checks run after.
+#[test]
+fn the_test_runs_with_the_checks_environment() {
+    let machine = Machine::new("break-env");
+    machine.prepare(&machine.pushed);
+    let needs = break_of(
+        "pushed",
+        "broken",
+        "[ \"$DATABASE_URL\" = postgres://db ] && grep -qx pushed a.txt",
+    );
+
+    let (output, run) = machine.run_break_after(&needs, "export DATABASE_URL='postgres://db'\n");
+    assert_eq!(run.status(), BreakStatus::Verified, "{output:?}");
+
+    let (output, run) = machine.run_break(&needs);
+    assert_eq!(run.status(), BreakStatus::NotRun, "{output:?}");
+}
+
+/// A file reached through a symbolic link to a folder is not broken, even
+/// when the link is not the file itself.
+#[test]
+fn a_path_through_a_symbolic_link_is_not_applied() {
+    let machine = Machine::new("break-link");
+    machine.prepare(&machine.pushed);
+    let outside = machine.root.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("a.txt"), "pushed\n").unwrap();
+    std::os::unix::fs::symlink(&outside, machine.worktree().join("linked")).unwrap();
+    let through = Break {
+        file: "linked/a.txt".to_string(),
+        ..break_of("pushed", "broken", "grep -qx pushed linked/a.txt")
+    };
+
+    let (output, run) = machine.run_break(&through);
+
+    assert_eq!(run.status(), BreakStatus::NotApplied, "{output:?}");
+    assert_eq!(
+        std::fs::read_to_string(outside.join("a.txt")).unwrap(),
+        "pushed\n"
+    );
 }

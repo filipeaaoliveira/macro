@@ -547,15 +547,17 @@ where
                 outcome: answer.outcome,
             });
         };
+        // The breaks are recorded before the round ends, so a retry that
+        // finds it ended finds them too.
+        if outcome == CheckRoundOutcome::Passed && matches!(target, Checked::Branch { .. }) {
+            self.record_unchecked(input, None, NOT_RUN_BY_FACTORY)
+                .await?;
+        }
         self.pull_requests
             .records()
             .end_check_round(input.key, round.round, outcome, &answer.text)
             .await
             .map_err(records)?;
-        if outcome == CheckRoundOutcome::Passed && matches!(target, Checked::Branch { .. }) {
-            self.record_unchecked(input, None, NOT_RUN_BY_FACTORY)
-                .await?;
-        }
         Ok(Ran::Ended)
     }
 
@@ -772,11 +774,13 @@ where
         // round ends, so a retry finds the round open and goes on with the
         // breaks still to run.
         if outcome == CheckRoundOutcome::Passed && matches!(target, Checked::Branch { .. }) {
+            let environment = format!("{}{}", setup.exports(), target.environment());
             let place = BreakPlace {
                 role: &role,
                 round: round_id,
                 commit: &commit,
                 context: &context,
+                environment: &environment,
             };
             self.run_breaks(input, &place, answer_by, checks_until)
                 .await?;

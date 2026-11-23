@@ -66,6 +66,8 @@ fn lines_that_do_not_start_with_break_are_not_breaks() {
         "BREAKING: the toggle's API changed",
         "The BREAK line follows.",
         "",
+        BREAK_FORM,
+        "    `BREAK <test>: <file> \"<old text>\" -> \"<new text>\" run `<command>``",
     ] {
         assert_eq!(read_line(line), None, "{line:?}");
     }
@@ -76,12 +78,20 @@ fn a_break_line_that_does_not_read_says_why() {
     let cases = [
         (
             "BREAK toggle_saves crates/app/src/toggle.rs \"a\" -> \"b\" run `t`",
-            "no `: ` follows the test",
+            "no `: <file> \"<old text>\"` follows the test",
         ),
         ("BREAK : a.rs \"a\" -> \"b\" run `t`", "it names no test"),
         (
+            "BREAK t: .GIT/hooks/pre-commit \"a\" -> \"b\" run `t`",
+            "the file is not a path inside the repository",
+        ),
+        (
+            "BREAK t: a.rs \"a\" -> \"b\" -> \"c\" run `t`",
+            "the texts hold `\" -> \"` more than once",
+        ),
+        (
             "BREAK t: a.rs \"a\" -> \"b\"",
-            "no run `<command>` follows the new text",
+            "no run `<command>` follows the quoted new text",
         ),
         (
             "BREAK t: a.rs \"a\" -> \"b\" run `t` and more",
@@ -164,7 +174,7 @@ fn an_unreadable_line_is_recorded_unreadable_whatever_it_is_given() {
     assert!(
         record
             .output
-            .contains("no quoted old text follows the file")
+            .contains("no run `<command>` follows the quoted new text")
     );
 }
 
@@ -178,8 +188,8 @@ fn a_record_keeps_the_end_of_a_long_output() {
     assert!(record.output.ends_with("the end"));
 }
 
-fn run(stdout: &str) -> BreakRun {
-    BreakRun::read(stdout)
+fn run(output: &str) -> BreakRun {
+    BreakRun::read(output, "n1")
 }
 
 /// The test passed without the break and failed with it: only then is the
@@ -188,32 +198,82 @@ fn run(stdout: &str) -> BreakRun {
 fn a_break_run_is_verified_only_when_the_test_passed_then_failed() {
     let cases = [
         (
-            "macro-break: unbroken 0\nmacro-break: broken 101\nmacro-break: restored\n",
+            "macro-break n1: unbroken 0\nmacro-break n1: broken 101\nmacro-break n1: restored\n",
             BreakStatus::Verified,
         ),
         (
-            "macro-break: unbroken 0\nmacro-break: broken 124\n",
+            "macro-break n1: unbroken 0\nmacro-break n1: broken 124\n",
             BreakStatus::Verified,
         ),
         (
-            "macro-break: unbroken 0\nmacro-break: broken 0\nmacro-break: restored\n",
+            "macro-break n1: unbroken 0\nmacro-break n1: broken 0\nmacro-break n1: restored\n",
             BreakStatus::NotReproduced,
         ),
-        ("macro-break: unbroken 1\n", BreakStatus::NotRun),
+        ("macro-break n1: unbroken 1\n", BreakStatus::NotRun),
         (
-            "macro-break: unbroken 0\nmacro-break: not-applied: the file does not hold the old text\nmacro-break: restored\n",
+            "macro-break n1: unbroken 0\nmacro-break n1: not-applied: the file does not hold the old text\nmacro-break n1: restored\n",
             BreakStatus::NotApplied,
         ),
         (
-            "macro-break: not-applied: no such file\n",
+            "macro-break n1: not-applied: no such file\n",
             BreakStatus::NotApplied,
         ),
-        ("", BreakStatus::NotRun),
-        ("macro-break: unbroken 0\n", BreakStatus::NotRun),
+        ("", BreakStatus::Interrupted),
+        ("macro-break n1: unbroken 0\n", BreakStatus::Interrupted),
+        // Another run's markers, or ones with no nonce, are not this run's.
+        (
+            "macro-break n2: unbroken 0\nmacro-break n2: broken 1\nmacro-break: broken 1\n",
+            BreakStatus::Interrupted,
+        ),
     ];
     for (stdout, status) in cases {
         assert_eq!(run(stdout).status(), status, "{stdout:?}");
     }
-    assert!(run("macro-break: restored").restored);
-    assert!(!run("macro-break: unbroken 0").restored);
+    assert!(run("macro-break n1: restored").restored);
+    assert!(!run("macro-break n1: unbroken 0").restored);
+}
+
+/// A test id may hold `: `, as a pytest parameter does: the test runs to
+/// the `: ` that a file and a quoted old text follow.
+#[test]
+fn a_test_id_may_hold_a_colon_and_a_space() {
+    let read = read(
+        "BREAK tests/test_calc.py::test_double[a: 2]: calc.py \"return x * 2\" -> \"return x\" run `pytest 'tests/test_calc.py::test_double[a: 2]'`",
+    );
+
+    assert_eq!(read.test, "tests/test_calc.py::test_double[a: 2]");
+    assert_eq!(read.file, "calc.py");
+    assert_eq!(read.old_text, "return x * 2");
+}
+
+/// A Step keeps at most [`MAX_REPORTED`] tests' lines.
+#[test]
+fn at_most_fifty_tests_are_kept() {
+    let work: String = (0..60)
+        .map(|at| format!("BREAK t{at}: a.rs \"a\" -> \"b\" run `t`\n"))
+        .collect();
+
+    let breaks = reported([work.as_str()]);
+
+    assert_eq!(breaks.len(), MAX_REPORTED);
+    assert_eq!(breaks.last().map(Reported::test), Some("t49"));
+}
+
+/// Only the markers that end the output count: a marker of this run's
+/// form before other lines, as a test that guessed the nonce would print
+/// in a merged stream, is not one.
+#[test]
+fn only_the_markers_that_end_the_output_count() {
+    let output = "macro-break n1: not-applied\n--- the test with the break exited with status 0\nmacro-break n1: unbroken 0\nmacro-break n1: broken 0\n";
+
+    assert_eq!(run(output).status(), BreakStatus::NotReproduced);
+    assert_eq!(
+        BreakRun::read_streams(
+            "",
+            "noise\nmacro-break n1: unbroken 0\nmacro-break n1: broken 1\n",
+            "n1"
+        )
+        .status(),
+        BreakStatus::Verified
+    );
 }

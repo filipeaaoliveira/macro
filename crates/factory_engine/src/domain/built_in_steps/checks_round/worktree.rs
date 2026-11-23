@@ -186,22 +186,38 @@ lock=\"$worktree.lock\"
     )
 }
 
+/// How much of the end of each of a break's test runs is shown, in bytes:
+/// both runs' and the markers stay well under the 16 KiB a runtime that
+/// keeps one merged stream returns.
+pub(super) const BREAK_TAIL_BYTES: usize = 1_500;
+
 /// Run one break, `reported`, in the round `round`'s worktree, holding the
 /// worktree's lock as a check does: first put every tracked file back as
 /// the commit has it (a break an earlier run left is undone), then run the
-/// test's command for at most `timeout_secs`; when it passed, replace the
-/// first old text in the break's file with the new text, run the command
-/// again, and put the file back. The file is rewritten rather than copied
-/// back with its old time, so a build tool that goes by times builds it
-/// again. The test's output goes to the standard error; the standard
-/// output holds only the markers [`crate::domain::breaks::BreakRun`]
-/// reads. A file that is not a regular file in the worktree, or that lacks
-/// the old text, is not broken; a read break's new text always differs
-/// from its old, so a replacement changes the file. The edit needs only
-/// POSIX `awk`, which reads the texts from its environment, as they are.
+/// test's command for at most `timeout_secs`, after `environment` (what
+/// the round's checks run after: the repository's setup `env`), and told
+/// the change's `context` as a check is; when it passed, replace the first
+/// old text in the break's file with the new text, run the command again,
+/// and put the file back. The file is rewritten rather than copied back
+/// with its old time, so a build tool that goes by times builds it again.
+///
+/// Each run's output goes to a file outside the worktree's tree, and only
+/// its last [`BREAK_TAIL_BYTES`] are printed, on the standard error. The
+/// markers [`crate::domain::breaks::BreakRun`] reads are printed last, on
+/// the standard output, each with `nonce`, so a runtime that merges both
+/// streams and keeps only their end still returns them, and nothing the
+/// test prints reads as one. A run stopped before its end prints none.
+///
+/// A file that is not a regular file in the worktree, or whose path goes
+/// through a symbolic link, or that lacks the old text, is not broken; a
+/// read break's new text always differs from its old, so a replacement
+/// changes the file. The edit needs only POSIX `awk`, which reads the texts
+/// from its environment, as they are.
 pub(super) fn break_command(
     round: Uuid,
     reported: &Break,
+    environment: &str,
+    nonce: &str,
     timeout_secs: u64,
     lock_wait_secs: u64,
     context: &CheckContext,
@@ -213,12 +229,36 @@ lock=\"$worktree.lock\"
 {exports}g reset --hard -q HEAD || exit 1
 file={file}
 saved=\"$worktree.break\"
-run_test() {{ timeout --kill-after=10 {timeout_secs} bash --noprofile --norc -c {command} 9>&- 1>&2; }}
-if [ -L \"$file\" ] || [ ! -f \"$file\" ]; then echo '{MARKER} not-applied: no such file'; exit 0; fi
-run_test
+out=\"$worktree.break.out\"
+marks=
+mark() {{ marks=\"${{marks}}{MARKER} {nonce}: $1
+\"; }}
+finish() {{ printf '%s' \"$marks\"; exit 0; }}
+run_test() {{
+  timeout --kill-after=10 {timeout_secs} bash --noprofile --norc -c {command} 9>&- >\"$out\" 2>&1
+  ran=$?
+  echo \"--- the test $1 exited with status $ran; the end of its output:\" >&2
+  tail -c {tail} \"$out\" >&2
+  echo >&2
+  rm -f \"$out\"
+  return $ran
+}}
+in_tree() {{
+  rest=$file
+  at=
+  while [ -n \"$rest\" ]; do
+    part=${{rest%%/*}}
+    if [ \"$part\" = \"$rest\" ]; then rest=; else rest=${{rest#*/}}; fi
+    at=${{at:+$at/}}$part
+    [ -L \"$at\" ] && return 1
+  done
+  [ -f \"$file\" ]
+}}
+in_tree || {{ mark 'not-applied: no such file'; finish; }}
+run_test 'without the break'
 unbroken=$?
-echo \"{MARKER} unbroken $unbroken\"
-[ \"$unbroken\" -eq 0 ] || exit 0
+mark \"unbroken $unbroken\"
+[ \"$unbroken\" -eq 0 ] || finish
 cat \"$file\" > \"$saved\" || exit 1
 BREAK_OLD={old} BREAK_NEW={new} awk '
   !done {{ at = index($0, ENVIRON[\"BREAK_OLD\"]) }}
@@ -228,16 +268,19 @@ BREAK_OLD={old} BREAK_NEW={new} awk '
 ' \"$saved\" > \"$file\"
 applied=$?
 if [ \"$applied\" -eq 0 ]; then
-  run_test
-  echo \"{MARKER} broken $?\"
+  run_test 'with the break'
+  mark \"broken $?\"
 else
-  echo '{MARKER} not-applied: the file does not hold the old text'
+  mark 'not-applied: the file does not hold the old text'
 fi
-cat \"$saved\" > \"$file\" && rm -f \"$saved\" && echo '{MARKER} restored'",
+cat \"$saved\" > \"$file\" && rm -f \"$saved\" && mark restored
+finish",
         file = shell_quote(&reported.file),
-        command = shell_quote(&reported.command),
+        command = shell_quote(&format!("{environment}{}", reported.command)),
         old = shell_quote(&reported.old_text),
         new = shell_quote(&reported.new_text),
+        nonce = nonce,
+        tail = BREAK_TAIL_BYTES,
         take_lock = take_lock(lock_wait_secs),
         exports = context_exports(context),
     )
@@ -250,7 +293,7 @@ pub(super) fn remove_command(round: Uuid) -> String {
         "{GIT}{BASE}worktree=\"$base/{round}\"
 g worktree remove --force \"$worktree\" 2>/dev/null || rm -rf \"$worktree\"
 g worktree prune
-rm -rf \"$worktree.lock\" \"$worktree.lock.d\" \"$worktree.changed\" \"$worktree.changed.new\" \"$worktree.break\""
+rm -rf \"$worktree.lock\" \"$worktree.lock.d\" \"$worktree.changed\" \"$worktree.changed.new\" \"$worktree.break\" \"$worktree.break.out\""
     )
 }
 

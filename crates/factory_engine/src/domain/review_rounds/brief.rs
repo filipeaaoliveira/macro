@@ -273,9 +273,14 @@ pub fn breaks_brief(records: &[BreakRecord]) -> String {
     let intro = "## Break records\n\nEach write or fix step reports a break for each test it \
                  adds: an edit to the code the test covers, which the factory runs on the \
                  commit whose checks passed. A break is `verified` only when the test passed \
-                 without it and failed with it. Any other status means the factory did not see \
-                 the test fail, except `unchecked`, where the factory could run nothing and the \
-                 break is the agent's word only: weigh it as you would any claim.\n\n";
+                 without it and failed with it.\n\n\
+                 A test the change adds is a blocker when it has no record below, or when its \
+                 latest record is `not reproduced`, `not run`, `not applied` or `unreadable`. \
+                 A `dropped`, `unchecked` or `interrupted` record is no blocker by itself: the \
+                 factory could not run the break, so judge the test from the diff as you would \
+                 any claim. Even a `verified` break proves nothing when it only stops the code \
+                 compiling, when its command does not run that test alone, or when the test \
+                 failed by hanging (exit status 124 or 137): raise a blocker then too.\n\n";
     if latest.is_empty() {
         return format!("{intro}No step of this run reported a break: no test it adds has one.\n");
     }
@@ -288,27 +293,28 @@ pub fn breaks_brief(records: &[BreakRecord]) -> String {
         } else {
             format!(
                 " Break: in `{}`, \"{}\" becomes \"{}\"; run `{}`.",
-                one_line(&record.file),
-                one_line(&record.old_text),
-                one_line(&record.new_text),
-                one_line(&record.command),
+                agent_text(&record.file),
+                agent_text(&record.old_text),
+                agent_text(&record.new_text),
+                agent_text(&record.command),
             )
         };
         let output = if record.status == BreakStatus::Verified || record.output.is_empty() {
             String::new()
         } else {
-            let said = one_line(&record.output);
+            let said = agent_text(&record.output);
             let start = said.len().saturating_sub(BREAK_OUTPUT_BYTES);
             let start = (start..=said.len())
                 .find(|at| said.is_char_boundary(*at))
                 .unwrap_or(said.len());
             format!(" It said: {}", &said[start..])
         };
+        // The factory's word comes first, before anything an agent wrote.
         let item = escape(&format!(
-            "{number}. `{}` (step {}): {}.{change}{output}\n",
-            one_line(&record.test),
-            record.seq,
+            "{number}. {} (step {}). Test `{}`.{change}{output}\n",
             status_words(record.status),
+            record.seq,
+            agent_text(&record.test),
         ));
         if body.len() + item.len() < BREAKS_BUDGET {
             body.push_str(&item);
@@ -328,6 +334,13 @@ pub fn breaks_brief(records: &[BreakRecord]) -> String {
     )
 }
 
+/// What an agent wrote, or a test printed, as a brief's line carries it:
+/// on one line, with no backtick, so it never closes the code span it
+/// stands in.
+fn agent_text(text: &str) -> String {
+    one_line(text).replace('`', "'")
+}
+
 /// What a break's status says, for a reviewer.
 fn status_words(status: BreakStatus) -> &'static str {
     match status {
@@ -344,5 +357,6 @@ fn status_words(status: BreakStatus) -> &'static str {
             "dropped: the step had no time left for it, or reported more breaks than are run"
         }
         BreakStatus::Unchecked => "unchecked: the factory could not run it",
+        BreakStatus::Interrupted => "interrupted: its run ended before it said how the test went",
     }
 }

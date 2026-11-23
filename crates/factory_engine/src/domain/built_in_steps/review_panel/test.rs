@@ -456,7 +456,7 @@ async fn the_tests_reviewer_reads_the_break_records() {
     assert!(prompt.contains("You review the change's tests"), "{prompt}");
     assert!(prompt.contains("## Break records"), "{prompt}");
     assert!(
-        prompt.contains("1. `toggle_saves` (step 2): not reproduced"),
+        prompt.contains("1. not reproduced: it passed with the break too, so it does not catch it (step 2). Test `toggle_saves`."),
         "{prompt}"
     );
     assert!(prompt.contains("It said: 1 passed"), "{prompt}");

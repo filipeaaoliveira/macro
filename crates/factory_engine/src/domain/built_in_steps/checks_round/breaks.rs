@@ -20,7 +20,7 @@ use tokio::time::Instant;
 use uuid::Uuid;
 
 use super::{BuiltInStepError, BuiltInSteps, records, retry, until, worktree};
-use crate::domain::breaks::{BreakRun, MAX_BREAKS, Reported, reported};
+use crate::domain::breaks::{BreakRun, MARKER, MAX_BREAKS, Reported, reported};
 use crate::domain::check_context::CheckContext;
 use crate::domain::checks::kept_output;
 use crate::domain::models::StepInput;
@@ -29,6 +29,11 @@ use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 /// How long one run of a break's test may take: it runs twice, without
 /// the break and with it.
 pub(super) const BREAK_TEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// What a break's session command may take beyond its test's two runs:
+/// the round's lock's wait, `timeout`'s ten seconds before it kills, for
+/// each run, and a minute for the reset, the edit and the file put back.
+const BREAK_MARGIN: Duration = Duration::from_secs(worktree::LOCK_WAIT_SECS + 2 * 10 + 60);
 
 /// What a break the Step had no time left for says.
 const OUT_OF_TIME: &str = "The step's time ran out before this break ran.";
@@ -53,6 +58,9 @@ pub(super) struct BreakPlace<'a> {
     pub(super) commit: &'a str,
     /// What the checks were told of the change.
     pub(super) context: &'a CheckContext,
+    /// What each check's command runs after, as shell: the repository's
+    /// setup `env`, so the test runs as the checks did.
+    pub(super) environment: &'a str,
 }
 
 impl<A, G, R, M> BuiltInSteps<A, G, R, M>
@@ -67,7 +75,11 @@ where
     /// A break that would not end before `answer_by` is recorded dropped;
     /// one that would not end in this attempt (`checks_until`), or that
     /// found another run holding the round's lock, fails the attempt for a
-    /// retry, which goes on with the breaks still to run.
+    /// retry, which goes on with the breaks still to run. A run that ended
+    /// before it said how the test went is recorded interrupted, and the
+    /// attempt then fails for a retry once the other breaks ran, so the
+    /// round stays open and the break runs once more; interrupted again,
+    /// its record stands.
     pub(super) async fn run_breaks(
         &self,
         input: StepInput<'_>,
@@ -81,22 +93,27 @@ where
         if breaks.is_empty() {
             return Ok(());
         }
-        let done = self.recorded_breaks(input).await?;
-        for (at, reported) in breaks.iter().enumerate() {
+        let (done, interrupted_before) = self.recorded_breaks(input).await?;
+        let mut interrupted = Vec::new();
+        let mut runnable = 0;
+        for reported in &breaks {
+            let Reported::Break(read) = reported else {
+                if !done.contains(reported.test()) {
+                    self.record(input, reported, BreakStatus::Unreadable, None, "")
+                        .await?;
+                }
+                continue;
+            };
+            runnable += 1;
             if done.contains(reported.test()) {
                 continue;
             }
-            let Reported::Break(read) = reported else {
-                self.record(input, reported, BreakStatus::Unreadable, None, "")
-                    .await?;
-                continue;
-            };
-            if at >= MAX_BREAKS {
+            if runnable > MAX_BREAKS {
                 self.record(input, reported, BreakStatus::Dropped, None, TOO_MANY)
                     .await?;
                 continue;
             }
-            let run_for = BREAK_TEST_TIMEOUT * 2 + worktree::RUN_MARGIN;
+            let run_for = BREAK_TEST_TIMEOUT * 2 + BREAK_MARGIN;
             if until(answer_by) < run_for {
                 self.record(input, reported, BreakStatus::Dropped, None, OUT_OF_TIME)
                     .await?;
@@ -108,6 +125,7 @@ where
                     read.test
                 )));
             }
+            let nonce = Uuid::now_v7().simple().to_string();
             let ran = self
                 .in_checkout(
                     input,
@@ -115,6 +133,8 @@ where
                     worktree::break_command(
                         place.round,
                         read,
+                        place.environment,
+                        &nonce,
                         BREAK_TEST_TIMEOUT.as_secs(),
                         worktree::LOCK_WAIT_SECS,
                         place.context,
@@ -137,16 +157,33 @@ where
                     read.test
                 )));
             }
-            let run = BreakRun::read(&output.stdout);
-            let mut said = kept_output(&output.stderr);
-            if run.unbroken.is_none() && !run.not_applied {
+            // A runtime may return both streams as one.
+            let both = format!("{}\n{}", output.stdout, output.stderr);
+            let run = BreakRun::read_streams(&output.stdout, &output.stderr, &nonce);
+            let marker = format!("{MARKER} {nonce}:");
+            let shown: Vec<&str> = both
+                .lines()
+                .filter(|line| !line.trim().starts_with(&marker))
+                .collect();
+            let mut said = kept_output(shown.join("\n").trim());
+            let status = run.status();
+            if status == BreakStatus::Interrupted {
                 said = format!(
-                    "The break could not run (exit status {}).\n{said}",
+                    "The break's run ended before it said how the test went (exit status {}): a later attempt runs it again.\n{said}",
                     output.exit_code
                 );
             }
-            self.record(input, reported, run.status(), Some(place.commit), &said)
+            self.record(input, reported, status, Some(place.commit), &said)
                 .await?;
+            if status == BreakStatus::Interrupted && !interrupted_before.contains(&read.test) {
+                interrupted.push(read.test.as_str());
+            }
+        }
+        if !interrupted.is_empty() {
+            return Err(retry(format!(
+                "the break of {} ended before it said how the test went",
+                interrupted.join(", ")
+            )));
         }
         Ok(())
     }
@@ -176,24 +213,33 @@ where
         Ok(())
     }
 
-    /// The tests whose breaks the Step `input.key` recorded.
+    /// The tests whose breaks the Step `input.key` recorded, but for an
+    /// interrupted run's, which runs again; and those interrupted.
     async fn recorded_breaks(
         &self,
         input: StepInput<'_>,
-    ) -> Result<BTreeSet<String>, BuiltInStepError> {
+    ) -> Result<(BTreeSet<String>, BTreeSet<String>), BuiltInStepError> {
         let recorded = self
             .pull_requests
             .records()
             .runs_break_records(&[input.key.run_id])
             .await
             .map_err(records)?;
-        Ok(recorded
+        let mut done = BTreeSet::new();
+        let mut interrupted = BTreeSet::new();
+        for record in recorded
             .get(&input.key.run_id)
             .into_iter()
             .flatten()
             .filter(|record| record.seq == input.key.seq)
-            .map(|record| record.test.clone())
-            .collect())
+        {
+            if record.status == BreakStatus::Interrupted {
+                interrupted.insert(record.test.clone());
+            } else {
+                done.insert(record.test.clone());
+            }
+        }
+        Ok((done, interrupted))
     }
 
     async fn record(

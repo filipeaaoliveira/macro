@@ -11,7 +11,8 @@ const BREAK: &str = "BREAK toggle_saves: apps/web/src/toggle.ts \"saved = true\"
 
 /// What the break's run says when the test passed without it and failed
 /// with it.
-const VERIFIED: &str = "macro-break: unbroken 0\nmacro-break: broken 1\nmacro-break: restored\n";
+const VERIFIED: &str =
+    "macro-break NONCE: unbroken 0\nmacro-break NONCE: broken 1\nmacro-break NONCE: restored\n";
 
 /// An agent whose session runs commands, `runs` in turn, and whose work
 /// hands back `work`.
@@ -33,7 +34,7 @@ fn break_commands(agent: &ScriptedAgent) -> Vec<AgentCommand> {
         .lock()
         .expect("commands")
         .iter()
-        .filter(|command| command.command.command.contains("macro-break:"))
+        .filter(|command| command.command.command.contains("macro-break "))
         .cloned()
         .collect()
 }
@@ -75,15 +76,16 @@ async fn a_break_whose_test_fails_is_recorded_verified_on_the_checked_commit() {
     assert_eq!(sent.len(), 1);
     let rounds = rounds(&repo, input).await;
     let round = rounds[0].check_action_id.to_string();
-    // In the round's worktree, under its lock, both runs within five
-    // minutes each, and the lock's wait on top.
+    // In the round's worktree, under its lock.
     let shell = &sent[0].command.command;
     assert!(shell.contains(&format!("worktree=\"$base/{round}\"")));
     assert!(
         shell.contains("timeout --kill-after=10 300 bash --noprofile --norc -c 'bun test toggle'")
     );
     assert!(shell.contains("BREAK_OLD='saved = true' BREAK_NEW='saved = false'"));
-    assert_eq!(sent[0].command.timeout_secs, 600 + 80);
+    // Two runs of five minutes, the lock's wait, two kills' ten seconds and
+    // a minute for the rest.
+    assert_eq!(sent[0].command.timeout_secs, 600 + 60 + 20 + 60);
     assert_eq!(sent[0].role.as_str(), "writer");
     // The break ran before the round ended and its worktree went.
     let machine = agent.machine.lock().expect("machine").clone();
@@ -101,7 +103,7 @@ async fn a_break_whose_test_passes_is_recorded_not_reproduced() {
             ran(0, "12 passed"),
             ran(
                 0,
-                "macro-break: unbroken 0\nmacro-break: broken 0\nmacro-break: restored\n",
+                "macro-break NONCE: unbroken 0\nmacro-break NONCE: broken 0\nmacro-break NONCE: restored\n",
             ),
         ],
         Vec::new(),
@@ -119,11 +121,126 @@ async fn a_break_whose_test_passes_is_recorded_not_reproduced() {
     assert_eq!(records[0].status, BreakStatus::NotReproduced);
 }
 
-/// A run that printed no marker could not run the test: it is not run, and
-/// its record says the exit status.
+/// A run that ended before it said how the test went is interrupted: the
+/// attempt fails for a retry, with the round still open, and the retry
+/// runs the break again; its record then says how it went.
 #[tokio::test]
-async fn a_break_that_could_not_run_says_its_exit_status() {
-    let agent = working(BREAK, vec![ran(0, "12 passed"), ran(1, "")], Vec::new());
+async fn an_interrupted_break_runs_again_on_the_retry() {
+    let agent = working(
+        BREAK,
+        vec![
+            ran(0, "12 passed"),
+            ran(0, "macro-break NONCE: unbroken 0\n"),
+        ],
+        Vec::new(),
+    );
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+
+    let first = run_in_session(&agent, &github, &repo, input).await;
+
+    assert!(first.is_err());
+    let records = breaks(&repo, input);
+    assert_eq!(records[0].status, BreakStatus::Interrupted);
+    assert!(
+        records[0]
+            .output
+            .starts_with("The break's run ended before it said how the test went (exit status 0)")
+    );
+    assert!(rounds(&repo, input).await[0].end.is_none());
+
+    let retry = working(BREAK, vec![ran(0, VERIFIED)], Vec::new());
+    let report = run_in_session(&retry, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, Outcome::done());
+    let records = breaks(&repo, input);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].status, BreakStatus::Verified);
+    assert_eq!(break_commands(&retry).len(), 1);
+}
+
+/// A break interrupted on its retry too keeps that record, and the round
+/// ends: it is not retried for ever.
+#[tokio::test]
+async fn a_break_interrupted_twice_stays_interrupted() {
+    let agent = working(BREAK, vec![ran(0, "12 passed"), ran(137, "")], Vec::new());
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+    let earlier = crate::domain::breaks::read_line(BREAK).expect("a break");
+    repo.keep_break(
+        input.key,
+        &earlier.record(BreakStatus::Interrupted, Some(HEAD), ""),
+    );
+
+    let report = run_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, Outcome::done());
+    let records = breaks(&repo, input);
+    assert_eq!(records[0].status, BreakStatus::Interrupted);
+    assert!(records[0].output.contains("(exit status 137)"));
+}
+
+/// A break's test runs after the repository's setup `env`, exactly as the
+/// round's checks do, so a test that needs it passes without the break.
+#[tokio::test]
+async fn a_break_runs_with_the_checks_environment() {
+    let agent = working(
+        BREAK,
+        vec![ran(0, "12 passed"), ran(0, VERIFIED)],
+        Vec::new(),
+    );
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    github.state().files.insert(
+        (
+            "main".to_string(),
+            crate::domain::setup::SETUP_FILE.to_string(),
+        ),
+        r#"{"env": {"DATABASE_URL": "postgres://db"}}"#.to_string(),
+    );
+    let repo = FakeRepo::default();
+    let input = input();
+
+    run_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    let sent = agent.commands.lock().expect("commands").clone();
+    let check = &sent[0].command.command;
+    let shell = &break_commands(&agent)[0].command.command;
+    assert!(check.contains("export DATABASE_URL="), "{check}");
+    assert!(
+        shell.contains("bash --noprofile --norc -c 'export DATABASE_URL="),
+        "{shell}"
+    );
+    assert_eq!(breaks(&repo, input)[0].status, BreakStatus::Verified);
+}
+
+/// The markers may come back in either stream, as a runtime that merges
+/// them returns them, and the test's output kept is both streams' without
+/// the markers.
+#[tokio::test]
+async fn markers_read_from_a_merged_stream() {
+    let agent = working(
+        BREAK,
+        vec![
+            ran(0, "12 passed"),
+            Ok(SessionCommandOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: format!(
+                    "{}\n--- the test with the break exited with status 1\n{VERIFIED}",
+                    "x".repeat(20_000)
+                ),
+            }),
+        ],
+        Vec::new(),
+    );
     let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
     let repo = FakeRepo::default();
     let input = input();
@@ -133,12 +250,9 @@ async fn a_break_that_could_not_run_says_its_exit_status() {
         .expect("write");
 
     let records = breaks(&repo, input);
-    assert_eq!(records[0].status, BreakStatus::NotRun);
-    assert!(
-        records[0]
-            .output
-            .starts_with("The break could not run (exit status 1).")
-    );
+    assert_eq!(records[0].status, BreakStatus::Verified);
+    assert!(records[0].output.ends_with("exited with status 1"));
+    assert!(!records[0].output.contains("macro-break"));
 }
 
 /// A work that reports no break runs none and records none: the reviewer
@@ -249,18 +363,20 @@ async fn a_retry_runs_only_the_breaks_still_to_run() {
     assert_eq!(breaks(&repo, input).len(), 2);
 }
 
-/// An unreadable line is recorded unreadable and runs nothing; breaks past
-/// the most a Step runs are recorded dropped.
+/// An unreadable line is recorded unreadable and runs nothing, and does
+/// not count among the breaks a Step runs; runnable breaks past that most
+/// are recorded dropped.
 #[tokio::test]
 async fn unreadable_and_surplus_breaks_run_nothing() {
+    let most = crate::domain::breaks::MAX_BREAKS;
     let mut work = String::from("BREAK toggle_saves: apps/web/src/toggle.ts\n");
-    for test in 1..=crate::domain::breaks::MAX_BREAKS {
+    for test in 1..=most + 1 {
         work.push_str(&format!(
             "BREAK test_{test}: apps/web/src/toggle.ts \"a\" -> \"b\" run `bun test {test}`\n"
         ));
     }
     let mut runs = vec![ran(0, "12 passed")];
-    runs.extend((1..crate::domain::breaks::MAX_BREAKS).map(|_| ran(0, VERIFIED)));
+    runs.extend((1..=most).map(|_| ran(0, VERIFIED)));
     let agent = working(&work, runs, Vec::new());
     let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
     let repo = FakeRepo::default();
@@ -270,23 +386,40 @@ async fn unreadable_and_surplus_breaks_run_nothing() {
         .await
         .expect("write");
 
-    assert_eq!(
-        break_commands(&agent).len(),
-        crate::domain::breaks::MAX_BREAKS - 1
-    );
+    assert_eq!(break_commands(&agent).len(), most);
     let records = breaks(&repo, input);
-    assert_eq!(records.len(), crate::domain::breaks::MAX_BREAKS + 1);
+    assert_eq!(records.len(), most + 2);
     assert_eq!(records[0].status, BreakStatus::Unreadable);
     assert_eq!(
         records[0].test,
         "BREAK toggle_saves: apps/web/src/toggle.ts"
     );
+    assert_eq!(records[most].status, BreakStatus::Verified);
     let last = records.last().expect("records");
-    assert_eq!(
-        last.test,
-        format!("test_{}", crate::domain::breaks::MAX_BREAKS)
-    );
+    assert_eq!(last.test, format!("test_{}", most + 1));
     assert_eq!(last.status, BreakStatus::Dropped);
+}
+
+/// A Step keeps records of at most fifty break lines.
+#[tokio::test]
+async fn a_step_keeps_at_most_fifty_records() {
+    let mut work = String::new();
+    for test in 1..=60 {
+        work.push_str(&format!("BREAK test_{test}: unreadable\n"));
+    }
+    let agent = working(&work, vec![ran(0, "12 passed")], Vec::new());
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+
+    run_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert_eq!(
+        breaks(&repo, input).len(),
+        crate::domain::breaks::MAX_REPORTED
+    );
 }
 
 /// Where the agent's session runs no command, the agent runs the checks,

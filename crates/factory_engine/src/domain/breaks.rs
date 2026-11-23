@@ -32,6 +32,10 @@ pub const BREAK_WORD: &str = "BREAK";
 /// The most breaks one Step runs; any more are recorded dropped.
 pub const MAX_BREAKS: usize = 20;
 
+/// The most break lines, readable or not, one Step keeps records of; any
+/// more are left out.
+pub const MAX_REPORTED: usize = 50;
+
 /// How a break's line is written, for a prompt or a reviewer.
 pub const BREAK_FORM: &str =
     "BREAK <test>: <file> \"<old text>\" -> \"<new text>\" run `<command>`";
@@ -113,23 +117,26 @@ impl Reported {
 
 /// The breaks reported in `texts`, what a Step's agent handed back in
 /// order: one per test, a later line for a test replacing an earlier one
-/// where the earlier stood.
+/// where the earlier stood, and at most [`MAX_REPORTED`] tests.
 pub fn reported<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<Reported> {
     let mut breaks: Vec<Reported> = Vec::new();
     for line in texts.into_iter().flat_map(str::lines) {
         let Some(read) = read_line(line) else {
             continue;
         };
+        let full = breaks.len() >= MAX_REPORTED;
         match breaks.iter_mut().find(|kept| kept.test() == read.test()) {
             Some(kept) => *kept = read,
-            None => breaks.push(read),
+            None if !full => breaks.push(read),
+            None => {}
         }
     }
     breaks
 }
 
 /// `line` as a break: none when it does not start with [`BREAK_WORD`],
-/// once trimmed and any list mark taken off.
+/// once trimmed and any list mark taken off, or when it is the form the
+/// prompt shows ([`BREAK_FORM`]).
 pub fn read_line(line: &str) -> Option<Reported> {
     let trimmed = line.trim();
     let trimmed = trimmed
@@ -138,7 +145,7 @@ pub fn read_line(line: &str) -> Option<Reported> {
         .unwrap_or(trimmed)
         .trim_start();
     let rest = trimmed.strip_prefix(BREAK_WORD)?;
-    if !rest.starts_with(char::is_whitespace) {
+    if !rest.starts_with(char::is_whitespace) || trimmed.contains("<test>: <file>") {
         return None;
     }
     let unreadable = |why| {
@@ -153,20 +160,15 @@ pub fn read_line(line: &str) -> Option<Reported> {
     }
 }
 
-/// The part of a break's line after [`BREAK_WORD`], read.
+/// The part of a break's line after [`BREAK_WORD`], read. The command
+/// ends the line; the test runs to the first `: ` that a file and a quoted
+/// old text follow, so a test's id may hold `: `; the old and the new text
+/// are split at their one `" -> "`, and a line whose texts hold it more
+/// than once does not read, as no one could tell where the old text ends.
 fn read_break(rest: &str) -> Result<Break, &'static str> {
-    let (test, rest) = rest.split_once(": ").ok_or("no `: ` follows the test")?;
-    let test = test.trim();
-    if test.is_empty() {
-        return Err("it names no test");
-    }
-    let (file, rest) = rest
-        .trim_start()
-        .split_once(" \"")
-        .ok_or("no quoted old text follows the file")?;
-    let (change, command) = rest
+    let (head, command) = rest
         .rsplit_once("\" run `")
-        .ok_or("no run `<command>` follows the new text")?;
+        .ok_or("no run `<command>` follows the quoted new text")?;
     let command = command
         .strip_suffix('`')
         .ok_or("the command does not end with a backtick")?;
@@ -177,9 +179,26 @@ fn read_break(rest: &str) -> Result<Break, &'static str> {
     if command.is_empty() {
         return Err("the command is empty");
     }
-    let (old_text, new_text) = change
-        .split_once("\" -> \"")
+    let (test, file, change) = head
+        .match_indices(": ")
+        .find_map(|(at, _)| {
+            let after = head[at + 2..].trim_start();
+            let (file, change) = after.split_once(" \"")?;
+            (!file.is_empty() && !file.contains(char::is_whitespace))
+                .then(|| (head[..at].trim(), file, change))
+        })
+        .ok_or("no `: <file> \"<old text>\"` follows the test")?;
+    if test.is_empty() {
+        return Err("it names no test");
+    }
+    let mut splits = change.match_indices("\" -> \"");
+    let (at, _) = splits
+        .next()
         .ok_or("no -> \"<new text>\" follows the old text")?;
+    if splits.next().is_some() {
+        return Err("the texts hold `\" -> \"` more than once");
+    }
+    let (old_text, new_text) = (&change[..at], &change[at + 6..]);
     if old_text.is_empty() {
         return Err("the old text is empty");
     }
@@ -217,9 +236,9 @@ fn in_repository(file: &str) -> bool {
     !file.is_empty()
         && !file.starts_with('/')
         && !file.contains('\\')
-        && file
-            .split('/')
-            .all(|part| !part.is_empty() && part != ".." && part != "." && part != ".git")
+        && file.split('/').all(|part| {
+            !part.is_empty() && part != ".." && part != "." && !part.eq_ignore_ascii_case(".git")
+        })
 }
 
 /// The end of `text` a break's record keeps, at most
@@ -249,7 +268,7 @@ fn cut(text: &str, max: usize) -> &str {
 
 /// What a break's run on the agent's machine says
 /// ([`crate::domain::built_in_steps`]' break command), read from the
-/// markers it prints on its standard output.
+/// markers it prints last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BreakRun {
     /// The file to break is not in the worktree, or lacks the old text.
@@ -262,23 +281,41 @@ pub struct BreakRun {
     pub restored: bool,
 }
 
-/// What begins each marker a break's run prints.
-pub const MARKER: &str = "macro-break:";
+/// What begins each marker a break's run prints, before the run's nonce.
+pub const MARKER: &str = "macro-break";
 
 impl BreakRun {
-    /// Read the markers in `stdout`; the test's own output goes to the
-    /// standard error, so nothing it prints reads as a marker.
-    pub fn read(stdout: &str) -> Self {
+    /// Read the markers of the run `nonce` from the run's standard output,
+    /// or, when it holds none, from its standard error, where a runtime
+    /// that merges the streams may return them.
+    pub fn read_streams(stdout: &str, stderr: &str, nonce: &str) -> Self {
+        let run = Self::read(stdout, nonce);
+        if run == Self::read("", nonce) {
+            return Self::read(stderr, nonce);
+        }
+        run
+    }
+
+    /// Read the markers of the run `nonce` that end `output`: the lines at
+    /// its end that start with [`MARKER`] and the nonce, which the run
+    /// prints last. Nothing before them counts, so nothing the test
+    /// printed, which the run shows only the end of before its markers,
+    /// reads as one, even with the nonce.
+    pub fn read(output: &str, nonce: &str) -> Self {
+        let prefix = format!("{MARKER} {nonce}:");
         let mut run = BreakRun {
             not_applied: false,
             unbroken: None,
             broken: None,
             restored: false,
         };
-        for line in stdout.lines() {
-            let Some(said) = line.trim().strip_prefix(MARKER) else {
-                continue;
-            };
+        let marked: Vec<&str> = output
+            .trim_end()
+            .lines()
+            .rev()
+            .map_while(|line| line.trim().strip_prefix(&prefix))
+            .collect();
+        for said in marked.into_iter().rev() {
             let said = said.trim();
             if said.starts_with("not-applied") {
                 run.not_applied = true;
@@ -294,7 +331,8 @@ impl BreakRun {
     }
 
     /// How the break went: verified only when the test passed without it
-    /// and failed with it.
+    /// and failed with it; interrupted when the run ended before it said
+    /// how the test went.
     pub fn status(&self) -> BreakStatus {
         if self.not_applied {
             return BreakStatus::NotApplied;
@@ -302,7 +340,8 @@ impl BreakRun {
         match (self.unbroken, self.broken) {
             (Some(0), Some(0)) => BreakStatus::NotReproduced,
             (Some(0), Some(_)) => BreakStatus::Verified,
-            _ => BreakStatus::NotRun,
+            (Some(0), None) | (None, _) => BreakStatus::Interrupted,
+            (Some(_), _) => BreakStatus::NotRun,
         }
     }
 }

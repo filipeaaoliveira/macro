@@ -251,7 +251,19 @@ impl StepAgent for ScriptedAgent {
         {
             age(repo, key);
         }
-        ran.map(Some)
+        // A break's run marks what it says with the nonce its command
+        // holds: a scripted run says `NONCE` for it.
+        let nonce = line
+            .split_once("macro-break ")
+            .and_then(|(_, rest)| rest.split_once(':'))
+            .map(|(nonce, _)| nonce.to_string());
+        ran.map(|mut output| {
+            if let Some(nonce) = nonce {
+                output.stdout = output.stdout.replace("NONCE", &nonce);
+                output.stderr = output.stderr.replace("NONCE", &nonce);
+            }
+            Some(output)
+        })
     }
 
     async fn stop(
