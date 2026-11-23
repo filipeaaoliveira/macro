@@ -998,7 +998,9 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             GithubPullRequestsErr::Github(GithubError::Forbidden) => {
                 Some(AccessRefusal::NotAllowed)
             }
-            GithubPullRequestsErr::Token(_) | GithubPullRequestsErr::Github(_) => None,
+            GithubPullRequestsErr::Token(_)
+            | GithubPullRequestsErr::Github(_)
+            | GithubPullRequestsErr::TooManyComments => None,
         }
     }
 }
