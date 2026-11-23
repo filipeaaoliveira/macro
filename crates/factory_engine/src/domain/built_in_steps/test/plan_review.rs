@@ -260,6 +260,7 @@ async fn a_revised_plan_the_reviewer_passes_goes_to_the_gate() {
         "{}",
         report.output
     );
+    assert!(!crate::domain::plan_review::blockers_left(&report.output));
     assert!(report.output.contains("Checked the files and the test."));
     assert_eq!(reviewer.asked(), 1);
     let tasks = reviewer.tasks.lock().expect("tasks");
@@ -319,9 +320,12 @@ async fn blockers_left_at_the_last_visit_go_to_the_gate_with_the_plan() {
 
     assert_eq!(report.outcome.as_str(), "reviewed");
     assert!(
-        report
-            .output
-            .starts_with("The plan review still finds 1 blockers at its last round"),
+        crate::domain::plan_review::blockers_left(&report.output),
+        "{}",
+        report.output
+    );
+    assert!(
+        report.output.contains("found 1 blockers"),
         "{}",
         report.output
     );
@@ -703,6 +707,28 @@ async fn a_planned_path_is_read_from_github_encoded() {
     )
     .await
     .expect("reviewed");
+
+    assert_eq!(report.outcome.as_str(), "reviewed", "{}", report.output);
+}
+
+/// A review entry that sets no bound still puts the plan to its Gate with
+/// the Blockers left, at the third round.
+#[tokio::test]
+async fn an_unbounded_review_goes_to_the_gate_at_its_third_round() {
+    let reviewer = Reviewer::answering(vec![(
+        "blockers",
+        "```json\n{\"blockers\": [{\"problem\": \"Still no test\"}]}\n```".to_string(),
+    )]);
+    let repo = FakeRepo::default();
+    let earlier = [ended(5, "plan", 3, "done", &plan_editing("src/slug.rs"))];
+    let input = StepInput {
+        max_visits: None,
+        ..review_input(key(6), &earlier, None, &ROUTES)
+    };
+
+    let report = run_visit(&reviewer, &github(), &repo, "plan_review", input, 3)
+        .await
+        .expect("reviewed");
 
     assert_eq!(report.outcome.as_str(), "reviewed", "{}", report.output);
 }

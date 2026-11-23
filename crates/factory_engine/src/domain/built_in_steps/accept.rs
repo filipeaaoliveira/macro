@@ -208,7 +208,7 @@ where
             Some(round)
         };
 
-        let last_visit = self.at_last_visit(input).await?;
+        let last_visit = self.at_last_visit(input, None).await?;
         Ok(verdict(
             &target,
             &checks,
@@ -220,13 +220,14 @@ where
     }
 
     /// Whether this Step is its entry's last visit, as the Flow the Run
-    /// walks bounds it: a failure then ends the Run's acceptance, or puts a
-    /// plan to its Gate with its Blockers.
+    /// walks bounds it, else as `unbounded` says: a failure then ends the
+    /// Run's acceptance, or puts a plan to its Gate with its Blockers.
     pub(super) async fn at_last_visit(
         &self,
         input: StepInput<'_>,
+        unbounded: Option<u16>,
     ) -> Result<bool, BuiltInStepError> {
-        let Some(most) = input.max_visits else {
+        let Some(most) = input.max_visits.or(unbounded) else {
             return Ok(false);
         };
         let steps = self

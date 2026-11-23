@@ -1490,3 +1490,31 @@ async fn a_run_s_flow_keeps_how_many_questions_its_agents_may_ask() {
         );
     }
 }
+
+/// A Step's entry bounds its visits; a Run whose Flow is unknown is
+/// bounded as the built-in `code` Flow bounds the Step.
+#[test]
+fn a_step_s_visits_are_bounded_by_its_entry_or_the_code_flow() {
+    let step =
+        |name: &str| crate::domain::flow::StepName::try_from(name.to_string()).expect("valid");
+    let code = crate::domain::built_in_flows::BuiltInFlow::named("code")
+        .expect("built in")
+        .read(|_| Some(StepUse::Work))
+        .expect("valid flow");
+    let write = code
+        .entries
+        .iter()
+        .find(|entry| entry.id.as_str() == "write")
+        .expect("write");
+    let accept = code
+        .entries
+        .iter()
+        .find(|entry| entry.id.as_str() == "accept")
+        .expect("accept");
+
+    assert_eq!(super::visits_bound(Some(accept), &step("accept")), Some(3));
+    assert_eq!(super::visits_bound(Some(write), &step("write")), None);
+    assert_eq!(super::visits_bound(None, &step("accept")), Some(3));
+    assert_eq!(super::visits_bound(None, &step("plan_review")), Some(3));
+    assert_eq!(super::visits_bound(None, &step("reply")), None);
+}

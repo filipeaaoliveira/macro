@@ -41,12 +41,12 @@ use uuid::Uuid;
 
 use crate::domain::agents::{AgentDefinition, RuleSubject};
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
-use crate::domain::built_in_flows::{BUILT_IN_FLOWS, walked_flow};
+use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow, walked_flow};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::{DEFINITION_FILE_PATTERNS, DefinitionError};
 use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
 use crate::domain::flaws::mark_flawed;
-use crate::domain::flow::Flow;
+use crate::domain::flow::{Entry, Flow, StepName, StepUse};
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate, StandingAnswer,
 };
@@ -2150,6 +2150,25 @@ fn valid_token_budget(definition: Option<&OrchestratorDefinition>) -> Result<(),
     Ok(())
 }
 
+/// The most visits of the entry `entry` of the Flow a Run walks, which runs
+/// `step`: its own bound, none when it has none; or, when the Run's Flow is
+/// unknown (a Run that kept none and names no built-in Flow, or whose Flow
+/// does not read), the built-in `code` Flow's bound of its entry of `step`,
+/// as such Runs were bounded before Runs kept their Flows.
+pub(crate) fn visits_bound(entry: Option<&Entry>, step: &StepName) -> Option<u16> {
+    let bound = |entry: &Entry| entry.max_visits.map(|most| u16::from(most.get()));
+    match entry {
+        Some(entry) => bound(entry),
+        None => BuiltInFlow::named("code")?
+            .read(|_| Some(StepUse::Work))
+            .ok()?
+            .entries
+            .iter()
+            .find(|entry| entry.step == *step)
+            .and_then(bound),
+    }
+}
+
 /// How many questions an agent Step may ask the Run's owner, unless the
 /// service is told otherwise: the next one ends the Run for a person.
 pub const DEFAULT_QUESTIONS: u8 = 2;
@@ -2441,10 +2460,7 @@ where
                     .into_iter()
                     .find(|entry| entry.id == request.entry)
             });
-        let max_visits = entry
-            .as_ref()
-            .and_then(|entry| entry.max_visits)
-            .map(|most| u16::from(most.get()));
+        let max_visits = visits_bound(entry.as_ref(), &request.step);
         let routes: Vec<Outcome> = entry
             .filter(|_| kept_definition)
             .map(|entry| entry.on.into_keys().collect())

@@ -53,6 +53,10 @@ const REVIEWED: &str = "reviewed";
 /// The outcome of a plan that splits the task into child tasks.
 const OVERSIZED: &str = "oversized";
 
+/// How many rounds the review runs before the plan goes to its Gate with
+/// the Blockers left, when its entry sets no bound.
+const DEFAULT_ROUNDS: u16 = 3;
+
 /// The most bytes of one Blocker's text the report keeps.
 const MAX_BLOCKER_BYTES: usize = 2048;
 
@@ -134,7 +138,9 @@ where
         }
 
         let mechanical = self.check_plan(input, size).await?;
-        let last_visit = self.at_last_visit(input).await?;
+        // A Flow whose review entry sets no bound still puts the plan to
+        // its Gate, after the rounds the `code` Flow gives it.
+        let last_visit = self.at_last_visit(input, Some(DEFAULT_ROUNDS)).await?;
         if !mechanical.blockers.is_empty() {
             return Ok(verdict(&mechanical, None, last_visit));
         }
@@ -370,10 +376,7 @@ fn verdict(
         "The plan review passed: the factory's checks and the plan reviewer found no blocker."
             .to_string()
     } else if last_visit {
-        format!(
-            "{BLOCKERS_LEFT} {count} blockers at its last round: the plan goes to its Gate with them, \
-             and no standing rule or stand-in approves it."
-        )
+        format!("{BLOCKERS_LEFT}\n\nIts last round found {count} blockers.")
     } else {
         format!("The plan review found {count} blockers: the planner revises the plan.")
     };
