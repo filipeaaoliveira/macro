@@ -352,6 +352,22 @@ impl FactoryService for FakeService {
         Err(self.refusing(&actor))
     }
 
+    async fn definition_file(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _path: String,
+    ) -> Result<crate::domain::models::DefinitionFile, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn check_definition_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _change: crate::domain::definition::ProposedChange,
+    ) -> Result<crate::domain::models::DefinitionChangeCheck, FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
     async fn set_control_files(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -1371,4 +1387,53 @@ async fn only_an_internal_caller_clears_a_main_hold() {
     assert_eq!(cleared.status(), StatusCode::OK);
     assert_eq!(body(cleared).await["held"], true);
     assert_eq!(repo.main_hold(&main).await.expect("read"), None);
+}
+
+/// A Definition's file is read for the caller, by the path the query
+/// names; a change is checked only for a person in their own session, as
+/// it is proposed, and its refusal carries the same code.
+#[tokio::test]
+async fn a_definition_file_and_a_change_check_reach_the_service() {
+    let (router, service) = router(|| FactoryError::NoDefinition);
+
+    let file = router
+        .clone()
+        .oneshot(call(
+            "GET",
+            "/settings/definition/file?path=flows%2Fcode.json",
+            Caller::User("alice"),
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("response");
+    let change = serde_json::json!({
+        "title": "Say more",
+        "files": { "flows/code.json": "{}" },
+    });
+    let internal = router
+        .clone()
+        .oneshot(call(
+            "POST",
+            "/settings/definition/changes/check",
+            Caller::Internal(Some(ALICE)),
+            change.clone(),
+        ))
+        .await
+        .expect("response");
+    let checked = router
+        .oneshot(call(
+            "POST",
+            "/settings/definition/changes/check",
+            Caller::User("alice"),
+            change,
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(file.status(), StatusCode::CONFLICT);
+    assert_eq!(body(file).await["code"], "noDefinition");
+    assert_eq!(internal.status(), StatusCode::FORBIDDEN);
+    assert_eq!(checked.status(), StatusCode::CONFLICT);
+    assert_eq!(body(checked).await["code"], "noDefinition");
+    assert_eq!(*service.actors.lock().expect("actors"), [ALICE, ALICE]);
 }

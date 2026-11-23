@@ -36,9 +36,10 @@ use crate::domain::board::{
     BoardNext, BoardPage, BoardRun, BoardScope, PullRequestRun, PullRequestRuns,
 };
 use crate::domain::models::{
-    ActingAgent, Answerer, ControlFilesSettings, DefinitionContents, DefinitionFlow,
-    DefinitionPullRequest, DefinitionRole, DefinitionScorer, DefinitionSettings, FactoryError,
-    FlowSummary, PersonOnly, RunDetail, SessionStepRef, StandingRulesSettings,
+    ActingAgent, Answerer, ControlFilesSettings, DefinitionChangeCheck, DefinitionContents,
+    DefinitionFile, DefinitionFlow, DefinitionPullRequest, DefinitionRole, DefinitionScorer,
+    DefinitionSettings, FactoryError, FlowSummary, PersonOnly, RunDetail, SessionStepRef,
+    StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -126,6 +127,11 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `GET /settings/definition` — the Factory Definition the caller's team
 ///   names, and whether it reads.
 /// - `PUT /settings/definition` — name one, or none.
+/// - `GET /settings/definition/file` — one of its files' text at its head.
+/// - `POST /settings/definition/changes` — propose a change to it as a
+///   pull request.
+/// - `POST /settings/definition/changes/check` — check a change as
+///   proposing it would, writing nothing.
 /// - `GET /settings/standing-rules` — the Standing Rules the caller's Runs
 ///   are created with.
 /// - `PUT /settings/standing-rules` — set the team's, or go back to the
@@ -201,8 +207,16 @@ where
                 .put(definition::set_definition_handler::<S, Auth>),
         )
         .route(
+            "/settings/definition/file",
+            get(definition::get_definition_file_handler::<S, Auth>),
+        )
+        .route(
             "/settings/definition/changes",
             post(definition::propose_definition_change_handler::<S, Auth>),
+        )
+        .route(
+            "/settings/definition/changes/check",
+            post(definition::check_definition_change_handler::<S, Auth>),
         )
         .route(
             "/settings/standing-rules",
@@ -1236,6 +1250,7 @@ impl FactoryError {
             | FactoryError::UnreachableDefinition
             | FactoryError::InvalidDefinition(_)
             | FactoryError::InvalidDefinitionChange(_)
+            | FactoryError::NotADefinitionFile(_)
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
@@ -1417,6 +1432,8 @@ impl IntoResponse for FactoryError {
         definition::get_definition_handler,
         definition::set_definition_handler,
         definition::propose_definition_change_handler,
+        definition::get_definition_file_handler,
+        definition::check_definition_change_handler,
         standing_rules::get_standing_rules_handler,
         standing_rules::set_standing_rules_handler,
         standing_rules::set_project_standing_rules_handler
@@ -1466,6 +1483,9 @@ impl IntoResponse for FactoryError {
         DefinitionSettings,
         definition::SetDefinitionRequest,
         definition::ProposeDefinitionChangeRequest,
+        definition::CheckDefinitionChangeRequest,
+        DefinitionFile,
+        DefinitionChangeCheck,
         DefinitionRead,
         DefinitionContents,
         DefinitionFlow,

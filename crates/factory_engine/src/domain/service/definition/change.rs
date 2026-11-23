@@ -1,6 +1,7 @@
 //! A change to a team's Factory Definition, proposed from the factory's
 //! settings: checked as the Definition would read with it, committed on a
-//! branch of its own, and opened as a pull request a person merges.
+//! branch of its own, and opened as a pull request a person merges; or
+//! only checked, writing nothing.
 //!
 //! Editing the Definition changes the rules every Run of the team runs
 //! under, so only an admin of the team proposes, in their own signed-in
@@ -28,8 +29,8 @@ use crate::domain::definition::{
     read_changed_definition,
 };
 use crate::domain::models::{
-    AccessRefusal, BranchCreation, BranchPullRequest, DefinitionPullRequest, FactoryError,
-    NewBranch, OpenPullRequest, Opening, PullRequestState,
+    AccessRefusal, BranchCreation, BranchPullRequest, CodeRepository, DefinitionChangeCheck,
+    DefinitionPullRequest, FactoryError, NewBranch, OpenPullRequest, Opening, PullRequestState,
 };
 use crate::domain::ports::{
     PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
@@ -114,26 +115,8 @@ where
             return Err(FactoryError::NoPushAccess);
         }
 
-        // The change is checked as the Definition would read with it at
-        // the commit it goes on top of: the same checks a Run's start makes.
-        let files = RepositoryFiles {
-            github: &self.github,
-            reader: &actor,
-            repository: &repository,
-            commit: &commit,
-        };
-        read_changed_definition(&files, &change, |step| self.executor.serves(step))
-            .await
-            .map_err(|error| match error {
-                DefinitionChangeReadError::Files(RepositoryFileError::Refused {
-                    path,
-                    refusal,
-                }) => DefinitionChangeError::Invalid(refused_file(path, refusal)).into(),
-                DefinitionChangeReadError::Files(RepositoryFileError::Github(error)) => {
-                    FactoryError::Internal(internal(error))
-                }
-                DefinitionChangeReadError::Refused(error) => error.into(),
-            })?;
+        self.check_against(&actor, &repository, &commit, &change)
+            .await?;
 
         // The branch is only ever created, never moved. One of the change's
         // name already there with no pull request is not this change's to
@@ -198,6 +181,66 @@ where
                 ))
             })?;
         Ok(opened.pull_request)
+    }
+
+    /// Check `change` to the Factory Definition `actor`'s team names as
+    /// proposing it would, and write nothing: the same admin, push access
+    /// and Definition checks, refused with the same errors. Whether a
+    /// change of the same id was proposed already is not looked at: a
+    /// check has no id.
+    pub(in crate::domain::service) async fn check_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        change: ProposedChange,
+    ) -> Result<DefinitionChangeCheck, FactoryError> {
+        let team = self.administered_team(&actor).await?;
+        let change = DefinitionChange::new(change)?;
+        let repo_url = self
+            .named_definition(Some(team))
+            .await?
+            .ok_or(FactoryError::NoDefinition)?;
+        let DefinitionHead {
+            repository,
+            access,
+            commit,
+        } = self.definition_head(&actor, &repo_url).await?;
+        if !access.can_push {
+            return Err(FactoryError::NoPushAccess);
+        }
+        self.check_against(&actor, &repository, &commit, &change)
+            .await?;
+        Ok(DefinitionChangeCheck { commit })
+    }
+
+    /// Check `change` as the Definition in `repository` would read with it
+    /// at `commit`, the commit it goes on top of: the same checks a Run's
+    /// start makes.
+    async fn check_against(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        commit: &str,
+        change: &DefinitionChange,
+    ) -> Result<(), FactoryError> {
+        let files = RepositoryFiles {
+            github: &self.github,
+            reader: actor,
+            repository,
+            commit,
+        };
+        read_changed_definition(&files, change, |step| self.executor.serves(step))
+            .await
+            .map_err(|error| match error {
+                DefinitionChangeReadError::Files(RepositoryFileError::Refused {
+                    path,
+                    refusal,
+                }) => DefinitionChangeError::Invalid(refused_file(path, refusal)).into(),
+                DefinitionChangeReadError::Files(RepositoryFileError::Github(error)) => {
+                    FactoryError::Internal(internal(error))
+                }
+                DefinitionChangeReadError::Refused(error) => error.into(),
+            })?;
+        Ok(())
     }
 }
 

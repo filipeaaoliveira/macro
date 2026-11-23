@@ -313,3 +313,90 @@ async fn only_an_admin_who_may_push_changes_a_named_definition() {
     assert!(github.state().created_branches.is_empty());
     assert_eq!(github.state().opened, 0);
 }
+
+/// A change checked without proposing it passes the checks proposing it
+/// makes, and answers the commit it was checked against; nothing is
+/// written to GitHub, and no pull request is looked up.
+#[tokio::test]
+async fn a_change_that_reads_is_checked_without_writing() {
+    let repo = team_repo();
+    let github = definition_github();
+    let service = code_service(&repo, &FakeWorkflows::default(), &github);
+
+    let checked = service
+        .check_definition_change(julia(), change("flows/notes.json", NOTES_CHANGED))
+        .await
+        .expect("the change reads");
+
+    assert_eq!(checked.commit, FIRST);
+    let state = github.state();
+    assert!(state.created_branches.is_empty());
+    assert_eq!(state.opened, 0);
+    assert!(state.pull_request.is_none());
+}
+
+/// A checked change is refused as proposing it is, with the same errors:
+/// a Definition that does not read with it, a change that changes
+/// nothing, someone who does not administer the team, an account that
+/// cannot push, and a team that names no Definition. Nothing is written.
+#[tokio::test]
+async fn a_checked_change_is_refused_as_a_proposed_one() {
+    let repo = team_repo();
+    let github = definition_github();
+    let service = code_service(&repo, &FakeWorkflows::default(), &github);
+
+    let invalid = service
+        .check_definition_change(
+            julia(),
+            change("factory.json", r#"{ "version": 2, "flows": ["notes"] }"#),
+        )
+        .await;
+    let unchanged = service
+        .check_definition_change(julia(), change("flows/notes.json", NOTES))
+        .await;
+    let member = service
+        .check_definition_change(teo(), change("flows/notes.json", NOTES_CHANGED))
+        .await;
+    github.state().read_only = true;
+    let read_only = service
+        .check_definition_change(julia(), change("flows/notes.json", NOTES_CHANGED))
+        .await;
+    github.state().read_only = false;
+    repo.team_definitions.lock().expect("definitions").clear();
+    let unnamed = service
+        .check_definition_change(julia(), change("flows/notes.json", NOTES_CHANGED))
+        .await;
+
+    assert!(
+        matches!(
+            invalid,
+            Err(FactoryError::InvalidDefinitionChange(
+                DefinitionChangeError::Invalid(DefinitionError::Version(2))
+            ))
+        ),
+        "{invalid:?}"
+    );
+    assert!(
+        matches!(
+            unchanged,
+            Err(FactoryError::InvalidDefinitionChange(
+                DefinitionChangeError::Unchanged
+            ))
+        ),
+        "{unchanged:?}"
+    );
+    assert!(
+        matches!(member, Err(FactoryError::NotATeamAdmin)),
+        "{member:?}"
+    );
+    assert!(
+        matches!(read_only, Err(FactoryError::NoPushAccess)),
+        "{read_only:?}"
+    );
+    assert!(
+        matches!(unnamed, Err(FactoryError::NoDefinition)),
+        "{unnamed:?}"
+    );
+    assert!(github.state().created_branches.is_empty());
+    assert_eq!(github.state().opened, 0);
+}
