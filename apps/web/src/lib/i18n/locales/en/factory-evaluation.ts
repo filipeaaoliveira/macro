@@ -94,6 +94,10 @@ export default {
   trial: 'Trial',
   score: 'Score',
   tokens: 'Tokens',
+  paretoSet: 'Pareto set',
+  recommended: 'Recommended',
+  paretoDescription:
+    'No other suite of the benchmark beats a suite on the Pareto set on both score and tokens a trial. The recommended suite has the best score on the set.',
   scoreDefinition:
     '1 when the checks went green, 0.5 when they stayed red, 0 otherwise.',
 };

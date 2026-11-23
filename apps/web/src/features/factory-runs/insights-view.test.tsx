@@ -558,6 +558,49 @@ describe('RunInsightsView', () => {
     expect(screen.queryByRole('heading', { name: 'Agent rules' })).toBeNull();
   });
 
+  it('marks the benchmark’s Pareto set of suites and recommends the best score on it', () => {
+    const [suite] = judged.suites;
+    if (!suite) throw new Error('No suite');
+    // Per trial: cheap 0.5 for 1,500 tokens, best 0.9 for 4,000, and dear
+    // 0.5 for 4,000, which cheap and best both beat.
+    const tokens = (output: number) => ({
+      input: 0,
+      output,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        suites: [
+          { ...suite, id: 'cheap', agents: { writer: 'cheap' } },
+          {
+            ...suite,
+            id: 'best',
+            agents: { writer: 'best' },
+            meanScore: 0.9,
+            tokens: tokens(4000),
+          },
+          {
+            ...suite,
+            id: 'dear',
+            agents: { writer: 'dear' },
+            tokens: tokens(4000),
+          },
+        ],
+      },
+    });
+
+    const row = (agent: string) =>
+      screen.getByText(`writer: ${agent}`).closest('li') as HTMLElement;
+    expect(within(row('best')).queryByText('Recommended')).toBeTruthy();
+    expect(within(row('best')).queryByText('Pareto set')).toBeTruthy();
+    expect(within(row('cheap')).queryByText('Recommended')).toBeNull();
+    expect(within(row('cheap')).queryByText('Pareto set')).toBeTruthy();
+    expect(within(row('dear')).queryByText('Pareto set')).toBeNull();
+  });
+
   it('says how many of a suite’s trials were lost to infrastructure, with no score', () => {
     const [suite] = judged.suites;
     if (!suite) throw new Error('No suite');

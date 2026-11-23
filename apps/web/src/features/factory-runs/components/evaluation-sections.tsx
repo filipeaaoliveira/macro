@@ -2,8 +2,15 @@ import { InsightSection } from '@app/features/scheduling/components/insights-pan
 import { t } from '@app/lib/i18n';
 import { toast } from '@core/component/Toast/Toast';
 import { fireAndForget } from '@core/util/fireAndForget';
-import { Button } from '@ui';
-import { createSignal, createUniqueId, For, type JSX, Show } from 'solid-js';
+import { Badge, Button } from '@ui';
+import {
+  createMemo,
+  createSignal,
+  createUniqueId,
+  For,
+  type JSX,
+  Show,
+} from 'solid-js';
 import { useInsightsContext } from '../context/insights-context';
 import type {
   AgentRuleInsight,
@@ -17,7 +24,9 @@ import type {
   ScorerInsight,
   SelfImprovementInsight,
   SuiteInsight,
+  SuiteStanding,
 } from '../core/evaluation';
+import { suiteStandings } from '../core/evaluation';
 import { flowWordLabel } from '../core/flow-words';
 import { tokenTotal } from '../core/insights';
 import { formatRunDate, formatShare, formatTokens } from './insight-format';
@@ -230,17 +239,30 @@ function AgentRulesTable(props: { rules: AgentRuleInsight[] }) {
 
 function SuiteRow(props: {
   suite: SuiteInsight;
+  standing: SuiteStanding | undefined;
   onOpenRun: (runId: string) => void;
 }) {
   return (
     <li class="flex flex-col gap-3 px-4 py-4 sm:px-5">
       <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 class="text-sm font-medium">
-          {props.suite.benchmark}
-          <span class="ml-2 text-xs font-normal text-ink-muted">
-            {formatRunDate(props.suite.createdAt)}
-          </span>
-        </h3>
+        <div class="flex flex-wrap items-center gap-2">
+          <h3 class="text-sm font-medium">
+            {props.suite.benchmark}
+            <span class="ml-2 text-xs font-normal text-ink-muted">
+              {formatRunDate(props.suite.createdAt)}
+            </span>
+          </h3>
+          <Show when={props.standing?.recommended}>
+            <Badge variant="success" size="xs">
+              {t('factoryEvaluation.recommended')}
+            </Badge>
+          </Show>
+          <Show when={props.standing?.pareto}>
+            <Badge variant="outline" size="xs">
+              {t('factoryEvaluation.paretoSet')}
+            </Badge>
+          </Show>
+        </div>
         <span class="text-xs text-ink-muted">
           {agentsLine(props.suite.agents)}
         </span>
@@ -587,6 +609,8 @@ export function EvaluationSections(props: {
   evaluation: EvaluationInsights;
   onOpenRun: (runId: string) => void;
 }) {
+  const standings = createMemo(() => suiteStandings(props.evaluation.suites));
+
   return (
     <div class="flex min-w-0 flex-col gap-5">
       <InsightSection
@@ -658,13 +682,22 @@ export function EvaluationSections(props: {
             props.evaluation.suites.length > 0
           }
         >
+          <Show when={standings().size > 0}>
+            <p class="border-t border-edge-muted px-4 py-3 text-xs text-ink-muted sm:px-5">
+              {t('factoryEvaluation.paretoDescription')}
+            </p>
+          </Show>
           <ul class="flex flex-col divide-y divide-edge-muted border-t border-edge-muted">
             <For
               each={props.evaluation.suites}
               fallback={<EmptyRow>{t('factoryEvaluation.noSuites')}</EmptyRow>}
             >
               {(suite) => (
-                <SuiteRow suite={suite} onOpenRun={props.onOpenRun} />
+                <SuiteRow
+                  suite={suite}
+                  standing={standings().get(suite.id)}
+                  onOpenRun={props.onOpenRun}
+                />
               )}
             </For>
           </ul>
