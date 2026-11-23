@@ -50,9 +50,15 @@ export type StartRunResult =
 
 /**
  * Why a retry didn't start: the Run was retried already or can't be
- * (`conflict`), or the person's Queue is full.
+ * (`conflict`), the person's Queue is full, no Standing Role lets whoever
+ * acts start a Run, or the team's Factory Definition doesn't read.
  */
-export type RetryRunFailure = 'conflict' | 'queueFull' | 'failed';
+export type RetryRunFailure =
+  | 'conflict'
+  | 'queueFull'
+  | 'notInStandingRole'
+  | 'definitionUnreadable'
+  | 'failed';
 
 /** How a retry went: the new Run, or why there is none. */
 export type RetryRunResult =

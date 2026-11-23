@@ -50,6 +50,14 @@ function notifyRetry(result: RetryRunResult | undefined) {
     toast.alert(t('factoryRuns.retryQueueFull'));
     return;
   }
+  if (result.reason === 'notInStandingRole') {
+    toast.alert(t('factoryRuns.retryNotInStandingRole'));
+    return;
+  }
+  if (result.reason === 'definitionUnreadable') {
+    toast.alert(t('factoryRuns.definitionUnreadable'));
+    return;
+  }
   if (result.reason === 'conflict') {
     toast.alert(t('factoryRuns.retryConflict'), {
       subtext: t('factoryRuns.retryConflictDescription'),

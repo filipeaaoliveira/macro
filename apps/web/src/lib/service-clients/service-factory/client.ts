@@ -151,10 +151,27 @@ async function refusal(
 }
 
 /** Why a retry was refused, when the service names the cause. */
-export type RetryRunErrorCode = 'QUEUE_FULL';
+export type RetryRunErrorCode =
+  | 'QUEUE_FULL'
+  | 'NOT_IN_STANDING_ROLE'
+  | 'DEFINITION_UNREADABLE';
+
+const RETRY_RUN_ERROR_CODES = {
+  queueFull: 'QUEUE_FULL',
+  notInStandingRole: 'NOT_IN_STANDING_ROLE',
+  unreachableDefinition: 'DEFINITION_UNREADABLE',
+  invalidDefinition: 'DEFINITION_UNREADABLE',
+} as const satisfies Partial<Record<RunErrorCode, RetryRunErrorCode>>;
+
+function isRetryRefusal(
+  code: unknown
+): code is keyof typeof RETRY_RUN_ERROR_CODES {
+  return typeof code === 'string' && Object.hasOwn(RETRY_RUN_ERROR_CODES, code);
+}
 
 /**
- * A refused retry: `QUEUE_FULL` when the person's Queue is full, else the
+ * A refused retry: the cause the service names (a full Queue, no Standing
+ * Role that allows a start, a Definition that doesn't read), else the
  * status's error (a Run retried already, or that can't be retried, is a
  * `CONFLICT`), with the service's message either way.
  */
@@ -169,7 +186,9 @@ async function retryRunError(
       ? body.message
       : failure.message;
   const code =
-    'code' in body && body.code === 'queueFull' ? 'QUEUE_FULL' : failure.code;
+    'code' in body && isRetryRefusal(body.code)
+      ? RETRY_RUN_ERROR_CODES[body.code]
+      : failure.code;
   return { code, message };
 }
 

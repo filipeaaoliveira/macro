@@ -520,6 +520,20 @@ describe('createAppRunsContext', () => {
       reason: 'conflict',
     });
     vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'NOT_IN_STANDING_ROLE', message: 'no role starts' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'notInStandingRole',
+    });
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'DEFINITION_UNREADABLE', message: 'moved' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'definitionUnreadable',
+    });
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
       err([{ code: 'NOT_FOUND', message: 'Resource not found' }])
     );
     expect(await context.retryRun('run-1')).toEqual({

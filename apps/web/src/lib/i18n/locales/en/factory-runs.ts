@@ -145,6 +145,8 @@ export default {
     'It was retried already, or it no longer ended in a way a retry takes over',
   retryQueueFull:
     'Your queue is full: answer some runs in Waiting on you, or cancel one you no longer need, then retry the run.',
+  retryNotInStandingRole:
+    'Your team’s factory definition gives no standing role here that lets a run start, so this run can’t be retried.',
   retry: 'Retry',
   retryOf:
     'This run retries an earlier one, on its branch, from where it stopped.',

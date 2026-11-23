@@ -362,12 +362,14 @@ function startFailure(
   return 'failed';
 }
 
-/** Why a retry didn't start: a full Queue, a refusal, or a failure. */
+/** Why a retry didn't start: the cause the service named, or a failure. */
 function retryFailure(
   errors: ResultError<FetchWithTokenErrorCode | RetryRunErrorCode>[]
 ): RetryRunFailure {
   const codes = errors.map((error) => error.code);
   if (codes.includes('QUEUE_FULL')) return 'queueFull';
+  if (codes.includes('NOT_IN_STANDING_ROLE')) return 'notInStandingRole';
+  if (codes.includes('DEFINITION_UNREADABLE')) return 'definitionUnreadable';
   if (codes.includes('CONFLICT')) return 'conflict';
   return 'failed';
 }

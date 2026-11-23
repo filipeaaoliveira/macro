@@ -210,6 +210,15 @@ describe('factoryClient routes', () => {
     expect(
       await refused({ message: 'too many wait', code: 'queueFull' })
     ).toEqual({ code: 'QUEUE_FULL', message: 'too many wait' });
+    expect(
+      await refused({ message: 'no role starts', code: 'notInStandingRole' })
+    ).toEqual({ code: 'NOT_IN_STANDING_ROLE', message: 'no role starts' });
+    expect(
+      await refused({ message: 'moved', code: 'unreachableDefinition' })
+    ).toEqual({ code: 'DEFINITION_UNREADABLE', message: 'moved' });
+    expect(
+      await refused({ message: 'bad flow', code: 'invalidDefinition' })
+    ).toEqual({ code: 'DEFINITION_UNREADABLE', message: 'bad flow' });
     // A Run retried already, or one that can't be, carries no code.
     expect(await refused({ message: 'the run was retried already' })).toEqual({
       code: 'CONFLICT',
