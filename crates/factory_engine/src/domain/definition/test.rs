@@ -355,13 +355,17 @@ async fn rules_the_factory_does_not_take_do_not_read() {
 
 #[tokio::test]
 async fn a_definition_names_its_known_flakes() {
+    let longest = "j".repeat(1024);
     let named = read(with(
         "rules.json",
-        r#"{ "knownFlakes": ["e2e (macos)", "lint"] }"#,
+        &format!(r#"{{ "knownFlakes": [" e2e (macos) ", "lint", "{longest}"] }}"#),
     ))
     .await
     .expect("a definition with known flakes reads");
-    assert_eq!(named.rules.known_flakes, ["e2e (macos)", "lint"]);
+    assert_eq!(
+        named.rules.known_flakes,
+        ["e2e (macos)", "lint", longest.as_str()]
+    );
     let without = read(files())
         .await
         .expect("a definition without rules reads");
