@@ -32,7 +32,7 @@ use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository}
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::acceptance::plan_output;
-use crate::domain::agents::{PLAN_REVIEWER, REVIEWER, REVIEWER_ROLES, VERIFIER};
+use crate::domain::agents::{PLAN_REVIEWER, REVIEWER_ROLES, VERIFIER};
 use crate::domain::checks::fence_for;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
@@ -436,7 +436,7 @@ where
                     .ok_or(BuiltInStepError::Unanswered(asked))?;
                 format!("{answered}{}", owner_notes_brief(input.owner_notes))
             }
-            None => prompt(instructions, &outcomes, input, &role),
+            None => prompt(instructions, &outcomes, input, reads_only(step)),
         };
         let setup = self.setup(input).await?;
         let asked_prompt = match &setup {
@@ -461,7 +461,7 @@ where
             afresh: input.resumes.map(|_| {
                 format!(
                     "{}{}{}",
-                    prompt(instructions, &outcomes, input, &role),
+                    prompt(instructions, &outcomes, input, reads_only(step)),
                     setup.as_ref().map(setup_note).unwrap_or_default(),
                     SESSION_LOST_NOTE
                 )
@@ -821,7 +821,12 @@ const HISTORY_BUDGET: usize = 48 * 1024;
 /// questions the owner answered ([`answers_brief`]), the notes the owner
 /// left on the Run's task since its latest Gate ([`owner_notes_brief`]),
 /// then the Run's earlier Steps ([`history`]).
-fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>, role: &Role) -> String {
+fn prompt(
+    instructions: &str,
+    outcomes: &[Outcome],
+    input: StepInput<'_>,
+    reads_only: bool,
+) -> String {
     let outcomes = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
@@ -839,8 +844,7 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>, role: 
     // Only an agent that changes its checkout is told what the failed Step
     // may have left in it: one that reads only keeps, finishes or discards
     // nothing.
-    let workplace = if input.repository.is_some() && input.resumes_failed_run() && !reads_only(role)
-    {
+    let workplace = if input.repository.is_some() && input.resumes_failed_run() && !reads_only {
         format!("{workplace}{RESUMED_RUN_NOTE}")
     } else {
         workplace
@@ -862,16 +866,21 @@ the branch already holds what that run's earlier steps pushed, and your working 
 still hold the failed step's unfinished, uncommitted changes. Run `git status` and \
 `git log` first, and keep, finish or discard those changes on purpose before you go on.\n";
 
-/// Whether an agent in `role` only reads its checkout, as its instructions
-/// say: the planner, a reviewer, the verifier and the plan reviewer change,
-/// commit and push nothing.
-fn reads_only(role: &Role) -> bool {
-    let role = role.as_str();
-    role == "planner"
-        || role == REVIEWER
-        || REVIEWER_ROLES.contains(&role)
-        || role == VERIFIER
-        || role == PLAN_REVIEWER
+/// Whether the agent doing `step` only reads its checkout, as the Step's
+/// instructions say, whatever Role its entry names: the plan, the plan
+/// review, a review (alone or on a panel), and the verifier's checks
+/// change, commit and push nothing.
+fn reads_only(step: &StepName) -> bool {
+    matches!(
+        BuiltInStep::named(step),
+        Some(
+            BuiltInStep::Plan
+                | BuiltInStep::PlanReview
+                | BuiltInStep::Review
+                | BuiltInStep::Accept
+                | BuiltInStep::Verify
+        )
+    )
 }
 
 /// Where the agent works: a checkout of the Run's repository, on the Run's

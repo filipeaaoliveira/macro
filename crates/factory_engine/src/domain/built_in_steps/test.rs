@@ -365,6 +365,51 @@ async fn a_retry_s_first_step_is_told_it_takes_over_a_failed_step_s_checkout() {
     assert!(!tasks[1].prompt.contains(super::RESUMED_RUN_NOTE));
 }
 
+/// Whether a retry's first Step is told to tidy the checkout follows the
+/// Step, not the Role its entry names: a team's own reviewer Role on a
+/// review reads only and is not told, and a fixer's Step is told whatever
+/// its Role is called.
+#[tokio::test]
+async fn a_retry_s_note_follows_the_step_not_the_role_s_name() {
+    let reviewer = FakeAgent::ending_with("pass");
+    let fixer = FakeAgent::ending_with("done");
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "trunk".to_string(),
+    };
+    let retried = RunId::generate();
+    let security = Role::try_from("security-reviewer".to_string()).expect("valid");
+    let named_like_a_reviewer = Role::try_from("plan-reviewer".to_string()).expect("valid");
+    let mut review = input(&[]);
+    review.repository = Some(&repository);
+    review.retry = Some(RunRetry {
+        retried_from: retried,
+        branch_of: retried,
+        first_seq: 2,
+    });
+    review.role = Some(&security);
+    let fix = StepInput {
+        role: Some(&named_like_a_reviewer),
+        ..review
+    };
+
+    BuiltInSteps::new(reviewer.clone(), pull_requests())
+        .run(&step("review"), review)
+        .await
+        .expect("review");
+    BuiltInSteps::new(fixer.clone(), pull_requests())
+        .run(&step("ci_fix"), fix)
+        .await
+        .expect("fix");
+
+    let reviewed = reviewer.tasks.lock().expect("tasks");
+    assert_eq!(reviewed[0].role, security);
+    assert!(!reviewed[0].prompt.contains(super::RESUMED_RUN_NOTE));
+    let fixed = fixer.tasks.lock().expect("tasks");
+    assert_eq!(fixed[0].role, named_like_a_reviewer);
+    assert!(fixed[0].prompt.contains(super::RESUMED_RUN_NOTE));
+}
+
 /// A Benchmark trial's branch starts from the commit its suite pinned, not
 /// from its base branch's head.
 #[tokio::test]
