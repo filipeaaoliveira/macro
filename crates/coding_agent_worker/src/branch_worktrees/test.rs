@@ -75,6 +75,14 @@ async fn check_out(worktree: &Path, branch: &str) {
         .unwrap();
 }
 
+/// Commit `file` in `worktree`, and push nothing.
+async fn commit_only(worktree: &Path, file: &str) -> String {
+    std::fs::write(worktree.join(file), file).unwrap();
+    git(worktree, &["add", file]).await.unwrap();
+    git(worktree, &["commit", "-m", file]).await.unwrap();
+    git(worktree, &["rev-parse", "HEAD"]).await.unwrap()
+}
+
 /// What an agent does once its change is written: commit `file` and push.
 async fn commit_and_push(worktree: &Path, branch: &str, file: &str) {
     std::fs::write(worktree.join(file), branch).unwrap();
@@ -174,6 +182,7 @@ async fn a_new_worktree_starts_at_the_branch_origin_has() {
             &repos.checkout,
             &directory(&repos.checkout),
             &key("factory/run").unwrap(),
+            Keep::Nothing,
         )
         .await;
 
@@ -280,6 +289,102 @@ async fn a_worktree_a_session_has_a_turn_running_in_is_never_removed() {
     );
     worktrees.sweep("factory+other").await;
     assert!(path.exists(), "a turn ended there just now");
+}
+
+/// A Run waiting on its owner with a commit it never pushed keeps its
+/// worktree and its branch, however long it waits, whether or not origin
+/// lists the branch.
+#[tokio::test]
+async fn a_commit_never_pushed_keeps_its_worktree_and_branch_on_both_paths() {
+    let repos = repositories().await;
+    let worktrees = Arc::new(BranchWorktrees::new(
+        repos.checkout.clone(),
+        ActiveTurns::default(),
+    ));
+    let waiting = worktrees.prepare("factory/waiting").await.unwrap().unwrap();
+    let old = worktrees.prepare("factory/old").await.unwrap().unwrap();
+    check_out(&waiting, "factory/waiting").await;
+    check_out(&old, "factory/old").await;
+    let waiting_commit = commit_only(&waiting, "waiting").await;
+    let old_commit = commit_only(&old, "old").await;
+    // Not on origin, idle past the hour: the branch-gone path.
+    age(&repos, "factory+waiting", GONE_AFTER + Duration::from_secs(60));
+    // Idle past the days: the stale path.
+    age(&repos, "factory+old", STALE_AFTER + Duration::from_secs(60));
+
+    worktrees.sweep("factory+other").await;
+
+    assert!(waiting.exists());
+    assert!(old.exists());
+    for (branch, commit) in [("factory/waiting", waiting_commit), ("factory/old", old_commit)] {
+        assert_eq!(
+            git(&repos.checkout, &["rev-parse", &format!("refs/heads/{branch}")])
+                .await
+                .unwrap(),
+            commit
+        );
+    }
+}
+
+/// A worktree git cannot read when its branch's next Step opens is not
+/// removed over the branch's unpushed commits: the prepare fails, and the
+/// directory and the branch stay.
+#[tokio::test]
+async fn a_prepare_keeps_a_branch_with_unpushed_commits() {
+    let repos = repositories().await;
+    let worktrees = Arc::new(BranchWorktrees::new(
+        repos.checkout.clone(),
+        ActiveTurns::default(),
+    ));
+    let path = worktrees.prepare("factory/run").await.unwrap().unwrap();
+    check_out(&path, "factory/run").await;
+    let commit = commit_only(&path, "work").await;
+    std::fs::remove_file(path.join(".git")).unwrap();
+
+    let prepared = worktrees.prepare("factory/run").await;
+
+    assert!(prepared.is_err(), "{prepared:?}");
+    assert!(path.join("work").exists());
+    assert_eq!(
+        git(&repos.checkout, &["rev-parse", "refs/heads/factory/run"])
+            .await
+            .unwrap(),
+        commit
+    );
+}
+
+/// The first sweep removes the worktrees an earlier macrod kept in the
+/// checkout itself, then the directory and its `info/exclude` line.
+#[tokio::test]
+async fn the_first_sweep_removes_the_worktrees_kept_in_the_checkout() {
+    let repos = repositories().await;
+    let legacy = repos.checkout.join(LEGACY_DIRECTORY);
+    std::fs::create_dir(&legacy).unwrap();
+    let old = legacy.join("factory+old");
+    git(
+        &repos.checkout,
+        &["worktree", "add", "--detach", &old.to_string_lossy(), "HEAD"],
+    )
+    .await
+    .unwrap();
+    std::fs::write(marker(&legacy, "factory+old"), b"").unwrap();
+    let exclude = repos.checkout.join(".git/info/exclude");
+    let kept = std::fs::read_to_string(&exclude).unwrap_or_default();
+    std::fs::write(&exclude, format!("{kept}/{LEGACY_DIRECTORY}/\n")).unwrap();
+    let worktrees = BranchWorktrees::new(repos.checkout.clone(), ActiveTurns::default());
+
+    worktrees.sweep("factory+other").await;
+
+    assert!(!legacy.exists());
+    assert!(
+        !std::fs::read_to_string(&exclude)
+            .unwrap()
+            .contains(LEGACY_DIRECTORY)
+    );
+    assert_eq!(
+        git(&repos.checkout, &["status", "--porcelain"]).await.unwrap(),
+        ""
+    );
 }
 
 #[tokio::test]

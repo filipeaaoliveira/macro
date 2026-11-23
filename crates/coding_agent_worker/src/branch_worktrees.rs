@@ -20,12 +20,15 @@
 //! removing a worktree waits on the others. At most every
 //! [`CLEAN_EVERY`], a prepare starts a sweep in the background that removes
 //! the worktrees no session used in [`STALE_AFTER`], and those no session
-//! used in [`GONE_AFTER`] whose branch origin no longer lists and that hold
-//! nothing origin lacks (no change left uncommitted, no commit on no remote
-//! branch). A session uses a worktree when it opens there, and when a turn
-//! of it starts or ends ([`ActiveTurns::workplace`]); a worktree a session
-//! has a turn running in is never removed. Removing one deletes the
-//! branch's local ref with it.
+//! used in [`GONE_AFTER`] whose branch origin no longer lists, with their
+//! branch's refs. Either is removed only when it holds nothing origin lacks
+//! (no change left uncommitted, no commit at its `HEAD` or on its branch
+//! that no remote branch has): one that does is kept, with its branch,
+//! however long it waits. A session uses a worktree when it opens there,
+//! and when a turn of it starts or ends ([`ActiveTurns::workplace`]); a
+//! worktree a session has a turn running in is never removed. The first
+//! sweep also removes the worktrees an earlier macrod kept in the checkout
+//! itself ([`LEGACY_DIRECTORY`]), on the same terms.
 
 #[cfg(test)]
 mod test;
@@ -62,6 +65,9 @@ pub(crate) struct BranchWorktrees {
     admin: tokio::sync::Mutex<()>,
     /// When the last sweep started.
     swept: Mutex<Option<Instant>>,
+    /// Whether a sweep looked for worktrees an earlier macrod kept in the
+    /// checkout itself ([`LEGACY_DIRECTORY`]).
+    legacy_swept: std::sync::atomic::AtomicBool,
 }
 
 impl BranchWorktrees {
@@ -74,6 +80,7 @@ impl BranchWorktrees {
             keys: Mutex::default(),
             admin: tokio::sync::Mutex::new(()),
             swept: Mutex::default(),
+            legacy_swept: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -133,8 +140,17 @@ impl BranchWorktrees {
                 touch(directory, key, SystemTime::now())?;
                 return Ok(path);
             }
-            // An earlier prepare stopped half way.
-            self.remove(top, directory, key).await;
+            // An earlier prepare stopped half way, or git cannot read the
+            // worktree now: it is removed only when it holds nothing origin
+            // lacks, and its branch is kept either way.
+            let empty = std::fs::read_dir(&path).is_ok_and(|mut entries| entries.next().is_none());
+            if !empty && !holds_nothing_origin_lacks(top, &path, branch).await {
+                rootcause::bail!(
+                    "{} is no worktree macrod can use and may hold work origin lacks: move it away",
+                    path.display()
+                );
+            }
+            self.remove(top, directory, key, Keep::Branch).await;
         }
 
         let tracking = format!("refs/remotes/origin/{branch}");
@@ -204,6 +220,12 @@ impl BranchWorktrees {
         let Some(top) = self.top().await else {
             return;
         };
+        if !self
+            .legacy_swept
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            sweep_legacy(&top).await;
+        }
         let directory = directory(&top);
         let Ok(entries) = std::fs::read_dir(&directory) else {
             return;
@@ -244,10 +266,6 @@ impl BranchWorktrees {
             if heads.contains(&branch.as_str()) {
                 continue;
             }
-            let path = directory.join(&key);
-            if !holds_nothing_origin_lacks(&path).await {
-                continue;
-            }
             self.remove_if_idle(&top, &directory, &key, GONE_AFTER)
                 .await;
         }
@@ -280,8 +298,10 @@ impl BranchWorktrees {
         now.duration_since(used).ok()
     }
 
-    /// Remove `key`'s worktree when no session used it in `idle`, under its
-    /// lock; one being prepared is left alone.
+    /// Remove `key`'s worktree, and its branch, when no session used it in
+    /// `idle` and it holds nothing origin lacks, under its lock; one being
+    /// prepared is left alone, and one that holds work origin lacks is kept
+    /// with its branch.
     async fn remove_if_idle(&self, top: &Path, directory: &Path, key: &str, idle: Duration) {
         let lock = self.key_lock(key);
         let Ok(_guard) = lock.try_lock() else {
@@ -293,14 +313,25 @@ impl BranchWorktrees {
         {
             return;
         }
-        tracing::info!(branch = %branch_of(key), "removing a work branch's idle worktree");
-        self.remove(top, directory, key).await;
+        let branch = branch_of(key);
+        if !holds_nothing_origin_lacks(top, &directory.join(key), &branch).await {
+            tracing::info!(%branch, "keeping an idle worktree that holds work origin lacks");
+            return;
+        }
+        tracing::info!(%branch, "removing a work branch's idle worktree");
+        self.remove(top, directory, key, Keep::Nothing).await;
     }
 
-    /// Remove `key`'s worktree, its marker and its branch's local ref.
-    async fn remove(&self, top: &Path, directory: &Path, key: &str) {
+    /// Remove `key`'s worktree and its marker, and, unless `keep` says to
+    /// keep it, its branch's local and remote-tracking refs; nothing while
+    /// a session has a turn running in it.
+    async fn remove(&self, top: &Path, directory: &Path, key: &str, keep: Keep) {
         let path = directory.join(key);
+        let cwd = path.to_string_lossy().into_owned();
         let _admin = self.admin.lock().await;
+        if self.turns.workplace(&cwd).0 {
+            return;
+        }
         if git(
             top,
             &["worktree", "remove", "--force", &path.to_string_lossy()],
@@ -311,8 +342,82 @@ impl BranchWorktrees {
             let _ = std::fs::remove_dir_all(&path);
         }
         let _ = git(top, &["worktree", "prune"]).await;
-        let _ = git(top, &["branch", "-D", &branch_of(key)]).await;
+        if keep == Keep::Nothing {
+            let branch = branch_of(key);
+            let _ = git(top, &["branch", "-D", &branch]).await;
+            let tracking = format!("refs/remotes/origin/{branch}");
+            let _ = git(top, &["update-ref", "-d", &tracking]).await;
+        }
         let _ = std::fs::remove_file(marker(directory, key));
+        self.turns.forget_workplace(&cwd);
+    }
+}
+
+/// What removing a worktree keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keep {
+    /// Its branch's refs.
+    Branch,
+    /// Nothing.
+    Nothing,
+}
+
+/// Where an earlier macrod kept the worktrees: in the checkout itself,
+/// left out of its status by a line in `info/exclude`.
+pub(crate) const LEGACY_DIRECTORY: &str = ".macrod-worktrees";
+
+/// Remove the worktrees an earlier macrod kept in the checkout at `top`
+/// ([`LEGACY_DIRECTORY`]) that hold nothing origin lacks, with their
+/// branches; once none is left, the directory and its `info/exclude` line
+/// too. One that holds work origin lacks stays, and so does the directory.
+async fn sweep_legacy(top: &Path) {
+    let legacy = top.join(LEGACY_DIRECTORY);
+    let Ok(entries) = std::fs::read_dir(&legacy) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let key = entry.file_name().to_string_lossy().into_owned();
+        let branch = branch_of(&key);
+        let path = entry.path();
+        if !holds_nothing_origin_lacks(top, &path, &branch).await {
+            tracing::info!(%branch, "keeping an earlier macrod's worktree that holds work origin lacks");
+            continue;
+        }
+        if git(top, &["worktree", "remove", "--force", &path.to_string_lossy()])
+            .await
+            .is_err()
+        {
+            continue;
+        }
+        let _ = git(top, &["branch", "-D", &branch]).await;
+        let _ = std::fs::remove_file(marker(&legacy, &key));
+    }
+    let _ = git(top, &["worktree", "prune"]).await;
+    let only_markers = std::fs::read_dir(&legacy).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .all(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+    });
+    if !only_markers || std::fs::remove_dir_all(&legacy).is_err() {
+        return;
+    }
+    let Ok(file) = git(top, &["rev-parse", "--git-path", "info/exclude"]).await else {
+        return;
+    };
+    let file = top.join(file);
+    let line = format!("/{LEGACY_DIRECTORY}/");
+    if let Ok(text) = std::fs::read_to_string(&file)
+        && text.lines().any(|existing| existing.trim() == line)
+    {
+        let kept: String = text
+            .lines()
+            .filter(|existing| existing.trim() != line)
+            .map(|existing| format!("{existing}\n"))
+            .collect();
+        let _ = std::fs::write(&file, kept);
     }
 }
 
@@ -369,20 +474,29 @@ async fn is_worktree_of(path: &Path, top: &Path) -> bool {
         && toplevel.is_ok_and(|toplevel| same(Path::new(&toplevel), path))
 }
 
-/// Whether the worktree at `path` holds nothing origin lacks: no change
-/// left uncommitted, and no commit that no remote branch this clone knows
-/// has.
-async fn holds_nothing_origin_lacks(path: &Path) -> bool {
+/// Whether the worktree at `path`, of `branch` in the checkout at `top`,
+/// holds nothing origin lacks: no change left uncommitted, and no commit,
+/// at its `HEAD` or on the branch's local ref, that no remote branch this
+/// clone knows has. A worktree git cannot read holds what it may.
+async fn holds_nothing_origin_lacks(top: &Path, path: &Path, branch: &str) -> bool {
     let clean = git(path, &["status", "--porcelain"])
         .await
         .is_ok_and(|status| status.is_empty());
-    let pushed = git(
-        path,
-        &["rev-list", "--max-count=1", "HEAD", "--not", "--remotes"],
-    )
-    .await
-    .is_ok_and(|unpushed| unpushed.is_empty());
-    clean && pushed
+    if !clean {
+        return false;
+    }
+    let local = format!("refs/heads/{branch}");
+    let has_local = git(top, &["rev-parse", "--verify", "--quiet", &local])
+        .await
+        .is_ok();
+    let mut revisions = vec!["rev-list", "--max-count=1", "HEAD"];
+    if has_local {
+        revisions.push(&local);
+    }
+    revisions.extend(["--not", "--remotes"]);
+    git(path, &revisions)
+        .await
+        .is_ok_and(|unpushed| unpushed.is_empty())
 }
 
 /// The file whose time says when a session last used `key`'s worktree.
