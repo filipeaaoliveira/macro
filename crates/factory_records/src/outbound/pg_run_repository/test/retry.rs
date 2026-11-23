@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::{entry, insert, julia, key, outcome, planner, session};
 use crate::domain::evaluation::EvaluationRepository as _;
+use crate::domain::gate_replies::GateReplyRepository as _;
 use crate::domain::insights::{InsightsScope, RunInsightsRepository as _};
 use crate::domain::models::{NewRetry, QueueHold, RetryInsert, Run, RunId, RunOutcome, RunRetry};
 use crate::domain::ports::RunRepository;
@@ -468,4 +469,97 @@ async fn what_a_retry_kept_counts_once_on_the_run_that_made_it(pool: PgPool) {
         [(1, 0)],
         "the attempt is counted by the run in the period"
     );
+}
+
+/// A Gate a chain of retries kept is the owner's answer once, on the Run
+/// that asked it: past answers and the replay's answered Gates leave out
+/// each retry's copy below its `first_seq`, and read the Gates a retry
+/// asked itself.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_kept_gate_is_answered_once_down_a_chain_of_retries(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let lost = lost_at_fix(&pool, &repo).await;
+    let first = RunId::generate();
+    let RetryInsert::Inserted(_) = retry(
+        &repo,
+        NewRetry {
+            id: first,
+            retried: lost,
+            first_seq: 4,
+            created_in_person: false,
+        },
+    )
+    .await
+    else {
+        panic!("an ended run is retried");
+    };
+    // The first retry asks a plan Gate of its own, and fails.
+    repo.start_step(key(first, 4), &entry("plan"), 2)
+        .await
+        .expect("start");
+    repo.end_step(key(first, 4), &outcome("done"), "A smaller plan")
+        .await
+        .expect("end");
+    repo.open_gate(
+        key(first, 4),
+        "Approve?",
+        &[outcome("approve"), outcome("revise")],
+    )
+    .await
+    .expect("open");
+    repo.answer_gate(
+        key(first, 4),
+        &outcome("revise"),
+        Some("Smaller still"),
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("answer");
+    repo.end_run(first, RunOutcome::Failed).await.expect("end");
+    let second = RunId::generate();
+    let RetryInsert::Inserted(_) = retry(
+        &repo,
+        NewRetry {
+            id: second,
+            retried: first,
+            first_seq: 5,
+            created_in_person: false,
+        },
+    )
+    .await
+    else {
+        panic!("a retry that ended is retried");
+    };
+    let asking = RunId::generate();
+    insert(&repo, asking, "Next").await;
+
+    let past = repo
+        .past_answers(&julia(), &entry("plan"), asking, 10)
+        .await
+        .expect("past");
+    let answers: Vec<(&str, Option<&str>)> = past
+        .iter()
+        .map(|answer| (answer.answer.as_str(), answer.note.as_deref()))
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            ("revise", Some("Smaller still")),
+            ("approve", Some("Keep it small"))
+        ],
+        "each answer once, newest first"
+    );
+    let answered: Vec<(RunId, u16)> = repo
+        .answered_gates(10)
+        .await
+        .expect("answered")
+        .iter()
+        .map(|gate| (gate.run_id, gate.seq))
+        .collect();
+    assert_eq!(answered, [(lost, 1), (first, 4)]);
 }
