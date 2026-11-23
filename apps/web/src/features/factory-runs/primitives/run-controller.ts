@@ -76,8 +76,9 @@ export function createRunController(
   const [terminalNote, setTerminalNote] = createSignal('');
   // The steer on the wire, which locks the Terminal's controls.
   const [steering, setSteering] = createSignal<SteerAction>();
-  // A retry on the wire, and the Runs this person retried from here: the
-  // Retry button goes once one is sent, before any list shows the retry.
+  // A retry on the wire, and the Runs this person retried from here or the
+  // factory refused to retry: the Retry button goes once one is sent,
+  // before any list shows the retry.
   const [retrying, setRetrying] = createSignal(false);
   const [retried, setRetried] = createSignal<ReadonlySet<string>>(new Set());
   const [now, setNow] = createSignal(Date.now());
@@ -241,16 +242,33 @@ export function createRunController(
     return isRetriable(run, retriedBy() !== undefined || retried().has(run.id));
   };
 
+  // Another Run shown in this one's place starts clean: no note, Gate
+  // lock, focus rescue or Step Terminal of the Run before it.
+  const open = (next: string) => {
+    if (next === runId()) return;
+    setNote('');
+    setApproveControlFiles(false);
+    setAnsweredGate(undefined);
+    setRescue(undefined);
+    setCancelSent(false);
+    setTerminalSeq(undefined);
+    setTerminalNote('');
+    openRun(next);
+  };
+
   const retry = async (): Promise<RetryRunResult | undefined> => {
     const run = source.data();
     if (!run || retrying() || !retriable()) return undefined;
     setRetrying(true);
     const result = await context.retryRun(run.id);
     setRetrying(false);
-    if (result.ok) {
+    // A retry that went through, and one the factory refused as retried
+    // already or not retriable (a Run that kept no Flow to walk again), is
+    // offered no more for this Run.
+    if (result.ok || result.reason === 'conflict') {
       setRetried((ids) => new Set([...ids, run.id]));
-      openRun(result.value.id);
     }
+    if (result.ok) open(result.value.id);
     return result;
   };
 
@@ -312,8 +330,8 @@ export function createRunController(
     retry,
     /** The Run's retry, when its task's Runs list it. */
     retriedBy,
-    /** Shows another Run in this one's place. */
-    openRun,
+    /** Shows another Run in this one's place, with none of this one's state. */
+    openRun: open,
     /** The Step whose Step Terminal is open, as last read. */
     terminalStep,
     openTerminal: (step: Pick<RunStep, 'seq'>) => {

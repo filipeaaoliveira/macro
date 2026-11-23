@@ -231,10 +231,11 @@ describe('retrying a Run', () => {
     expect(retryButton()).toBeNull();
   });
 
-  it('says why a retry was refused', async () => {
+  it('says why a retry was refused, and offers it again', async () => {
     const results: RetryRunResult[] = [
       { ok: false, reason: 'queueFull' },
-      { ok: false, reason: 'conflict' },
+      { ok: false, reason: 'notInStandingRole' },
+      { ok: false, reason: 'definitionUnreadable' },
       { ok: false, reason: 'failed' },
     ];
     const retry = vi.fn(async () => results.shift() ?? results[0]);
@@ -250,15 +251,72 @@ describe('retrying a Run', () => {
     fireEvent.click(button);
     await waitFor(() =>
       expect(toast.alert).toHaveBeenCalledWith(
-        'This run can’t be retried',
-        expect.anything()
+        expect.stringContaining('no standing role here')
+      )
+    );
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(toast.alert).toHaveBeenCalledWith(
+        expect.stringContaining('factory definition doesn’t read')
       )
     );
     fireEvent.click(button);
     await waitFor(() =>
       expect(toast.failure).toHaveBeenCalledWith('Couldn’t retry the run')
     );
-    // A refused retry leaves the Run where it is.
+    // These refusals leave the Run where it is, to retry later.
     expect(retryButton()).toBeTruthy();
+  });
+
+  it('stops offering a retry the factory refused as not retriable', async () => {
+    const retry = vi.fn(
+      async (): Promise<RetryRunResult> => ({ ok: false, reason: 'conflict' })
+    );
+    mount({ retryRun: retry });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry run' }));
+
+    await waitFor(() =>
+      expect(toast.alert).toHaveBeenCalledWith(
+        'This run can’t be retried',
+        expect.anything()
+      )
+    );
+    await waitFor(() => expect(retryButton()).toBeNull());
+  });
+
+  it('shows a linked Run without the note written on the one before', async () => {
+    const earlier: Run = { ...failedRun, id: 'run-0' };
+    const waitingRetry: Run = {
+      ...retryRun,
+      id: 'run-1',
+      retry: { retriedFrom: 'run-0', branchOf: 'run-0', firstSeq: 2 },
+      steps: [
+        {
+          ...failedRun.steps[0],
+          seq: 2,
+          gate: {
+            kind: 'flow',
+            question: 'Approve this plan?',
+            answers: ['approve', 'revise'],
+            openedAt: '2026-11-16T10:06:00Z',
+          },
+        } as Run['steps'][number],
+      ],
+    };
+    mount({ runs: [earlier, waitingRetry], taskRuns: [waitingRetry, earlier] });
+
+    const note = await screen.findByRole('textbox');
+    fireEvent.input(note, { target: { value: 'Keep it small' } });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open the run it retries' })
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Open its retry' })
+    );
+
+    expect(
+      ((await screen.findByRole('textbox')) as HTMLTextAreaElement).value
+    ).toBe('');
   });
 });
