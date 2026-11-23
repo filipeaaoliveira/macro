@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   changeRequest,
   checkDraft,
+  checkRequest,
   type DefinitionChangeDraft,
   definitionFileUrl,
   isDefinitionFile,
   sendUnder,
+  startsAfresh,
 } from './definition-change';
 
 const draft = (
@@ -155,5 +157,43 @@ describe('sendUnder', () => {
       newId
     );
     expect(retexted.request.changeId).toBe('change-3');
+  });
+});
+
+describe('checkRequest', () => {
+  it('asks what a send would, without a change id', () => {
+    expect(checkRequest(draft({ title: ' Add a docs flow ' }))).toEqual({
+      title: 'Add a docs flow',
+      description: null,
+      files: { 'flows/docs.json': '{"entries": []}' },
+    });
+  });
+});
+
+describe('startsAfresh', () => {
+  it('fills a file nothing was written in, or only what it started from', () => {
+    expect(startsAfresh({ path: 'agents.json', text: '' })).toBe(true);
+    expect(
+      startsAfresh({
+        path: 'rules.json',
+        text: '{"a": 1}',
+        start: { path: 'agents.json', text: '{"a": 1}' },
+      })
+    ).toBe(true);
+    expect(
+      startsAfresh({
+        path: 'flows/new.json',
+        text: '',
+        start: { path: 'flows/new.json', text: null },
+      })
+    ).toBe(true);
+    expect(startsAfresh({ path: 'agents.json', text: '{}' })).toBe(false);
+    expect(
+      startsAfresh({
+        path: 'agents.json',
+        text: '{"a": 2}',
+        start: { path: 'agents.json', text: '{"a": 1}' },
+      })
+    ).toBe(false);
   });
 });

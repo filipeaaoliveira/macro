@@ -20,6 +20,8 @@ vi.mock('@service-factory/client', () => ({
     getDefinition: vi.fn(),
     setDefinition: vi.fn(),
     proposeDefinitionChange: vi.fn(),
+    checkDefinitionChange: vi.fn(),
+    getDefinitionFile: vi.fn(),
   },
 }));
 
@@ -40,7 +42,7 @@ const named: Settings = {
   canEdit: false,
   newestRun: { commit: READ, createdAt: '2026-11-20T10:00:00Z' },
   contents: {
-    commit: READ,
+    commit: HEAD,
     description: 'The team’s factory.',
     flows: [
       {
@@ -71,6 +73,12 @@ const named: Settings = {
 
 function mount(settings: Settings) {
   vi.mocked(factoryClient.getDefinition).mockResolvedValue(ok(settings));
+  vi.mocked(factoryClient.getDefinitionFile).mockImplementation(async (path) =>
+    ok({ path, commit: HEAD, text: null })
+  );
+  vi.mocked(factoryClient.checkDefinitionChange).mockResolvedValue(
+    ok({ commit: HEAD })
+  );
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -87,7 +95,7 @@ afterEach(() => {
 });
 
 describe('DefinitionSettings', () => {
-  it('shows, read-only, the definition as the newest run read it', async () => {
+  it('shows, read-only, the definition at its head, and the newest run’s commit', async () => {
     mount(named);
 
     const read = await screen.findByRole('link', {
@@ -100,7 +108,7 @@ describe('DefinitionSettings', () => {
     const inside = within(contents);
     expect(
       inside.getByRole('link', {
-        name: 'As it is at aaaaaaa (opens in a new tab)',
+        name: 'As it is at bbbbbbb (opens in a new tab)',
       })
     ).toBeTruthy();
     expect(inside.getByText('The team’s factory.')).toBeTruthy();
@@ -118,20 +126,30 @@ describe('DefinitionSettings', () => {
     expect(contents.querySelector('input, textarea, button')).toBeNull();
     expect(
       inside.queryByText(
-        'The newest run’s commit couldn’t be read, so this is its default branch now.'
+        'Its default branch doesn’t read now, so this is the commit the newest run read.'
       )
     ).toBeNull();
   });
 
-  it('says when it shows the head, the newest run’s commit unread', async () => {
-    mount({ ...named, contents: { ...named.contents!, commit: HEAD } });
+  it('says when it shows the newest run’s commit, the head not reading', async () => {
+    mount({
+      ...named,
+      commit: null,
+      problem: 'agents.json is missing',
+      contents: { ...named.contents!, commit: READ },
+    });
 
     const contents = await screen.findByRole('group', {
       name: 'What the definition holds',
     });
     expect(
+      within(contents).getByRole('link', {
+        name: 'As it is at aaaaaaa (opens in a new tab)',
+      })
+    ).toBeTruthy();
+    expect(
       within(contents).getByText(
-        'The newest run’s commit couldn’t be read, so this is its default branch now.'
+        'Its default branch doesn’t read now, so this is the commit the newest run read.'
       )
     ).toBeTruthy();
   });
@@ -402,6 +420,129 @@ describe('DefinitionSettings', () => {
           'The definition’s repository couldn’t be read with your GitHub account: not found'
         )
       );
+    });
+
+    const fileText = () =>
+      (
+        screen.getByRole('textbox', {
+          name: 'File 1’s new text',
+        }) as HTMLTextAreaElement
+      ).value;
+
+    const pick = async (path: string) => {
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Propose a change' })
+      );
+      fireEvent.input(screen.getByRole('textbox', { name: 'File 1' }), {
+        target: { value: path },
+      });
+    };
+
+    it('starts a file from its text at the head once its path is picked', async () => {
+      vi.mocked(factoryClient.getDefinitionFile).mockResolvedValueOnce(
+        ok({
+          path: 'flows/notes.json',
+          commit: HEAD,
+          text: '{"entries": ["reply"]}',
+        })
+      );
+      mount(admin);
+      await pick('flows/notes.json');
+
+      await waitFor(() => expect(fileText()).toBe('{"entries": ["reply"]}'));
+      expect(factoryClient.getDefinitionFile).toHaveBeenCalledWith(
+        'flows/notes.json',
+        expect.anything()
+      );
+      // Another path, its text untouched, starts from that file instead.
+      vi.mocked(factoryClient.getDefinitionFile).mockResolvedValueOnce(
+        ok({ path: 'agents.json', commit: HEAD, text: '{"roles": {}}' })
+      );
+      fireEvent.input(screen.getByRole('textbox', { name: 'File 1' }), {
+        target: { value: 'agents.json' },
+      });
+      await waitFor(() => expect(fileText()).toBe('{"roles": {}}'));
+    });
+
+    it('says a picked file isn’t there yet, and keeps text already written', async () => {
+      mount(admin);
+      await pick('flows/new.json');
+
+      expect(
+        await screen.findByText(
+          'There’s no file here yet: this change adds it.'
+        )
+      ).toBeTruthy();
+      expect(fileText()).toBe('');
+      fireEvent.input(
+        screen.getByRole('textbox', { name: 'File 1’s new text' }),
+        { target: { value: '{"entries": []}' } }
+      );
+      fireEvent.input(screen.getByRole('textbox', { name: 'File 1' }), {
+        target: { value: 'agents.json' },
+      });
+      expect(fileText()).toBe('{"entries": []}');
+      expect(factoryClient.getDefinitionFile).toHaveBeenCalledTimes(1);
+    });
+
+    it('says why a picked file couldn’t be read', async () => {
+      vi.mocked(factoryClient.getDefinitionFile).mockResolvedValueOnce(
+        err([{ code: 'DEFINITION_UNREACHABLE', message: 'not found' }])
+      );
+      mount(admin);
+      await pick('agents.json');
+
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'Couldn’t read the file as it is now: not found'
+      );
+      expect(fileText()).toBe('');
+    });
+
+    it('checks a change without opening a pull request', async () => {
+      vi.mocked(factoryClient.checkDefinitionChange)
+        .mockResolvedValueOnce(ok({ commit: HEAD }))
+        .mockResolvedValueOnce(
+          err([
+            {
+              code: 'INVALID_DEFINITION_CHANGE',
+              message: 'flows/notes.json: the entry review is not defined',
+            },
+          ])
+        );
+      mount(admin);
+      await write({});
+      fireEvent.click(screen.getByRole('button', { name: 'Check' }));
+
+      expect(
+        await screen.findByText(
+          'The definition reads with this change at bbbbbbb. Nothing was sent.'
+        )
+      ).toBeTruthy();
+      expect(factoryClient.checkDefinitionChange).toHaveBeenCalledWith({
+        title: 'Add a review step',
+        description: null,
+        files: { 'flows/notes.json': '{"entries": ["plan"]}' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Check' }));
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'The definition doesn’t read with this change: flows/notes.json: the entry review is not defined'
+      );
+      expect(factoryClient.proposeDefinitionChange).not.toHaveBeenCalled();
+    });
+
+    it('checks a change before it sends it, and sends none that doesn’t read', async () => {
+      vi.mocked(factoryClient.checkDefinitionChange).mockResolvedValueOnce(
+        err([{ code: 'NO_PUSH_ACCESS', message: 'read only' }])
+      );
+      mount(admin);
+      await write({});
+      send();
+
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'Your GitHub account can’t push to the definition’s repository.'
+      );
+      expect(factoryClient.checkDefinitionChange).toHaveBeenCalledTimes(1);
+      expect(factoryClient.proposeDefinitionChange).not.toHaveBeenCalled();
     });
 
     it('offers no change to a member who doesn’t administer the team', async () => {

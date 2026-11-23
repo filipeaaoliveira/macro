@@ -1,20 +1,28 @@
 import { t } from '@app/lib/i18n';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { ThrownResultError } from '@core/util/result';
+import type { DefinitionChangeCheck } from '@service-factory/client';
 import type { DefinitionPullRequest } from '@service-factory/generated/schemas';
 import { Button, TextField } from '@ui';
 import { createSignal, Index, Show } from 'solid-js';
 import {
   checkDraft,
+  checkRequest,
   type DraftFile,
   type DraftFileProblem,
   definitionFileUrl,
+  isDefinitionFile,
   MAX_CHANGE_DESCRIPTION_BYTES,
   MAX_CHANGE_TITLE_BYTES,
   type SentChange,
   sendUnder,
+  startsAfresh,
 } from '../core/definition-change';
-import { useProposeDefinitionChangeMutation } from '../queries/definition';
+import {
+  useCheckDefinitionChangeMutation,
+  useDefinitionFileReader,
+  useProposeDefinitionChangeMutation,
+} from '../queries/definition';
 import { ExternalLink } from './definition-contents';
 
 const FILE_PROBLEMS = {
@@ -82,11 +90,19 @@ function refusal(error: unknown): { text: string; newChange: boolean } {
 
 const EMPTY_FILE: DraftFile = { path: '', text: '' };
 
+/** The service's words for a failed read, if it gave any. */
+function readFailure(error: unknown): string {
+  const first =
+    error instanceof ThrownResultError ? error.errors.at(0) : undefined;
+  return first?.message ?? '';
+}
+
 /**
  * A change to the team's Factory Definition, for its admins: the whole new
  * text of some of its files, sent as a pull request on its repository that
- * a person merges. The factory checks the Definition reads with the change
- * and says why when it doesn't.
+ * a person merges. Picking a file's path fills in its text as it is at the
+ * Definition's head. The factory checks the Definition reads with the
+ * change, on its own or before it is sent, and says why when it doesn't.
  */
 export function DefinitionChangeEditor(props: {
   repoUrl: string;
@@ -94,6 +110,9 @@ export function DefinitionChangeEditor(props: {
   commit?: string | null;
 }) {
   const mutation = useProposeDefinitionChangeMutation();
+  const checking = useCheckDefinitionChangeMutation();
+  const readFile = useDefinitionFileReader();
+  const busy = () => mutation.isPending || checking.isPending;
   const [editing, setEditing] = createSignal(false);
   const [title, setTitle] = createSignal('');
   const [description, setDescription] = createSignal('');
@@ -106,14 +125,15 @@ export function DefinitionChangeEditor(props: {
   const [checked, setChecked] = createSignal(false);
   const [refused, setRefused] = createSignal<string>();
   const [opened, setOpened] = createSignal<DefinitionPullRequest>();
+  const [passed, setPassed] = createSignal<DefinitionChangeCheck>();
+  const [reading, setReading] = createSignal<ReadonlySet<number>>(new Set());
 
   const draft = () => ({
     title: title(),
     description: description(),
     files: files(),
   });
-  const check = () => checkDraft(draft());
-  const shown = () => (checked() ? check() : undefined);
+  const shown = () => (checked() ? checkDraft(draft()) : undefined);
 
   const reset = () => {
     setTitle('');
@@ -122,17 +142,83 @@ export function DefinitionChangeEditor(props: {
     setSent(undefined);
     setChecked(false);
     setRefused(undefined);
+    setPassed(undefined);
   };
 
-  const updateFile = (index: number, change: Partial<DraftFile>) =>
+  const updateFile = (index: number, change: Partial<DraftFile>) => {
+    setPassed(undefined);
     setFiles((current) =>
       current.map((file, at) => (at === index ? { ...file, ...change } : file))
     );
+  };
+
+  const markReading = (index: number, on: boolean) =>
+    setReading((current) => {
+      const next = new Set(current);
+      if (on) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+
+  // A path picked for a file nothing was written in yet starts it from the
+  // file as it is at the Definition's head; an answer for a path changed
+  // since, or a file written in meanwhile, is dropped.
+  const pickPath = async (index: number, value: string) => {
+    updateFile(index, { path: value, readProblem: undefined });
+    const path = value.trim();
+    const file = files()[index];
+    if (!file || !isDefinitionFile(path) || !startsAfresh(file)) return;
+    if (file.start?.path === path) return;
+    const current = () => files()[index];
+    const stillPicked = () => {
+      const now = current();
+      return !!now && now.path.trim() === path && startsAfresh(now);
+    };
+    markReading(index, true);
+    try {
+      const read = await readFile(path);
+      if (!stillPicked()) return;
+      updateFile(index, {
+        text: read.text ?? '',
+        start: { path, text: read.text },
+      });
+    } catch (error) {
+      if (!stillPicked()) return;
+      updateFile(index, { readProblem: readFailure(error) });
+    } finally {
+      markReading(index, false);
+    }
+  };
+
+  // Asks the factory whether the Definition reads with the draft, writing
+  // nothing; says why when it doesn't.
+  const checkWithFactory = async (): Promise<boolean> => {
+    try {
+      setPassed(await checking.mutateAsync(checkRequest(draft())));
+      return true;
+    } catch (error) {
+      const answer = refusal(error);
+      setRefused(answer.text);
+      if (answer.newChange) setSent(undefined);
+      return false;
+    }
+  };
+
+  const check = async () => {
+    setChecked(true);
+    setRefused(undefined);
+    setPassed(undefined);
+    if (!checkDraft(draft()).ready || busy()) return;
+    await checkWithFactory();
+  };
 
   const send = async () => {
     setChecked(true);
     setRefused(undefined);
-    if (!check().ready || mutation.isPending) return;
+    if (!checkDraft(draft()).ready || busy()) return;
+    // The draft is checked before it is sent, so a change that doesn't
+    // read never takes a change id.
+    if (!(await checkWithFactory())) return;
     const change = sendUnder(sent(), draft(), () => crypto.randomUUID());
     setSent(change.sent);
     try {
@@ -181,7 +267,7 @@ export function DefinitionChangeEditor(props: {
       >
         <fieldset
           class="flex flex-col gap-3"
-          disabled={mutation.isPending}
+          disabled={busy()}
           aria-label={t('factoryRuns.definitionChangeTitle')}
         >
           <legend class="text-sm font-medium">
@@ -231,7 +317,9 @@ export function DefinitionChangeEditor(props: {
                 <div class="flex flex-col gap-1.5 rounded-md border border-edge-muted p-2">
                   <TextField
                     value={file().path}
-                    onChange={(value) => updateFile(index, { path: value })}
+                    onChange={(value) =>
+                      fireAndForget(pickPath(index, value), 'factory-runs')
+                    }
                     validationState={
                       problem() === 'path' || problem() === 'duplicate'
                         ? 'invalid'
@@ -253,6 +341,28 @@ export function DefinitionChangeEditor(props: {
                       {t(FILE_PROBLEMS[problem() ?? 'path'])}
                     </TextField.ErrorMessage>
                   </TextField>
+                  <Show when={reading().has(index)}>
+                    <p class="text-xs text-ink-muted" role="status">
+                      {t('factoryRuns.definitionChangeReading')}
+                    </p>
+                  </Show>
+                  <Show
+                    when={
+                      file().start?.path === path() &&
+                      file().start?.text === null
+                    }
+                  >
+                    <p class="text-xs text-ink-muted">
+                      {t('factoryRuns.definitionChangeNewFile')}
+                    </p>
+                  </Show>
+                  <Show when={file().readProblem !== undefined}>
+                    <p class="text-xs text-failure" role="alert">
+                      {t('factoryRuns.definitionChangeReadFailed', {
+                        message: file().readProblem ?? '',
+                      })}
+                    </p>
+                  </Show>
                   <Show when={problem() !== 'path' && path()}>
                     <p class="text-xs text-ink-muted">
                       <ExternalLink
@@ -307,6 +417,15 @@ export function DefinitionChangeEditor(props: {
               );
             }}
           </Index>
+          <Show when={passed()}>
+            {(check) => (
+              <p class="text-xs" role="status">
+                {t('factoryRuns.definitionChangeChecked', {
+                  commit: check().commit.slice(0, 7),
+                })}
+              </p>
+            )}
+          </Show>
           <Show when={refused()}>
             {(text) => (
               <p class="text-xs whitespace-pre-wrap text-failure" role="alert">
@@ -331,6 +450,14 @@ export function DefinitionChangeEditor(props: {
               }}
             >
               {t('factoryRuns.definitionChangeDiscard')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={checking.isPending && !mutation.isPending}
+              onClick={() => fireAndForget(check(), 'factory-runs')}
+            >
+              {t('factoryRuns.definitionChangeCheck')}
             </Button>
             <Button
               variant="primary"

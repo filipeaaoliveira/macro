@@ -17,8 +17,26 @@ const DEFINITION_FILES = [
 /** A Flow's file: `flows/{name}.json`, one level down. */
 const FLOW_FILE = /^flows\/[^/\s]+\.json$/;
 
-/** A file of a change being written: its path and its whole new text. */
-export type DraftFile = { path: string; text: string };
+/**
+ * A file of a change being written: its path and its whole new text, and
+ * what it started from: the file as it was at the Definition's head when
+ * its path was picked (`text` null when there was no file there yet), or
+ * why that couldn't be read.
+ */
+export type DraftFile = {
+  path: string;
+  text: string;
+  start?: { path: string; text: string | null };
+  readProblem?: string;
+};
+
+/**
+ * Whether picking a path may fill a file's text with the file as it is
+ * now: nothing was written yet, or only what it started from.
+ */
+export function startsAfresh(file: DraftFile): boolean {
+  return file.text === '' || file.text === (file.start?.text ?? '');
+}
 
 /** A change to the Definition, as the person writes it. */
 export type DefinitionChangeDraft = {
@@ -101,6 +119,14 @@ export function checkDraft(draft: DefinitionChangeDraft): DraftCheck {
       !descriptionProblem &&
       files.every((problem) => problem === undefined),
   };
+}
+
+/** What checking a draft without proposing it sends: no change id. */
+export function checkRequest(
+  draft: DefinitionChangeDraft
+): Omit<ProposeDefinitionChangeRequest, 'changeId'> {
+  const { title, description, files } = changeRequest(draft, '');
+  return { title, description, files };
 }
 
 /** The request a checked draft sends, under the change's id. */
