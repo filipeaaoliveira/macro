@@ -290,6 +290,8 @@ struct CheckRunResultResponse {
     name: String,
     status: String,
     conclusion: Option<String>,
+    #[serde(default)]
+    html_url: Option<String>,
     app: Option<CheckRunResultApp>,
     #[serde(default)]
     output: Option<CheckRunOutput>,
@@ -886,6 +888,7 @@ impl GithubOauthImpl {
                         app_slug: run.app.and_then(|app| app.slug),
                         output_title,
                         output_summary,
+                        html_url: run.html_url,
                     }
                 })
                 .collect(),
