@@ -217,18 +217,12 @@ fn the_task_thread_section_is_stored_beside_the_kinds_and_off_by_default() {
         task_thread: true,
         ..OrchestratorDefinition::DEFAULT
     };
-    assert_eq!(
-        definition.kinds(),
-        ["blockers", "task_thread", "rerun_flaky_ci"]
-    );
+    assert_eq!(definition.kinds(), ["blockers", "task_thread"]);
     assert_eq!(
         OrchestratorDefinition::from_kinds(&definition.kinds()),
         Some(definition)
     );
-    assert_eq!(
-        OrchestratorDefinition::DEFAULT.kinds(),
-        ["blockers", "rerun_flaky_ci"]
-    );
+    assert_eq!(OrchestratorDefinition::DEFAULT.kinds(), ["blockers"]);
     let sent: OrchestratorDefinition = serde_json::from_str(
         r#"{"plan": false, "blockers": true, "merge": false, "ownerGates": true}"#,
     )
@@ -256,7 +250,7 @@ fn quiet_gates_are_an_opt_out_stored_beside_the_kinds() {
         quiet_gates: true,
         ..OrchestratorDefinition::DEFAULT
     };
-    assert_eq!(quiet.kinds(), ["blockers", "quiet_gates", "rerun_flaky_ci"]);
+    assert_eq!(quiet.kinds(), ["blockers", "quiet_gates"]);
     assert_eq!(
         OrchestratorDefinition::from_kinds(&quiet.kinds()),
         Some(quiet)
@@ -287,12 +281,7 @@ fn the_kinds_the_orchestrator_may_approve_are_stored_beside_the_rules() {
     };
     assert_eq!(
         definition.kinds(),
-        [
-            "blockers",
-            "orchestrator_plan",
-            "orchestrator_blockers",
-            "rerun_flaky_ci"
-        ]
+        ["blockers", "orchestrator_plan", "orchestrator_blockers"]
     );
     assert_eq!(
         OrchestratorDefinition::from_kinds(&definition.kinds()),
@@ -330,15 +319,14 @@ fn a_token_budget_is_read_and_sent_only_when_set() {
     assert_eq!(OrchestratorDefinition::DEFAULT.token_budget, None);
 }
 
-/// The factory's default reruns a known flaky CI job once; a definition
-/// sent or kept without the rule has it off, and it is stored by its
-/// rule's name.
+/// The flaky CI rerun is off in the factory's default and in a definition
+/// sent or kept without it, and is stored by its rule's name when on.
 #[test]
-fn the_flaky_ci_rerun_is_on_by_default_and_stored_by_its_rule_s_name() {
+fn the_flaky_ci_rerun_is_off_by_default_and_stored_by_its_rule_s_name() {
     assert_eq!(
         OrchestratorDefinition::from_kinds(&OrchestratorDefinition::DEFAULT.kinds())
             .map(|kept| kept.rerun_flaky_ci),
-        Some(true)
+        Some(false)
     );
     let sent: OrchestratorDefinition =
         serde_json::from_str(r#"{"plan": false, "blockers": true, "merge": false}"#)

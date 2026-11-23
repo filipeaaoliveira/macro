@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT task_id, repo_url, name, failed_step, failure, run_id, passed_retries, filed,\n            quarantined_at, last_passed_at\n        FROM factory_ci_quarantine\n        WHERE run_id = $1 AND NOT filed\n        ORDER BY name, failed_step, failure\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "failed_step",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "failure",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "passed_retries",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "filed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "quarantined_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_passed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "830419b2f961f2fd3564e5bf6c8b9a1e3e1917e2f33f5cc5a8cf93ed2803775e"
+}

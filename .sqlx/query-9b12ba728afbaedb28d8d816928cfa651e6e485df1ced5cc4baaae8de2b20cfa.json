@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT name, head_sha, job_id, matched, result, requested_at\n        FROM factory_ci_retry\n        WHERE run_id = $1 AND seq = $2\n        ORDER BY name\n        ",
+  "query": "\n        SELECT name, head_sha, job_id, workflow_run_id, failed_step, failure, matched, result,\n            requested_at\n        FROM factory_ci_retry\n        WHERE run_id = $1 AND seq = $2\n        ORDER BY name\n        ",
   "describe": {
     "columns": [
       {
@@ -20,16 +20,31 @@
       },
       {
         "ordinal": 3,
-        "name": "matched",
-        "type_info": "Text"
+        "name": "workflow_run_id",
+        "type_info": "Int8"
       },
       {
         "ordinal": 4,
-        "name": "result",
+        "name": "failed_step",
         "type_info": "Text"
       },
       {
         "ordinal": 5,
+        "name": "failure",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "matched",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "result",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "requested_at",
         "type_info": "Timestamptz"
       }
@@ -44,10 +59,13 @@
       false,
       false,
       false,
+      true,
+      true,
+      true,
       false,
       true,
       false
     ]
   },
-  "hash": "6ca9444799437e1c7b615ec6fa6dff3f6a55383a301e84cd623599a26a6484c7"
+  "hash": "9b12ba728afbaedb28d8d816928cfa651e6e485df1ced5cc4baaae8de2b20cfa"
 }

@@ -12,8 +12,8 @@ use uuid::Uuid;
 use super::PgRunRepositoryErr;
 use crate::domain::models::{RunId, StepKey};
 use crate::domain::quality::{
-    CiFlakes, CiQuarantine, CiRetry, CiRetryMatch, CiRetryRequest, CiRetryResult, FlakyCiFailure,
-    NewCiQuarantine,
+    CiFailureIdentity, CiFlakes, CiQuarantine, CiRetry, CiRetryMatch, CiRetryRequest,
+    CiRetryResult, FlakyCiFailure, NewCiQuarantine,
 };
 use crate::domain::standing_rules::StandingRule;
 
@@ -39,6 +39,10 @@ fn count(value: i32) -> u32 {
     u32::try_from(value).unwrap_or_default()
 }
 
+fn id(value: Option<i64>) -> Option<u64> {
+    value.and_then(|value| u64::try_from(value).ok())
+}
+
 pub(super) async fn keep_known_ci_flakes(
     pool: &PgPool,
     id: RunId,
@@ -58,6 +62,7 @@ pub(super) async fn ci_flakes(
     pool: &PgPool,
     id: RunId,
     repository: &str,
+    pull_request: Option<&str>,
     since: DateTime<Utc>,
 ) -> Result<CiFlakes, PgRunRepositoryErr> {
     let known = sqlx::query_scalar!(
@@ -68,22 +73,31 @@ pub(super) async fn ci_flakes(
     .await?
     .flatten()
     .unwrap_or_default();
-    let quarantined = sqlx::query_scalar!(
+    let quarantined = sqlx::query!(
         r#"
-        SELECT name
+        SELECT name, failed_step, failure
         FROM factory_ci_quarantine
-        WHERE repo_url = $1
-        ORDER BY name
-        LIMIT $2
+        WHERE repo_url = $1 AND last_passed_at >= $2
+        ORDER BY name, failed_step, failure
+        LIMIT $3
         "#,
         repository,
+        since,
         QUARANTINES_READ,
     )
     .fetch_all(pool)
-    .await?;
-    // The red jobs other Runs on the repository kept, and the jobs they
-    // reran, which a passed rerun keeps apart from its wait: each failure
-    // counted once per pull request.
+    .await?
+    .into_iter()
+    .map(|row| CiFailureIdentity {
+        name: row.name,
+        failed_step: row.failed_step,
+        failure: row.failure,
+    })
+    .collect();
+    // The failures other pull requests of the repository proved flaky: a
+    // rerun of the job passed, or the same Run saw the same head green
+    // after the red, with no new commit. Each counts once per pull
+    // request; a red no later green proved flaky counts for nothing.
     let failures = sqlx::query!(
         r#"
         SELECT
@@ -93,31 +107,44 @@ pub(super) async fn ci_flakes(
             count(DISTINCT pull_request)::int AS "pull_requests!"
         FROM (
             SELECT j.name, j.failed_step, j.failure,
-                coalesce(r.pull_request_url, r.id::text) AS pull_request
-            FROM factory_ci_job j
-            JOIN factory_ci_wait w ON w.run_id = j.run_id AND w.seq = j.seq
-            JOIN factory_run r ON r.id = j.run_id
-            WHERE lower(r.repo_url) = $1
+                coalesce(lower(r.pull_request_url), r.id::text) AS pull_request
+            FROM factory_ci_wait w
+            JOIN factory_ci_job j ON j.run_id = w.run_id AND j.seq = w.seq
+            JOIN factory_run r ON r.id = w.run_id
+            WHERE w.recorded_at >= $3
+              AND w.verdict = 'red'
+              AND lower(r.repo_url) = $1
               AND r.id <> $2
-              AND w.recorded_at >= $3
+              AND lower(r.pull_request_url) IS DISTINCT FROM lower($4)
               AND j.result IN ('failed', 'setup')
               AND NOT j.replaced
+              AND EXISTS (
+                  SELECT 1
+                  FROM factory_ci_wait g
+                  WHERE g.run_id = w.run_id
+                    AND g.seq > w.seq
+                    AND g.head_sha = w.head_sha
+                    AND g.verdict = 'green'
+              )
             UNION ALL
             SELECT t.name, t.failed_step, t.failure,
-                coalesce(r.pull_request_url, r.id::text) AS pull_request
+                coalesce(lower(r.pull_request_url), r.id::text) AS pull_request
             FROM factory_ci_retry t
             JOIN factory_run r ON r.id = t.run_id
-            WHERE lower(r.repo_url) = $1
+            WHERE t.result = 'passed'
+              AND t.settled_at >= $3
+              AND lower(r.repo_url) = $1
               AND r.id <> $2
-              AND t.requested_at >= $3
-        ) failed
+              AND lower(r.pull_request_url) IS DISTINCT FROM lower($4)
+        ) proved
         GROUP BY name, failed_step, failure
         ORDER BY 4 DESC, 1, 2, 3
-        LIMIT $4
+        LIMIT $5
         "#,
         repository,
         id.as_uuid(),
         since,
+        pull_request,
         FAILURES_READ,
     )
     .fetch_all(pool)
@@ -143,7 +170,8 @@ pub(super) async fn ci_retries(
 ) -> Result<Vec<CiRetry>, PgRunRepositoryErr> {
     sqlx::query!(
         r#"
-        SELECT name, head_sha, job_id, matched, result, requested_at
+        SELECT name, head_sha, job_id, workflow_run_id, failed_step, failure, matched, result,
+            requested_at
         FROM factory_ci_retry
         WHERE run_id = $1 AND seq = $2
         ORDER BY name
@@ -159,6 +187,9 @@ pub(super) async fn ci_retries(
             name: row.name,
             head_sha: row.head_sha,
             job_id: u64::try_from(row.job_id).unwrap_or_default(),
+            workflow_run_id: id(row.workflow_run_id),
+            failed_step: row.failed_step,
+            failure: row.failure,
             matched: retry_match(row.matched)?,
             result: retry_result(row.result)?,
             requested_at: row.requested_at,
@@ -172,11 +203,19 @@ pub(super) async fn request_ci_retries(
     key: StepKey,
     head_sha: &str,
     retries: &[CiRetryRequest],
-) -> Result<(), PgRunRepositoryErr> {
+) -> Result<Vec<String>, PgRunRepositoryErr> {
     let names: Vec<String> = retries.iter().map(|retry| retry.name.clone()).collect();
     let job_ids: Vec<i64> = retries
         .iter()
         .map(|retry| i64::try_from(retry.job_id).unwrap_or(i64::MAX))
+        .collect();
+    let workflow_runs: Vec<Option<i64>> = retries
+        .iter()
+        .map(|retry| {
+            retry
+                .workflow_run_id
+                .and_then(|run| i64::try_from(run).ok())
+        })
         .collect();
     let steps: Vec<Option<String>> = retries
         .iter()
@@ -187,29 +226,35 @@ pub(super) async fn request_ci_retries(
         .iter()
         .map(|retry| retry.matched.as_str().to_string())
         .collect();
-    sqlx::query!(
+    // Only the rows this call adds come back: an attempt running beside
+    // it, which kept them first, is the one that asks GitHub.
+    let kept = sqlx::query_scalar!(
         r#"
-        INSERT INTO factory_ci_retry
-            (run_id, seq, name, head_sha, job_id, failed_step, failure, matched, rule)
-        SELECT $1, $2, retry.name, $3, retry.job_id, retry.failed_step, retry.failure,
-            retry.matched, $9
-        FROM unnest($4::text[], $5::bigint[], $6::text[], $7::text[], $8::text[])
-            AS retry(name, job_id, failed_step, failure, matched)
+        INSERT INTO factory_ci_retry (
+            run_id, seq, name, head_sha, job_id, workflow_run_id, failed_step, failure,
+            matched, rule
+        )
+        SELECT $1, $2, retry.name, $3, retry.job_id, retry.workflow_run_id,
+            retry.failed_step, retry.failure, retry.matched, $10
+        FROM unnest($4::text[], $5::bigint[], $6::bigint[], $7::text[], $8::text[], $9::text[])
+            AS retry(name, job_id, workflow_run_id, failed_step, failure, matched)
         ON CONFLICT (run_id, seq, name) DO NOTHING
+        RETURNING name
         "#,
         key.run_id.as_uuid(),
         i32::from(key.seq),
         head_sha,
         &names,
         &job_ids,
+        &workflow_runs as &[Option<i64>],
         &steps as &[Option<String>],
         &failures as &[Option<String>],
         &matched,
         StandingRule::RerunFlakyCi.as_ref(),
     )
-    .execute(pool)
+    .fetch_all(pool)
     .await?;
-    Ok(())
+    Ok(kept)
 }
 
 pub(super) async fn settle_ci_retries(
@@ -247,110 +292,164 @@ pub(super) async fn quarantine_ci_jobs(
     since: DateTime<Utc>,
     threshold: u32,
 ) -> Result<Vec<String>, PgRunRepositoryErr> {
-    let names: Vec<String> = jobs.iter().map(|job| job.name.clone()).collect();
+    let names: Vec<String> = jobs.iter().map(|job| job.failure.name.clone()).collect();
+    let steps: Vec<Option<String>> = jobs
+        .iter()
+        .map(|job| job.failure.failed_step.clone())
+        .collect();
+    let failures: Vec<Option<String>> =
+        jobs.iter().map(|job| job.failure.failure.clone()).collect();
     let task_ids: Vec<Uuid> = jobs.iter().map(|job| job.task_id).collect();
-    // Each job's passed reruns on the repository since `since`, by any Run.
-    let made = sqlx::query_scalar!(
+    // Each failure's passed reruns on the repository since `since`, by any
+    // Run. One quarantined already keeps its task and Run; the count and
+    // the last pass move on, so it lapses only once its reruns stop
+    // passing. `xmax` is 0 only on a row this statement inserted.
+    let made = sqlx::query!(
         r#"
-        INSERT INTO factory_ci_quarantine (repo_url, name, run_id, passed_retries, task_id)
-        SELECT $2, job.name, $1, passed.retries, job.task_id
-        FROM unnest($3::text[], $4::uuid[]) AS job(name, task_id)
+        INSERT INTO factory_ci_quarantine
+            (task_id, repo_url, name, failed_step, failure, run_id, passed_retries)
+        SELECT job.task_id, $2, job.name, job.failed_step, job.failure, $1, passed.retries
+        FROM unnest($3::text[], $4::text[], $5::text[], $6::uuid[])
+            AS job(name, failed_step, failure, task_id)
         CROSS JOIN LATERAL (
             SELECT count(*)::int AS retries
             FROM factory_ci_retry t
             JOIN factory_run r ON r.id = t.run_id
             WHERE t.name = job.name
               AND t.result = 'passed'
-              AND t.settled_at >= $5
+              AND t.settled_at >= $7
+              AND t.failed_step IS NOT DISTINCT FROM job.failed_step
+              AND t.failure IS NOT DISTINCT FROM job.failure
               AND lower(r.repo_url) = $2
         ) passed
-        WHERE passed.retries >= $6
-        ON CONFLICT (repo_url, name) DO NOTHING
-        RETURNING name
+        WHERE passed.retries >= $8
+        ON CONFLICT (repo_url, name, coalesce(failed_step, ''), coalesce(failure, ''))
+        DO UPDATE SET passed_retries = EXCLUDED.passed_retries, last_passed_at = now()
+        RETURNING name AS "name!", (xmax = 0) AS "inserted!"
         "#,
         id.as_uuid(),
         repository,
         &names,
+        &steps as &[Option<String>],
+        &failures as &[Option<String>],
         &task_ids,
         since,
         i32::try_from(threshold).unwrap_or(i32::MAX),
     )
     .fetch_all(pool)
     .await?;
-    Ok(made)
+    Ok(made
+        .into_iter()
+        .filter(|row| row.inserted)
+        .map(|row| row.name)
+        .collect())
+}
+
+struct QuarantineRow {
+    task_id: Uuid,
+    repo_url: String,
+    name: String,
+    failed_step: Option<String>,
+    failure: Option<String>,
+    run_id: Option<Uuid>,
+    passed_retries: i32,
+    filed: bool,
+    quarantined_at: DateTime<Utc>,
+    last_passed_at: DateTime<Utc>,
+}
+
+impl From<QuarantineRow> for CiQuarantine {
+    fn from(row: QuarantineRow) -> Self {
+        CiQuarantine {
+            repository: row.repo_url,
+            failure: CiFailureIdentity {
+                name: row.name,
+                failed_step: row.failed_step,
+                failure: row.failure,
+            },
+            run_id: row.run_id.map(RunId::from_uuid),
+            passed_retries: count(row.passed_retries),
+            task_id: row.task_id,
+            filed: row.filed,
+            quarantined_at: row.quarantined_at,
+            last_passed_at: row.last_passed_at,
+        }
+    }
 }
 
 pub(super) async fn unfiled_ci_quarantines(
     pool: &PgPool,
     id: RunId,
 ) -> Result<Vec<CiQuarantine>, PgRunRepositoryErr> {
-    Ok(sqlx::query!(
+    Ok(sqlx::query_as!(
+        QuarantineRow,
         r#"
-        SELECT repo_url, name, run_id, passed_retries, task_id, filed, quarantined_at
+        SELECT task_id, repo_url, name, failed_step, failure, run_id, passed_retries, filed,
+            quarantined_at, last_passed_at
         FROM factory_ci_quarantine
         WHERE run_id = $1 AND NOT filed
-        ORDER BY name
+        ORDER BY name, failed_step, failure
         "#,
         id.as_uuid(),
     )
     .fetch_all(pool)
     .await?
     .into_iter()
-    .map(|row| CiQuarantine {
-        repository: row.repo_url,
-        name: row.name,
-        run_id: RunId::from_uuid(row.run_id),
-        passed_retries: count(row.passed_retries),
-        task_id: row.task_id,
-        filed: row.filed,
-        quarantined_at: row.quarantined_at,
-    })
+    .map(CiQuarantine::from)
     .collect())
 }
 
 pub(super) async fn mark_ci_quarantine_filed(
     pool: &PgPool,
-    repository: &str,
-    name: &str,
+    task_id: Uuid,
 ) -> Result<(), PgRunRepositoryErr> {
     sqlx::query!(
-        "UPDATE factory_ci_quarantine SET filed = true WHERE repo_url = $1 AND name = $2",
-        repository,
-        name,
+        "UPDATE factory_ci_quarantine SET filed = true WHERE task_id = $1",
+        task_id,
     )
     .execute(pool)
     .await?;
     Ok(())
 }
 
-/// The quarantines of `repositories` (their URLs in lower case), by
-/// repository and name, read within the quality read's `transaction`.
+pub(super) async fn lift_ci_quarantine(
+    pool: &PgPool,
+    task_id: Uuid,
+) -> Result<bool, PgRunRepositoryErr> {
+    let lifted = sqlx::query!(
+        "DELETE FROM factory_ci_quarantine WHERE task_id = $1",
+        task_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(lifted.rows_affected() > 0)
+}
+
+/// The quarantines of `repositories` (their URLs in lower case) whose
+/// reruns passed since `since`, by repository and failure, read within the
+/// quality read's `transaction`.
 pub(super) async fn quarantines_of(
     transaction: &mut sqlx::PgConnection,
     repositories: &[String],
+    since: DateTime<Utc>,
 ) -> Result<Vec<CiQuarantine>, PgRunRepositoryErr> {
-    Ok(sqlx::query!(
+    Ok(sqlx::query_as!(
+        QuarantineRow,
         r#"
-        SELECT repo_url, name, run_id, passed_retries, task_id, filed, quarantined_at
+        SELECT task_id, repo_url, name, failed_step, failure, run_id, passed_retries, filed,
+            quarantined_at, last_passed_at
         FROM factory_ci_quarantine
-        WHERE repo_url = ANY($1)
-        ORDER BY repo_url, name
-        LIMIT $2
+        WHERE repo_url = ANY($1) AND last_passed_at >= $2
+        ORDER BY repo_url, name, failed_step, failure
+        LIMIT $3
         "#,
         repositories,
+        since,
         QUARANTINES_READ,
     )
     .fetch_all(transaction)
     .await?
     .into_iter()
-    .map(|row| CiQuarantine {
-        repository: row.repo_url,
-        name: row.name,
-        run_id: RunId::from_uuid(row.run_id),
-        passed_retries: count(row.passed_retries),
-        task_id: row.task_id,
-        filed: row.filed,
-        quarantined_at: row.quarantined_at,
-    })
+    .map(CiQuarantine::from)
     .collect())
 }

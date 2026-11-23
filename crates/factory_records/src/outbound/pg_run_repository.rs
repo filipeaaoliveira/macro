@@ -888,9 +888,10 @@ impl RunRepository for PgRunRepository {
         &self,
         id: RunId,
         repository: &str,
+        pull_request: Option<&str>,
         since: DateTime<Utc>,
     ) -> Result<crate::domain::quality::CiFlakes, Self::Err> {
-        ci_retries::ci_flakes(&self.pool, id, repository, since).await
+        ci_retries::ci_flakes(&self.pool, id, repository, pull_request, since).await
     }
 
     #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
@@ -907,7 +908,7 @@ impl RunRepository for PgRunRepository {
         key: StepKey,
         head_sha: &str,
         retries: &[crate::domain::quality::CiRetryRequest],
-    ) -> Result<(), Self::Err> {
+    ) -> Result<Vec<String>, Self::Err> {
         ci_retries::request_ci_retries(&self.pool, key, head_sha, retries).await
     }
 
@@ -941,12 +942,13 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn mark_ci_quarantine_filed(
-        &self,
-        repository: &str,
-        name: &str,
-    ) -> Result<(), Self::Err> {
-        ci_retries::mark_ci_quarantine_filed(&self.pool, repository, name).await
+    async fn mark_ci_quarantine_filed(&self, task_id: Uuid) -> Result<(), Self::Err> {
+        ci_retries::mark_ci_quarantine_filed(&self.pool, task_id).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn lift_ci_quarantine(&self, task_id: Uuid) -> Result<bool, Self::Err> {
+        ci_retries::lift_ci_quarantine(&self.pool, task_id).await
     }
 
     #[tracing::instrument(err, skip(self, changes))]

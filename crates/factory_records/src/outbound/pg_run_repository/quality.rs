@@ -18,9 +18,9 @@ use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::insights::{RunSummary, TITLE_CHARS};
 use crate::domain::models::{RunId, RunOutcome};
 use crate::domain::quality::{
-    BlockerRecord, CiJob, CiJobResult, CiRetryRecord, CiVerdict, CiWait, CiWaitRecord, LastCiWait,
-    QualityRecords, QualityRun, QualityScope, QualitySession, ReviewRoundRecord, ReviewerRecord,
-    RunQualityRepository,
+    BlockerRecord, CiJob, CiJobResult, CiRetryRecord, CiVerdict, CiWait, CiWaitRecord,
+    FLAKY_PERIOD, LastCiWait, QualityRecords, QualityRun, QualityScope, QualitySession,
+    ReviewRoundRecord, ReviewerRecord, RunQualityRepository,
 };
 use crate::domain::review_rounds::{DisputeRuling, FixStatus, ReviewRoundOutcome};
 
@@ -513,7 +513,8 @@ impl RunQualityRepository for PgRunRepository {
                 .map(|repository| repository.to_lowercase())
                 .collect(),
         };
-        let ci_quarantines = quarantines_of(&mut transaction, &quarantined_in).await?;
+        let ci_quarantines =
+            quarantines_of(&mut transaction, &quarantined_in, Utc::now() - FLAKY_PERIOD).await?;
 
         transaction.commit().await?;
         Ok(QualityRecords {

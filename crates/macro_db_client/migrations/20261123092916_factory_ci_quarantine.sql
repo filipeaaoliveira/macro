@@ -56,18 +56,20 @@ ALTER TABLE factory_run
     );
 
 -- One failed CI job a `ci` Step reran, once per Step and job. `job_id` is
--- the GitHub Actions job that failed, so a read can tell its rerun from
--- it. `matched` says why it was taken for flaky: the Definition names it
--- (`known`), it is quarantined (`quarantined`), or the same failure
--- happened on other pull requests (`record`). `result` is null until the
--- rerun ends: `passed`, `failed`, or `refused` when GitHub would not
--- rerun it. A rerun goes with its Step.
+-- the GitHub Actions job that failed, and `workflow_run_id` its workflow
+-- run, which keeps its id when a job of it runs again, so a read can tell
+-- the job's rerun from it. `matched` says why it was taken for flaky: the
+-- Definition names it (`known`), it is quarantined (`quarantined`), or the
+-- same failure proved flaky on other pull requests (`record`). `result` is
+-- null until the rerun ends: `passed`, `failed`, or `refused` when GitHub
+-- would not rerun it. A rerun goes with its Step.
 CREATE TABLE factory_ci_retry (
     run_id uuid NOT NULL,
     seq integer NOT NULL,
     name text NOT NULL CHECK (octet_length(name) BETWEEN 1 AND 1024),
     head_sha text NOT NULL CHECK (head_sha ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'),
     job_id bigint NOT NULL CHECK (job_id > 0),
+    workflow_run_id bigint CHECK (workflow_run_id > 0),
     failed_step text CHECK (octet_length(failed_step) BETWEEN 1 AND 1024),
     failure text CHECK (octet_length(failure) BETWEEN 1 AND 1024),
     matched text NOT NULL CHECK (matched IN ('known', 'quarantined', 'record')),
@@ -80,24 +82,33 @@ CREATE TABLE factory_ci_retry (
     FOREIGN KEY (run_id, seq) REFERENCES factory_step (run_id, seq) ON DELETE CASCADE
 );
 
--- A CI job quarantined in a repository (its URL in lower case): its
--- reruns passed often enough that it counts as flaky from then on, and a
--- `ci` Step reruns it as a known flake. The Run whose rerun crossed the
--- threshold files a task for it as its owner, with the id `task_id`, kept
--- before the task is made so filing it again makes no second one; `filed`
--- once it is made. One quarantine per job and repository.
+-- The passed retries of a failure, which prove it flaky and quarantine it.
+CREATE INDEX factory_ci_retry_passed_idx
+    ON factory_ci_retry (name, result, settled_at);
+
+-- A failure of a CI job quarantined in a repository (its URL in lower
+-- case), by the job, its failed step and its test: its reruns passed often
+-- enough that it counts as flaky there. It lapses once no rerun of it
+-- passed for 30 days (`last_passed_at`), and is lifted by deleting it. The
+-- Run whose rerun crossed the threshold files a task for it as its owner,
+-- with the id `task_id`, kept before the task is made so filing it again
+-- makes no second one; `filed` once it is made. A quarantine outlives its
+-- Run: one deleted leaves it with no Run.
 CREATE TABLE factory_ci_quarantine (
-    repo_url text NOT NULL CHECK (
-        length(repo_url) <= 300
-        AND repo_url ~ '^https://github\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$'
-    ),
+    task_id uuid PRIMARY KEY,
+    repo_url text NOT NULL CHECK (length(repo_url) BETWEEN 1 AND 300),
     name text NOT NULL CHECK (octet_length(name) BETWEEN 1 AND 1024),
-    run_id uuid NOT NULL REFERENCES factory_run (id) ON DELETE CASCADE,
+    failed_step text CHECK (octet_length(failed_step) BETWEEN 1 AND 1024),
+    failure text CHECK (octet_length(failure) BETWEEN 1 AND 1024),
+    run_id uuid REFERENCES factory_run (id) ON DELETE SET NULL,
     passed_retries integer NOT NULL CHECK (passed_retries > 0),
-    task_id uuid NOT NULL UNIQUE,
     filed boolean NOT NULL DEFAULT false,
     quarantined_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (repo_url, name)
+    last_passed_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX factory_ci_quarantine_failure_idx ON factory_ci_quarantine (
+    repo_url, name, coalesce(failed_step, ''), coalesce(failure, '')
 );
 
 CREATE INDEX factory_ci_quarantine_run_idx ON factory_ci_quarantine (run_id);

@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            name AS \"name!\",\n            failed_step,\n            failure,\n            count(DISTINCT pull_request)::int AS \"pull_requests!\"\n        FROM (\n            SELECT j.name, j.failed_step, j.failure,\n                coalesce(lower(r.pull_request_url), r.id::text) AS pull_request\n            FROM factory_ci_wait w\n            JOIN factory_ci_job j ON j.run_id = w.run_id AND j.seq = w.seq\n            JOIN factory_run r ON r.id = w.run_id\n            WHERE w.recorded_at >= $3\n              AND w.verdict = 'red'\n              AND lower(r.repo_url) = $1\n              AND r.id <> $2\n              AND lower(r.pull_request_url) IS DISTINCT FROM lower($4)\n              AND j.result IN ('failed', 'setup')\n              AND NOT j.replaced\n              AND EXISTS (\n                  SELECT 1\n                  FROM factory_ci_wait g\n                  WHERE g.run_id = w.run_id\n                    AND g.seq > w.seq\n                    AND g.head_sha = w.head_sha\n                    AND g.verdict = 'green'\n              )\n            UNION ALL\n            SELECT t.name, t.failed_step, t.failure,\n                coalesce(lower(r.pull_request_url), r.id::text) AS pull_request\n            FROM factory_ci_retry t\n            JOIN factory_run r ON r.id = t.run_id\n            WHERE t.result = 'passed'\n              AND t.settled_at >= $3\n              AND lower(r.repo_url) = $1\n              AND r.id <> $2\n              AND lower(r.pull_request_url) IS DISTINCT FROM lower($4)\n        ) proved\n        GROUP BY name, failed_step, failure\n        ORDER BY 4 DESC, 1, 2, 3\n        LIMIT $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "failed_step",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "failure",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "pull_requests!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "3caed33afc6b92a981fef8a3d74ae79babeb7877f319650f3969de5f43cfb954"
+}

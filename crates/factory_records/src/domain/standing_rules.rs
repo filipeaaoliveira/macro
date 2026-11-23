@@ -256,8 +256,8 @@ const ORCHESTRATOR_BLOCKERS: &str = "orchestrator_blockers";
 impl OrchestratorDefinition {
     /// The definition that applies when a team set none: the review's
     /// Blockers are fixed on their own, as they were before Standing Rules,
-    /// a known flaky CI job is rerun once, and the plan and the merge wait
-    /// for a person.
+    /// and the plan and the merge wait for a person. Flaky CI jobs are not
+    /// rerun: a team turns `rerun_flaky_ci` on in its rules.
     pub const DEFAULT: Self = Self {
         plan: false,
         blockers: true,
@@ -265,7 +265,7 @@ impl OrchestratorDefinition {
         owner_gates: false,
         quiet_gates: false,
         task_thread: false,
-        rerun_flaky_ci: true,
+        rerun_flaky_ci: false,
         queue_limit: None,
         token_budget: None,
         stand_in: StandInKinds {
