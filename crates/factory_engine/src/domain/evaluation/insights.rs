@@ -1,13 +1,16 @@
 //! Evaluation insights: the live Scorers' judgments of a person's Runs over
-//! a period, how each Experiment's arms did, and their Benchmark suites.
+//! a period, with how far each agrees with the person's labels, how each
+//! Experiment's arms did, and their Benchmark suites.
+
+pub mod calibration;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use factory_records::domain::evaluation::{
-    AgentChoices, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository, MAX_OPEN_TRIALS,
-    NewSuite, SuiteInsert, TrialKey,
+    AgentChoices, BENCHMARK_FLOW, CalibrationTally, EvaluationRecords, EvaluationRepository,
+    MAX_OPEN_TRIALS, NewSuite, SuiteInsert, TrialKey,
 };
 use factory_records::domain::models::{RunId, RunOutcome, TeamMembership};
 use factory_records::domain::ports::RunRepository;
@@ -18,6 +21,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 use uuid::Uuid;
 
+use self::calibration::{ScorerCalibration, current_judges};
 use super::{EvaluationDefinition, SelfImprovementDefinition, check_choices};
 use crate::domain::insights::{InsightsError, InsightsQuery, TokenCounts};
 use crate::domain::models::{ActingAgent, FactoryError};
@@ -55,6 +59,9 @@ pub struct ScorerInsight {
     pub passed: u32,
     /// Their mean score, from 0 to 1; none when it judged none.
     pub mean_score: Option<f64>,
+    /// How far its current judge agrees with the person's labels of its
+    /// judgments, over all of their Runs, not only the period's.
+    pub calibration: ScorerCalibration,
 }
 
 /// One Scorer's judgments of one arm's Runs.
@@ -159,6 +166,11 @@ pub struct TrialInsight {
     pub task: String,
     /// Its Run.
     pub run_id: RunId,
+    /// When its Run was created, which starts its workflow.
+    pub started_at: DateTime<Utc>,
+    /// When its Run ended; none while it goes. With `startedAt`, the time
+    /// the trial took.
+    pub ended_at: Option<DateTime<Utc>>,
     /// How its Run ended; none while it goes.
     pub run_outcome: Option<RunOutcome>,
     /// Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5
@@ -464,35 +476,67 @@ pub struct EvaluationServiceImpl<R, F> {
     runs: Arc<F>,
     definition: Arc<EvaluationDefinition>,
     agents: Option<crate::domain::agents::AgentDefinition>,
+    scorer_model: String,
 }
 
 impl<R, F> EvaluationServiceImpl<R, F> {
     /// Create the service. `agents`, the agent definition, says which
-    /// Agents a suite's configuration may name.
+    /// Agents a suite's configuration may name; `scorer_model` is the model
+    /// the Scorers judge with now, whose judgments alone calibrate them.
     pub fn new(
         repo: R,
         runs: Arc<F>,
         definition: Arc<EvaluationDefinition>,
         agents: Option<crate::domain::agents::AgentDefinition>,
+        scorer_model: String,
     ) -> Self {
         Self {
             repo,
             runs,
             definition,
             agents,
+            scorer_model,
+        }
+    }
+}
+
+impl<R, F> EvaluationServiceImpl<R, F>
+where
+    F: FactoryService,
+{
+    /// `actor`'s team's Definition's Scorers, Experiments and Benchmarks;
+    /// none for a team that names no Definition. One that does not read
+    /// lists none, never the deployment's.
+    async fn team_definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Option<EvaluationDefinition>, rootcause::Report> {
+        match self.runs.team_evaluation(actor).await {
+            Ok(team) => Ok(team.map(|team| team.evaluation)),
+            Err(FactoryError::Internal(report)) => Err(report),
+            Err(error) => {
+                tracing::warn!(%error, "the team's definition did not read for its evaluation");
+                Ok(Some(EvaluationDefinition::default()))
+            }
         }
     }
 }
 
 /// The insights of `records`, with each defined Scorer, Experiment and
-/// Benchmark listed whether or not it has records in the period.
+/// Benchmark listed whether or not it has records in the period, and each
+/// Scorer's calibration from `calibrations`.
 pub(crate) fn evaluation_insights(
     definition: &EvaluationDefinition,
     query: &InsightsQuery,
     records: EvaluationRecords,
+    calibrations: Vec<CalibrationTally>,
 ) -> EvaluationInsights {
     let mut tallies: BTreeMap<String, _> = records
         .scorers
+        .into_iter()
+        .map(|tally| (tally.scorer.clone(), tally))
+        .collect();
+    let calibrations: BTreeMap<String, _> = calibrations
         .into_iter()
         .map(|tally| (tally.scorer.clone(), tally))
         .collect();
@@ -509,10 +553,12 @@ pub(crate) fn evaluation_insights(
                 judged: tally.as_ref().map_or(0, |tally| tally.judged),
                 passed: tally.as_ref().map_or(0, |tally| tally.passed),
                 mean_score: tally.map(|tally| tally.mean_score),
+                calibration: ScorerCalibration::of(calibrations.get(&scorer.name)),
             }
         })
         .collect();
     scorers.extend(tallies.into_values().map(|tally| ScorerInsight {
+        calibration: ScorerCalibration::of(calibrations.get(&tally.scorer)),
         name: tally.scorer,
         instructions: None,
         flows: Vec::new(),
@@ -662,6 +708,8 @@ pub(crate) fn evaluation_insights(
                     TrialInsight {
                         task: trial.task,
                         run_id: trial.run_id,
+                        started_at: trial.started_at,
+                        ended_at: trial.ended_at,
                         run_outcome: trial.run_outcome,
                         score: result.map(|result| result.score),
                         tokens: trial_tokens,
@@ -798,23 +846,23 @@ where
     ) -> Result<EvaluationInsights, InsightsError> {
         let scope = query.scope(actor)?;
         // A team's Definition lists its own Scorers, Experiments and
-        // Benchmarks; one that does not read lists none, never the
-        // deployment's, and its records still show.
-        let team = match self.runs.team_evaluation(actor).await {
-            Ok(team) => team.map(|team| team.evaluation),
-            Err(FactoryError::Internal(report)) => return Err(InsightsError::Internal(report)),
-            Err(error) => {
-                tracing::warn!(%error, "the team's definition did not read for its evaluation");
-                Some(EvaluationDefinition::default())
-            }
-        };
+        // Benchmarks, and its records still show when it does not read.
+        let team = self
+            .team_definition(actor)
+            .await
+            .map_err(InsightsError::Internal)?;
         let definition = team.as_ref().unwrap_or(&self.definition);
         let records = self
             .repo
             .read_evaluation(&scope)
             .await
             .map_err(|error| InsightsError::Internal(internal(error)))?;
-        let mut insights = evaluation_insights(definition, &query, records);
+        let calibrations = self
+            .repo
+            .calibrations(actor, &current_judges(definition, &self.scorer_model))
+            .await
+            .map_err(|error| InsightsError::Internal(internal(error)))?;
+        let mut insights = evaluation_insights(definition, &query, records, calibrations);
         // Only a Definition improves itself, under its own thresholds; one
         // that does not read shows the defaults.
         let thresholds = team

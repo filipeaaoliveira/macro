@@ -1,6 +1,7 @@
 //! How Runs are judged and compared: Scorers' judgments of finished Runs,
-//! the Experiment arm each Run was assigned, and Benchmark suites, which
-//! replay frozen tasks as trial Runs on one configuration.
+//! their owners' labels of those judgments, the Experiment arm each Run was
+//! assigned, and Benchmark suites, which replay frozen tasks as trial Runs
+//! on one configuration.
 //!
 //! A trial's judgments are kept with the trial, never with the live
 //! Scorers' judgments, so a benchmark does not move their numbers.
@@ -78,6 +79,10 @@ pub struct Judgment {
     pub reason: String,
     /// The model that judged.
     pub model: String,
+    /// The fingerprint of the Scorer's instructions and what its judge
+    /// reads, as it judged: with the model, the judge a label calibrates.
+    /// Kept only with a live judgment, never a trial's.
+    pub instructions_digest: String,
 }
 
 /// One trial of a Benchmark suite: one frozen task, by name.
@@ -294,6 +299,10 @@ pub struct TrialRecord {
     pub task: String,
     /// Its Run.
     pub run_id: RunId,
+    /// When its Run was created, which starts its workflow.
+    pub started_at: DateTime<Utc>,
+    /// When its Run ended; none while it goes.
+    pub ended_at: Option<DateTime<Utc>>,
     /// How its Run ended; none while it goes.
     pub run_outcome: Option<RunOutcome>,
     /// Its result, once its Run ended and it was scored.
@@ -332,6 +341,63 @@ pub struct EvaluationRecords {
     /// The person's suites started in the period, newest first, at most
     /// [`SUITES_READ`].
     pub suites: Vec<SuiteRecord>,
+}
+
+/// A person's label of a live Scorer's judgment of one of their Runs:
+/// whether the Run should have passed on the Scorer's dimension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ScorerLabel {
+    /// Whether it should have passed.
+    pub passed: bool,
+    /// When it was labelled, the last time.
+    pub labelled_at: DateTime<Utc>,
+}
+
+/// A live Scorer's judgment of one Run, with its owner's label.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunJudgment {
+    /// The Scorer.
+    pub scorer: String,
+    /// From 0 to 1.
+    pub score: f64,
+    /// Why.
+    pub reason: String,
+    /// The model that judged.
+    pub model: String,
+    /// The fingerprint of the Scorer as it judged; none for a judgment
+    /// made before fingerprints were kept.
+    pub instructions_digest: Option<String>,
+    /// When it judged.
+    pub judged_at: DateTime<Utc>,
+    /// The Run's owner's label of it, if they gave one.
+    pub label: Option<ScorerLabel>,
+}
+
+/// A Scorer's current judge: its model and the fingerprint of its
+/// instructions. Only the labels of its judgments calibrate it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScorerJudge {
+    /// The Scorer.
+    pub scorer: String,
+    /// The model it judges with.
+    pub model: String,
+    /// The fingerprint of its instructions and what its judge reads.
+    pub instructions_digest: String,
+}
+
+/// How one Scorer's judgments by its current judge agree with one
+/// person's labels of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalibrationTally {
+    /// The Scorer.
+    pub scorer: String,
+    /// How many of its judgments the person labelled.
+    pub labelled: u32,
+    /// How many of those it passed exactly when the person did: a score of
+    /// at least [`PASS_SCORE`] on a Run labelled passed, or below it on one
+    /// labelled failed.
+    pub agreed: u32,
 }
 
 /// Keeps the Experiment arms, the Scorers' judgments and the Benchmark
@@ -464,4 +530,29 @@ pub trait EvaluationRepository: Send + Sync + 'static {
         &self,
         scope: &InsightsScope,
     ) -> impl Future<Output = Result<EvaluationRecords, Self::Err>> + Send;
+
+    /// The live Scorers' judgments of a Run, by Scorer, with its owner's
+    /// labels.
+    fn run_judgments(
+        &self,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<Vec<RunJudgment>, Self::Err>> + Send;
+
+    /// Keep its owner's label of `scorer`'s judgment of a Run, replacing the
+    /// one it had; none when the Scorer did not judge the Run.
+    fn label_judgment(
+        &self,
+        run_id: RunId,
+        scorer: &str,
+        passed: bool,
+    ) -> impl Future<Output = Result<Option<ScorerLabel>, Self::Err>> + Send;
+
+    /// How the judgments each of `judges` made agree with `user_id`'s
+    /// labels of them, over all their Runs. A judgment of a Scorer's earlier
+    /// model or instructions is left out, as is a Scorer not among them.
+    fn calibrations(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        judges: &[ScorerJudge],
+    ) -> impl Future<Output = Result<Vec<CalibrationTally>, Self::Err>> + Send;
 }

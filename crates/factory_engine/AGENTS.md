@@ -603,7 +603,42 @@ nothing is meant to be pushed to it or based on it after.
 `GET /insights/evaluation` (same
 params as `/insights`) shows each Scorer's judgments, each Experiment's
 arms with their Runs' outcomes and scores, the Benchmarks and the caller's
-suites of the period.
+suites of the period. Each trial has when its Run was created and when it
+ended (`startedAt`, `endedAt`): the span includes any wait before its
+Steps ran, such as for a Machine, not only the work. `endedAt` is null
+until the Run ends, and a Run whose workflow never started ends only when
+a read finds it stale, so the web app should not run a live clock from
+`startedAt`.
+
+A Run's owner labels a live Scorer's judgment of the Run with whether it
+should have passed (`PUT /runs/{id}/scores/{scorer}/label`, `{"passed"}`;
+`evaluation/insights/calibration.rs`). Only the person in their own
+signed-in session labels, never an agent's account (403); a new label
+replaces the last; a Run not theirs, or a Scorer that did not judge it,
+is 404; and a Scorer name outside the name rules is 400 before anything
+is read. `GET /runs/{id}/scores` lists the Run's judgments with their
+labels for its owner, however they call (an API key, an agent session
+or an internal caller for them too), as `GET /insights/evaluation` does.
+
+A Scorer's judge is the model the Scorers judge with
+(`FACTORY_SCORER_MODEL`) and the Scorer's instructions with what it
+reads, whose SHA-256 each judgment keeps
+(`factory_run_score.instructions_sha256`,
+`ScorerDefinition::instructions_digest`). A Scorer is calibrated once its
+current judge agrees with the person's labels, over all of their Runs:
+at least `CALIBRATION_LABELS` (20) of that judge's judgments labelled,
+with its pass (a score of at least `PASS_SCORE`) the label's on at least
+`CALIBRATION_AGREEMENT` (0.8) of them. A new model or new instructions
+start the Scorer's calibration again from none; the labels of the old
+judge's judgments are kept, and count again if the judge comes back.
+Judgments made before fingerprints were kept calibrate no judge. Each
+Scorer in the insights, and each judgment of a Run, carries its
+`calibration`, and a judgment says whether the current judge made it
+(`byCurrentJudge`); until a Scorer is calibrated, nothing should act on
+its numbers. A Scorer no longer defined has no current judge and is
+never calibrated. Calibration is each person's, from their own labels,
+as the insights are of their own Runs; a trial's judgments are never
+labelled.
 
 The Step Terminal (`src/domain/step_terminal.rs`) lets the Run's owner
 watch a running agent Step's session and steer it. A Step reads the

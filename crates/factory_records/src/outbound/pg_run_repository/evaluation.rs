@@ -12,10 +12,11 @@ use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr};
 use crate::domain::evaluation::{
-    AgentChoices, ArmScore, ArmTally, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository,
-    Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE, RuleTally, RunAgentRule,
-    RunAgents, RunArm, SUITE_STARTING_SECS, SUITES_READ, ScorerTally, ScoringStep, ScoringSubject,
-    SubjectTrial, SuiteInsert, SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
+    AgentChoices, ArmScore, ArmTally, BENCHMARK_FLOW, CalibrationTally, EvaluationRecords,
+    EvaluationRepository, Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE,
+    RuleTally, RunAgentRule, RunAgents, RunArm, RunJudgment, SUITE_STARTING_SECS, SUITES_READ,
+    ScorerJudge, ScorerLabel, ScorerTally, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert,
+    SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
 };
 use crate::domain::insights::InsightsScope;
 use crate::domain::models::{AgentName, EntryId, Outcome, Role, RunId, RunOutcome};
@@ -382,8 +383,8 @@ impl EvaluationRepository for PgRunRepository {
     async fn record_run_score(&self, run_id: RunId, judgment: &Judgment) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
-            INSERT INTO factory_run_score (run_id, scorer, score, reason, model)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO factory_run_score (run_id, scorer, score, reason, model, instructions_sha256)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (run_id, scorer) DO NOTHING
             "#,
             run_id.as_uuid(),
@@ -391,6 +392,7 @@ impl EvaluationRepository for PgRunRepository {
             judgment.score,
             kept_reason(&judgment.reason),
             judgment.model,
+            judgment.instructions_digest,
         )
         .execute(&self.pool)
         .await?;
@@ -737,6 +739,119 @@ impl EvaluationRepository for PgRunRepository {
             suites,
         })
     }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn run_judgments(&self, run_id: RunId) -> Result<Vec<RunJudgment>, Self::Err> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT s.scorer, s.score, s.reason, s.model, s.instructions_sha256, s.judged_at,
+                   l.passed AS "passed?", l.labelled_at AS "labelled_at?"
+            FROM factory_run_score s
+            LEFT JOIN factory_scorer_label l ON l.run_id = s.run_id AND l.scorer = s.scorer
+            WHERE s.run_id = $1
+            ORDER BY s.scorer
+            "#,
+            run_id.as_uuid(),
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| RunJudgment {
+                scorer: row.scorer,
+                score: row.score,
+                reason: row.reason,
+                model: row.model,
+                instructions_digest: row.instructions_sha256,
+                judged_at: row.judged_at,
+                label: row
+                    .passed
+                    .zip(row.labelled_at)
+                    .map(|(passed, labelled_at)| ScorerLabel {
+                        passed,
+                        labelled_at,
+                    }),
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn label_judgment(
+        &self,
+        run_id: RunId,
+        scorer: &str,
+        passed: bool,
+    ) -> Result<Option<ScorerLabel>, Self::Err> {
+        // Only a judgment that exists is labelled: no row is inserted for a
+        // Scorer that did not judge the Run.
+        let row = sqlx::query!(
+            r#"
+            INSERT INTO factory_scorer_label (run_id, scorer, passed)
+            SELECT run_id, scorer, $3
+            FROM factory_run_score
+            WHERE run_id = $1 AND scorer = $2
+            ON CONFLICT (run_id, scorer)
+                DO UPDATE SET passed = EXCLUDED.passed, labelled_at = now()
+            RETURNING passed, labelled_at
+            "#,
+            run_id.as_uuid(),
+            scorer,
+            passed,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| ScorerLabel {
+            passed: row.passed,
+            labelled_at: row.labelled_at,
+        }))
+    }
+
+    #[tracing::instrument(err, skip_all, fields(judges = judges.len()))]
+    async fn calibrations(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        judges: &[ScorerJudge],
+    ) -> Result<Vec<CalibrationTally>, Self::Err> {
+        let scorers: Vec<&str> = judges.iter().map(|judge| judge.scorer.as_str()).collect();
+        let models: Vec<&str> = judges.iter().map(|judge| judge.model.as_str()).collect();
+        let digests: Vec<&str> = judges
+            .iter()
+            .map(|judge| judge.instructions_digest.as_str())
+            .collect();
+        // Only a Run's owner labels it, so a person's labels are those of
+        // their Runs. A label counts only on a judgment its Scorer's current
+        // judge made: its model and its instructions' fingerprint.
+        let rows = sqlx::query!(
+            r#"
+            SELECT l.scorer,
+                   count(*) AS "labelled!",
+                   count(*) FILTER (WHERE (s.score >= $2) = l.passed) AS "agreed!"
+            FROM factory_scorer_label l
+            JOIN factory_run r ON r.id = l.run_id
+            JOIN factory_run_score s ON s.run_id = l.run_id AND s.scorer = l.scorer
+            JOIN unnest($3::text[], $4::text[], $5::text[]) AS j (scorer, model, digest)
+                ON j.scorer = s.scorer AND j.model = s.model AND j.digest = s.instructions_sha256
+            WHERE r.user_id = $1
+            GROUP BY l.scorer
+            ORDER BY l.scorer
+            "#,
+            user_id.as_ref(),
+            PASS_SCORE,
+            &scorers as &[&str],
+            &models as &[&str],
+            &digests as &[&str],
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| CalibrationTally {
+                scorer: row.scorer,
+                labelled: count(row.labelled),
+                agreed: count(row.agreed),
+            })
+            .collect())
+    }
 }
 
 impl PgRunRepository {
@@ -771,7 +886,7 @@ impl PgRunRepository {
         let mut trials: BTreeMap<Uuid, Vec<TrialRecord>> = BTreeMap::new();
         let rows = sqlx::query!(
             r#"
-            SELECT t.suite_id, t.task, t.run_id, r.outcome, t.score,
+            SELECT t.suite_id, t.task, t.run_id, r.created_at, r.ended_at, r.outcome, t.score,
                    t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_write_tokens
             FROM factory_benchmark_trial t
             JOIN factory_run r ON r.id = t.run_id
@@ -806,6 +921,8 @@ impl PgRunRepository {
             trials.entry(row.suite_id).or_default().push(TrialRecord {
                 task: row.task,
                 run_id: RunId::from_uuid(row.run_id),
+                started_at: row.created_at,
+                ended_at: row.ended_at,
                 run_outcome: run_outcome(row.outcome)?,
                 result,
                 scores: Vec::new(),

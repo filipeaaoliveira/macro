@@ -908,6 +908,7 @@ async fn a_suite_takes_a_bot_in_a_standing_role_that_allows_start() {
         Arc::new(code_service(&repo, &workflows, &github)),
         Arc::new(EvaluationDefinition::default()),
         None,
+        "anthropic/claude-haiku-5-5".to_string(),
     );
     let writer: AgentChoices = [(
         Role::try_from("writer".to_string()).expect("valid"),
