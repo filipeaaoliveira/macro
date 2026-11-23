@@ -168,6 +168,7 @@ export default {
   ruleApprovePlan: 'Approve plans',
   ruleFixBlockers: 'Fix review blockers',
   ruleMergeWhenGreen: 'Merge when CI is green',
+  ruleRerunFlakyCi: 'Rerun flaky CI once',
   // An agent's question to the Run's owner.
   questionTitle: 'The {{role}} has a question',
   questionWaiting:

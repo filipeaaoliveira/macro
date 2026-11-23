@@ -174,6 +174,14 @@ const judged: EvaluationInsights = {
       judged: 4,
       passed: 3,
       meanScore: 0.7,
+      calibration: {
+        labelled: 0,
+        agreed: 0,
+        agreement: null,
+        needed: 20,
+        threshold: 0.8,
+        calibrated: false,
+      },
     },
   ],
   experiments: [
@@ -236,6 +244,8 @@ const judged: EvaluationInsights = {
           task: 'typo',
           runId: failedImport.id,
           runOutcome: 'manual',
+          startedAt: '2026-11-10T09:00:00Z',
+          endedAt: '2026-11-10T09:30:00Z',
           score: 0.5,
           tokens: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0 },
           scores: [{ scorer: 'correctness', score: 0.25 }],
@@ -642,6 +652,7 @@ describe('RunInsightsView', () => {
               {
                 task: 'export',
                 runId: 'run-lost',
+                startedAt: '2026-11-10T09:00:00Z',
                 runOutcome: 'infrastructure',
                 score: null,
                 tokens: null,
@@ -1085,6 +1096,8 @@ function quality(): QualityInsights {
     ci: {
       waits: 4,
       redWaits: 2,
+      quarantined: [],
+      retries: { passed: 0, failed: 0, refused: 0 },
       runs: 2,
       causes: { own: 1, setup: 2, flaky: 2, cancelled: 1 },
       jobs: [

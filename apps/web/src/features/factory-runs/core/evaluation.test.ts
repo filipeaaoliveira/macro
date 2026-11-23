@@ -24,6 +24,7 @@ const suite = (
   trials: Array.from({ length: scored }, (_, index) => ({
     task: `task-${index}`,
     runId: `${id}-run-${index}`,
+    startedAt: '2026-11-10T09:00:00Z',
     score: meanScore,
     scores: [],
   })),
@@ -153,6 +154,7 @@ describe('suiteStandings', () => {
           ...Array.from({ length: 9 }, (_, index) => ({
             task: `waiting-${index}`,
             runId: `running-waiting-${index}`,
+            startedAt: '2026-11-10T09:00:00Z',
             scores: [],
           })),
         ],
@@ -162,7 +164,12 @@ describe('suiteStandings', () => {
         infrastructure: 1,
         trials: [
           ...lossy.trials,
-          { task: 'lost', runId: 'lossy-lost', scores: [] },
+          {
+            task: 'lost',
+            runId: 'lossy-lost',
+            startedAt: '2026-11-10T09:00:00Z',
+            scores: [],
+          },
         ],
       },
     ]);
