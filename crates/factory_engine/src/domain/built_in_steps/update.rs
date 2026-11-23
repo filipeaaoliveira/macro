@@ -39,7 +39,7 @@ use factory_records::domain::review_rounds::ReviewRoundRepository;
 use super::{BuiltInStepError, BuiltInSteps, outcomes};
 use crate::domain::flow::StepName;
 use crate::domain::models::{StepInput, StepReport, run_branch};
-use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
+use crate::domain::ports::{ChildTasks, MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::Update;
 
 /// What the agent is told once GitHub merged the base into the branch.
@@ -54,12 +54,13 @@ const RESOLVED: &str = "resolved";
 /// The outcome of an update no agent could resolve.
 const CONFLICT: &str = "conflict";
 
-impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+impl<A, G, R, M, C> BuiltInSteps<A, G, R, M, C>
 where
     A: StepAgent,
     G: PullRequests,
     R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
+    C: ChildTasks,
 {
     /// Merge the Run's base into its branch and check it again.
     pub(super) async fn update_branch(

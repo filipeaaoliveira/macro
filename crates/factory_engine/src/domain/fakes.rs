@@ -296,6 +296,23 @@ impl crate::domain::ports::QuarantineTasks for FakeRepo {
     }
 }
 
+/// A child task is made as a follow-up task is.
+impl crate::domain::ports::ChildTasks for FakeRepo {
+    type Err = FakeError;
+
+    async fn file_child(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        task: &FollowUpTask,
+        task_id: Uuid,
+    ) -> Result<Option<crate::domain::ports::FollowUpMade>, FakeError> {
+        self.create_follow_up(user_id, of, task, task_id)
+            .await
+            .map(Some)
+    }
+}
+
 impl TaskDirectory for FakeRepo {
     type Err = FakeError;
 

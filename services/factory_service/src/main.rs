@@ -260,11 +260,17 @@ async fn run() -> Result<(), rootcause::Report> {
             )
             .map_err(|error| rootcause::report!("{error:?}"))?;
             let agent = SessionAgent::new(sessions, repo.clone(), agents);
-            serve(parts, BuiltInSteps::new(agent, pull_requests)).await
+            // A plan too big for one Run is split into child tasks, filed
+            // as the Run's owner, as follow-up tasks are.
+            let steps =
+                BuiltInSteps::new(agent, pull_requests).with_child_tasks(parts.tasks.clone());
+            serve(parts, steps).await
         }
         None => {
             tracing::warn!("FACTORY_AGENTS is unset: agent steps run on the local stand-in");
-            serve(parts, BuiltInSteps::new(LocalAgent, pull_requests)).await
+            let steps =
+                BuiltInSteps::new(LocalAgent, pull_requests).with_child_tasks(parts.tasks.clone());
+            serve(parts, steps).await
         }
     }
 }
@@ -321,6 +327,7 @@ async fn serve<A: StepAgent + Clone>(
         GithubPullRequests<AuthServiceClient>,
         PgRunRepository,
         TemporalMainWatches,
+        DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,
     >,
 ) -> Result<(), rootcause::Report> {
     let runtime = Runtime::from_current_tokio(Default::default())?;

@@ -18,7 +18,7 @@ mod test;
 
 use crate::domain::gate_owner::factory_signed;
 use crate::domain::ports::{
-    FollowUpMade, FollowUpTask, QuarantineTasks, TaskAccess, TaskDirectory,
+    ChildTasks, FollowUpMade, FollowUpTask, QuarantineTasks, TaskAccess, TaskDirectory,
 };
 use crate::outbound::task_project::{initiative_of, new_task_properties, tags_of};
 
@@ -225,6 +225,23 @@ impl<A: EntityAccessService> QuarantineTasks for DocumentTaskDirectory<A> {
     type Err = DocumentTaskDirectoryErr;
 
     async fn file_quarantine(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        task: &FollowUpTask,
+        task_id: Uuid,
+    ) -> Result<Option<FollowUpMade>, Self::Err> {
+        self.create_follow_up(user_id, of, task, task_id)
+            .await
+            .map(Some)
+    }
+}
+
+/// A child task of a split task is filed as a follow-up task is.
+impl<A: EntityAccessService> ChildTasks for DocumentTaskDirectory<A> {
+    type Err = DocumentTaskDirectoryErr;
+
+    async fn file_child(
         &self,
         user_id: &MacroUserIdStr<'static>,
         of: Option<Uuid>,

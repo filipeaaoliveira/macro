@@ -59,7 +59,7 @@ use crate::domain::checks::{
 use crate::domain::flow::StepName;
 use crate::domain::models::run_branch;
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
-use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
+use crate::domain::ports::{ChildTasks, MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
 use crate::domain::review_rounds::fix_answers;
 use crate::domain::setup::{RepositorySetup, SETUP_FILE, redacted};
@@ -153,12 +153,13 @@ pub(super) fn lost(why: &str) -> BuiltInStepError {
     }
 }
 
-impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+impl<A, G, R, M, C> BuiltInSteps<A, G, R, M, C>
 where
     A: StepAgent,
     G: PullRequests,
     R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
+    C: ChildTasks,
 {
     /// Have the agent do `step`'s work, then run the repository's checks on
     /// it in the same session, round after round. The Step ends with the

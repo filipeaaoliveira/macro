@@ -41,10 +41,18 @@ pub const REVIEWER_ROLES: [&str; 3] = ["correctness-reviewer", "scope-reviewer",
 /// written before it keeps working.
 pub const VERIFIER: &str = "verifier";
 
-/// Whether `role` is one of the review panel's, or the verifier, which
-/// [`REVIEWER`]'s Agents fill by default.
+/// The Role of the agent that reads a plan before a person does, and
+/// raises Blockers the planner revises: never the planner's. A definition
+/// that does not list it has [`REVIEWER`]'s Agents fill it, so a definition
+/// written before it keeps working.
+pub const PLAN_REVIEWER: &str = "plan-reviewer";
+
+/// Whether `role` is one of the review panel's, the verifier or the plan
+/// reviewer, which [`REVIEWER`]'s Agents fill by default.
 fn defaults_to_reviewer(role: &Role) -> bool {
-    REVIEWER_ROLES.contains(&role.as_str()) || role.as_str() == VERIFIER
+    REVIEWER_ROLES.contains(&role.as_str())
+        || role.as_str() == VERIFIER
+        || role.as_str() == PLAN_REVIEWER
 }
 
 /// An Agent: whose sessions it runs in, on which model, told what.
@@ -128,12 +136,12 @@ pub enum AgentDefinitionError {
     /// A Flow names a Role the definition does not fill.
     #[error("a flow names role {0}, which the agent definition does not fill")]
     UnfilledRole(Role),
-    /// A Flow names a review panel's Role, or the verifier, and the
-    /// definition fills neither it nor `reviewer`, whose Agents would fill
-    /// it.
+    /// A Flow names a review panel's Role, the verifier or the plan
+    /// reviewer, and the definition fills neither it nor `reviewer`, whose
+    /// Agents would fill it.
     #[error(
         "a flow names role {0}: the agent definition must fill it, or `reviewer`, \
-         whose agents fill every reviewer role and the verifier when it does not list them"
+         whose agents fill every reviewer role, the verifier and the plan reviewer when it does not list them"
     )]
     UnfilledReviewer(Role),
     /// A built-in Flow does not read.
@@ -416,8 +424,8 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
 
 impl AgentDefinition {
     /// The Agents that fill `role`, in order: the first is its default.
-    /// A review panel's Role, or the verifier, the definition does not
-    /// list takes [`REVIEWER`]'s. Empty for a Role the definition does not
+    /// A review panel's Role, the verifier or the plan reviewer the
+    /// definition does not list takes [`REVIEWER`]'s. Empty for a Role the definition does not
     /// fill.
     pub fn for_role(&self, role: &Role) -> &[AgentName] {
         if let Some(listed) = self.roles.get(role) {
