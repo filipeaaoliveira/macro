@@ -941,7 +941,11 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn mark_ci_quarantine_filed(&self, repository: &str, name: &str) -> Result<(), Self::Err> {
+    async fn mark_ci_quarantine_filed(
+        &self,
+        repository: &str,
+        name: &str,
+    ) -> Result<(), Self::Err> {
         ci_retries::mark_ci_quarantine_filed(&self.pool, repository, name).await
     }
 

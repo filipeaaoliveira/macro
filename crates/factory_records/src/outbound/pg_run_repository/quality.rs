@@ -19,8 +19,7 @@ use crate::domain::insights::{RunSummary, TITLE_CHARS};
 use crate::domain::models::{RunId, RunOutcome};
 use crate::domain::quality::{
     BlockerRecord, CiJob, CiJobResult, CiRetryRecord, CiVerdict, CiWait, CiWaitRecord, LastCiWait,
-    QualityRecords,
-    QualityRun, QualityScope, QualitySession, ReviewRoundRecord, ReviewerRecord,
+    QualityRecords, QualityRun, QualityScope, QualitySession, ReviewRoundRecord, ReviewerRecord,
     RunQualityRepository,
 };
 use crate::domain::review_rounds::{DisputeRuling, FixStatus, ReviewRoundOutcome};

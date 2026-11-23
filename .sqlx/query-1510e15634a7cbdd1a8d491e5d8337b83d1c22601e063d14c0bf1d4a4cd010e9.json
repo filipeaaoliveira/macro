@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE factory_ci_retry t\n        SET result = settled.result, settled_at = now()\n        FROM unnest($3::text[], $4::text[]) AS settled(name, result)\n        WHERE t.run_id = $1 AND t.seq = $2 AND t.name = settled.name AND t.result IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1510e15634a7cbdd1a8d491e5d8337b83d1c22601e063d14c0bf1d4a4cd010e9"
+}

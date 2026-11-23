@@ -256,7 +256,7 @@ fn quiet_gates_are_an_opt_out_stored_beside_the_kinds() {
         quiet_gates: true,
         ..OrchestratorDefinition::DEFAULT
     };
-    assert_eq!(quiet.kinds(), ["blockers", "quiet_gates"]);
+    assert_eq!(quiet.kinds(), ["blockers", "quiet_gates", "rerun_flaky_ci"]);
     assert_eq!(
         OrchestratorDefinition::from_kinds(&quiet.kinds()),
         Some(quiet)
@@ -287,7 +287,12 @@ fn the_kinds_the_orchestrator_may_approve_are_stored_beside_the_rules() {
     };
     assert_eq!(
         definition.kinds(),
-        ["blockers", "orchestrator_plan", "orchestrator_blockers"]
+        [
+            "blockers",
+            "orchestrator_plan",
+            "orchestrator_blockers",
+            "rerun_flaky_ci"
+        ]
     );
     assert_eq!(
         OrchestratorDefinition::from_kinds(&definition.kinds()),
@@ -330,7 +335,11 @@ fn a_token_budget_is_read_and_sent_only_when_set() {
 /// rule's name.
 #[test]
 fn the_flaky_ci_rerun_is_on_by_default_and_stored_by_its_rule_s_name() {
-    assert!(OrchestratorDefinition::DEFAULT.rerun_flaky_ci);
+    assert_eq!(
+        OrchestratorDefinition::from_kinds(&OrchestratorDefinition::DEFAULT.kinds())
+            .map(|kept| kept.rerun_flaky_ci),
+        Some(true)
+    );
     let sent: OrchestratorDefinition =
         serde_json::from_str(r#"{"plan": false, "blockers": true, "merge": false}"#)
             .expect("a definition without the rule reads");
