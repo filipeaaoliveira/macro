@@ -231,7 +231,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/domain/breaks.rs`, `src/outbound/pg_run_repository/breaks.rs`) keep
   how each test's break the Step's agent reported went, once per Step and
   test: `record_break` keeps the first, so a retried round records each
-  break once. `runs_break_records` reads some Runs' records, by Step.
+  break once (an `interrupted` record is replaced by the next run's).
+  `runs_break_records` reads some Runs' records, by Step. A retry copies
+  the records of the Steps it keeps.
 - A review round (`factory_review_round`) is keyed by the place of its first
   Step and recorded before its Steps start, so it references the Run, not a
   Step; `start_review_round` keeps its first record. `record_findings`

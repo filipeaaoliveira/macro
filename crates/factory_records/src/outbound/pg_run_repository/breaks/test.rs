@@ -154,6 +154,7 @@ async fn every_status_is_kept_and_read_back(pool: PgPool) {
         BreakStatus::Dropped,
         BreakStatus::Unchecked,
         BreakStatus::Interrupted,
+        BreakStatus::Hung,
     ];
     for (at, status) in statuses.iter().enumerate() {
         repo.record_break(key, &record(&format!("test_{at}"), *status, ""))

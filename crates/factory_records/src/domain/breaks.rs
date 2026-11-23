@@ -39,6 +39,9 @@ pub enum BreakStatus {
     Verified,
     /// The test passed with the break too: it does not catch it.
     NotReproduced,
+    /// The test ran out of its time with the break (`timeout` stopped it):
+    /// a hang proves nothing of what the test checks.
+    Hung,
     /// The test failed without the break: it does not pass here, so the
     /// break proves nothing.
     NotRun,

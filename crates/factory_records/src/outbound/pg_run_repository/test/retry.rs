@@ -469,3 +469,57 @@ async fn what_a_retry_kept_counts_once_on_the_run_that_made_it(pool: PgPool) {
         "the attempt is counted by the run in the period"
     );
 }
+
+/// The retry keeps the break records of the Steps it keeps, as they were,
+/// and none of a Step it runs again.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_retry_keeps_the_break_records_of_its_kept_steps(pool: PgPool) {
+    use crate::domain::breaks::{BreakStatus, NewBreakRecord};
+
+    let repo = PgRunRepository::new(pool.clone());
+    let lost = lost_at_fix(&pool, &repo).await;
+    let record = |test: &str, status| NewBreakRecord {
+        test: test.to_string(),
+        file: "src/slug.rs".to_string(),
+        old_text: "'-'".to_string(),
+        new_text: "'_'".to_string(),
+        command: "cargo test slug".to_string(),
+        status,
+        checked_commit: Some(HEAD.to_string()),
+        output: "1 failed".to_string(),
+    };
+    repo.record_break(key(lost, 2), &record("dashes", BreakStatus::Verified))
+        .await
+        .expect("record the write's");
+    repo.record_break(key(lost, 4), &record("ends", BreakStatus::Interrupted))
+        .await
+        .expect("record the lost fix's");
+    let id = RunId::generate();
+
+    let RetryInsert::Inserted(_) = retry(
+        &repo,
+        NewRetry {
+            id,
+            retried: lost,
+            first_seq: 4,
+            created_in_person: false,
+        },
+    )
+    .await
+    else {
+        panic!("an ended run is retried");
+    };
+
+    let kept = repo.runs_break_records(&[id, lost]).await.expect("read");
+    let tests: Vec<(u16, &str, BreakStatus)> = kept[&id]
+        .iter()
+        .map(|record| (record.seq, record.test.as_str(), record.status))
+        .collect();
+    assert_eq!(tests, [(2, "dashes", BreakStatus::Verified)]);
+    assert_eq!(kept[&id][0].recorded_at, kept[&lost][0].recorded_at);
+    assert_eq!(kept[&id][0].checked_commit.as_deref(), Some(HEAD));
+    assert_eq!(kept[&lost].len(), 2);
+}

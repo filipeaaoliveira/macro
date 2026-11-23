@@ -1005,6 +1005,26 @@ impl RunRepository for PgRunRepository {
         )
         .execute(&mut *transaction)
         .await?;
+        // The breaks they recorded, which the tests reviewer and the Run's
+        // page read.
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_break_record (
+                run_id, seq, test, file, old_text, new_text, command, status, checked_commit,
+                output, recorded_at
+            )
+            SELECT
+                $1, b.seq, b.test, b.file, b.old_text, b.new_text, b.command, b.status,
+                b.checked_commit, b.output, b.recorded_at
+            FROM factory_break_record b
+            JOIN factory_step s ON s.run_id = $1 AND s.seq = b.seq
+            WHERE b.run_id = $2
+            "#,
+            retry.id.as_uuid(),
+            retry.retried.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
         // Their Gates that were answered, which later Steps read the notes
         // of.
         sqlx::query!(

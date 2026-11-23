@@ -22,7 +22,8 @@ CREATE TABLE factory_break_record (
     new_text text NOT NULL CHECK (octet_length(new_text) <= 1024),
     command text NOT NULL CHECK (octet_length(command) <= 1024),
     -- verified: the test passed without the break and failed with it;
-    -- not_reproduced: it passed with it too; not_run: it failed without
+    -- not_reproduced: it passed with it too; hung: it ran out of its time
+    -- with it, which proves nothing; not_run: it failed without
     -- it; not_applied: the file does not hold the text to replace;
     -- unreadable: the agent's line does not read as a break; dropped: no
     -- time was left, or too many were reported; unchecked: the factory ran
@@ -30,7 +31,7 @@ CREATE TABLE factory_break_record (
     -- said how the test went, and a later run replaces the record.
     status text NOT NULL CHECK (
         status IN (
-            'verified', 'not_reproduced', 'not_run', 'not_applied', 'unreadable', 'dropped',
+            'verified', 'not_reproduced', 'hung', 'not_run', 'not_applied', 'unreadable', 'dropped',
             'unchecked', 'interrupted'
         )
     ),

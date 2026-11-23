@@ -797,6 +797,22 @@ impl RunRepository for FakeRepo {
                 })
                 .collect();
             sessions.extend(kept);
+            // With the breaks they recorded.
+            let mut breaks = self.breaks.lock().expect("breaks");
+            let kept: Vec<_> = breaks
+                .iter()
+                .filter(|(key, _)| key.run_id == retry.retried && places.contains(&key.seq))
+                .map(|(key, record)| {
+                    (
+                        StepKey {
+                            run_id: run.id,
+                            seq: key.seq,
+                        },
+                        record.clone(),
+                    )
+                })
+                .collect();
+            breaks.extend(kept);
         }
         {
             let mut rounds = self.review_rounds.lock().expect("review rounds");
