@@ -1437,3 +1437,22 @@ async fn a_definition_file_and_a_change_check_reach_the_service() {
     assert_eq!(body(checked).await["code"], "noDefinition");
     assert_eq!(*service.actors.lock().expect("actors"), [ALICE, ALICE]);
 }
+
+/// A path that names no Definition file is refused with its own code.
+#[tokio::test]
+async fn a_path_that_is_no_definition_file_says_so() {
+    let (router, _) = router(|| FactoryError::NotADefinitionFile("README.md".to_string()));
+
+    let response = router
+        .oneshot(call(
+            "GET",
+            "/settings/definition/file?path=README.md",
+            Caller::User("alice"),
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(body(response).await["code"], "notADefinitionFile");
+}

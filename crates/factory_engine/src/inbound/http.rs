@@ -1344,6 +1344,8 @@ pub enum RunErrorCode {
     /// The change's pull request was closed without merging; it is not
     /// opened again.
     DefinitionChangeClosed,
+    /// The path names no file a Factory Definition holds.
+    NotADefinitionFile,
 }
 
 /// What a refused or failed request answers: a message, and for a refusal
@@ -1377,6 +1379,7 @@ impl FactoryError {
                 Some(RunErrorCode::DefinitionChangeNotOpened)
             }
             FactoryError::DefinitionChangeClosed(_) => Some(RunErrorCode::DefinitionChangeClosed),
+            FactoryError::NotADefinitionFile(_) => Some(RunErrorCode::NotADefinitionFile),
             _ => None,
         }
     }

@@ -2354,7 +2354,8 @@ commit a change proposed now goes on top of (`DefinitionFile`: `path`,
 being added), so the change editor starts from it. Only a path a
 Definition holds is read (`is_definition_file`: `factory.json`,
 `agents.json`, `rules.json`, `scorers.json`, or `flows/{name}.json` with a
-name a Run keeps; 400 otherwise, before GitHub is asked); a repository
+name a Run keeps; 400 `notADefinitionFile` otherwise, before GitHub is
+asked); a repository
 the caller does not reach is 400 `unreachableDefinition`, a file GitHub
 will not give 400 `invalidDefinition`, and a team that names none 409
 `noDefinition`. Any member of the team reads it, as they read the
