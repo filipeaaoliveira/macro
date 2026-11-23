@@ -937,6 +937,75 @@ describe('RunInsightsView', () => {
     expect(figure('Review fix rounds')).toBe('1');
   });
 
+  it('counts how flaky reruns ended and lists each quarantined job with its task', () => {
+    mount({
+      insights: november,
+      quality: () => {
+        const read = quality();
+        return {
+          ...read,
+          ci: {
+            ...read.ci,
+            retries: { passed: 3, failed: 1, refused: 2 },
+            quarantined: [
+              {
+                repository: APP,
+                job: 'test',
+                step: 'Run tests',
+                failure: 'src/net.rs: net::test::retry',
+                passedRetries: 4,
+                quarantinedAt: '2026-11-03T10:00:00Z',
+                lastPassedAt: '2026-11-09T10:00:00Z',
+                taskId: 'task-flake',
+              },
+              {
+                repository: 'https://github.com/macro/site',
+                job: 'e2e',
+                step: null,
+                failure: null,
+                passedRetries: 1,
+                quarantinedAt: '2026-11-05T10:00:00Z',
+                lastPassedAt: '2026-11-05T10:00:00Z',
+                taskId: null,
+              },
+            ],
+          },
+        };
+      },
+    });
+
+    const reruns = screen.getByLabelText('Flaky job reruns');
+    expect(reruns.textContent).toContain('Passed on rerun3');
+    expect(reruns.textContent).toContain('Failed again1');
+    expect(reruns.textContent).toContain('Not rerun by GitHub2');
+
+    const quarantined = screen.getByRole('list', { name: 'Quarantined jobs' });
+    const rows = within(quarantined).getAllByRole('listitem');
+    expect(rows.map((row) => row.querySelector('h4')?.textContent)).toEqual([
+      'macro/app · test · Run tests',
+      'macro/site · e2e',
+    ]);
+    expect(rows[0]?.textContent).toContain('src/net.rs: net::test::retry');
+    expect(rows[0]?.textContent).toContain('4 passed retries, quarantined');
+    expect(
+      within(rows[0] as HTMLElement)
+        .getByRole('link', { name: 'Open the task filed for it' })
+        .getAttribute('href')
+    ).toContain('task-flake');
+    expect(rows[1]?.textContent).toContain('1 passed retry, quarantined');
+    expect(within(rows[1] as HTMLElement).queryByRole('link')).toBeNull();
+    expect(rows[1]?.textContent).toContain('No task filed yet.');
+  });
+
+  it('says no job is quarantined', () => {
+    mount({ insights: november, quality: () => quality() });
+
+    expect(
+      screen.getByText('No job is quarantined in these repositories.')
+    ).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'Quarantined jobs' })).toBeNull();
+  });
+
   it('shows review rounds, blockers by reviewer and agent, and recurring blocker texts', () => {
     mount({ insights: november, quality: () => quality() });
 

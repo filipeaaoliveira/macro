@@ -43,6 +43,23 @@ export default {
     other:
       '{{count}} failures on {{pullRequests}} pull requests, last {{date}}',
   },
+  flakyReruns: 'Flaky job reruns',
+  flakyRerunsDescription:
+    'When every failed job was a known flake, the run ran them again once before any CI fix',
+  retriesPassed: 'Passed on rerun',
+  retriesFailed: 'Failed again',
+  retriesRefused: 'Not rerun by GitHub',
+  quarantined: 'Quarantined jobs',
+  quarantinedDescription:
+    'Jobs whose reruns passed often enough to count as known flakes, until none passes for 30 days',
+  noQuarantined: 'No job is quarantined in these repositories.',
+  quarantinedSince: {
+    one: '{{count}} passed retry, quarantined {{date}}, last passed {{lastPassed}}',
+    other:
+      '{{count}} passed retries, quarantined {{date}}, last passed {{lastPassed}}',
+  },
+  quarantineTask: 'Open the task filed for it',
+  quarantineNoTask: 'No task filed yet.',
   // Review quality.
   reviewQuality: 'Review quality',
   reviewQualityDescription:

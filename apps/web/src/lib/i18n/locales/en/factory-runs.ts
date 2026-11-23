@@ -262,6 +262,8 @@ export default {
     'Send the blockers reviewers find to be fixed, at most twice in a row; blockers found after that wait for a person.',
   standingRulesMergeWhenGreenHint:
     'Merge once CI passes and the base branch isn’t held.',
+  standingRulesRerunFlakyCiHint:
+    'When every failed CI job is a known flake, run the failed jobs again once before sending the change to be fixed. A known flake is a job your factory definition lists, one quarantined in the repository, or one whose same failure broke other pull requests.',
   standingRulesAlwaysPerson:
     'A run that changes control files its request doesn’t name always waits for a person.',
   standingRulesProjects: {
