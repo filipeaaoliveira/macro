@@ -841,9 +841,10 @@ Run's branch and its base: the agent checks the branch out, and `write`,
 nothing. A `write` or `fix` whose agent hands back `done` with none of its
 work on the branch on GitHub ends `failed`, saying why, before its checks
 (`checks_round.rs`, `unpushed`): the branch is not there (read again after
-2 s), has no commit beyond the Run's base (GitHub's merge base of the base
-and the head is the head), or, for a fix that says it fixed a Blocker of
-its review round, is still at the commit that round reviewed. Like the
+2 s), changes nothing against the Run's base (GitHub lists no changed
+path; a list GitHub cannot give in full passes), or, for a fix that says it
+fixed a Blocker of its review round, is still at the commit that round
+reviewed. Like the
 checks, this runs in the Step's activity, behind no patch marker. The pull request Steps act on GitHub as the Run's owner, with
 the token of the GitHub account they linked to Macro, which the
 authentication service gives (`outbound/github_pull_requests.rs`, over the

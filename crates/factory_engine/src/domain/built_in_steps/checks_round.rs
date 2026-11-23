@@ -785,10 +785,11 @@ where
 
     /// How a Step whose agent handed back `done`, with `work_output`, ends
     /// when the Run's branch on GitHub does not hold its work: `failed`,
-    /// saying why, when the branch is not there, has no commit beyond the
-    /// Run's base, or, for a fix that says it fixed a Blocker of the review
-    /// round `answers`, is still at the commit that round reviewed. None
-    /// when it holds. An agent that committed on another branch, or in a
+    /// saying why, when the branch is not there, changes nothing against
+    /// the Run's base, or, for a fix that says it fixed a Blocker of the
+    /// review round `answers`, is still at the commit that round reviewed.
+    /// None when it holds, or when GitHub cannot list the branch's changes
+    /// in full. An agent that committed on another branch, or in a
     /// checkout another Run moved, ends so rather than `done`.
     async fn unpushed(
         &self,
@@ -820,21 +821,15 @@ where
                     )
                 } else if self
                     .pull_requests
-                    .check_changes(&input, &head)
+                    .branch_changes(&input)
                     .await?
-                    .merge_base
-                    == head
+                    .is_some_and(|changed| changed.is_empty())
                 {
-                    let base = input.base_commit.map_or_else(
-                        || {
-                            input
-                                .repository
-                                .map_or(String::new(), |repository| repository.base_branch.clone())
-                        },
-                        str::to_string,
-                    );
+                    let base = input
+                        .repository
+                        .map_or("", |repository| repository.base_branch.as_str());
                     format!(
-                        "the run's branch `{branch}` is at `{head}`, which has no commit beyond its base `{base}`"
+                        "the run's branch `{branch}` is at `{head}`, which changes nothing against its base `{base}`"
                     )
                 } else {
                     return Ok(None);

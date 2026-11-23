@@ -3,13 +3,12 @@
 
 use super::*;
 
-/// The branch is at the base: the agent committed elsewhere, as on a
-/// checkout another Run had moved to its own branch.
+/// The branch changes nothing against the base: the agent committed
+/// elsewhere, as on a checkout another Run had moved to its own branch.
 #[tokio::test]
-async fn a_write_whose_branch_has_no_commit_beyond_its_base_fails() {
+async fn a_write_whose_branch_changes_nothing_against_its_base_fails() {
     let agent = ScriptedAgent::new("done", Vec::new());
-    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
-    github.state().check_base = Some(HEAD.to_string());
+    let github = github(Some(CHECKS), Some(&[]));
     let repo = FakeRepo::default();
     let input = input();
 
@@ -20,7 +19,7 @@ async fn a_write_whose_branch_has_no_commit_beyond_its_base_fails() {
     assert_eq!(report.outcome, Outcome::failed());
     assert!(
         report.output.starts_with(&format!(
-            "The agent said its work was done and pushed, but the run's branch `factory/{}` is at `{HEAD}`, which has no commit beyond its base `main`",
+            "The agent said its work was done and pushed, but the run's branch `factory/{}` is at `{HEAD}`, which changes nothing against its base `main`",
             input.key.run_id
         )),
         "{}",

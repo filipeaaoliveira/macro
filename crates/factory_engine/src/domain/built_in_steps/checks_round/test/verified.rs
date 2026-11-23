@@ -457,13 +457,14 @@ async fn a_worktree_that_cannot_be_set_up_is_left_to_a_retry() {
     assert!(rounds[0].end.is_none());
 }
 
-/// A branch GitHub does not have fails the attempt for a retry: nothing
-/// runs on the machine.
+/// A branch GitHub does not have when the round reads it (it had it when
+/// the work was handed back) fails the attempt for a retry: nothing runs on
+/// the machine.
 #[tokio::test]
 async fn a_branch_missing_on_github_is_left_to_a_retry() {
     let agent = verifying(Vec::new(), Vec::new());
     let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
-    github.state().head = None;
+    github.state().branch_heads = [Some(HEAD.to_string()), None, None].into();
     let repo = FakeRepo::default();
     let input = input();
 

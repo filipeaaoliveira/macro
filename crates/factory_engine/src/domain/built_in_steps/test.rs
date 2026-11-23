@@ -692,7 +692,6 @@ async fn a_fix_that_left_the_branch_where_the_round_reviewed_it_fails() {
         let repo = FakeRepo::default();
         let github = FakeGithub::default();
         github.state().head = Some(head.to_string());
-        github.state().check_base = Some("aaa".to_string());
         let steps = BuiltInSteps::new(
             agent.clone(),
             PullRequestSteps::new(github, repo.clone(), FakeWatches::default()),
