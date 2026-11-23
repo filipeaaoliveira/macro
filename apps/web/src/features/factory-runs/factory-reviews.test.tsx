@@ -71,6 +71,7 @@ const found: PullRequestRuns = {
               terminal: { betweenTurns: false, steers: [] },
             },
           ],
+          breakRecords: [],
           reviewRounds: [],
           standingActs: [],
           agentRules: [],

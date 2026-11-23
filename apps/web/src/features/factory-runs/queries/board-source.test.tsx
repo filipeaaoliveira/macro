@@ -39,6 +39,7 @@ function page(steps: number): BoardPage {
             passedOver: [],
             terminal: { betweenTurns: false, steers: [] },
           })),
+          breakRecords: [],
           reviewRounds: [],
           standingActs: [],
           agentRules: [],

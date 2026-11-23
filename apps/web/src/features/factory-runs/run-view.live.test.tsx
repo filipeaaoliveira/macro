@@ -60,6 +60,7 @@ const planning: RunDetail = {
       checks: [],
     },
   ],
+  breakRecords: [],
   reviewRounds: [],
   standingActs: [],
   agentRules: [],
