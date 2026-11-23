@@ -218,11 +218,13 @@ impl PlanSize {
     /// What the size block of `plan` says: the last fenced `json` block
     /// that names `size`.
     pub fn from_plan(plan: &str) -> Result<Self, SizeBlockError> {
-        let block = json_blocks(plan)
+        let Some(block) = json_blocks(plan)
             .into_iter()
             .rev()
             .find(|block| block.names("size"))
-            .ok_or(SizeBlockError::Missing)?;
+        else {
+            return Err(unread_block(plan));
+        };
         // The plan's output keeps a block of at most this size whole, however
         // long the plan's prose (`plan_output`).
         if block.end - block.start > MAX_BLOCK_BYTES {
@@ -235,6 +237,43 @@ impl PlanSize {
             "fits" => fits(written),
             "oversized" => oversized(written),
             other => Err(SizeBlockError::Size(other.to_string())),
+        }
+    }
+}
+
+/// Why a plan with no size block that reads has none: a block that opens
+/// as one (a fenced `json` object naming `size` near its start) and does
+/// not read is unreadable, or too large when it runs past what a size
+/// block may hold, as one cut short does; with no such block, it is
+/// missing.
+fn unread_block(plan: &str) -> SizeBlockError {
+    const OPEN: &str = "```json";
+    // ASCII lowercasing keeps every byte where it was, so places in it are
+    // places in `text`.
+    let lower = plan.to_ascii_lowercase();
+    let opened = lower
+        .match_indices(OPEN)
+        .map(|(at, _)| at + OPEN.len())
+        .filter(|body| {
+            let start = plan[*body..].trim_start();
+            let head = crate::domain::built_in_steps::cut(start, 256);
+            start.starts_with('{') && head.contains("\"size\"")
+        })
+        .last();
+    let Some(body) = opened else {
+        return SizeBlockError::Missing;
+    };
+    // The block's text runs to the next fence that opens a line.
+    let text = &plan[body..];
+    let text = text.find("\n```").map_or(text, |end| &text[..end]);
+    if text.len() > MAX_BLOCK_BYTES {
+        return SizeBlockError::TooLarge;
+    }
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Err(error) => SizeBlockError::Unreadable(error.to_string()),
+        // A value that reads but is no block, as one with text after it.
+        Ok(_) => {
+            SizeBlockError::Unreadable("it is not one JSON object closed by a fence".to_string())
         }
     }
 }
@@ -310,12 +349,12 @@ fn sized(text: &str, max: usize) -> bool {
 
 /// Whether `path` names a file from the repository's root: not blank,
 /// within its bound, each folder and the file named, none of them `.` or
-/// `..`, in letters, digits and `.`, `_`, `-`, `+`, `@`, `[`, `]`, `(`, `)`
-/// only. Nothing in it is read as part of a URL (`%`, `?`, `#`), quotes or
+/// `..`, in letters and digits of any script and `.`, `_`, `-`, `+`, `@`,
+/// `[`, `]`, `(`, `)` only. Nothing in it is read as part of a URL (`%`, `?`, `#`), quotes or
 /// tags the text it is written into, or climbs out of the repository.
 fn plain_path(path: &str) -> bool {
     let safe = path.chars().all(|c| {
-        c.is_ascii_alphanumeric()
+        c.is_alphanumeric()
             || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '[' | ']' | '(' | ')')
     });
     let named = path
@@ -341,14 +380,17 @@ pub fn later_gate_entry(entry: &str) -> Option<&'static str> {
     (entry == PLAN_GATE_ENTRIES.1).then_some(PLAN_GATE_ENTRIES.0)
 }
 
-/// How the output of a plan review starts when its last round still found
-/// Blockers: the plan goes to its Gate with them.
-pub const BLOCKERS_LEFT: &str = "The plan review still finds";
+/// The first line of a plan review's output when its last round still
+/// found Blockers: the plan goes to its Gate with them. The factory writes
+/// it, and [`blockers_left`] reads it.
+pub const BLOCKERS_LEFT: &str = "The plan review's last round left blockers: the plan goes to \
+its Gate with them, and no standing rule or stand-in approves it.";
 
 /// Whether `output`, a `plan_review` Step's, put the plan to its Gate with
-/// Blockers left: then no Standing Rule and no stand-in approves it.
+/// Blockers left: its first line is [`BLOCKERS_LEFT`], whole. Then no
+/// Standing Rule and no stand-in approves it.
 pub fn blockers_left(output: &str) -> bool {
-    output.starts_with(BLOCKERS_LEFT)
+    output.lines().next() == Some(BLOCKERS_LEFT)
 }
 
 /// The latest plan among a Run's `earlier` Steps: the output of its latest

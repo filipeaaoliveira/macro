@@ -285,3 +285,60 @@ fn a_size_block_too_large_to_keep_whole_is_a_blocker() {
 
     assert_eq!(PlanSize::from_plan(&plan), Err(SizeBlockError::TooLarge));
 }
+
+#[test]
+fn only_a_first_line_that_is_the_whole_mark_says_blockers_are_left() {
+    assert!(blockers_left(&format!(
+        "{BLOCKERS_LEFT}\n\nIts last round found 2 blockers."
+    )));
+    assert!(!blockers_left(&format!(
+        "The plan review passed.\n\n{BLOCKERS_LEFT}"
+    )));
+    assert!(!blockers_left(&format!("{BLOCKERS_LEFT} And more.")));
+}
+
+#[test]
+fn a_size_block_that_does_not_read_is_unreadable_not_missing() {
+    let broken = "Plan.\n\n```json\n{\"size\": \"fits\", \"files\": [}\n```\n";
+
+    assert!(
+        matches!(
+            PlanSize::from_plan(broken),
+            Err(SizeBlockError::Unreadable(_))
+        ),
+        "{:?}",
+        PlanSize::from_plan(broken)
+    );
+}
+
+#[test]
+fn a_large_size_block_in_a_long_plan_is_too_large_not_missing() {
+    let request = "x".repeat(MAX_REQUEST_BYTES);
+    let children: Vec<String> = (0..5)
+        .map(|index| format!("{{\"name\": \"Part {index}\", \"request\": \"{request}\"}}"))
+        .collect();
+    let plan = format!(
+        "{}\n\n```json\n{{\"size\": \"oversized\", \"why\": \"Big\", \"children\": [{}]}}\n```",
+        "x".repeat(70 * 1024),
+        children.join(", ")
+    );
+
+    let kept = crate::domain::acceptance::plan_output(&plan);
+
+    assert_eq!(PlanSize::from_plan(&kept), Err(SizeBlockError::TooLarge));
+}
+
+#[test]
+fn a_path_may_name_files_in_any_script() {
+    let block = |path: &str| {
+        format!(
+            "```json\n{{\"size\": \"fits\", \"files\": [{{\"path\": \"{path}\", \"change\": \"edit\"}}]}}\n```"
+        )
+    };
+
+    assert!(PlanSize::from_plan(&block("docs/café/日本語.md")).is_ok());
+    assert_eq!(
+        PlanSize::from_plan(&block("docs/café%20.md")),
+        Err(SizeBlockError::File(1))
+    );
+}

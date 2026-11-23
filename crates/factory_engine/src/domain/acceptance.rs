@@ -350,7 +350,11 @@ pub fn plan_output(output: &str) -> String {
         .rev()
         .find(|block| block.names("size"));
     let (prose, kept) = match size_block {
-        Some(block) if block.end - block.start + 2 < MAX_OUTPUT_BYTES / 2 => {
+        // A block over the size `plan_review` reads is kept too, when it
+        // fits, so the review says it is too large rather than missing.
+        Some(block)
+            if block.end - block.start + 2 + note.len() + CUT_NOTE.len() <= MAX_OUTPUT_BYTES =>
+        {
             let kept = format!("\n\n{}", &plan[block.start..block.end]);
             (block.cut_from(&plan), kept)
         }
