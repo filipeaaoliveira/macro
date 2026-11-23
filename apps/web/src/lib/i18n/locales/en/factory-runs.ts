@@ -99,6 +99,10 @@ export default {
   reviewRoundReviewing: 'Reviewing…',
   reviewRoundNotOpened: 'Couldn’t start: {{failure}}',
   reviewBlockers: { one: '{{count}} blocker', other: '{{count}} blockers' },
+  splitChildTasks: {
+    one: 'Split into {{count}} child task',
+    other: 'Split into {{count}} child tasks',
+  },
   reviewFollowUps: {
     one: '{{count}} follow-up',
     other: '{{count}} follow-ups',

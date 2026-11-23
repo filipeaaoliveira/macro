@@ -6,6 +6,7 @@ import {
   type RunStep,
   retryOf,
   runStatus,
+  splitChildTasks,
 } from './run';
 
 const plan: RunStep = {
@@ -151,5 +152,44 @@ describe('retries', () => {
     const other: Run = { ...ended('failed'), id: 'run-3' };
     expect(retryOf({ id: 'run-1' }, [other, retry])?.id).toBe('run-2');
     expect(retryOf({ id: 'run-2' }, [other, retry])).toBeUndefined();
+  });
+});
+
+describe('splitChildTasks', () => {
+  const mention = (id: string, name: string) =>
+    `<m-document-mention>${JSON.stringify({
+      documentId: id,
+      documentName: name,
+      blockName: 'md',
+      blockParams: {},
+    })}</m-document-mention>`;
+  const split = (output: string): RunStep => ({
+    seq: 3,
+    entry: 'split',
+    visit: 1,
+    startedAt: '2026-11-16T09:00:00Z',
+    end: { outcome: 'done', output, endedAt: '2026-11-16T09:01:00Z' },
+  });
+
+  it('reads the child tasks a split filed, in order, from their mentions', () => {
+    const output = [
+      'The task is too big for one run (two services): its plan split it into 2 child tasks.',
+      '',
+      `- ${mention('task-a', 'Add the column')}`,
+      `- ${mention('task-b', 'Show it in the list')}`,
+      `- ${mention('task-a', 'Add the column')}`,
+      '- <m-document-mention>{not json}</m-document-mention>',
+    ].join('\n');
+
+    expect(splitChildTasks(split(output))).toEqual([
+      { id: 'task-a', name: 'Add the column' },
+      { id: 'task-b', name: 'Show it in the list' },
+    ]);
+  });
+
+  it('reads no child tasks from another Step, or a split still running', () => {
+    const output = `- ${mention('task-a', 'Add the column')}`;
+    expect(splitChildTasks({ ...split(output), entry: 'plan' })).toEqual([]);
+    expect(splitChildTasks({ ...split(output), end: undefined })).toEqual([]);
   });
 });

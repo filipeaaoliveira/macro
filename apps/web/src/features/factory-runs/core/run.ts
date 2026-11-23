@@ -668,3 +668,42 @@ export function isRetriable(run: Run, retried: boolean): boolean {
   if (run.flow !== undefined && UNRETRIED_FLOWS.has(run.flow)) return false;
   return !retried;
 }
+
+/** The entry of the code Flow that files an oversized plan's child tasks. */
+export const SPLIT_ENTRY = 'split';
+
+/** A task a Run filed, by its id and name. */
+export type FiledTask = { id: string; name: string };
+
+const TASK_MENTION = /<m-document-mention>([\s\S]*?)<\/m-document-mention>/g;
+
+/**
+ * The child tasks a `split` Step filed, as its output links them: a
+ * document mention each, in order. None for another Step, or one that
+ * filed none; a mention that doesn't read is left out.
+ */
+export function splitChildTasks(
+  step: Pick<RunStep, 'entry' | 'end'>
+): FiledTask[] {
+  if (step.entry !== SPLIT_ENTRY || !step.end) return [];
+  const tasks: FiledTask[] = [];
+  for (const match of step.end.output.matchAll(TASK_MENTION)) {
+    try {
+      const mention: unknown = JSON.parse(match[1] ?? '');
+      if (
+        mention &&
+        typeof mention === 'object' &&
+        'documentId' in mention &&
+        typeof mention.documentId === 'string' &&
+        'documentName' in mention &&
+        typeof mention.documentName === 'string' &&
+        !tasks.some((task) => task.id === mention.documentId)
+      ) {
+        tasks.push({ id: mention.documentId, name: mention.documentName });
+      }
+    } catch {
+      // A mention that doesn't read links no task.
+    }
+  }
+  return tasks;
+}

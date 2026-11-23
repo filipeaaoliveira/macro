@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { fellShort, flowWordLabel, flowWordText } from './flow-words';
+import {
+  fellShort,
+  flowWordLabel,
+  flowWordText,
+  outcomeTone,
+} from './flow-words';
 
 describe('flow words', () => {
   it('reads a Flow word as a label, acronyms in capitals', () => {
@@ -33,5 +38,22 @@ describe('flow words', () => {
     expect(fellShort('no_result', 'stop')).toBe(true);
     expect(fellShort('no_result', 'retry')).toBe(false);
     expect(fellShort('no_result')).toBe(false);
+  });
+
+  it('labels the plan review and split Steps and their outcomes', () => {
+    expect(flowWordLabel('plan-review')).toBe('Plan review');
+    expect(flowWordLabel('split')).toBe('Split');
+    expect(flowWordLabel('reviewed')).toBe('Reviewed');
+    expect(flowWordLabel('oversized')).toBe('Oversized');
+  });
+
+  it('shows blockers and an oversized plan as sent back, not failed', () => {
+    expect(outcomeTone('blockers')).toBe('sentBack');
+    expect(outcomeTone('oversized')).toBe('sentBack');
+    expect(outcomeTone('failed')).toBe('short');
+    expect(outcomeTone('no_result', 'stop')).toBe('short');
+    for (const outcome of ['reviewed', 'done', 'pass', 'no_result']) {
+      expect(outcomeTone(outcome)).toBeUndefined();
+    }
   });
 });
