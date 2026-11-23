@@ -829,22 +829,26 @@ its configured workspace. It names the Run's branch too
 (`PrepareRoutineSession.work_branch`, `factory/{run id}`), which reaches an
 external runtime on its request (`AgentSessionRequestedEvent.work_branch`): a
 macrod that shares one workspace among its sessions gives the branch a git
-worktree of its own there (`coding_agent_worker`'s `branch_worktrees.rs`,
-`<workspace>/.macrod-worktrees/factory+<run id>`), which every Step of the Run
+worktree of its own beside it (`coding_agent_worker`'s `branch_worktrees.rs`,
+`<workspace>.macrod-worktrees/factory+<run id>`), which every Step of the Run
 works in and no other Run does, so two Runs at once on one machine never
-share a checkout's files or `HEAD`. It removes the worktree once origin
-deleted the branch (after the merge), or no Step asked for it in 14 days.
+share a checkout's files or `HEAD`. macrod removes the worktree once no
+session used it for an hour, origin no longer lists the branch and the
+worktree holds nothing origin lacks, or once no session used it for 3 days;
+never while a turn runs in it.
 Nothing is recorded or replayed in the workflow, so no patch marker guards
 it: a Run in flight gets its worktree at its next Step. The prompt names the
 Run's branch and its base: the agent checks the branch out, and `write`,
 `fix` and `ci_fix` commit and push it from their runtime; `review` changes
 nothing. A `write` or `fix` whose agent hands back `done` with none of its
 work on the branch on GitHub ends `failed`, saying why, before its checks
-(`checks_round.rs`, `unpushed`): the branch is not there (read again after
-2 s), changes nothing against the Run's base (GitHub lists no changed
+(`checks_round.rs`, `unpushed`, which `update` and conflict resolution skip):
+the branch changes nothing against the Run's base (GitHub lists no changed
 path; a list GitHub cannot give in full passes), or, for a fix that says it
 fixed a Blocker of its review round, is still at the commit that round
-reviewed. Like the
+reviewed. Either is read again after 2 s before the Step fails. A branch
+GitHub does not have, even after 2 s, fails the attempt for a retry, as a
+round's read of it does. Like the
 checks, this runs in the Step's activity, behind no patch marker. The pull request Steps act on GitHub as the Run's owner, with
 the token of the GitHub account they linked to Macro, which the
 authentication service gives (`outbound/github_pull_requests.rs`, over the

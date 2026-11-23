@@ -242,8 +242,17 @@ fn steps(
     repo: &FakeRepo,
 ) -> BuiltInSteps<Reviewer, FakeGithub, FakeRepo, FakeWatches> {
     // A fix's work is on the Run's branch, at a commit no round reviewed.
+    steps_at(reviewer, repo, &"f".repeat(40))
+}
+
+/// [`steps`], with the Run's branch at `head` on GitHub.
+fn steps_at(
+    reviewer: &Reviewer,
+    repo: &FakeRepo,
+    head: &str,
+) -> BuiltInSteps<Reviewer, FakeGithub, FakeRepo, FakeWatches> {
     let github = FakeGithub::default();
-    github.state().head = Some("f".repeat(40));
+    github.state().head = Some(head.to_string());
     BuiltInSteps::new(
         reviewer.clone(),
         PullRequestSteps::new(github, repo.clone(), FakeWatches::default()),
