@@ -188,3 +188,38 @@ async fn a_name_git_would_not_take_is_never_sent() {
         );
     }
 }
+
+/// A rule of the repository that forbids the branch is GitHub declining
+/// it, with its reason, not a failure to retry.
+#[tokio::test]
+async fn a_branch_a_rule_forbids_is_declined_with_the_reason() {
+    let server = answers(MockResponse {
+        status: "422 Unprocessable Entity",
+        body: r#"{"message":"Repository rule violations found","errors":[{"message":"Cannot create ref due to creations being restricted."}]}"#
+            .to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let created = client
+        .create_branch_with_files(
+            "token",
+            "macro",
+            "factory-definition",
+            GithubNewBranch {
+                name: "definition-change/1",
+                base_commit: BASE,
+                message: "Add a flow",
+                files: &[("agents.json", "{}")],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        created,
+        GithubBranchCreation::Refused(
+            "Cannot create ref due to creations being restricted.".to_string()
+        )
+    );
+    server.finish_all();
+}

@@ -30,6 +30,9 @@ pub enum GithubBranchCreation {
     Created,
     /// A branch of that name is already there; it was left as it is.
     Exists,
+    /// GitHub declined to create it, for this reason, as a ruleset that
+    /// restricts which branches may be created does.
+    Refused(String),
 }
 
 /// A branch to create: one commit on top of `base_commit` that writes
@@ -155,11 +158,21 @@ impl GithubOauthImpl {
         }
         let headers = response.headers().clone();
         let body = response_text(response).await;
-        let exists = status == StatusCode::UNPROCESSABLE_ENTITY
-            && serde_json::from_str::<GithubErrorBody>(&body)
-                .is_ok_and(|error| error.message == REFERENCE_EXISTS);
-        if exists {
-            return Ok(GithubBranchCreation::Exists);
+        // GitHub's answer about the branch itself: the name is taken, or a
+        // rule of the repository forbids it.
+        if status == StatusCode::UNPROCESSABLE_ENTITY {
+            let Ok(error) = serde_json::from_str::<GithubErrorBody>(&body) else {
+                return Err(unexpected(
+                    status,
+                    &headers,
+                    body,
+                    "failed to create a branch",
+                ));
+            };
+            if error.message == REFERENCE_EXISTS {
+                return Ok(GithubBranchCreation::Exists);
+            }
+            return Ok(GithubBranchCreation::Refused(error.reason()));
         }
         Err(refused(status, &headers, body, "failed to create a branch"))
     }
