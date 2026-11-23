@@ -1778,6 +1778,37 @@ export type ProjectRules = {
 };
 
 /**
+ * Request body for proposing a change to the team's Factory Definition.
+ */
+export type ProposeDefinitionChangeRequest = {
+    /**
+     * The change's id, a UUID the client makes once per change: sending
+     * the change again with it, as after a lost answer, answers the pull
+     * request it opened, open or merged, without checking or writing
+     * anything again (409 `definitionChangeClosed` once it was closed
+     * unmerged).
+     */
+    changeId: string;
+    /**
+     * Why, for whoever reviews the pull request.
+     */
+    description?: string | null;
+    /**
+     * The files it writes, each by its path from the repository's root
+     * (`factory.json`, `flows/{name}.json`, `agents.json`, `rules.json`,
+     * `scorers.json`), with its whole new text. Files left out stay as
+     * they are.
+     */
+    files: {
+        [key: string]: string;
+    };
+    /**
+     * What the change does, in a line: its pull request's title.
+     */
+    title: string;
+};
+
+/**
  * The Run that opened a pull request, as the board shows it.
  */
 export type PullRequestRun = {
@@ -2387,7 +2418,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson' | 'notInStandingRole' | 'unreachableDefinition' | 'invalidDefinition' | 'definitionNamed';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson' | 'notInStandingRole' | 'unreachableDefinition' | 'invalidDefinition' | 'definitionNamed' | 'noDefinition' | 'invalidDefinitionChange' | 'definitionChangeNotOpened' | 'definitionChangeClosed';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -4272,6 +4303,29 @@ export type SetFactoryDefinitionResponses = {
 };
 
 export type SetFactoryDefinitionResponse = SetFactoryDefinitionResponses[keyof SetFactoryDefinitionResponses];
+
+export type ProposeFactoryDefinitionChangeData = {
+    body: ProposeDefinitionChangeRequest;
+    path?: never;
+    query?: never;
+    url: '/settings/definition/changes';
+};
+
+export type ProposeFactoryDefinitionChangeErrors = {
+    400: RunErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    409: RunErrorResponse;
+    500: ErrorResponse;
+};
+
+export type ProposeFactoryDefinitionChangeError = ProposeFactoryDefinitionChangeErrors[keyof ProposeFactoryDefinitionChangeErrors];
+
+export type ProposeFactoryDefinitionChangeResponses = {
+    200: DefinitionPullRequest;
+};
+
+export type ProposeFactoryDefinitionChangeResponse = ProposeFactoryDefinitionChangeResponses[keyof ProposeFactoryDefinitionChangeResponses];
 
 export type GetFactoryStandingRulesData = {
     body?: never;

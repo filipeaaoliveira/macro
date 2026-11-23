@@ -14,6 +14,7 @@ import type {
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionPullRequest,
   DefinitionSettings,
   DismissalUndoneResponse,
   ErrorResponse,
@@ -29,6 +30,7 @@ import type {
   LinkTaskRequest,
   ListFactoryBoardParams,
   NoteStepRequest,
+  ProposeDefinitionChangeRequest,
   PullRequestRuns,
   PullRequestUrls,
   QualityInsights,
@@ -2876,6 +2878,97 @@ export const setFactoryDefinition = async (
     status: res.status,
     headers: res.headers,
   } as setFactoryDefinitionResponse;
+};
+
+/**
+ * @summary Propose a change to the caller's team's Factory Definition as a pull
+request on its repository, and answer that pull request. The Definition
+must read with the change at its default branch's head, as a Run's start
+reads it (400 `invalidDefinitionChange`, naming the file and the
+problem); each file written must be one it then reads. The change is
+committed on its own new branch, `definition-change/{changeId}`, never
+on the default branch, with the caller's GitHub account, which must
+push to the repository (400 `noPushAccess`); a person merges it. A
+branch GitHub will not create (a rule of the repository, or one of that
+name already there with no pull request) or a pull request it will not
+open is 409 `definitionChangeNotOpened`. Only an admin of the team
+proposes, in their own signed-in session (403 otherwise, before the
+change is checked); a team that names no Definition has none to change
+(409 `noDefinition`).
+ */
+export type proposeFactoryDefinitionChangeResponse200 = {
+  data: DefinitionPullRequest;
+  status: 200;
+};
+
+export type proposeFactoryDefinitionChangeResponse400 = {
+  data: RunErrorResponse;
+  status: 400;
+};
+
+export type proposeFactoryDefinitionChangeResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type proposeFactoryDefinitionChangeResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type proposeFactoryDefinitionChangeResponse409 = {
+  data: RunErrorResponse;
+  status: 409;
+};
+
+export type proposeFactoryDefinitionChangeResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type proposeFactoryDefinitionChangeResponseSuccess =
+  proposeFactoryDefinitionChangeResponse200 & {
+    headers: Headers;
+  };
+export type proposeFactoryDefinitionChangeResponseError = (
+  | proposeFactoryDefinitionChangeResponse400
+  | proposeFactoryDefinitionChangeResponse401
+  | proposeFactoryDefinitionChangeResponse403
+  | proposeFactoryDefinitionChangeResponse409
+  | proposeFactoryDefinitionChangeResponse500
+) & {
+  headers: Headers;
+};
+
+export type proposeFactoryDefinitionChangeResponse =
+  | proposeFactoryDefinitionChangeResponseSuccess
+  | proposeFactoryDefinitionChangeResponseError;
+
+export const getProposeFactoryDefinitionChangeUrl = () => {
+  return `/settings/definition/changes`;
+};
+
+export const proposeFactoryDefinitionChange = async (
+  proposeDefinitionChangeRequest: ProposeDefinitionChangeRequest,
+  options?: RequestInit
+): Promise<proposeFactoryDefinitionChangeResponse> => {
+  const res = await fetch(getProposeFactoryDefinitionChangeUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(proposeDefinitionChangeRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: proposeFactoryDefinitionChangeResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as proposeFactoryDefinitionChangeResponse;
 };
 
 /**

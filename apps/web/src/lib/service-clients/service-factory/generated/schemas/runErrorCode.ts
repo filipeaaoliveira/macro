@@ -21,4 +21,8 @@ export const RunErrorCode = {
   unreachableDefinition: 'unreachableDefinition',
   invalidDefinition: 'invalidDefinition',
   definitionNamed: 'definitionNamed',
+  noDefinition: 'noDefinition',
+  invalidDefinitionChange: 'invalidDefinitionChange',
+  definitionChangeNotOpened: 'definitionChangeNotOpened',
+  definitionChangeClosed: 'definitionChangeClosed',
 } as const;

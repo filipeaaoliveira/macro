@@ -3005,6 +3005,85 @@
         }
       }
     },
+    "/settings/definition/changes": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Propose a change to the caller's team's Factory Definition as a pull\nrequest on its repository, and answer that pull request. The Definition\nmust read with the change at its default branch's head, as a Run's start\nreads it (400 `invalidDefinitionChange`, naming the file and the\nproblem); each file written must be one it then reads. The change is\ncommitted on its own new branch, `definition-change/{changeId}`, never\non the default branch, with the caller's GitHub account, which must\npush to the repository (400 `noPushAccess`); a person merges it. A\nbranch GitHub will not create (a rule of the repository, or one of that\nname already there with no pull request) or a pull request it will not\nopen is 409 `definitionChangeNotOpened`. Only an admin of the team\nproposes, in their own signed-in session (403 otherwise, before the\nchange is checked); a team that names no Definition has none to change\n(409 `noDefinition`).",
+        "operationId": "propose_factory_definition_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeDefinitionChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionPullRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/settings/standing-rules": {
       "get": {
         "tags": ["factory"],
@@ -5656,6 +5735,36 @@
           }
         }
       },
+      "ProposeDefinitionChangeRequest": {
+        "type": "object",
+        "description": "Request body for proposing a change to the team's Factory Definition.",
+        "required": ["changeId", "title", "files"],
+        "properties": {
+          "changeId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The change's id, a UUID the client makes once per change: sending\nthe change again with it, as after a lost answer, answers the pull\nrequest it opened, open or merged, without checking or writing\nanything again (409 `definitionChangeClosed` once it was closed\nunmerged)."
+          },
+          "description": {
+            "type": ["string", "null"],
+            "description": "Why, for whoever reviews the pull request."
+          },
+          "files": {
+            "type": "object",
+            "description": "The files it writes, each by its path from the repository's root\n(`factory.json`, `flows/{name}.json`, `agents.json`, `rules.json`,\n`scorers.json`), with its whole new text. Files left out stay as\nthey are.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string",
+            "description": "What the change does, in a line: its pull request's title."
+          }
+        }
+      },
       "PullRequestRun": {
         "type": "object",
         "description": "The Run that opened a pull request, as the board shows it.",
@@ -6585,7 +6694,11 @@
           "notInStandingRole",
           "unreachableDefinition",
           "invalidDefinition",
-          "definitionNamed"
+          "definitionNamed",
+          "noDefinition",
+          "invalidDefinitionChange",
+          "definitionChangeNotOpened",
+          "definitionChangeClosed"
         ]
       },
       "RunErrorResponse": {
