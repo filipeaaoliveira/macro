@@ -124,6 +124,7 @@ fn a_pid_that_is_not_a_running_child_is_refused() {
             stderr: -1,
             pending_output: String::new(),
             active_prompts: Vec::new(),
+            workplaces: String::new(),
         },
     };
 
@@ -163,4 +164,12 @@ fn the_fallback_stops_the_agent_it_names() {
     // The reaper owns the child's exit status; this test must not wait too.
     let status = reaper.join().unwrap().expect("the agent was reaped");
     assert_eq!(status.terminating_signal(), Some(9));
+}
+
+/// State from an image that kept no workplaces still reads, with none.
+#[test]
+fn state_without_workplaces_reads_with_none() {
+    let raw = br#"{"version":1,"agent":{"pid":1,"stdin":-1,"stdout":-1,"stderr":-1,"pending_output":"","active_prompts":[]}}"#;
+    let state = parse_state(raw).unwrap();
+    assert_eq!(state.agent.workplaces, "");
 }
