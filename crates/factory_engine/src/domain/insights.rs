@@ -362,7 +362,7 @@ pub struct EntryInsight {
     /// The tokens its agent Steps used, if any recorded usage.
     pub tokens: Option<TokenCounts>,
     /// What its agent Steps' model calls cost, in US dollars; none unless
-    /// they recorded usage and every call was priced.
+    /// every session of theirs recorded usage and every call was priced.
     pub cost_usd: Option<f64>,
     /// The newest Runs where it failed or was visited more than once.
     pub trouble: Vec<TroubleRun>,
@@ -621,6 +621,9 @@ fn summarize(
     // What each entry's priced calls cost, and how many of its calls had no
     // price.
     let mut entry_cost: HashMap<&str, (f64, u64)> = HashMap::new();
+    // The entries with a session that recorded no usage: what they spent is
+    // not known, so no cost is given for them, as delivery gives none.
+    let mut entry_unmeasured: HashSet<&str> = HashSet::new();
     let mut run_tokens: HashMap<RunId, TokenCounts> = HashMap::new();
     let mut usage_total = TokenCounts::default();
     // A Step counts once however many sessions it worked in, and is
@@ -635,6 +638,7 @@ fn summarize(
     let mut counted: HashSet<(RunId, &str, Uuid)> = HashSet::new();
     for session in &records.sessions {
         let Some(used) = tokens_by_session.get(&session.session_id) else {
+            entry_unmeasured.insert(session.entry.as_str());
             continue;
         };
         measured_steps.insert((session.run_id, session.seq));
@@ -727,7 +731,7 @@ fn summarize(
                 tokens: entry_tokens.get(entry).copied(),
                 cost_usd: entry_cost
                     .get(entry)
-                    .filter(|(_, unpriced)| *unpriced == 0)
+                    .filter(|(_, unpriced)| *unpriced == 0 && !entry_unmeasured.contains(entry))
                     .map(|(usd, _)| *usd),
                 trouble: trouble.remove(entry).unwrap_or_default(),
             }

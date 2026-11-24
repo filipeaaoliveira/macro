@@ -467,7 +467,8 @@ async fn usage_is_summed_by_entry_and_run_for_the_caller() {
 }
 
 /// An entry's cost is what its sessions' priced calls cost, given only
-/// when every call was priced; an entry with no usage has none.
+/// when every session recorded usage and every call was priced: one
+/// measured session beside one that recorded none gives no cost.
 #[tokio::test]
 async fn an_entry_costs_its_priced_calls_when_every_call_was_priced() {
     let session = |n: u128| Uuid::from_u128(200 + n);
@@ -483,12 +484,16 @@ async fn an_entry_costs_its_priced_calls_when_every_call_was_priced() {
             entry_summary("plan", 2),
             entry_summary("write", 1),
             entry_summary("review", 1),
+            entry_summary("fix", 2),
         ],
         sessions: vec![
             step(1, "plan", 1),
             step(2, "plan", 2),
             step(3, "write", 3),
             step(4, "review", 4),
+            step(5, "fix", 5),
+            // A Step on a runtime that records no usage.
+            step(6, "fix", 6),
         ],
         ..InsightsRecords::default()
     };
@@ -503,7 +508,12 @@ async fn an_entry_costs_its_priced_calls_when_every_call_was_priced() {
     };
     let service = service(
         records,
-        vec![used(1, 0.25, 0), used(2, 0.5, 0), used(3, 1.0, 2)],
+        vec![
+            used(1, 0.25, 0),
+            used(2, 0.5, 0),
+            used(3, 1.0, 2),
+            used(5, 0.75, 0),
+        ],
     );
 
     let insights = service
@@ -521,6 +531,7 @@ async fn an_entry_costs_its_priced_calls_when_every_call_was_priced() {
     assert_eq!(cost("plan"), Some(0.75));
     assert_eq!(cost("write"), None);
     assert_eq!(cost("review"), None);
+    assert_eq!(cost("fix"), None);
 }
 
 /// A Step that went on in a new session counts as one Step: one passed
