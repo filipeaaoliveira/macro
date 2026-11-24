@@ -436,6 +436,9 @@ pub struct Run {
     /// The Run that retried it; none until one does. A Run is retried at
     /// most once, so this names the next Run of a chain of retries.
     pub retried_by: Option<RunId>,
+    /// When its pull request was merged, as its `merge` Step saw it merged
+    /// (`factory_merge`); none for a Run that merged none.
+    pub merged_at: Option<DateTime<Utc>>,
 }
 
 /// What a Run that retries another keeps of it: the Run it retries, the
@@ -930,6 +933,29 @@ pub struct Step {
     /// Its Step Terminal: the session its owner may watch, and how they
     /// steered it.
     pub terminal: StepTerminal,
+    /// Where its agent's session ran, and as which agent.
+    pub runtime: StepRuntime,
+}
+
+/// Where an agent Step's session ran: the model, the Machine, and the
+/// Macro agent (bot) whose session it is, by its display name. Each is none
+/// for a Step no agent does, and for a Step from before Steps kept it; a
+/// Step that went on in a new session reads that session's.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StepRuntime {
+    /// The model the session ran on, as the session recorded it when the
+    /// Step first saw it open.
+    pub model: Option<String>,
+    /// The Machine the session first opened on: the name of the harness its
+    /// bot was bound to when the Step first saw it open, a macrod machine
+    /// or a Macro computer. None for an in-memory runtime. Only the Run's
+    /// owner reads it: a harness is private to whoever paired it.
+    pub machine: Option<String>,
+    /// The display name of the Macro agent (bot) whose session it is, read
+    /// live, so renaming the agent renames it on old Runs too; none for a
+    /// first-party bot, which has no row of its own.
+    pub agent_name: Option<String>,
 }
 
 /// A running agent Step as its owner watches and steers it, from the Run

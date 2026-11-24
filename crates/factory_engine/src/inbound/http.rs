@@ -1,6 +1,7 @@
 //! Axum router for the Run API.
 
 mod board;
+mod ci_quarantine;
 mod control_files;
 mod definition;
 mod main_hold;
@@ -21,7 +22,7 @@ use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
     AskedBack, ControlFileChanges, DefinitionRead, EntryId, FlawMarker, Gate, GateAnswer,
     GateModelReading, HandBack, Outcome, Run, RunDefinition, RunEnd, RunFlaw, RunId, RunOutcome,
-    RunRetry, StandInAnswer, Steer, SteerAction, Step, StepEnd, StepTerminal,
+    RunRetry, StandInAnswer, Steer, SteerAction, Step, StepEnd, StepRuntime, StepTerminal,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -36,10 +37,10 @@ use crate::domain::board::{
     BoardNext, BoardPage, BoardRun, BoardScope, PullRequestRun, PullRequestRuns,
 };
 use crate::domain::models::{
-    ActingAgent, Answerer, ControlFilesSettings, DefinitionChangeCheck, DefinitionContents,
-    DefinitionFile, DefinitionFlow, DefinitionPullRequest, DefinitionRole, DefinitionScorer,
-    DefinitionSettings, FactoryError, FlowSummary, PersonOnly, RunDetail, SessionStepRef,
-    StandingRulesSettings,
+    ActingAgent, Answerer, CiQuarantineChange, ControlFilesSettings, DefinitionChangeCheck,
+    DefinitionContents, DefinitionFile, DefinitionFlow, DefinitionPullRequest, DefinitionRole,
+    DefinitionScorer, DefinitionSettings, FactoryError, FlowSummary, PersonOnly, RunDetail,
+    SessionStepRef, StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -138,6 +139,9 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   default.
 /// - `PUT /settings/standing-rules/projects/{project_id}` — set or remove a
 ///   Project's own.
+/// - `POST /insights/ci-quarantines` — a team's owner or admin quarantines
+///   a CI job of a repository they may push to, in person.
+/// - `POST /insights/ci-quarantines/release` — or releases it.
 /// - `POST /internal/main-holds/clear` — an internal caller, for an
 ///   operator, clears a base branch's Main Hold; not in the OpenAPI
 ///   document.
@@ -226,6 +230,14 @@ where
         .route(
             "/settings/standing-rules/projects/{project_id}",
             put(standing_rules::set_project_standing_rules_handler::<S, Auth>),
+        )
+        .route(
+            "/insights/ci-quarantines",
+            post(ci_quarantine::quarantine_ci_job_handler::<S, Auth>),
+        )
+        .route(
+            "/insights/ci-quarantines/release",
+            post(ci_quarantine::release_ci_job_handler::<S, Auth>),
         )
         .route(
             "/internal/main-holds/clear",
@@ -1246,6 +1258,7 @@ impl FactoryError {
             | FactoryError::RepositoryRequired
             | FactoryError::RepositoryNotUsed
             | FactoryError::InvalidRepository
+            | FactoryError::InvalidCiJob
             | FactoryError::UnreachableRepository
             | FactoryError::NoPushAccess
             | FactoryError::UnreachableDefinition
@@ -1449,7 +1462,9 @@ impl IntoResponse for FactoryError {
         definition::check_definition_change_handler,
         standing_rules::get_standing_rules_handler,
         standing_rules::set_standing_rules_handler,
-        standing_rules::set_project_standing_rules_handler
+        standing_rules::set_project_standing_rules_handler,
+        ci_quarantine::quarantine_ci_job_handler,
+        ci_quarantine::release_ci_job_handler
     ),
     components(schemas(
         FlowsResponse,
@@ -1483,6 +1498,7 @@ impl IntoResponse for FactoryError {
         Step,
         StepEnd,
         StepTerminal,
+        StepRuntime,
         Steer,
         SteerAction,
         Gate,
@@ -1515,6 +1531,8 @@ impl IntoResponse for FactoryError {
         RulesSource,
         StandingRule,
         standing_rules::SetStandingRulesRequest,
+        ci_quarantine::CiJobRequest,
+        CiQuarantineChange,
         MacroUserIdStr,
         EntryId,
         Outcome,

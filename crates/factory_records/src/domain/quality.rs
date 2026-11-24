@@ -305,8 +305,12 @@ pub struct FlakyCiFailure {
 pub struct CiFlakes {
     /// The jobs the Run's Factory Definition names as known flakes.
     pub known: Vec<String>,
-    /// The failures quarantined in the Run's repository, not lapsed.
+    /// The failures quarantined in the Run's repository by their reruns,
+    /// not lapsed: each covers its own failure only.
     pub quarantined: Vec<CiFailureIdentity>,
+    /// The jobs quarantined whole in the Run's repository by hand, not
+    /// lapsed: each covers every failure of its job.
+    pub quarantined_jobs: Vec<String>,
     /// The failures proved flaky on other pull requests of the repository
     /// over the period read, the most widespread first.
     pub failures: Vec<FlakyCiFailure>,
@@ -374,8 +378,9 @@ pub struct QualityRun {
     pub repository: Option<String>,
     /// The page of the pull request it opened.
     pub pull_request: Option<String>,
-    /// Whether it merged its pull request.
-    pub merged: bool,
+    /// When it merged its pull request, on the worker's clock; none when
+    /// it did not.
+    pub merged_at: Option<DateTime<Utc>>,
     /// Whether a person answered one of its Gates: not a Standing Rule, the
     /// stand-in or an agent.
     pub person_answered: bool,

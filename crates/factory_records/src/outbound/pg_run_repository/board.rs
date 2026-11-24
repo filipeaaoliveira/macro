@@ -53,6 +53,7 @@ struct BoardRunRow {
     branch_run_id: Option<Uuid>,
     first_seq: Option<i32>,
     retried_by: Option<Uuid>,
+    merged_at: Option<DateTime<Utc>>,
     task_name: Option<String>,
     task_live: bool,
     state: String,
@@ -104,6 +105,7 @@ impl TryFrom<BoardRunRow> for BoardRun {
             branch_run_id: row.branch_run_id,
             first_seq: row.first_seq,
             retried_by: row.retried_by,
+            merged_at: row.merged_at,
         })?;
         Ok(BoardRun {
             run,
@@ -184,6 +186,7 @@ impl RunBoardRepository for PgRunRepository {
                 r.retried_from AS "retried_from?", r.branch_run_id AS "branch_run_id?",
                 r.first_seq AS "first_seq?",
                 (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?",
+                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS "merged_at?",
                 r.task_name AS "task_name?", r.task_live AS "task_live!",
                 r.state AS "state!"
             FROM (
@@ -305,6 +308,7 @@ impl RunBoardRepository for PgRunRepository {
                 r.retried_from AS "retried_from?", r.branch_run_id AS "branch_run_id?",
                 r.first_seq AS "first_seq?",
                 (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?",
+                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS "merged_at?",
                 r.task_name AS "task_name?", r.task_live AS "task_live!",
                 r.state AS "state!"
             FROM (
@@ -445,6 +449,7 @@ impl RunBoardRepository for PgRunRepository {
                 r.retried_from AS "retried_from?", r.branch_run_id AS "branch_run_id?",
                 r.first_seq AS "first_seq?",
                 (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?",
+                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS "merged_at?",
                 CASE WHEN task.live THEN d.name END AS "task_name?",
                 task.live AS "task_live!",
                 place.state AS "state!"

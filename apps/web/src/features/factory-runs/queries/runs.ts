@@ -97,6 +97,8 @@ export function toRun(detail: RunDetail): Run {
           flaw: run.end.flaw ?? undefined,
         }
       : undefined,
+    // A Run that merged none, and a service older than merge times, send none.
+    mergedAt: run.mergedAt ?? undefined,
     steps: detail.steps.map((step) => ({
       seq: step.seq,
       entry: step.entry,
@@ -138,6 +140,14 @@ export function toRun(detail: RunDetail): Run {
         : undefined,
       role: step.role ?? undefined,
       agent: step.agent ?? undefined,
+      // A service older than runtimes sends none.
+      runtime: step.runtime
+        ? {
+            model: step.runtime.model ?? undefined,
+            machine: step.runtime.machine ?? undefined,
+            agentName: step.runtime.agentName ?? undefined,
+          }
+        : undefined,
       passedOver: step.passedOver,
       // A service older than the Step Terminal sends none.
       terminal: step.terminal

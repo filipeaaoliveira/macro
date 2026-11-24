@@ -41,6 +41,7 @@ fn step(seq: u16, entry: &str, outcome: &str, output: String, checks: Vec<CheckR
         passed_over: Vec::new(),
         checks,
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 

@@ -36,7 +36,7 @@ import {
   WHOLE_CHANGE,
 } from '../core/run';
 import { RULE_NAMES } from '../core/standing-rules';
-import { stageIcon } from './live-pipeline';
+import { RuntimeChips, stageIcon } from './live-pipeline';
 
 /** The classes of a Step's outcome badge, by its tone. */
 const OUTCOME_TONES = {
@@ -290,6 +290,8 @@ function TimelineStep(props: {
                 </span>
               )}
             </For>
+            {/* Where it ran: the agent, its model and Machine, once known. */}
+            <RuntimeChips step={props.step} class="mt-1" />
           </StepNote>
         )}
       </Show>

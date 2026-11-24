@@ -33,6 +33,8 @@ import {
   getNoteFactoryStepUrl,
   getPauseFactoryStepUrl,
   getProposeFactoryDefinitionChangeUrl,
+  getQuarantineFactoryCiJobUrl,
+  getReleaseFactoryCiJobUrl,
   getReplyToFactoryGateUrl,
   getResumeFactoryStepUrl,
   getRetryFactoryRunUrl,
@@ -50,6 +52,8 @@ import type {
   AutomationsSettings,
   BoardPage,
   CheckDefinitionChangeRequest,
+  CiJobRequest,
+  CiQuarantineChange,
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
@@ -712,6 +716,37 @@ export const factoryClient = {
     return fetchWithToken<DismissalUndoneResponse>(
       `${host()}${getUndoFactoryImprovementDismissalUrl(encodeURIComponent(improvementId))}`,
       { method: 'POST' }
+    );
+  },
+
+  /**
+   * Quarantines a CI job of a repository by hand: every failure of it is a
+   * known flake there. Only an owner or admin of the person's team who may
+   * push to the repository; a refusal carries the service's message.
+   */
+  quarantineCiJob(request: CiJobRequest) {
+    return fetchWithToken<CiQuarantineChange>(
+      `${host()}${getQuarantineFactoryCiJobUrl()}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+        errorResponseHandler: refusal,
+      }
+    );
+  },
+
+  /**
+   * Releases a CI job of a repository: lifts every quarantine of it. The
+   * same people as for a quarantine may.
+   */
+  releaseCiJob(request: CiJobRequest) {
+    return fetchWithToken<CiQuarantineChange>(
+      `${host()}${getReleaseFactoryCiJobUrl()}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+        errorResponseHandler: refusal,
+      }
     );
   },
 };

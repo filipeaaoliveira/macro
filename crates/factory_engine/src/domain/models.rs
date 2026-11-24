@@ -887,6 +887,20 @@ pub struct RunDetail {
     pub split_tasks: Vec<SplitTask>,
 }
 
+impl RunDetail {
+    /// The Run as `viewer` reads it. The names of the Machines its Steps ran
+    /// on are its owner's: a harness is private to the person or team that
+    /// paired it, so a team member reading someone else's Run sees none.
+    pub fn as_seen_by(mut self, viewer: &MacroUserIdStr<'_>) -> Self {
+        if self.run.user_id.as_ref() != viewer.as_ref() {
+            for step in &mut self.steps {
+                step.runtime.machine = None;
+            }
+        }
+        self
+    }
+}
+
 /// The Control File patterns a person's Runs are checked against: their
 /// team's, or the factory's default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
@@ -1222,6 +1236,20 @@ fn queue_limit_source(source: RulesSource) -> &'static str {
     }
 }
 
+/// A CI job a person quarantined or released by hand, and whether that
+/// changed anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CiQuarantineChange {
+    /// The repository, by its URL in lower case, as quarantines name it.
+    pub repository: String,
+    /// The job.
+    pub job: String,
+    /// Whether anything changed: quarantining a job quarantined already,
+    /// or releasing one that is not, changes nothing.
+    pub changed: bool,
+}
+
 /// Errors of the factory's Run use cases.
 #[derive(Debug, thiserror::Error)]
 pub enum FactoryError {
@@ -1267,6 +1295,9 @@ pub enum FactoryError {
     /// The repository is not named by a `https://github.com/owner/name` URL.
     #[error("the repository must be named by a https://github.com/owner/name URL")]
     InvalidRepository,
+    /// A CI job to quarantine or release is named by no name.
+    #[error("name the ci job to quarantine or release")]
+    InvalidCiJob,
     /// The Run's owner cannot reach the repository with their GitHub
     /// account, has not connected one, or the repository has no branch yet.
     #[error(

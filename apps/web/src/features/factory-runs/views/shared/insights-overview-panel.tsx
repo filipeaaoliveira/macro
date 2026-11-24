@@ -1,4 +1,5 @@
 import { t } from '@app/lib/i18n';
+import { toast } from '@core/component/Toast/Toast';
 import { cn } from '@ui';
 import { type Accessor, createMemo, For, Show } from 'solid-js';
 import {
@@ -267,6 +268,7 @@ export function InsightsOverviewPanel(props: {
   const quality = context.quality(props.params);
   const previousQuality = context.quality(before);
   const evaluation = context.evaluation(props.params);
+  const isTeamAdmin = context.isTeamAdmin();
   const points = (read: EvaluationInsights) =>
     paretoPoints(read.suites, suiteStandings(read.suites));
 
@@ -295,7 +297,27 @@ export function InsightsOverviewPanel(props: {
             <div class="flex min-w-0 flex-col gap-4">
               <TroubleCard entries={troubledEntries(insights().entries)} />
               <Show when={quality.data()}>
-                {(read) => <FlakyCiTable ci={read().ci} />}
+                {(read) => (
+                  <FlakyCiTable
+                    ci={read().ci}
+                    onQuarantine={
+                      isTeamAdmin()
+                        ? async (job, quarantine) => {
+                            const result = await context.setCiQuarantine(
+                              job,
+                              quarantine
+                            );
+                            if (!result.ok) {
+                              toast.failure(
+                                result.message ??
+                                  t('factoryInsights.ciQuarantineFailed')
+                              );
+                            }
+                          }
+                        : undefined
+                    }
+                  />
+                )}
               </Show>
             </div>
             <RoleCards

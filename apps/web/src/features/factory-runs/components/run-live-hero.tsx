@@ -14,6 +14,7 @@ import {
   elapsedMs,
   flowStages,
   formatElapsed,
+  mergedAt,
   type PipelineStage,
   runPipeline,
   workingSteps,
@@ -147,6 +148,9 @@ function OutcomeCard(props: {
       (stage) => stage.state === 'failed' || stage.state === 'stopped'
     );
   const pr = () => props.run.pullRequestUrl?.split('/').at(-1);
+  // A merged Run counts to its merge, not to the Steps after it.
+  const endedAt = () =>
+    (merged() ? mergedAt(props.run) : undefined) ?? props.end.endedAt;
   const Icon = () =>
     merged() ? GitMergeIcon : stageIcon(stoppedAt()?.entry ?? '');
   return (
@@ -183,10 +187,8 @@ function OutcomeCard(props: {
         </span>
         <span class="text-xs text-ink-muted">
           {t('factoryDashboard.endedSummary', {
-            time: formatElapsed(
-              elapsedMs(props.run.createdAt, props.end.endedAt)
-            ),
-            ago: formatCompactRelativeTimestamp(props.end.endedAt),
+            time: formatElapsed(elapsedMs(props.run.createdAt, endedAt())),
+            ago: formatCompactRelativeTimestamp(endedAt()),
           })}
         </span>
       </div>

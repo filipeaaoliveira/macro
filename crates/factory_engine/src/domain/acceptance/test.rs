@@ -232,6 +232,7 @@ fn checks_dropped_for_their_size_do_not_read() {
         gate: None,
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     };
 
     assert_eq!(

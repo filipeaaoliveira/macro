@@ -131,6 +131,7 @@ fn ended(seq: u16, entry: &str, visit: u16, outcome: &str, output: &str) -> Step
         gate: None,
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 

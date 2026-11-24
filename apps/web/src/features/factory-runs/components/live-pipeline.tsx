@@ -16,6 +16,7 @@ import MagnifyingGlassIcon from '@icon/system/regular/magnifying-glass.svg';
 import MinusIcon from '@icon/system/regular/minus-circle.svg';
 import PencilIcon from '@icon/system/regular/pencil-simple.svg';
 import RepeatIcon from '@icon/system/regular/repeat.svg';
+import RobotIcon from '@icon/system/regular/robot.svg';
 import ShieldCheckIcon from '@icon/system/regular/shield-check.svg';
 import TerminalIcon from '@icon/system/regular/terminal.svg';
 import UsersThreeIcon from '@icon/system/regular/users-three.svg';
@@ -231,24 +232,50 @@ export function RoleAvatar(props: {
 }
 
 /**
- * Where a Step runs: its model and its Machine, each only once the API says
- * (`stepRuntime`); nothing in their place until then.
+ * Where a Step runs: the agent whose session it is, its model and its
+ * Machine, each only once the API says (`stepRuntime`); nothing in their
+ * place until then. `agent` false leaves the agent out, where the view
+ * names it already.
  */
-export function RuntimeChips(props: { step: RunStep; class?: string }) {
+export function RuntimeChips(props: {
+  step: RunStep;
+  agent?: boolean;
+  class?: string;
+}) {
   const runtime = () => stepRuntime(props.step);
   const chips = () =>
     [
-      { icon: CpuIcon, value: runtime().model },
-      { icon: DesktopIcon, value: runtime().machine },
-    ].filter((chip): chip is { icon: Icon; value: string } => !!chip.value);
+      {
+        icon: RobotIcon,
+        value: props.agent === false ? undefined : runtime().agentName,
+        label: (agent: string) => t('factoryDashboard.agentNamed', { agent }),
+      },
+      {
+        icon: CpuIcon,
+        value: runtime().model,
+        label: (model: string) => t('factoryDashboard.runtimeModel', { model }),
+      },
+      {
+        icon: DesktopIcon,
+        value: runtime().machine,
+        label: (machine: string) =>
+          t('factoryDashboard.runtimeMachine', { machine }),
+      },
+    ].filter((chip): chip is typeof chip & { value: string } => !!chip.value);
   return (
     <Show when={chips().length > 0}>
       <span class={cn('flex flex-wrap items-center gap-1', props.class)}>
         <For each={chips()}>
           {(chip) => (
-            <span class="inline-flex h-5 max-w-40 items-center gap-1 rounded-md bg-surface-2 px-1.5 text-[11px] text-ink-muted">
+            <span
+              class="inline-flex h-5 max-w-40 items-center gap-1 rounded-md bg-surface-2 px-1.5 text-[11px] text-ink-muted"
+              title={chip.label(chip.value)}
+            >
               <Dynamic component={chip.icon} class="size-3 shrink-0" />
-              <span class="truncate">{chip.value}</span>
+              <span class="sr-only">{chip.label(chip.value)}</span>
+              <span class="truncate" aria-hidden="true">
+                {chip.value}
+              </span>
             </span>
           )}
         </For>

@@ -846,6 +846,144 @@
         }
       }
     },
+    "/insights/ci-quarantines": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Quarantine a CI job of a repository: every failure of it is a known\nflake there, which the `rerun_flaky_ci` Standing Rule reruns once before\nany CI fix. Quarantines are per repository, so this reaches every team's\nRuns on it, not only the caller's team's. It files no task; each passed\nrerun of the job extends it, and it lapses 30 days after it was made or\na rerun of it last passed. Quarantining a job that is so already\nchanges nothing. Only an owner or admin of a team, from an account that\nis not an agent's, in their own signed-in session (403 otherwise), who\nmay push to the repository (400 otherwise). The job's name is trimmed,\nand cut as CI health keeps job names.",
+        "operationId": "quarantine_factory_ci_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CiJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CiQuarantineChange"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/ci-quarantines/release": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Release a CI job of a repository: lift every quarantine of it, made by\nhand or by its passed reruns, for every team's Runs on it. Its reruns and\ngreens before the release no longer prove it flaky, so its failures go\nto a CI fix again until new evidence, or a person, quarantines it anew;\na job the Factory Definition names in `knownFlakes` stays a known flake.\nReleasing a job that is not quarantined changes nothing. The same\npeople as for a quarantine may.",
+        "operationId": "release_factory_ci_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CiJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CiQuarantineChange"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/insights/evaluation": {
       "get": {
         "tags": ["factory"],
@@ -4565,6 +4703,40 @@
           }
         }
       },
+      "CiJobRequest": {
+        "type": "object",
+        "description": "The CI job to quarantine or release.",
+        "required": ["repository", "job"],
+        "properties": {
+          "job": {
+            "type": "string",
+            "description": "The job's name: its check run's, or its commit status's context."
+          },
+          "repository": {
+            "type": "string",
+            "description": "The repository's `https://github.com/owner/name` URL."
+          }
+        }
+      },
+      "CiQuarantineChange": {
+        "type": "object",
+        "description": "A CI job a person quarantined or released by hand, and whether that\nchanged anything.",
+        "required": ["repository", "job", "changed"],
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "description": "Whether anything changed: quarantining a job quarantined already,\nor releasing one that is not, changes nothing."
+          },
+          "job": {
+            "type": "string",
+            "description": "The job."
+          },
+          "repository": {
+            "type": "string",
+            "description": "The repository, by its URL in lower case, as quarantines name it."
+          }
+        }
+      },
       "CiQuarantined": {
         "type": "object",
         "description": "A failure of a CI job quarantined in a repository: its reruns passed\noften enough that it counts as a known flake there, until no rerun of\nit passed for 30 days.",
@@ -5129,6 +5301,17 @@
             "description": "Ended Runs with a Step their owner steered.",
             "minimum": 0
           },
+          "timeToMerge": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DurationStats",
+                "description": "How long those took from their creation to their merge; none while\nnone merged."
+              }
+            ]
+          },
           "tokens": {
             "$ref": "#/components/schemas/TokenCounts",
             "description": "The tokens every Run's agents used."
@@ -5217,6 +5400,11 @@
           "trouble"
         ],
         "properties": {
+          "costUsd": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "What its agent Steps' model calls cost, in US dollars; none unless\nevery session of theirs recorded usage and every call was priced."
+          },
           "duration": {
             "oneOf": [
               {
@@ -5894,6 +6082,17 @@
             "type": "string",
             "format": "date",
             "description": "The day, in the period's time zone."
+          },
+          "runDuration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DurationStats",
+                "description": "How long its Runs took from creation to their end, as\n[`RunInsights::run_duration`] measures them; none when none of them\nended but cancelled."
+              }
+            ]
           }
         }
       },
@@ -6929,6 +7128,11 @@
           "id": {
             "$ref": "#/components/schemas/RunId",
             "description": "The Run's id, also its Temporal workflow id."
+          },
+          "mergedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When its pull request was merged, as its `merge` Step saw it merged\n(`factory_merge`); none for a Run that merged none."
           },
           "projectId": {
             "type": ["string", "null"],
@@ -8036,7 +8240,8 @@
           "startedAt",
           "passedOver",
           "checks",
-          "terminal"
+          "terminal",
+          "runtime"
         ],
         "properties": {
           "agent": {
@@ -8101,6 +8306,10 @@
               }
             ]
           },
+          "runtime": {
+            "$ref": "#/components/schemas/StepRuntime",
+            "description": "Where its agent's session ran, and as which agent."
+          },
           "seq": {
             "type": "integer",
             "format": "int32",
@@ -8141,6 +8350,24 @@
           "output": {
             "type": "string",
             "description": "What the Step produced, for a person to read."
+          }
+        }
+      },
+      "StepRuntime": {
+        "type": "object",
+        "description": "Where an agent Step's session ran: the model, the Machine, and the\nMacro agent (bot) whose session it is, by its display name. Each is none\nfor a Step no agent does, and for a Step from before Steps kept it; a\nStep that went on in a new session reads that session's.",
+        "properties": {
+          "agentName": {
+            "type": ["string", "null"],
+            "description": "The display name of the Macro agent (bot) whose session it is, read\nlive, so renaming the agent renames it on old Runs too; none for a\nfirst-party bot, which has no row of its own."
+          },
+          "machine": {
+            "type": ["string", "null"],
+            "description": "The Machine the session first opened on: the name of the harness its\nbot was bound to when the Step first saw it open, a macrod machine\nor a Macro computer. None for an in-memory runtime. Only the Run's\nowner reads it: a harness is private to whoever paired it."
+          },
+          "model": {
+            "type": ["string", "null"],
+            "description": "The model the session ran on, as the session recorded it when the\nStep first saw it open."
           }
         }
       },

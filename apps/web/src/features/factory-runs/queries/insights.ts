@@ -10,6 +10,7 @@ import {
 import type { InsightsContext } from '../context/insights-context';
 import type { InsightsParams } from '../core/insights';
 import type { QualityParams } from '../core/quality';
+import { automationsOptions } from './automations';
 import { factoryRunKeys } from './keys';
 import { flowsOptions, toSource } from './runs';
 
@@ -131,6 +132,28 @@ export function createAppInsightsContext(client: QueryClient): InsightsContext {
       }
       await reads.catch(() => undefined);
       return { ok: true, value: undefined };
+    },
+
+    isTeamAdmin: () => {
+      // The team's Automations say whether the person administers it.
+      const automations = useQuery(() => automationsOptions());
+      return () => automations.data?.isAdmin ?? false;
+    },
+
+    async setCiQuarantine(job, quarantine) {
+      const result = quarantine
+        ? await factoryClient.quarantineCiJob(job)
+        : await factoryClient.releaseCiJob(job);
+      // Either way, quality shows where the job stands now.
+      const reads = client.invalidateQueries({
+        queryKey: factoryRunKeys.quality._def,
+      });
+      if (result.isErr()) {
+        fireAndForget(reads, 'factory-runs');
+        return { ok: false, message: result.error[0]?.message };
+      }
+      await reads.catch(() => undefined);
+      return { ok: true };
     },
   };
 }
