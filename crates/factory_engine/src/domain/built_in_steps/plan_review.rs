@@ -277,7 +277,10 @@ where
             match made {
                 Some(FollowUpMade::Made) => {
                     // Kept for the Run's read, which lists the children
-                    // without asking document storage.
+                    // without asking document storage. A failed write is
+                    // a records error, which is retried: the retry files
+                    // the same ids, which document storage finds made,
+                    // and the write does nothing for a child kept already.
                     let place = u16::try_from(index).unwrap_or(u16::MAX);
                     self.pull_requests
                         .records()
