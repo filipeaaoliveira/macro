@@ -283,10 +283,13 @@ its Step only reads its checkout (`reads_only`, by the Step, whatever Role
 its entry names: `plan`, `plan_review`, `review`, `accept`, `verify`). A Run
 is retried at most once (`AlreadyRetried`, 409 `alreadyRetried`; retry
 the newest retry instead), and a Run that may not be retried is 409
-`notRetriable`. A retried Run names its retry (`retriedBy`, on its read and
-in every list of Runs, read through `factory_run_retried_from_idx`), so a
-chain of retries is followed forward without a search. A retry is held to the Queue limit a new Run would be, and an
-agent acting for the owner needs a Standing Role that allows `start`. The
+`notRetriable`. A Run that names its retry already is refused so before
+any other check, and the unique index on the retry's insert settles a race.
+A retried Run names its retry (`retriedBy`, on its read and in every list
+of Runs, read through `factory_run_retried_from_idx`), so a chain of
+retries is followed forward without a search. A retry is held to the Queue
+limit a new Run would be, and an agent acting for the owner needs a
+Standing Role that allows `start`. The
 retry is created in person only when its owner retried it in person, from
 an account that is not an agent's. The kept Steps' sessions count against
 its token budget, so a Run its budget stopped stops again; Insights, the
@@ -1186,8 +1189,8 @@ under `rerun_flaky_ci`, by Step then job, with its job, failed step, test,
 `attempt` among the job's reruns in the Run, why it was taken for flaky,
 and how it ended) and the quarantines its passed reruns made
 (`ciQuarantines`), and the child tasks its `split` Step filed
-(`splitTasks`); a list of Runs leaves them out too. A round the agent runs (no `exec`) and a red Step run no
-break.
+(`splitTasks`); a list of Runs leaves them out too. A round the agent
+runs (no `exec`) and a red Step run no break.
 
 Each check the engine runs is told the change it checks
 (`src/domain/check_context.rs`), since its worktree may hold only the
