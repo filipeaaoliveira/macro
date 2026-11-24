@@ -38,8 +38,8 @@ use crate::domain::models::{
     GateModelReading, HandBack, HandedBack, InvalidName, NewRetry, NewRun, NewSteer, Outcome,
     PassedOver, QueueHold, QueuePlaces, Repository, RetryInsert, Role, Run, RunDefinition, RunEnd,
     RunFlow, RunId, RunInsert, RunOutcome, RunRetry, SessionStep, StandInAnswer, SteerRefusal,
-    Steered, Step, StepEnd, StepKey, StepSession, StepSteering, StepTerminal, StoppingSession,
-    TaskLink, TeamMembership,
+    Steered, Step, StepEnd, StepKey, StepRuntime, StepSession, StepSteering, StepTerminal,
+    StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -307,6 +307,7 @@ struct RunRow {
     branch_run_id: Option<Uuid>,
     first_seq: Option<i32>,
     retried_by: Option<Uuid>,
+    merged_at: Option<DateTime<Utc>>,
 }
 
 /// The token budget a Run keeps, stored as `stored`.
@@ -438,6 +439,7 @@ impl TryFrom<RunRow> for Run {
                 _ => return Err(PgRunRepositoryErr::PartialRetry),
             },
             retried_by: row.retried_by.map(RunId::from_uuid),
+            merged_at: row.merged_at,
         })
     }
 }
@@ -485,6 +487,9 @@ struct StepRow {
     stop_asked_at: Option<DateTime<Utc>>,
     between_turns: bool,
     pause_ran_out_at: Option<DateTime<Utc>>,
+    model: Option<String>,
+    machine: Option<String>,
+    agent_name: Option<String>,
 }
 
 impl StepRow {
@@ -724,6 +729,11 @@ impl TryFrom<StepRow> for Step {
                 pause_ran_out_at: row.pause_ran_out_at,
                 steers: Vec::new(),
             },
+            runtime: StepRuntime {
+                model: row.model,
+                machine: row.machine,
+                agent_name: row.agent_name,
+            },
         })
     }
 }
@@ -793,7 +803,8 @@ impl RunRepository for PgRunRepository {
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
                 token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
-                NULL::uuid AS "retried_by?"
+                NULL::uuid AS "retried_by?",
+                NULL::timestamptz AS "merged_at?"
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -918,7 +929,8 @@ impl RunRepository for PgRunRepository {
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
                 token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
-                NULL::uuid AS "retried_by?"
+                NULL::uuid AS "retried_by?",
+                NULL::timestamptz AS "merged_at?"
             "#,
             retry.id.as_uuid(),
             retry.retried.as_uuid(),
@@ -979,13 +991,13 @@ impl RunRepository for PgRunRepository {
                 run_id, seq, entry, visit, started_at, outcome, output, ended_at, session_id,
                 action_id, offered, handed_outcome, handed_output, handed_at, session_released_at,
                 prepared_at, opened_at, role, agent, passed_over, pass_reasons, bot_id,
-                setup_session_id, setup_passed
+                setup_session_id, setup_passed, model, machine
             )
             SELECT
                 $1, seq, entry, visit, started_at, outcome, output, ended_at, session_id,
                 action_id, offered, handed_outcome, handed_output, handed_at, session_released_at,
                 prepared_at, opened_at, role, agent, passed_over, pass_reasons, bot_id,
-                setup_session_id, setup_passed
+                setup_session_id, setup_passed, model, machine
             FROM factory_step
             WHERE run_id = $2 AND seq < $3 AND ended_at IS NOT NULL
             "#,
@@ -1567,7 +1579,8 @@ impl RunRepository for PgRunRepository {
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
                 token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
-                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?",
+                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS "merged_at?"
             FROM factory_run r
             WHERE id = $1
             "#,
@@ -1626,9 +1639,13 @@ impl RunRepository for PgRunRepository {
                 s.paused_at,
                 s.stop_asked_at,
                 s.steer_closed AND s.ended_at IS NULL AS "between_turns!",
-                s.pause_ran_out_at
+                s.pause_ran_out_at,
+                s.model,
+                s.machine,
+                b.name AS "agent_name?"
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
+            LEFT JOIN bots b ON b.id = s.bot_id
             WHERE s.run_id = $1
             ORDER BY s.seq
             "#,
@@ -1673,7 +1690,8 @@ impl RunRepository for PgRunRepository {
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
                 token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
-                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?",
+                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS "merged_at?"
             FROM factory_run r
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -1713,7 +1731,8 @@ impl RunRepository for PgRunRepository {
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
                 token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
-                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?",
+                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS "merged_at?"
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1761,7 +1780,8 @@ impl RunRepository for PgRunRepository {
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
                 token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
-                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?",
+                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS "merged_at?"
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1832,9 +1852,13 @@ impl RunRepository for PgRunRepository {
                 s.paused_at,
                 s.stop_asked_at,
                 s.steer_closed AND s.ended_at IS NULL AS "between_turns!",
-                s.pause_ran_out_at
+                s.pause_ran_out_at,
+                s.model,
+                s.machine,
+                b.name AS "agent_name?"
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
+            LEFT JOIN bots b ON b.id = s.bot_id
             WHERE s.run_id = ANY($1)
             ORDER BY s.run_id, s.seq
             "#,
@@ -2094,6 +2118,8 @@ impl RunRepository for PgRunRepository {
                     pass_reasons = array_append(s.pass_reasons, $9),
                     prepared_at = CASE WHEN $4::uuid IS NULL THEN s.prepared_at END,
                     opened_at = CASE WHEN $4::uuid IS NULL THEN s.opened_at END,
+                    model = CASE WHEN $4::uuid IS NULL THEN s.model END,
+                    machine = CASE WHEN $4::uuid IS NULL THEN s.machine END,
                     steer_action_id = CASE WHEN $4::uuid IS NULL THEN s.steer_action_id END,
                     steer_closed = CASE WHEN $4::uuid IS NULL THEN s.steer_closed ELSE false END
                 FROM factory_run r
@@ -2203,10 +2229,26 @@ impl RunRepository for PgRunRepository {
 
     #[tracing::instrument(err, skip(self))]
     async fn record_open(&self, key: StepKey, session_id: Uuid) -> Result<(), Self::Err> {
+        // The session is deleted once the Step is done with it, and its bot
+        // may be bound to another Machine later, so where it runs is kept
+        // now: the model it opened on, and the macrod harness its bot is
+        // bound to. A session on no harness has no Machine.
         sqlx::query!(
             r#"
             UPDATE factory_step
-            SET opened_at = now()
+            SET opened_at = now(),
+                model = (
+                    SELECT NULLIF(left(a.model, 255), '')
+                    FROM agent_session a
+                    WHERE a.id = $3
+                ),
+                machine = (
+                    SELECT NULLIF(left(h.name, 255), '')
+                    FROM agent_session a
+                    JOIN agent_configs c ON c.bot_id = a.bot_id
+                    JOIN harnesses h ON h.id = c.harness_id
+                    WHERE a.id = $3
+                )
             WHERE run_id = $1 AND seq = $2
                 AND session_id = $3 AND opened_at IS NULL
             "#,

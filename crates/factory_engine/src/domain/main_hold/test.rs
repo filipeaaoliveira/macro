@@ -796,6 +796,7 @@ fn approved_merge_gate(approved: &[&str]) -> Step {
         }),
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 

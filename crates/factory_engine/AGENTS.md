@@ -305,6 +305,12 @@ Step requests carries `branch_of`, which such a worker's activities
 refuse (`StepRequest` denies unknown fields), so none works on a branch of
 the retry's own. Deploy every worker before the API all the same.
 
+A Run that merged its pull request says when (`mergedAt`, as its `merge`
+Step recorded the merge in `factory_merge`), and each agent Step says where
+its session ran (`runtime`: `model`, `machine` and the agent's display
+name, `agentName`), on its read and in every list of Runs; Runs from before
+these were kept read none.
+
 Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
 `deny_unknown_fields`, and an agent Step reads its Run's kept Agents
 (`SessionAgent::run_agents`). A worker from before them fails every agent Step

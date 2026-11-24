@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,\n                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS \"retried_by?\"\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND COALESCE(r.flow_asks, r.flow = ANY($2))\n                AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,\n                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS \"retried_by?\",\n                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS \"merged_at?\"\n            FROM factory_run r\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -187,13 +187,16 @@
         "ordinal": 36,
         "name": "retried_by?",
         "type_info": "Uuid"
+      },
+      {
+        "ordinal": 37,
+        "name": "merged_at?",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "TextArray",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -233,8 +236,9 @@
       true,
       true,
       true,
+      null,
       null
     ]
   },
-  "hash": "88a4a33c3092634caeb03189dc5d499205642513d756efff3fe4fa3c1b5d73c3"
+  "hash": "5e5cbb67c1f852d130b6ace39c147fa4dd69dc566a2557385ab9abb06873816c"
 }

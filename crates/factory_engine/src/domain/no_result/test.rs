@@ -43,6 +43,7 @@ fn stopped(seq: u16, outcome: Outcome, answer: Option<(Outcome, Option<&str>)>) 
         }),
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 

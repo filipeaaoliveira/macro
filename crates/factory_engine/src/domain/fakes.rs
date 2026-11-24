@@ -665,6 +665,7 @@ impl RunRepository for FakeRepo {
             budget_stop: None,
             retry: None,
             retried_by: None,
+            merged_at: None,
         };
         if let Some(kept) = kept_flow {
             self.kept_flows
@@ -735,6 +736,7 @@ impl RunRepository for FakeRepo {
                 first_seq: retry.first_seq,
             }),
             retried_by: None,
+            merged_at: None,
             ..retried.clone()
         };
         {
@@ -1501,6 +1503,7 @@ impl RunRepository for FakeRepo {
                 passed_over: Vec::new(),
                 checks: Vec::new(),
                 terminal: Default::default(),
+                runtime: Default::default(),
             },
         ));
         Ok(())
