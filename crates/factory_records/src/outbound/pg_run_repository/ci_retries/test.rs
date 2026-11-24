@@ -318,8 +318,18 @@ async fn a_failure_whose_reruns_passed_is_quarantined_until_lifted(pool: PgPool)
     assert_eq!(records.ci_quarantines.len(), 1);
     assert!(records.ci_quarantines[0].filed);
 
-    assert!(repo.lift_ci_quarantine(task_id).await.expect("lift"));
-    assert!(!repo.lift_ci_quarantine(task_id).await.expect("lift again"));
+    assert_eq!(
+        repo.lift_ci_job_quarantines(APP, "test")
+            .await
+            .expect("lift"),
+        1
+    );
+    assert_eq!(
+        repo.lift_ci_job_quarantines(APP, "test")
+            .await
+            .expect("lift again"),
+        0
+    );
     let lifted = repo
         .ci_flakes(run(DASHES), APP, None, since)
         .await
@@ -425,4 +435,77 @@ async fn a_run_keeps_its_known_flakes(pool: PgPool) {
         .await
         .expect("flakes");
     assert_eq!(flakes.known, names);
+}
+
+/// A person quarantines a job by hand: every failure of it, with no
+/// passed retry and no task, kept with who did it. Doing it again while it
+/// holds changes nothing; once it lapsed, it starts over. Lifting the job
+/// lifts it, and the quarantines its reruns made beside it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "quality"))
+)]
+async fn a_person_quarantines_a_whole_job_and_lifts_it(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let julia =
+        MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid user id");
+    let id = Uuid::parse_str("00000000-0000-7000-8000-000000000c11").expect("valid id");
+    let since = Utc::now() - chrono::TimeDelta::days(30);
+
+    assert!(
+        repo.quarantine_ci_job(APP, "lint", &julia, id, since)
+            .await
+            .expect("quarantine")
+    );
+    let other = Uuid::parse_str("00000000-0000-7000-8000-000000000c12").expect("valid id");
+    assert!(
+        !repo
+            .quarantine_ci_job(APP, "lint", &julia, other, since)
+            .await
+            .expect("quarantine again")
+    );
+    let flakes = repo
+        .ci_flakes(run(DASHES), APP, None, since)
+        .await
+        .expect("flakes");
+    assert_eq!(flakes.quarantined, vec![identity("lint", None)]);
+    let kept = sqlx::query!(
+        "SELECT task_id, passed_retries, quarantined_by, filed FROM factory_ci_quarantine"
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("kept");
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].task_id, id);
+    assert_eq!(kept[0].passed_retries, 0);
+    assert_eq!(
+        kept[0].quarantined_by.as_deref(),
+        Some("macro|julia@example.com")
+    );
+    assert!(!kept[0].filed);
+
+    // Once lapsed, quarantining it again starts it over.
+    assert!(
+        repo.quarantine_ci_job(
+            APP,
+            "lint",
+            &julia,
+            other,
+            Utc::now() + chrono::TimeDelta::days(1)
+        )
+        .await
+        .expect("quarantine a lapsed one")
+    );
+
+    assert_eq!(
+        repo.lift_ci_job_quarantines(APP, "lint")
+            .await
+            .expect("lift"),
+        1
+    );
+    let lifted = repo
+        .ci_flakes(run(DASHES), APP, None, since)
+        .await
+        .expect("flakes");
+    assert!(lifted.quarantined.is_empty());
 }

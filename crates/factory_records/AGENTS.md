@@ -142,7 +142,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261123100336_factory_ci_wait_recorded_index.sql`,
   `20261123130000_factory_break_record.sql`,
   `20261123221318_factory_run_scored.sql`,
-  `20261123221322_factory_split_task.sql`), `factory_break_record`,
+  `20261123221322_factory_split_task.sql`,
+  `20261124120000_factory_ci_quarantine_by_hand.sql`), `factory_break_record`,
   `factory_split_task`,
   `factory_step_steer`,
   `factory_run_score`, `factory_scorer_label`, `factory_run_arm`, `factory_run_agent_rule`,
@@ -524,10 +525,18 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   case), job, failed step and test, whose reruns passed often enough there
   (`quarantine_ci_jobs`); a quarantine already kept keeps its task and Run
   and moves `passed_retries` and `last_passed_at` on. It lapses 30 days
-  after its last passed rerun and is lifted by deleting it
-  (`lift_ci_quarantine`). Its `task_id` is kept before the task is filed,
+  after its last passed rerun. Its `task_id` is kept before the task is filed,
   and `filed` set once it is (`mark_ci_quarantine_filed`), so filing again
-  makes no second task. It outlives its Run (`run_id` is set null).
+  makes no second task. It outlives its Run (`run_id` is set null). A
+  person quarantines a whole job by hand
+  (`20261124120000_factory_ci_quarantine_by_hand.sql`,
+  `quarantine_ci_job`): no step, no test, no Run, no passed retries, and
+  `quarantined_by` kept; its `task_id` only keys it, as it files no task.
+  Quarantining it again while it holds changes nothing; once it lapsed, it
+  starts over. `lift_ci_job_quarantines` lifts every quarantine of a job in
+  a repository by deleting them, through `factory_ci_quarantine_failure_idx`.
+  `read_quality` reads each Run's merge time from `factory_merge`
+  (`QualityRun::merged_at`).
 
 - `factory_merge` keeps one row per Run that merged (`record_merge`, safe
   to repeat), with the base it merged into and the time on the worker's

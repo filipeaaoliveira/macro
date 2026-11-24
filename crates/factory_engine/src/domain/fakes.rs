@@ -1124,11 +1124,56 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
-    async fn lift_ci_quarantine(&self, task_id: Uuid) -> Result<bool, FakeError> {
+    async fn quarantine_ci_job(
+        &self,
+        repository: &str,
+        name: &str,
+        _by: &MacroUserIdStr<'static>,
+        id: Uuid,
+        since: chrono::DateTime<Utc>,
+    ) -> Result<bool, FakeError> {
+        let failure = factory_records::domain::quality::CiFailureIdentity {
+            name: name.to_string(),
+            failed_step: None,
+            failure: None,
+        };
+        let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
+        let kept = quarantines.iter_mut().find(|quarantine| {
+            quarantine.repository == repository && quarantine.failure == failure
+        });
+        match kept {
+            Some(kept) if kept.last_passed_at >= since => Ok(false),
+            Some(kept) => {
+                kept.last_passed_at = Utc::now();
+                Ok(true)
+            }
+            None => {
+                quarantines.push(factory_records::domain::quality::CiQuarantine {
+                    repository: repository.to_string(),
+                    failure,
+                    run_id: None,
+                    passed_retries: 0,
+                    task_id: id,
+                    filed: false,
+                    quarantined_at: Utc::now(),
+                    last_passed_at: Utc::now(),
+                });
+                Ok(true)
+            }
+        }
+    }
+
+    async fn lift_ci_job_quarantines(
+        &self,
+        repository: &str,
+        name: &str,
+    ) -> Result<u32, FakeError> {
         let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
         let before = quarantines.len();
-        quarantines.retain(|quarantine| quarantine.task_id != task_id);
-        Ok(quarantines.len() < before)
+        quarantines.retain(|quarantine| {
+            quarantine.repository != repository || quarantine.failure.name != name
+        });
+        Ok(u32::try_from(before - quarantines.len()).unwrap_or(u32::MAX))
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {

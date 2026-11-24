@@ -518,6 +518,32 @@ impl FactoryService for FakeService {
     ) -> Result<bool, FactoryError> {
         Ok(false)
     }
+
+    async fn quarantine_ci_job(
+        &self,
+        _actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> Result<crate::domain::models::CiQuarantineChange, FactoryError> {
+        Ok(crate::domain::models::CiQuarantineChange {
+            repository: repo_url.to_lowercase(),
+            job: job.to_string(),
+            changed: true,
+        })
+    }
+
+    async fn release_ci_job(
+        &self,
+        _actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> Result<crate::domain::models::CiQuarantineChange, FactoryError> {
+        Ok(crate::domain::models::CiQuarantineChange {
+            repository: repo_url.to_lowercase(),
+            job: job.to_string(),
+            changed: false,
+        })
+    }
 }
 
 fn router(answer: fn() -> FactoryError) -> (Router, Arc<FakeService>) {

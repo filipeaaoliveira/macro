@@ -1567,6 +1567,24 @@ where
         self.details(runs).await
     }
 
+    async fn quarantine_ci_job(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> Result<crate::domain::models::CiQuarantineChange, FactoryError> {
+        self.quarantine_job(actor, repo_url, job).await
+    }
+
+    async fn release_ci_job(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> Result<crate::domain::models::CiQuarantineChange, FactoryError> {
+        self.release_job(actor, repo_url, job).await
+    }
+
     #[tracing::instrument(skip(self))]
     async fn clear_main_hold(
         &self,

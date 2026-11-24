@@ -6,6 +6,7 @@
 mod test;
 
 use chrono::{DateTime, Utc};
+use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -473,17 +474,54 @@ pub(super) async fn mark_ci_quarantine_filed(
     Ok(())
 }
 
-pub(super) async fn lift_ci_quarantine(
+pub(super) async fn quarantine_ci_job(
     pool: &PgPool,
-    task_id: Uuid,
+    repository: &str,
+    name: &str,
+    by: &MacroUserIdStr<'static>,
+    id: Uuid,
+    since: DateTime<Utc>,
 ) -> Result<bool, PgRunRepositoryErr> {
+    // A quarantine by hand names no step and no test, so it covers every
+    // failure of the job. One kept already is left as it is while it holds;
+    // one that lapsed starts over, as made now. A row is returned only when
+    // the statement inserted or revived one.
+    let made = sqlx::query_scalar!(
+        r#"
+        INSERT INTO factory_ci_quarantine
+            (task_id, repo_url, name, passed_retries, quarantined_by)
+        VALUES ($1, $2, $3, 0, $4)
+        ON CONFLICT (repo_url, name, coalesce(failed_step, ''), coalesce(failure, ''))
+        DO UPDATE SET last_passed_at = now(),
+            quarantined_by = coalesce(factory_ci_quarantine.quarantined_by, EXCLUDED.quarantined_by)
+        WHERE factory_ci_quarantine.last_passed_at < $5
+        RETURNING task_id
+        "#,
+        id,
+        repository,
+        name,
+        by.as_ref(),
+        since,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(made.is_some())
+}
+
+pub(super) async fn lift_ci_job_quarantines(
+    pool: &PgPool,
+    repository: &str,
+    name: &str,
+) -> Result<u32, PgRunRepositoryErr> {
+    // Through `factory_ci_quarantine_failure_idx`, by its repository and job.
     let lifted = sqlx::query!(
-        "DELETE FROM factory_ci_quarantine WHERE task_id = $1",
-        task_id,
+        "DELETE FROM factory_ci_quarantine WHERE repo_url = $1 AND name = $2",
+        repository,
+        name,
     )
     .execute(pool)
     .await?;
-    Ok(lifted.rows_affected() > 0)
+    Ok(u32::try_from(lifted.rows_affected()).unwrap_or(u32::MAX))
 }
 
 /// The quarantines of `repositories` (their URLs in lower case) whose

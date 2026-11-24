@@ -494,3 +494,23 @@ fn may_be_flaky_matches_quarantines_by_their_failure() {
     let green = [job(CheckState::Passed, None, Some(FAILED_RUN))];
     assert!(!may_be_flaky(&green, &known));
 }
+
+/// A quarantine that names no step and no test, as one made by hand,
+/// covers its job however it fails, and no other job.
+#[test]
+fn a_quarantine_of_the_whole_job_covers_each_of_its_failures() {
+    let whole_job = |name: &str| CiFlakes {
+        known: Vec::new(),
+        quarantined: vec![CiFailureIdentity {
+            name: name.to_string(),
+            failed_step: None,
+            failure: None,
+        }],
+        failures: Vec::new(),
+    };
+    let red = [job(failed(), Some("Run tests"), Some(FAILED_RUN))];
+
+    let retries = flaky_retries(&red, &whole_job("test")).expect("flaky");
+    assert_eq!(retries[0].matched, CiRetryMatch::Quarantined);
+    assert_eq!(flaky_retries(&red, &whole_job("lint")), None);
+}
