@@ -459,7 +459,11 @@ where
         {
             return Err(RoutineSessionError::Forbidden);
         }
-        match self.sessions.delete_session(command.session_id).await {
+        // Through the harness, as any other delete: it ends the session on
+        // its runtime and frees its sandbox, its queue and its command
+        // worker, on whichever replica holds it. Deleting only the row and
+        // the actor here left the runtime's agent process running.
+        match self.controls.session_deleted(command.session_id).await {
             Ok(()) | Err(AgentSessionError::NotFound(_)) => Ok(()),
             Err(error) => Err(session_error(error)),
         }
