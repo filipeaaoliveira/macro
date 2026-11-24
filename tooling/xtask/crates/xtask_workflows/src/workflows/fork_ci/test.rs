@@ -20,21 +20,18 @@ fn only_pull_requests_and_manual_runs_start_it() {
     );
 }
 
-/// A job on the self-hosted runner runs only for a manual run or a branch of
-/// this repository.
+/// Every job runs on a hosted runner, and the Rust jobs only for a manual run
+/// or a branch of this repository.
 #[test]
-fn self_hosted_jobs_run_only_trusted_code() {
+fn every_job_runs_hosted_and_rust_jobs_only_trusted_code() {
     let workflow = serde_json::to_value(fork_ci()).unwrap();
     let jobs = workflow["jobs"].as_object().unwrap();
-    let self_hosted: Vec<&String> = jobs
-        .iter()
-        .filter(|(_, job)| job["runs-on"] == RUNNER)
-        .map(|(id, _)| id)
-        .collect();
 
-    assert_eq!(self_hosted, ["rust-check", "rust-test"]);
+    for (id, job) in jobs {
+        assert_eq!(job["runs-on"], HOSTED_RUNNER, "{id}");
+    }
 
-    for id in self_hosted {
+    for id in ["rust-check", "rust-test"] {
         let condition = jobs[id]["if"].as_str().unwrap();
         assert!(
             condition.ends_with(
@@ -44,6 +41,36 @@ fn self_hosted_jobs_run_only_trusted_code() {
             "{id}: {condition}"
         );
     }
+}
+
+/// Teardown Nix kills every process on the file system that holds /nix, for
+/// a cache volume to unmount. On a hosted runner that is the root file
+/// system, the runner's own processes included, so no job runs it.
+#[test]
+fn no_job_tears_down_nix() {
+    let workflow = serde_json::to_value(fork_ci()).unwrap();
+    for (id, job) in workflow["jobs"].as_object().unwrap() {
+        let names: Vec<&str> = job["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|step| step["name"].as_str())
+            .collect();
+        assert!(!names.contains(&"Teardown Nix"), "{id}: {names:?}");
+    }
+}
+
+/// The test shards come from `changes`, and a failed shard fails the others'
+/// job result only at the end, so every shard reports.
+#[test]
+fn the_test_job_runs_one_shard_per_counted_share() {
+    let job = serde_json::to_value(rust_test()).unwrap();
+
+    assert_eq!(
+        job["strategy"]["matrix"]["shard"],
+        "${{ fromJSON(needs.changes.outputs.test_shards) }}"
+    );
+    assert_eq!(job["strategy"]["fail-fast"], false);
 }
 
 /// The required check runs on every run and waits for every other job, so a
@@ -67,7 +94,8 @@ fn the_gate_always_runs_after_every_job() {
 }
 
 /// `changes` builds the package filter from the pull request's code, so its
-/// scripts run only for a trusted pull request.
+/// scripts run only for a trusted pull request. Counting the test shards reads
+/// only their output.
 #[test]
 fn changes_runs_scripts_only_for_trusted_pull_requests() {
     let job = serde_json::to_value(changes()).unwrap();
@@ -76,6 +104,7 @@ fn changes_runs_scripts_only_for_trusted_pull_requests() {
         .unwrap()
         .iter()
         .filter(|step| step.get("run").is_some())
+        .filter(|step| step["id"] != "test-shards")
         .collect();
 
     assert_eq!(scripts.len(), 2);
@@ -143,20 +172,4 @@ fn the_web_job_runs_on_a_hosted_runner() {
     let job = serde_json::to_value(web()).unwrap();
 
     assert_eq!(job["runs-on"], HOSTED_RUNNER);
-}
-
-/// Teardown Nix kills every process on the file system that holds /nix, for
-/// a cache volume to unmount. On a hosted runner that is the root file
-/// system, the runner's own processes included, so the web job leaves it out.
-#[test]
-fn the_web_job_does_not_tear_down_nix() {
-    let job = serde_json::to_value(web()).unwrap();
-    let names: Vec<&str> = job["steps"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|step| step["name"].as_str())
-        .collect();
-
-    assert!(!names.contains(&"Teardown Nix"), "{names:?}");
 }
