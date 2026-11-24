@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
+use std::time::Duration;
 
 use factory_records::domain::models::{AgentName, EntryId, Role};
 use factory_records::domain::standing_rules::OrchestratorDefinition;
+use tokio::sync::Barrier;
+use tokio::time::timeout;
 
 use super::{
     DEFINITION_FILE_PATTERNS, DefinitionError, DefinitionFiles, DefinitionReadError,
@@ -118,6 +121,49 @@ async fn a_definition_reads_its_flows_agents_rules_and_scorers() {
     assert_eq!(scorer.flows, ["plan"]);
     assert_eq!(scorer.sample_percent, 10);
     assert_eq!(definition.evaluation.experiments()[0].flow, "plan");
+}
+
+/// A Definition's files that each answer only once every file past its
+/// manifest is asked for: read one after another, none would answer.
+struct AnsweredTogether {
+    files: BTreeMap<String, String>,
+    asked: Barrier,
+}
+
+impl DefinitionFiles for AnsweredTogether {
+    type Err = Infallible;
+
+    async fn read(&self, path: &str) -> Result<Option<String>, Infallible> {
+        if path != "factory.json" {
+            self.asked.wait().await;
+        }
+        Ok(self.files.get(path).cloned())
+    }
+}
+
+/// The files the manifest says a Definition holds are asked for at once:
+/// each is a call to GitHub, and one after another they add up.
+#[tokio::test(start_paused = true)]
+async fn a_definition_s_files_are_asked_for_at_once() {
+    // Its two Flows, its Agents, and the rules and Scorers it may hold.
+    let files = AnsweredTogether {
+        files: files(),
+        asked: Barrier::new(5),
+    };
+
+    let read = timeout(
+        Duration::from_secs(60),
+        read_definition(&files, built_in_step_use),
+    )
+    .await;
+
+    let Ok(Ok(definition)) = read else {
+        panic!("the files were not asked for at once");
+    };
+    assert_eq!(
+        definition.flows.keys().collect::<Vec<_>>(),
+        ["plan", "reply"]
+    );
 }
 
 #[tokio::test]

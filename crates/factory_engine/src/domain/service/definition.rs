@@ -4,6 +4,9 @@
 //! requests (`change`).
 
 mod change;
+mod kept;
+
+pub(super) use kept::DefinitionReads;
 
 use factory_records::domain::automations::AutomationRepository;
 use factory_records::domain::board::RunBoardRepository;
@@ -123,6 +126,7 @@ fn refused_file(path: String, refusal: FileRefusal) -> DefinitionError {
 }
 
 /// Where a Definition is now, as one person reaches it on GitHub.
+#[derive(Debug, Clone)]
 struct DefinitionHead {
     /// Its repository.
     repository: CodeRepository,
@@ -223,11 +227,37 @@ where
         reader: &MacroUserIdStr<'static>,
         repo_url: &str,
     ) -> Result<PinnedDefinition, FactoryError> {
+        let head = self.definition_head(reader, repo_url).await?;
+        self.pinned_at(reader, head).await
+    }
+
+    /// The Factory Definition in `repo_url` as [`Self::definition_at_head`]
+    /// reads it, at the head `reader` found lately when they did: for the
+    /// screens that show it, never for what a Run keeps.
+    pub(super) async fn recent_definition_at_head(
+        &self,
+        reader: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> Result<PinnedDefinition, FactoryError> {
+        let head = match self.definition_reads.head(reader, repo_url) {
+            Some(head) => head,
+            None => self.definition_head(reader, repo_url).await?,
+        };
+        self.pinned_at(reader, head).await
+    }
+
+    /// The Factory Definition at `head`, read and checked as `reader`
+    /// reaches it.
+    async fn pinned_at(
+        &self,
+        reader: &MacroUserIdStr<'static>,
+        head: DefinitionHead,
+    ) -> Result<PinnedDefinition, FactoryError> {
         let DefinitionHead {
             repository,
             access,
             commit,
-        } = self.definition_head(reader, repo_url).await?;
+        } = head;
         let definition = self.definition_at(reader, &repository, &commit).await?;
         let agents = serde_json::to_value(&definition.agents)
             .map_err(|error| FactoryError::Internal(internal(error)))?;
@@ -277,11 +307,13 @@ where
             .map_err(internal)?
             .filter(|commit| is_commit_id(commit))
             .ok_or(FactoryError::UnreachableDefinition)?;
-        Ok(DefinitionHead {
+        let head = DefinitionHead {
             repository,
             access,
             commit,
-        })
+        };
+        self.definition_reads.keep_head(reader, repo_url, &head);
+        Ok(head)
     }
 
     /// The Factory Definition in `repository`, read and checked at
@@ -296,13 +328,21 @@ where
         if !is_commit_id(commit) {
             return Err(FactoryError::UnreachableDefinition);
         }
+
+        // A commit's files never change: what this person read at it is
+        // read again only once it is no longer kept.
+        let repo_url = repository.url();
+        if let Some(definition) = self.definition_reads.definition(reader, &repo_url, commit) {
+            return Ok(definition);
+        }
+
         let files = RepositoryFiles {
             github: &self.github,
             reader,
             repository,
             commit,
         };
-        read_definition(&files, |step| self.executor.serves(step))
+        let definition = read_definition(&files, |step| self.executor.serves(step))
             .await
             .map_err(|error| match error {
                 DefinitionReadError::Files(RepositoryFileError::Refused { path, refusal }) => {
@@ -312,7 +352,10 @@ where
                     FactoryError::Internal(internal(error))
                 }
                 DefinitionReadError::Invalid(error) => FactoryError::InvalidDefinition(error),
-            })
+            })?;
+        self.definition_reads
+            .keep_definition(reader, &repo_url, commit, &definition);
+        Ok(definition)
     }
 
     /// The Factory Definition `team` names, read at its default branch's
@@ -325,6 +368,22 @@ where
     ) -> Result<Option<PinnedDefinition>, FactoryError> {
         match self.named_definition(team).await? {
             Some(repo_url) => Ok(Some(self.definition_at_head(actor, &repo_url).await?)),
+            None => Ok(None),
+        }
+    }
+
+    /// The Factory Definition `team` names, as [`Self::team_definition`]
+    /// reads it, at the head `actor` found lately when they did: for the
+    /// screens that show it, never for what a Run keeps.
+    pub(super) async fn recent_team_definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        team: Option<TeamMembership>,
+    ) -> Result<Option<PinnedDefinition>, FactoryError> {
+        match self.named_definition(team).await? {
+            Some(repo_url) => Ok(Some(
+                self.recent_definition_at_head(actor, &repo_url).await?,
+            )),
             None => Ok(None),
         }
     }
@@ -402,7 +461,7 @@ where
         let agent = self.repo.is_agent_account(actor).await.map_err(internal)?;
         let repo_url = self.named_definition(team).await?;
         let read = match &repo_url {
-            Some(repo_url) => Some(self.definition_at_head(actor, repo_url).await),
+            Some(repo_url) => Some(self.recent_definition_at_head(actor, repo_url).await),
             None => None,
         };
         self.settings_of(actor, team, !agent, repo_url, read).await
@@ -429,26 +488,33 @@ where
         };
         // A change reaches the Definition by pull request only where its
         // default branch asks for one: say so when it does not. GitHub
-        // failing to tell is not the settings' failure.
-        let requires_pull_request = match &pinned {
-            Some(pinned) => self.requires_pull_request(actor, pinned).await,
-            None => None,
-        };
-        let (newest_run, contents, open_pull_requests) = match (&repo_url, team) {
-            (Some(repo_url), Some(team)) => {
-                let newest_run = self
-                    .repo
-                    .newest_definition_read(team.team_id, repo_url)
-                    .await
-                    .map_err(internal)?;
-                let (contents, open) = tokio::join!(
-                    self.shown_contents(actor, repo_url, newest_run.as_ref(), pinned.as_ref()),
-                    self.definition_pull_requests(actor, repo_url),
-                );
-                (newest_run, contents, open)
+        // failing to tell is not the settings' failure. It is asked while
+        // the rest of the settings are read.
+        let requires_pull_request = async {
+            match &pinned {
+                Some(pinned) => self.requires_pull_request(actor, pinned).await,
+                None => None,
             }
-            _ => (None, None, None),
         };
+        let shown = async {
+            match (&repo_url, team) {
+                (Some(repo_url), Some(team)) => {
+                    let newest_run = self
+                        .repo
+                        .newest_definition_read(team.team_id, repo_url)
+                        .await
+                        .map_err(internal)?;
+                    let (contents, open) = tokio::join!(
+                        self.shown_contents(actor, repo_url, newest_run.as_ref(), pinned.as_ref()),
+                        self.definition_pull_requests(actor, repo_url),
+                    );
+                    Ok::<_, FactoryError>((newest_run, contents, open))
+                }
+                _ => Ok((None, None, None)),
+            }
+        };
+        let (requires_pull_request, shown) = tokio::join!(requires_pull_request, shown);
+        let (newest_run, contents, open_pull_requests) = shown?;
         Ok(DefinitionSettings {
             repo_url,
             commit: pinned.map(|pinned| pinned.commit),
