@@ -16,6 +16,7 @@ pub use merge_queue::PgMergeTurn;
 mod quality;
 mod review_rounds;
 mod self_improvement;
+mod session_usage;
 mod split_tasks;
 mod standing_acts;
 mod standing_rules;
@@ -1011,8 +1012,8 @@ impl RunRepository for PgRunRepository {
         // counts with theirs.
         sqlx::query!(
             r#"
-            INSERT INTO factory_step_used_session (run_id, seq, session_id)
-            SELECT $1, u.seq, u.session_id
+            INSERT INTO factory_step_used_session (run_id, seq, session_id, bot_id)
+            SELECT $1, u.seq, u.session_id, u.bot_id
             FROM factory_step_used_session u
             JOIN factory_step s ON s.run_id = $1 AND s.seq = u.seq
             WHERE u.run_id = $2
@@ -2069,8 +2070,8 @@ impl RunRepository for PgRunRepository {
                 WHERE run_id = $1 AND seq = $2 AND session_id IS NULL
                 RETURNING run_id, seq
             ), used AS (
-                INSERT INTO factory_step_used_session (run_id, seq, session_id)
-                SELECT run_id, seq, $3 FROM claimed
+                INSERT INTO factory_step_used_session (run_id, seq, session_id, bot_id)
+                SELECT run_id, seq, $3, $8 FROM claimed
                 ON CONFLICT DO NOTHING
             )
             SELECT count(*) AS "claimed!" FROM claimed
@@ -2118,9 +2119,10 @@ impl RunRepository for PgRunRepository {
         // when overlapping attempts both find the Role exhausted. A Step
         // that took a later prompt has an Agent at work, and its checks
         // rounds go on in that session. The Step keeps both sessions among
-        // those it used: the one it leaves may have used tokens already, as
-        // when it was lost after its agent worked in it, and its Run's token
-        // budget and Insights still count them.
+        // those it used, each with the bot that ran it: the one it leaves
+        // may have used tokens already, as when it was lost after its agent
+        // worked in it, and its Run's token budget and Insights still count
+        // them.
         let to_agent = to.and_then(|to| to.agent.as_ref()).map(AgentName::as_str);
         let recorded = sqlx::query_scalar!(
             r#"
@@ -2150,11 +2152,22 @@ impl RunRepository for PgRunRepository {
                     )
                 RETURNING s.run_id, s.seq
             ), used AS (
-                INSERT INTO factory_step_used_session (run_id, seq, session_id)
-                SELECT p.run_id, p.seq, used.session_id
-                FROM passed p, unnest(ARRAY[$3::uuid, $4::uuid]) AS used (session_id)
+                INSERT INTO factory_step_used_session (run_id, seq, session_id, bot_id)
+                SELECT p.run_id, p.seq, used.session_id, used.bot_id
+                FROM passed p, (
+                    VALUES
+                        -- The session left, with the bot that ran it: the
+                        -- Step's before this update, which every part of
+                        -- the statement reads.
+                        (
+                            $3::uuid,
+                            (SELECT bot_id FROM factory_step WHERE run_id = $1 AND seq = $2)
+                        ),
+                        ($4::uuid, $10::uuid)
+                ) AS used (session_id, bot_id)
                 WHERE used.session_id IS NOT NULL
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (run_id, seq, session_id) DO UPDATE
+                SET bot_id = COALESCE(factory_step_used_session.bot_id, EXCLUDED.bot_id)
             )
             SELECT count(*) AS "passed!" FROM passed
             "#,

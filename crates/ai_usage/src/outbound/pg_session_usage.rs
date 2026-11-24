@@ -109,6 +109,7 @@ impl SessionUsageReader for PgSessionUsageReader {
                 cache_write: tokens(row.cache_write),
                 cost_usd: row.cost_usd,
                 unpriced_calls: tokens(row.unpriced_calls),
+                reported_by_runtime: false,
             })
             .collect())
     }

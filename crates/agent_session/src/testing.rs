@@ -952,6 +952,30 @@ impl crate::domain::turn_state::SessionTurnProjectionRepo for InMemoryAgentSessi
 }
 
 impl AgentSessionLogRepo for InMemoryAgentSessionRepo {
+    async fn list_usage_frames(
+        &self,
+        agent_session_id: AgentSessionId,
+    ) -> Result<Vec<StoredAgentSessionLog>> {
+        // Every frame, with no history boundary: the reader picks the
+        // usage out of them.
+        let _transaction = self.log_transaction.lock().unwrap();
+        let mut rows = self
+            .logs
+            .lock()
+            .unwrap()
+            .get(&agent_session_id)
+            .cloned()
+            .unwrap_or_default();
+        rows.retain(|row| {
+            matches!(
+                row.entry.content,
+                Message::ToServer(_) | Message::ToRuntime(_)
+            )
+        });
+        rows.sort_unstable_by_key(|row| (row.created_at, row.id));
+        Ok(rows)
+    }
+
     async fn list_action_history(
         &self,
         agent_session_id: AgentSessionId,

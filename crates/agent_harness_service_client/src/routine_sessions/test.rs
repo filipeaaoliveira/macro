@@ -344,6 +344,38 @@ async fn a_follow_up_is_sent_once_to_its_route() {
     assert_eq!(requests[0].body["prompt"], "run the checks");
 }
 
+/// A session's usage is read from its own route, and one that reported
+/// none reads as none.
+#[tokio::test]
+async fn a_sessions_usage_is_read_from_its_route() {
+    let server = server(vec![
+        Reply::json(
+            200,
+            json!({
+                "input_tokens": 6, "output_tokens": 1165, "cache_read_tokens": 89953,
+                "cache_write_tokens": 2845, "cost_usd": 0.27, "model": "claude-sonnet-5-5",
+            }),
+        ),
+        Reply::json(200, Value::Null),
+    ])
+    .await;
+    let client = AgentSessionClient::new(&server.url, KEY).unwrap();
+
+    let reported = client.usage(identity()).await.unwrap().expect("usage");
+    let none = client.usage(identity()).await.unwrap();
+
+    assert_eq!(reported.output_tokens, 1165);
+    assert_eq!(reported.cost_usd, Some(0.27));
+    assert_eq!(reported.model.as_deref(), Some("claude-sonnet-5-5"));
+    assert_eq!(none, None);
+    let requests = server.requests.lock().unwrap();
+    assert!(
+        requests[0]
+            .head
+            .starts_with("POST /internal/routine-sessions/usage HTTP/1.1")
+    );
+}
+
 /// A command goes to its own route with its owner's identity, its end comes
 /// back as the harness answered it, and a runtime that runs no command says
 /// so, typed.

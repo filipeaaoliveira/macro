@@ -6,7 +6,8 @@ use std::time::Duration;
 use agent_session::domain::routines::{
     ExecRoutineSession, PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession,
     RoutineActionStatus, RoutineActivity, RoutinePromptAccepted, RoutineSessionAction,
-    RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
+    RoutineSessionError, RoutineSessions, RoutineUsage, ValidateRoutineSession,
+    ValidatedRoutineSession,
 };
 use agent_session::domain::session_command::{MAX_COMMAND_TIMEOUT, SessionCommandOutput};
 use anyhow::{Context, Result};
@@ -34,6 +35,7 @@ enum Operation {
     Delete,
     Activity,
     Reply,
+    Usage,
 }
 
 impl Operation {
@@ -49,14 +51,18 @@ impl Operation {
             Self::Delete => "internal/routine-sessions/delete",
             Self::Activity => "internal/routine-sessions/activity",
             Self::Reply => "internal/routine-sessions/reply",
+            Self::Usage => "internal/routine-sessions/usage",
         }
     }
 
     fn timeout(self) -> Duration {
         match self {
-            Self::Status | Self::Cancel | Self::Delete | Self::Activity | Self::Reply => {
-                SNAPSHOT_TIMEOUT
-            }
+            Self::Status
+            | Self::Cancel
+            | Self::Delete
+            | Self::Activity
+            | Self::Reply
+            | Self::Usage => SNAPSHOT_TIMEOUT,
             Self::Exec => EXEC_TIMEOUT,
             _ => REQUEST_TIMEOUT,
         }
@@ -289,6 +295,13 @@ impl RoutineSessions for AgentSessionClient {
         command: RoutineSessionAction,
     ) -> Result<Option<String>, RoutineSessionError> {
         self.command(Operation::Reply, &command).await
+    }
+
+    async fn usage(
+        &self,
+        command: RoutineSessionAction,
+    ) -> Result<Option<RoutineUsage>, RoutineSessionError> {
+        self.command(Operation::Usage, &command).await
     }
 }
 

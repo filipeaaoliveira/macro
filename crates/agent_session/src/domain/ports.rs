@@ -903,6 +903,16 @@ pub trait AgentSessionLogRepo: Send + Sync + 'static {
         action: agent_runtime_protocol::domain::action::AgentActionId,
     ) -> impl Future<Output = Result<Vec<StoredAgentSessionLog>>> + Send;
 
+    /// The frames in which the runtime reported what its model calls used:
+    /// prompt responses with token counts and usage updates, and the
+    /// requests that started its process again (`initialize`,
+    /// `session/load`, `session/resume`), oldest first, over the whole log,
+    /// frames from before a successful load included.
+    fn list_usage_frames(
+        &self,
+        agent_session_id: AgentSessionId,
+    ) -> impl Future<Output = Result<Vec<StoredAgentSessionLog>>> + Send;
+
     /// Every user the log has attributed a frame to: whoever prompted,
     /// answered, or otherwise drove the session. Distinct, unordered; the
     /// owner appears only if they acted. Spans the whole log, resumes

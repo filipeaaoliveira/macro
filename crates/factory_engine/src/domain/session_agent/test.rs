@@ -8,7 +8,7 @@ use agent_session::domain::routines::{
     ExecRoutineSession, PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession,
     RoutineActionStatus, RoutineActivity, RoutineFailureReason, RoutinePendingReason,
     RoutinePromptAccepted, RoutineSessionAction, RoutineSessionError, RoutineSessions,
-    ValidateRoutineSession, ValidatedRoutineSession,
+    RoutineUsage, ValidateRoutineSession, ValidatedRoutineSession,
 };
 use agent_session::domain::session_command::SessionCommandOutput;
 use ai_billing::DenyReason;
@@ -18,6 +18,7 @@ use factory_records::domain::models::{
     StepSession,
 };
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::session_usage::{SessionUsage, SessionUsageRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -139,6 +140,9 @@ pub(crate) struct FakeSessions {
     tool_calls: u32,
     /// Reads of the session's activity.
     activity_reads: Arc<Mutex<usize>>,
+    /// What the session's runtime reported it used so far, which its log
+    /// holds until the session is deleted.
+    reported: Arc<Mutex<Option<RoutineUsage>>>,
 }
 
 impl FakeSessions {
@@ -183,6 +187,7 @@ impl FakeSessions {
             limited: Arc::default(),
             tool_calls: 0,
             activity_reads: Arc::default(),
+            reported: Arc::default(),
         }
     }
 
@@ -530,6 +535,17 @@ impl RoutineSessions for FakeSessions {
             turns: 1,
         })
     }
+
+    /// A deleted session's log went with it.
+    async fn usage(
+        &self,
+        _command: RoutineSessionAction,
+    ) -> Result<Option<RoutineUsage>, RoutineSessionError> {
+        if !*self.open.lock().expect("open") {
+            return Err(RoutineSessionError::OperationFailed);
+        }
+        Ok(self.reported.lock().expect("reported").clone())
+    }
 }
 
 fn julia() -> MacroUserIdStr<'static> {
@@ -818,6 +834,150 @@ async fn releasing_a_step_deletes_its_session() {
     assert_eq!(deleted[0].session_id.as_uuid(), claimed.session_id);
 }
 
+/// What a session's runtime reported so far: `output` tokens, and a cost
+/// when given.
+fn reported(output: u64, cost_usd: Option<f64>) -> RoutineUsage {
+    RoutineUsage {
+        input_tokens: 6,
+        output_tokens: output,
+        cache_read_tokens: 89_953,
+        cache_write_tokens: 2845,
+        cost_usd,
+        model: Some("claude-sonnet-5-5".to_string()),
+    }
+}
+
+/// The usage kept for `session`, as Julia's.
+async fn kept_usage(repo: &FakeRepo, session: Uuid) -> Option<SessionUsage> {
+    repo.session_usage(&julia(), &[session])
+        .await
+        .expect("read")
+        .pop()
+}
+
+/// What the session's runtime reported is kept as its turn ends, with who
+/// it ran as and its bot, so a session that dies keeps what it used.
+#[tokio::test]
+async fn a_steps_usage_is_kept_as_its_turn_ends() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    *sessions.reported.lock().expect("reported") = Some(reported(1165, Some(0.27)));
+    let task = plan_task(&repo).await;
+    let key = task.key;
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let claimed = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    let kept = kept_usage(&repo, claimed.session_id)
+        .await
+        .expect("usage kept");
+    assert_eq!(kept.user_id, julia());
+    assert_eq!(kept.bot_id, PRIMARY.as_uuid());
+    assert_eq!(kept.output_tokens, 1165);
+    assert_eq!(kept.cache_read_tokens, 89_953);
+    assert_eq!(kept.cost_usd, Some(0.27));
+    assert_eq!(kept.model.as_deref(), Some("claude-sonnet-5-5"));
+}
+
+/// Releasing a Step keeps what its session used before the session, and
+/// its log, are deleted: what it used since its last turn ended counts.
+#[tokio::test]
+async fn releasing_a_step_keeps_its_usage_before_deleting_its_session() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    *sessions.reported.lock().expect("reported") = Some(reported(1165, Some(0.27)));
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+    *sessions.reported.lock().expect("reported") = Some(reported(3297, Some(0.31)));
+
+    agent(&sessions, &repo)
+        .release(key, &planner(), &julia())
+        .await
+        .expect("release");
+
+    let claimed = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
+    let kept = kept_usage(&repo, claimed.session_id)
+        .await
+        .expect("usage kept");
+    assert_eq!(kept.output_tokens, 3297);
+    assert_eq!(kept.cost_usd, Some(0.31));
+}
+
+/// A session whose runtime reported tokens and no cost keeps no cost, so
+/// what it cost stays unknown.
+#[tokio::test]
+async fn a_step_whose_session_reported_no_cost_keeps_none() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    *sessions.reported.lock().expect("reported") = Some(reported(1165, None));
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    agent(&sessions, &repo)
+        .release(key, &planner(), &julia())
+        .await
+        .expect("release");
+
+    let claimed = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    let kept = kept_usage(&repo, claimed.session_id)
+        .await
+        .expect("usage kept");
+    assert_eq!(kept.output_tokens, 1165);
+    assert_eq!(kept.cost_usd, None);
+}
+
+/// A session whose runtime reported nothing keeps nothing: it reads as
+/// unmeasured, as before.
+#[tokio::test]
+async fn a_session_that_reported_nothing_keeps_no_usage() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    agent(&sessions, &repo)
+        .release(key, &planner(), &julia())
+        .await
+        .expect("release");
+
+    let claimed = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert_eq!(kept_usage(&repo, claimed.session_id).await, None);
+}
+
+/// A usage write that fails costs the Step nothing: it ends as it would.
+#[tokio::test]
+async fn a_failed_usage_write_does_not_fail_the_step() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    *sessions.reported.lock().expect("reported") = Some(reported(1165, Some(0.27)));
+    repo.fail_once_after("record_session_usage", 0);
+    let task = plan_task(&repo).await;
+
+    let answer = agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    assert_eq!(answer.outcome, Outcome::done());
+}
+
 /// A session whose runtime disconnected before its prompt shows nothing of
 /// the prompt either way: the Step asks, and the session takes it.
 #[tokio::test(start_paused = true)]
@@ -1020,6 +1180,51 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
             .iter()
             .all(|stop| stop.session_id.as_uuid() == claimed.session_id)
     );
+}
+
+/// Stopping a Step keeps what its session used before deleting it, as a
+/// release does: a stopped turn's tokens count.
+#[tokio::test(start_paused = true)]
+async fn stopping_a_step_keeps_its_usage_before_deleting_its_session() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(
+        &repo,
+        Some(the_plan()),
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    );
+    *sessions.reported.lock().expect("reported") = Some(reported(512, Some(0.05)));
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    repo.claim_session(
+        key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+            agent: Some(name("primary")),
+            bot: Some(PRIMARY.as_uuid()),
+        },
+        &task.role,
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    repo.record_open(key, claimed_id(&repo, key).await)
+        .await
+        .expect("open");
+    *sessions.open.lock().expect("open") = true;
+    *sessions.prompted.lock().expect("prompted") = true;
+
+    agent(&sessions, &repo)
+        .stop(key, &planner(), &julia())
+        .await
+        .expect("stop");
+
+    assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
+    let kept = kept_usage(&repo, claimed_id(&repo, key).await)
+        .await
+        .expect("usage kept");
+    assert_eq!(kept.output_tokens, 512);
+    assert_eq!(kept.cost_usd, Some(0.05));
 }
 
 /// A session an attempt saw open is never written off: a delete that fails,

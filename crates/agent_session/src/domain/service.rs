@@ -418,6 +418,13 @@ pub trait AgentSessionService: Send + Sync + 'static {
     /// implementation. See [`SessionLog`] and [`Self::folded_session_log`].
     fn session_log(&self, id: AgentSessionId) -> impl Future<Output = Result<SessionLog>> + Send;
 
+    /// The frames of one session in which its runtime reported usage, over
+    /// its whole log. See [`AgentSessionLogRepo::list_usage_frames`].
+    fn usage_frames(
+        &self,
+        id: AgentSessionId,
+    ) -> impl Future<Output = Result<Vec<StoredAgentSessionLog>>> + Send;
+
     /// Recover one action from a consistent durable snapshot, including history
     /// replaced by session/load. No observer callback or live actor is required.
     fn recorded_action(
@@ -1399,6 +1406,11 @@ where
             bot: self.repo.session_bot(session.bot_id).await?,
             entries,
         })
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn usage_frames(&self, id: AgentSessionId) -> Result<Vec<StoredAgentSessionLog>> {
+        AgentSessionLogRepo::list_usage_frames(&self.repo, id).await
     }
 
     #[tracing::instrument(err, skip(self))]

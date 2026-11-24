@@ -18,6 +18,7 @@ use config::Config;
 use document_storage_service_client::DocumentStorageServiceClient;
 use entity_access::domain::service::EntityAccessServiceImpl;
 use entity_access::outbound::PgAccessRepository;
+use factory_engine::domain::agent_usage::AgentUsageReader;
 use factory_engine::domain::agents::AgentDefinition;
 use factory_engine::domain::automations::service::AutomationServiceImpl;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
@@ -191,7 +192,9 @@ async fn run() -> Result<(), rootcause::Report> {
         review_rounds: config.factory_review_rounds,
         questions: config.factory_questions,
         repo: repo.clone(),
-        usage: PgSessionUsageReader::new(db.clone()),
+        // What agent sessions used: what their runtime reported, which the
+        // factory keeps, else the model calls Macro's usage log recorded.
+        usage: AgentUsageReader::new(PgSessionUsageReader::new(db.clone()), repo.clone()),
         users: AuthUserDirectory::new(auth),
         github: github.clone(),
         tasks: DocumentTaskDirectory::new(
@@ -287,7 +290,7 @@ struct Parts {
     review_rounds: Option<std::num::NonZeroU8>,
     questions: Option<u8>,
     repo: PgRunRepository,
-    usage: PgSessionUsageReader,
+    usage: AgentUsageReader<PgSessionUsageReader, PgRunRepository>,
     users: AuthUserDirectory,
     github: GithubPullRequests<AuthServiceClient>,
     tasks: DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,

@@ -162,6 +162,27 @@ pub struct RoutineActivity {
     pub turns: u32,
 }
 
+/// What a session's runtime reported its model calls used, summed over its
+/// whole log, turns from before a resume included: the token counts each
+/// turn's prompt response reported, and the cost the runtime's own usage
+/// updates reported, for its opener's accounting.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RoutineUsage {
+    /// Input tokens, besides those read from or written to the prompt cache.
+    pub input_tokens: u64,
+    /// Output tokens.
+    pub output_tokens: u64,
+    /// Input tokens read from the prompt cache.
+    pub cache_read_tokens: u64,
+    /// Input tokens written to the prompt cache.
+    pub cache_write_tokens: u64,
+    /// What the session cost, in US dollars, when its runtime reported it;
+    /// none when it reported no cost, or one in another currency.
+    pub cost_usd: Option<f64>,
+    /// The model that used the most tokens, when the runtime named it.
+    pub model: Option<String>,
+}
+
 /// Why the action has not established completion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

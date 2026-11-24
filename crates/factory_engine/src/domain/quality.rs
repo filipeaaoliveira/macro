@@ -1150,14 +1150,21 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
     let mut person_answered = 0;
     let mut steered = 0;
     let mut manual = 0;
-    // The bots one of whose sessions recorded usage: their runtime records
-    // it, so a session of theirs that recorded none made no model call (it
-    // failed before its first) and cost nothing.
+    // The bots one of whose sessions the usage log recorded calls for:
+    // their runtime records each call, so a session of theirs that recorded
+    // none made no model call (it failed before its first) and cost nothing.
+    // Not a bot whose runtime reported its usage itself: one of its sessions
+    // with none kept may have spent before the factory kept usage, or when
+    // keeping it failed.
     let measured_bots: HashSet<Uuid> = records
         .runs
         .iter()
         .flat_map(|run| &run.sessions)
-        .filter(|session| by_session.contains_key(&session.id))
+        .filter(|session| {
+            by_session
+                .get(&session.id)
+                .is_some_and(|tokens| !tokens.reported_by_runtime)
+        })
         .filter_map(|session| session.bot)
         .collect();
     let mut measured_runs = 0;

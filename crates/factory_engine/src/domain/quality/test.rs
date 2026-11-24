@@ -129,6 +129,7 @@ fn tokens(n: u128, input: u64, cost_usd: f64, unpriced_calls: u64) -> SessionTok
         cache_write: 0,
         cost_usd,
         unpriced_calls,
+        reported_by_runtime: false,
     }
 }
 
@@ -965,6 +966,35 @@ fn a_session_that_made_no_model_call_costs_nothing() {
     unknown_bot.sessions.push(on(Uuid::from_u128(0x5e55), None));
     let delivery = summarize_quality(&query(None), records(unknown_bot), &usage).delivery;
 
+    assert_eq!(delivery.cost_per_merged_usd, None);
+    assert_eq!(delivery.tokens_per_merged, None);
+}
+
+/// A session whose bot's other sessions only had usage their runtime
+/// reported, and which has none kept, is not known to have made no call:
+/// it may have spent before usage was kept, or when keeping it failed. No
+/// figure per merged pull request is given.
+#[test]
+fn a_session_with_none_kept_of_a_reporting_runtime_makes_the_cost_unknown() {
+    let mut not_kept = run(2);
+    not_kept
+        .sessions
+        .push(on(Uuid::from_u128(0x5e55), Some(HOSTED)));
+    let records = QualityRecords {
+        runs: vec![run(1), not_kept],
+        ..QualityRecords::default()
+    };
+    let reported = |n, input, cost_usd| SessionTokens {
+        reported_by_runtime: true,
+        ..tokens(n, input, cost_usd, 0)
+    };
+    let usage = [reported(1, 1000, 1.5), reported(2, 500, 0.5)];
+
+    let delivery = summarize_quality(&query(None), records, &usage).delivery;
+
+    assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.unmeasured_runs, 1);
+    assert_eq!(delivery.cost_usd, 2.0);
     assert_eq!(delivery.cost_per_merged_usd, None);
     assert_eq!(delivery.tokens_per_merged, None);
 }

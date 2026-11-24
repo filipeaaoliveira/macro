@@ -1942,6 +1942,47 @@ impl<B: BotFacts + 'static> AgentSessionLogRepo for PgAgentSessionRepo<B> {
             .collect::<anyhow::Result<Vec<_>>>()?)
     }
 
+    async fn list_usage_frames(
+        &self,
+        agent_session_id: AgentSessionId,
+    ) -> Result<Vec<StoredAgentSessionLog>> {
+        // The whole log, with no history boundary: a resumed session's
+        // turns before its load used tokens too. The requests that start
+        // the runtime's process again come along: its cost count starts
+        // over after them.
+        let rows = sqlx::query_as!(
+            AgentSessionLogRow,
+            r#"
+            SELECT id, agent_session_id, user_id AS "user_id: MacroUserIdStr",
+                   direction, content, created_at
+            FROM agent_session_log
+            WHERE agent_session_id = $1
+              AND (
+                  (
+                      direction = 'to_server'
+                      AND (
+                          content->'result' ? 'usage'
+                          OR content->'params'->'update'->>'sessionUpdate' = 'usage_update'
+                      )
+                  )
+                  OR (
+                      direction = 'to_runtime'
+                      AND content->>'method' IN ('initialize', 'session/load', 'session/resume')
+                  )
+              )
+            ORDER BY created_at, id
+            "#,
+            agent_session_id.as_uuid(),
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to read the usage frames of a session's log")?;
+        Ok(rows
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<anyhow::Result<Vec<_>>>()?)
+    }
+
     async fn list_action_history(
         &self,
         agent_session_id: AgentSessionId,

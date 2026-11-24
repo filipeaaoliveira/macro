@@ -446,6 +446,19 @@ where
         Ok(last_words(log.entries, command.action_id))
     }
 
+    async fn usage(
+        &self,
+        command: RoutineSessionAction,
+    ) -> Result<Option<RoutineUsage>, RoutineSessionError> {
+        self.owned_session(&command).await?;
+        let frames = self
+            .sessions
+            .usage_frames(command.session_id)
+            .await
+            .map_err(session_error)?;
+        Ok(super::usage::session_usage(frames))
+    }
+
     async fn delete(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
         // A session that is not there is deleted: a caller whose earlier
         // delete took effect, but whose answer was lost, asks again.

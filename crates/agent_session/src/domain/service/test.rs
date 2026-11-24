@@ -961,6 +961,13 @@ impl SessionOwnership for BlockingPromptLogs {
 }
 
 impl AgentSessionLogRepo for BlockingPromptLogs {
+    async fn list_usage_frames(
+        &self,
+        agent_session_id: AgentSessionId,
+    ) -> Result<Vec<StoredAgentSessionLog>> {
+        self.repo.list_usage_frames(agent_session_id).await
+    }
+
     async fn list_action_history(
         &self,
         agent_session_id: AgentSessionId,

@@ -1,6 +1,7 @@
 //! Domain layer of the factory's engine.
 
 pub mod acceptance;
+pub mod agent_usage;
 pub mod agents;
 pub mod automations;
 pub mod board;

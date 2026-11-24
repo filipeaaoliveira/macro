@@ -375,6 +375,7 @@ fn usage(session: Uuid) -> FakeUsage {
         cache_write: 700,
         cost_usd: 0.0,
         unpriced_calls: 0,
+        reported_by_runtime: false,
     }])
 }
 
@@ -680,6 +681,7 @@ async fn a_trial_keeps_the_tokens_of_a_session_its_step_lost() {
         cache_write: 0,
         cost_usd: 0.0,
         unpriced_calls: 0,
+        reported_by_runtime: false,
     };
     let scoring = ScoringServiceImpl::new(
         repo.clone(),
