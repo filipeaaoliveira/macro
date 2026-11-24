@@ -35,7 +35,7 @@ use crate::domain::flow::Flow;
 use crate::domain::models::{
     CodeRepository, DEFINITION_PULL_REQUESTS_LISTED, DefinitionContents, DefinitionFile,
     DefinitionFlow, DefinitionPullRequest, DefinitionRole, DefinitionScorer, DefinitionSettings,
-    FactoryError, RepositoryAccess,
+    FactoryError, PullRequestRequirement, RepositoryAccess,
 };
 use crate::domain::ports::{
     FileRefusal, PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
@@ -514,13 +514,20 @@ where
                 _ => Ok((None, None, None)),
             }
         };
-        let (requires_pull_request, shown) = tokio::join!(requires_pull_request, shown);
+        let (requirement, shown) = tokio::join!(requires_pull_request, shown);
         let (newest_run, contents, open_pull_requests) = shown?;
+        let (requires_pull_request, requires_pull_request_unknown_reason) = match requirement {
+            Some(PullRequestRequirement::Required) => (Some(true), None),
+            Some(PullRequestRequirement::NotRequired) => (Some(false), None),
+            Some(PullRequestRequirement::Unknown { github_message }) => (None, github_message),
+            None => (None, None),
+        };
         Ok(DefinitionSettings {
             repo_url,
             commit: pinned.map(|pinned| pinned.commit),
             problem,
             requires_pull_request,
+            requires_pull_request_unknown_reason,
             team_id: team.map(|team| team.team_id),
             can_edit: editor && team.is_some_and(|team| team.admin),
             newest_run,
@@ -621,20 +628,20 @@ where
     }
 
     /// Whether `pinned`'s default branch takes changes only through a pull
-    /// request, as `reader` can tell; none when they cannot, or GitHub
-    /// fails to say.
+    /// request, as `reader` can tell; none when GitHub fails to say, or the
+    /// repository is not on GitHub.
     async fn requires_pull_request(
         &self,
         reader: &MacroUserIdStr<'static>,
         pinned: &PinnedDefinition,
-    ) -> Option<bool> {
+    ) -> Option<PullRequestRequirement> {
         let repository = CodeRepository::parse(&pinned.repo_url)?;
         match self
             .github
             .requires_pull_request(reader, &repository, &pinned.branch)
             .await
         {
-            Ok(requires) => requires,
+            Ok(requirement) => Some(requirement),
             Err(error) => {
                 tracing::warn!(
                     ?error,

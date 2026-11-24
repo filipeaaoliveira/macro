@@ -34,7 +34,7 @@ pub use branches::{CommitMade, ComparedChanges, ComparedFile, FileTooLarge};
 mod pull_request_texts;
 pub use pull_request_texts::{GithubIssueComment, GithubPullRequestText};
 mod pull_requests;
-pub use pull_requests::GithubBranchUpdate;
+pub use pull_requests::{GithubBranchUpdate, GithubPullRequestRequirement};
 mod commits;
 #[cfg(test)]
 mod test;
