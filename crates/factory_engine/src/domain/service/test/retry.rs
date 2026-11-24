@@ -2,9 +2,11 @@
 
 use factory_records::domain::models::{
     EntryId, KeptFlow, NewRun, Outcome, Repository, RunId, RunInsert, RunOutcome, StepKey,
+    TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::standing_rules::RunRules;
+use factory_records::domain::standing_rules::{OrchestratorDefinition, RunRules};
+use uuid::Uuid;
 
 use super::{FakeExecutor, FakeWorkflows, StepServiceImpl, code_service, julia, reply_step, teo};
 use crate::domain::built_in_flows::BuiltInFlow;
@@ -475,6 +477,63 @@ async fn a_run_is_retried_once_and_a_retry_of_a_retry_keeps_the_first_branch() {
     assert_eq!(retry.retried_from, first.run.id);
     assert_eq!(retry.branch_of, lost);
     assert_eq!(workflows.started.lock().expect("started").len(), 2);
+}
+
+/// A Run retried already says so, even when its owner's Queue is full:
+/// the refusal that a second retry of it would meet first is not the one
+/// it gets.
+#[tokio::test]
+async fn a_run_retried_already_says_so_when_the_queue_is_full() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let team_id = Uuid::now_v7();
+    repo.teams.lock().expect("teams").insert(
+        julia().to_string(),
+        TeamMembership {
+            team_id,
+            admin: true,
+        },
+    );
+    repo.team_rules.lock().expect("rules").insert(
+        team_id,
+        OrchestratorDefinition {
+            queue_limit: Some(1),
+            ..OrchestratorDefinition::DEFAULT
+        },
+    );
+    let lost = lost_at_write(&repo).await;
+    service
+        .retry_run(&julia(), lost, None, true)
+        .await
+        .expect("the first retry");
+    // A new Run that has yet to ask takes the Queue's only place.
+    service
+        .create_run(
+            julia(),
+            "plan".to_string(),
+            "Plan it".to_string(),
+            None,
+            None,
+            false,
+            None,
+        )
+        .await
+        .expect("a plan run fills the queue");
+    let full = service
+        .retry_run(&julia(), lost_at_write(&repo).await, None, true)
+        .await;
+
+    let again = service.retry_run(&julia(), lost, None, true).await;
+
+    assert!(
+        matches!(full, Err(FactoryError::QueueFull { limit: 1, .. })),
+        "{full:?}"
+    );
+    assert!(
+        matches!(again, Err(FactoryError::AlreadyRetried)),
+        "{again:?}"
+    );
 }
 
 /// Someone else's Run reads as missing to a retry, as to every act.

@@ -15,8 +15,8 @@ use crate::domain::evaluation::{
     AgentChoices, ArmScore, ArmTally, BENCHMARK_FLOW, CalibrationTally, EvaluationRecords,
     EvaluationRepository, Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE,
     RuleTally, RunAgentRule, RunAgents, RunArm, RunJudgment, SUITE_STARTING_SECS, SUITES_READ,
-    ScorerJudge, ScorerLabel, ScorerTally, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert,
-    SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
+    ScorerJudge, ScorerLabel, ScorerTally, ScoringState, ScoringStep, ScoringSubject, SubjectTrial,
+    SuiteInsert, SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
 };
 use crate::domain::insights::InsightsScope;
 use crate::domain::models::{AgentName, EntryId, Outcome, Role, RunId, RunOutcome};
@@ -378,6 +378,61 @@ impl EvaluationRepository for PgRunRepository {
             judged,
             evaluation: run.definition_evaluation,
         }))
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn scoring_state(&self, run_id: RunId) -> Result<Option<ScoringState>, Self::Err> {
+        // The Run by its primary key, its trial through
+        // `factory_benchmark_trial`'s Run index, and its judgments through
+        // their primary key.
+        let Some(row) = sqlx::query!(
+            r#"
+            SELECT r.flow, r.outcome, r.ended_at, r.scored_at, r.definition_evaluation,
+                EXISTS (
+                    SELECT 1 FROM factory_benchmark_trial t WHERE t.run_id = r.id
+                ) AS "trial!",
+                ARRAY(
+                    SELECT s.scorer FROM factory_run_score s
+                    WHERE s.run_id = r.id
+                    ORDER BY s.scorer
+                ) AS "judged!"
+            FROM factory_run r
+            WHERE r.id = $1
+            "#,
+            run_id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ScoringState {
+            flow: row.flow,
+            outcome: row
+                .outcome
+                .map(|outcome| {
+                    outcome
+                        .parse::<RunOutcome>()
+                        .map_err(|_| PgRunRepositoryErr::UnknownRunOutcome(outcome))
+                })
+                .transpose()?,
+            ended_at: row.ended_at,
+            scored_at: row.scored_at,
+            trial: row.trial,
+            judged: row.judged,
+            evaluation: row.definition_evaluation,
+        }))
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn mark_run_scored(&self, run_id: RunId) -> Result<(), Self::Err> {
+        sqlx::query!(
+            "UPDATE factory_run SET scored_at = now() WHERE id = $1 AND scored_at IS NULL",
+            run_id.as_uuid(),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self, judgment), fields(scorer = %judgment.scorer))]

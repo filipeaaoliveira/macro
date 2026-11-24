@@ -327,6 +327,83 @@ async fn a_failure_whose_reruns_passed_is_quarantined_until_lifted(pool: PgPool)
     assert!(lifted.quarantined.is_empty());
 }
 
+/// A Run reads its reruns, by Step then job, each with how it ended, and
+/// the quarantines its passed reruns made; another Run's are apart.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "quality"))
+)]
+async fn a_run_reads_its_reruns_and_the_quarantines_they_made(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let since = at("2026-11-01T00:00:00Z");
+    let first = step(PARSER, 1);
+    let second = step(PARSER, 2);
+    repo.request_ci_retries(
+        first,
+        PARSER_HEAD,
+        &[retry("test", 7, Some("Run tests")), retry("lint", 8, None)],
+    )
+    .await
+    .expect("request");
+    repo.settle_ci_retries(
+        first,
+        &[
+            ("test".to_string(), CiRetryResult::Passed),
+            ("lint".to_string(), CiRetryResult::Failed),
+        ],
+    )
+    .await
+    .expect("settle");
+    repo.request_ci_retries(second, PARSER_HEAD, &[retry("test", 9, Some("Run tests"))])
+        .await
+        .expect("request again");
+    repo.quarantine_ci_jobs(
+        run(PARSER),
+        APP,
+        &[NewCiQuarantine {
+            failure: identity("test", Some("Run tests")),
+            task_id: Uuid::parse_str("00000000-0000-7000-8000-000000000c01")
+                .expect("valid task id"),
+        }],
+        since,
+        1,
+    )
+    .await
+    .expect("quarantine");
+
+    let reruns = repo.run_ci_reruns(run(PARSER)).await.expect("reruns");
+    let other = repo.run_ci_reruns(run(DASHES)).await.expect("other");
+
+    let read: Vec<(u16, &str, Option<CiRetryResult>, bool)> = reruns
+        .retries
+        .iter()
+        .map(|kept| {
+            (
+                kept.seq,
+                kept.retry.name.as_str(),
+                kept.retry.result,
+                kept.retry.settled_at.is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        read,
+        [
+            (1, "lint", Some(CiRetryResult::Failed), true),
+            (1, "test", Some(CiRetryResult::Passed), true),
+            (2, "test", None, false),
+        ]
+    );
+    assert_eq!(reruns.quarantines.len(), 1);
+    assert_eq!(
+        reruns.quarantines[0].failure,
+        identity("test", Some("Run tests"))
+    );
+    assert_eq!(reruns.quarantines[0].run_id, Some(run(PARSER)));
+    assert!(other.retries.is_empty());
+    assert!(other.quarantines.is_empty());
+}
+
 /// The known flakes a Run keeps are read back for its Steps.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",

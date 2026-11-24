@@ -13,6 +13,7 @@ use factory_records::domain::models::{
     RunRetry, SteerRefusal, Step, StepKey,
 };
 use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRound};
+use factory_records::domain::split_tasks::SplitTask;
 use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -23,6 +24,8 @@ use crate::domain::control_files::ControlFilesError;
 use crate::domain::definition::{DefinitionChangeError, DefinitionError};
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 use crate::domain::gate_owner::OwnerNote;
+use crate::domain::quality::CiQuarantined;
+use crate::domain::quality::reruns::CiRerun;
 use crate::domain::setup::RepositorySetup;
 use crate::domain::token_budget::RunTokenBudget;
 
@@ -871,6 +874,17 @@ pub struct RunDetail {
     /// added, by Step, each with how the factory's run of it went: in a
     /// Run's own read (`GET /runs/{id}`) only, empty in a list of Runs.
     pub break_records: Vec<BreakRecord>,
+    /// The failed CI jobs its `ci` Steps reran under the `rerun_flaky_ci`
+    /// rule, by Step then job, each with how it ended: in a Run's own read
+    /// only, empty in a list of Runs.
+    pub ci_reruns: Vec<CiRerun>,
+    /// The failures its passed reruns quarantined in its repository: in a
+    /// Run's own read only, empty in a list of Runs.
+    pub ci_quarantines: Vec<CiQuarantined>,
+    /// The child tasks its `split` Steps filed, by Step then place, with
+    /// their ids and names: in a Run's own read only, empty in a list of
+    /// Runs.
+    pub split_tasks: Vec<SplitTask>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their

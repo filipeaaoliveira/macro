@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT seq, place, task_id, name\n            FROM factory_split_task\n            WHERE run_id = $1\n            ORDER BY seq, place\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "place",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "task_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5586eb2d567c4673e4a283b0de4441e5a1dfeff29e896777e76e987e058c76c8"
+}

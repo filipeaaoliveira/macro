@@ -40,6 +40,7 @@ fn run() -> Run {
         end: None,
         budget_stop: None,
         retry: None,
+        retried_by: None,
     }
 }
 

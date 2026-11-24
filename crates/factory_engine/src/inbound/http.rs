@@ -1059,8 +1059,9 @@ where
 /// entry it stopped at, with their outputs, and starts there; its
 /// `retry.retriedFrom` names the Run it retries. A Run is retried once: a
 /// second retry, a running Run, a Run that ended otherwise, a Benchmark
-/// trial and a self-improvement Run are refused (409), as is a retry past
-/// the caller's Queue limit (`queueFull`). An agent acting for the owner
+/// trial and a self-improvement Run are refused (409 `notRetriable`, and
+/// `alreadyRetried` for a second retry), as is a retry past the caller's
+/// Queue limit (`queueFull`). An agent acting for the owner
 /// needs a Standing Role that allows `start`, as a new Run does.
 #[utoipa::path(
     post,
@@ -1316,6 +1317,13 @@ pub enum RunErrorCode {
     /// a question, and Runs of a Flow with a Gate that have not reached one
     /// yet. No new Run starts until they answer some, or cancel one.
     QueueFull,
+    /// The Run cannot be retried: it has not ended, it ended other than
+    /// `failed`, `infrastructure` or `blocked`, it is a Benchmark trial or
+    /// a self-improvement Run, or it keeps no Flow to start again.
+    NotRetriable,
+    /// The Run was retried already: its `retriedBy` names the retry, which
+    /// is the one to retry next.
+    AlreadyRetried,
     /// An agent answering for the Run's owner tried what the factory keeps
     /// for the owner in person.
     ReservedForAPerson,
@@ -1368,6 +1376,8 @@ impl FactoryError {
             FactoryError::NoPushAccess => Some(RunErrorCode::NoPushAccess),
             FactoryError::ControlFilesNotApproved => Some(RunErrorCode::ControlFilesNotApproved),
             FactoryError::QueueFull { .. } => Some(RunErrorCode::QueueFull),
+            FactoryError::NotRetriable => Some(RunErrorCode::NotRetriable),
+            FactoryError::AlreadyRetried => Some(RunErrorCode::AlreadyRetried),
             FactoryError::ReservedForAPerson(_) => Some(RunErrorCode::ReservedForAPerson),
             FactoryError::NotInStandingRole { .. } => Some(RunErrorCode::NotInStandingRole),
             FactoryError::UnreachableDefinition => Some(RunErrorCode::UnreachableDefinition),

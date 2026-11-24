@@ -15,5 +15,6 @@ pub mod ports;
 pub mod quality;
 pub mod review_rounds;
 pub mod self_improvement;
+pub mod split_tasks;
 pub mod standing_acts;
 pub mod standing_rules;

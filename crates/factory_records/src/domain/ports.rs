@@ -442,6 +442,25 @@ pub trait RunRepository: Send + Sync + 'static {
         ids: &[RunId],
     ) -> impl Future<Output = Result<RunsBreakRecords, Self::Err>> + Send;
 
+    /// Keep the task `task_id`, named `name`, as the child at `place` in
+    /// the plan that the `split` Step `key` filed. A child kept at its
+    /// place before keeps what it was, so a retried Step keeps each child
+    /// once.
+    fn record_split_task(
+        &self,
+        key: StepKey,
+        place: u16,
+        task_id: Uuid,
+        name: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The child tasks the Run `id`'s `split` Steps filed, by Step then
+    /// place.
+    fn run_split_tasks(
+        &self,
+        id: RunId,
+    ) -> impl Future<Output = Result<Vec<crate::domain::split_tasks::SplitTask>, Self::Err>> + Send;
+
     /// Keep `sha` as the commit whose checks passed, which the Run asks a
     /// person to merge, replacing the one kept before: only that commit
     /// merges once they agree. Keeping it again changes nothing.
@@ -502,6 +521,13 @@ pub trait RunRepository: Send + Sync + 'static {
         pull_request: Option<&str>,
         since: chrono::DateTime<chrono::Utc>,
     ) -> impl Future<Output = Result<crate::domain::quality::CiFlakes, Self::Err>> + Send;
+
+    /// The reruns the Run `id`'s `ci` Steps asked for, by Step then job
+    /// name, and the quarantines it made, by failure.
+    fn run_ci_reruns(
+        &self,
+        id: RunId,
+    ) -> impl Future<Output = Result<crate::domain::quality::RunCiReruns, Self::Err>> + Send;
 
     /// The reruns the `ci` Step `key` asked for, by job name.
     fn ci_retries(

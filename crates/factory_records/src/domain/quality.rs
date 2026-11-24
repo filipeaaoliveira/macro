@@ -4,6 +4,7 @@
 //! quarantines.
 
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::domain::insights::{InsightsScope, RunSummary};
@@ -142,7 +143,8 @@ pub struct LastCiWait {
 pub const FLAKY_PERIOD: chrono::TimeDelta = chrono::TimeDelta::days(30);
 
 /// Why a `ci` Step took a failed CI job for flaky, and reran it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub enum CiRetryMatch {
     /// The Run's Factory Definition names it in `knownFlakes`.
     Known,
@@ -174,7 +176,8 @@ impl CiRetryMatch {
 }
 
 /// How a rerun of a failed CI job ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub enum CiRetryResult {
     /// The job passed when it ran again: a passed retry.
     Passed,
@@ -246,6 +249,28 @@ pub struct CiRetry {
     pub result: Option<CiRetryResult>,
     /// When it was asked for.
     pub requested_at: DateTime<Utc>,
+    /// When it ended; none while it runs.
+    pub settled_at: Option<DateTime<Utc>>,
+}
+
+/// A rerun one of a Run's `ci` Steps asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunCiRetry {
+    /// The `ci` Step that asked for it.
+    pub seq: u16,
+    /// The rerun.
+    pub retry: CiRetry,
+}
+
+/// What a Run's flaky CI reruns came to: the reruns its `ci` Steps asked
+/// for, by Step then job, and the quarantines it made, by failure.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunCiReruns {
+    /// The reruns.
+    pub retries: Vec<RunCiRetry>,
+    /// The failures its passed reruns quarantined in its repository: those
+    /// whose threshold one of its reruns crossed.
+    pub quarantines: Vec<CiQuarantine>,
 }
 
 /// A failure of a CI job, as CI health tells failures apart: the job, the

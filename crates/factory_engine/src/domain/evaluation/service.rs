@@ -4,8 +4,10 @@
 use std::sync::Arc;
 
 use ai_usage::domain::session_usage::SessionUsageReader;
+use chrono::{DateTime, Utc};
 use factory_records::domain::evaluation::{
-    EvaluationRepository, Judgment, ScoringSubject, SubjectTrial, TrialResult, TrialTokens,
+    EvaluationRepository, Judgment, ScoringState, ScoringSubject, SubjectTrial, TrialResult,
+    TrialTokens,
 };
 use factory_records::domain::models::{Outcome, RunId, RunOutcome};
 use serde_json::json;
@@ -256,6 +258,51 @@ pub(crate) fn trial_score(subject: &ScoringSubject) -> f64 {
         Some(outcome) if *outcome == Outcome::red() => RED_SCORE,
         _ => 0.0,
     }
+}
+
+/// How long after a Run ends its live Scorers may still judge it: the
+/// workflow first stops the Steps it held (at most 15 minutes each), then
+/// gives scoring at most 30 minutes. Past it, a Scorer that has not judged
+/// the Run never will: its judge failed for good, it read no change, or
+/// the Run ended before Runs were scored or kept when scoring finished.
+pub const SCORING_WINDOW: chrono::TimeDelta = chrono::TimeDelta::hours(1);
+
+/// Whether no live Scorer judges a Run that ended `outcome`: a cancelled
+/// Run is no one's finished work, and one that ended `infrastructure` never
+/// had its work run.
+fn judged_by_none(outcome: Option<RunOutcome>) -> bool {
+    matches!(
+        outcome,
+        Some(RunOutcome::Cancelled | RunOutcome::Infrastructure)
+    )
+}
+
+/// The live Scorers of `definition`, the one the Run `run_id` is scored
+/// with, that will still judge it at `now`, by name: each whose sample
+/// takes it and that has not judged it. None once its scoring finished or
+/// [`SCORING_WINDOW`] after it ended, for a trial, which only its
+/// Benchmark's Scorers judge, nor for a Run no Scorer judges. A Run that
+/// goes names those that will judge it once it ends.
+pub fn pending_scorers(
+    definition: &EvaluationDefinition,
+    run_id: RunId,
+    state: &ScoringState,
+    now: DateTime<Utc>,
+) -> Vec<String> {
+    let past_window = state
+        .ended_at
+        .is_some_and(|ended_at| now - ended_at > SCORING_WINDOW);
+    if state.trial || state.scored_at.is_some() || past_window || judged_by_none(state.outcome) {
+        return Vec::new();
+    }
+    definition
+        .scorers()
+        .iter()
+        .filter(|scorer| {
+            scorer.samples(state.flow.as_deref(), run_id) && !state.judged.contains(&scorer.name)
+        })
+        .map(|scorer| scorer.name.clone())
+        .collect()
 }
 
 /// Scores Runs as they end, over the records, the Scorers' model, the
@@ -568,10 +615,7 @@ where
         subject: &ScoringSubject,
         last_attempt: bool,
     ) -> Result<bool, StepError> {
-        if matches!(
-            subject.outcome,
-            Some(RunOutcome::Cancelled | RunOutcome::Infrastructure)
-        ) {
+        if judged_by_none(subject.outcome) {
             return Ok(true);
         }
         let mut all_judged = true;
@@ -730,6 +774,12 @@ where
             }
             None => self.score_live(definition, &subject, last_attempt).await?,
         };
+        // Scoring is finished once every judge it asked judged, or on its
+        // last attempt however that went: the scores' read then names no
+        // Scorer as still to judge the Run.
+        if all_judged || last_attempt {
+            self.repo.mark_run_scored(run_id).await.map_err(internal)?;
+        }
         // A judge that failed is asked again on the activity's retry; the
         // judgments already kept are not asked for twice.
         if all_judged {

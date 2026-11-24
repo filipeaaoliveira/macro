@@ -15,7 +15,9 @@
 //! each child task as the Run's owner, in the project of the Run's task,
 //! and ends `done` with their links: the `code` Flow then ends the Run for
 //! a person. Each child's id is fixed by the Run and the Step, so a retried
-//! `split` files no second task.
+//! `split` files no second task. Each child filed is kept with its id and
+//! name (`RunRepository::record_split_task`), so the Run's read lists them
+//! (`RunDetail::split_tasks`) without parsing the Step's output.
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
@@ -24,7 +26,7 @@ use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use serde::Deserialize;
 
-use super::checks_round::fit;
+use super::checks_round::{fit, records};
 use super::{BuiltInStepError, BuiltInSteps, outcomes};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::flow::StepName;
@@ -273,7 +275,20 @@ where
                 .await
                 .map_err(unavailable)?;
             match made {
-                Some(FollowUpMade::Made) => filed.push(task_mention(task_id, &child.name)),
+                Some(FollowUpMade::Made) => {
+                    // Kept for the Run's read, which lists the children
+                    // without asking document storage. A failed write is
+                    // a records error, which is retried: the retry files
+                    // the same ids, which document storage finds made,
+                    // and the write does nothing for a child kept already.
+                    let place = u16::try_from(index).unwrap_or(u16::MAX);
+                    self.pull_requests
+                        .records()
+                        .record_split_task(input.key, place, task_id, &child.name)
+                        .await
+                        .map_err(records)?;
+                    filed.push(task_mention(task_id, &child.name));
+                }
                 // A task made under another id would be made again by every
                 // retry: a fault to stop at, as for a follow-up task.
                 Some(FollowUpMade::OtherId(made)) => {

@@ -13,7 +13,7 @@ use super::PgRunRepositoryErr;
 use crate::domain::models::{RunId, StepKey};
 use crate::domain::quality::{
     CiFailureIdentity, CiFlakes, CiQuarantine, CiRetry, CiRetryMatch, CiRetryRequest,
-    CiRetryResult, FlakyCiFailure, NewCiQuarantine,
+    CiRetryResult, FlakyCiFailure, NewCiQuarantine, RunCiReruns, RunCiRetry,
 };
 use crate::domain::standing_rules::StandingRule;
 
@@ -171,7 +171,7 @@ pub(super) async fn ci_retries(
     sqlx::query!(
         r#"
         SELECT name, head_sha, job_id, workflow_run_id, failed_step, failure, matched, result,
-            requested_at
+            requested_at, settled_at
         FROM factory_ci_retry
         WHERE run_id = $1 AND seq = $2
         ORDER BY name
@@ -193,9 +193,70 @@ pub(super) async fn ci_retries(
             matched: retry_match(row.matched)?,
             result: retry_result(row.result)?,
             requested_at: row.requested_at,
+            settled_at: row.settled_at,
         })
     })
     .collect()
+}
+
+/// The reruns the Run `id`'s `ci` Steps asked for, through the reruns'
+/// primary key, and the quarantines it made, through
+/// `factory_ci_quarantine_run_idx`.
+pub(super) async fn run_ci_reruns(
+    pool: &PgPool,
+    id: RunId,
+) -> Result<RunCiReruns, PgRunRepositoryErr> {
+    let retries = sqlx::query!(
+        r#"
+        SELECT seq, name, head_sha, job_id, workflow_run_id, failed_step, failure, matched,
+            result, requested_at, settled_at
+        FROM factory_ci_retry
+        WHERE run_id = $1
+        ORDER BY seq, name
+        "#,
+        id.as_uuid(),
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(RunCiRetry {
+            seq: u16::try_from(row.seq).map_err(|_| PgRunRepositoryErr::OutOfRange(row.seq))?,
+            retry: CiRetry {
+                name: row.name,
+                head_sha: row.head_sha,
+                job_id: u64::try_from(row.job_id).unwrap_or_default(),
+                workflow_run_id: self::id(row.workflow_run_id),
+                failed_step: row.failed_step,
+                failure: row.failure,
+                matched: retry_match(row.matched)?,
+                result: retry_result(row.result)?,
+                requested_at: row.requested_at,
+                settled_at: row.settled_at,
+            },
+        })
+    })
+    .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
+    let quarantines = sqlx::query_as!(
+        QuarantineRow,
+        r#"
+        SELECT task_id, repo_url, name, failed_step, failure, run_id, passed_retries, filed,
+            quarantined_at, last_passed_at
+        FROM factory_ci_quarantine
+        WHERE run_id = $1
+        ORDER BY name, failed_step, failure
+        "#,
+        id.as_uuid(),
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(CiQuarantine::from)
+    .collect();
+    Ok(RunCiReruns {
+        retries,
+        quarantines,
+    })
 }
 
 pub(super) async fn request_ci_retries(
