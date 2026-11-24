@@ -182,6 +182,21 @@ async fn runs_are_counted_on_their_local_day_by_outcome_and_flow() {
             p90_seconds: 1680.0,
         })
     );
+    // Each day times its own Runs alike: the 10th holds both, the 11th
+    // only the cancelled one and the 12th only the one still going.
+    let minutes = |count, median: f64, p90: f64| DurationStats {
+        count,
+        median_seconds: median * 60.0,
+        p90_seconds: p90 * 60.0,
+    };
+    assert_eq!(
+        insights
+            .days
+            .iter()
+            .map(|day| day.run_duration)
+            .collect::<Vec<_>>(),
+        vec![Some(minutes(2, 20.0, 28.0)), None, None]
+    );
     assert!(!insights.capped);
 }
 
@@ -449,6 +464,63 @@ async fn usage_is_summed_by_entry_and_run_for_the_caller() {
     assert_eq!(insights.usage.heaviest[0].run.id, run_id(1));
     assert_eq!(insights.entries[0].tokens, Some(tokens(100, 10)));
     assert_eq!(insights.entries[1].tokens, Some(tokens(50, 5)));
+}
+
+/// An entry's cost is what its sessions' priced calls cost, given only
+/// when every call was priced; an entry with no usage has none.
+#[tokio::test]
+async fn an_entry_costs_its_priced_calls_when_every_call_was_priced() {
+    let session = |n: u128| Uuid::from_u128(200 + n);
+    let step = |seq: u16, id: &str, n: u128| StepSessionRef {
+        run_id: run_id(1),
+        seq,
+        entry: entry(id),
+        session_id: session(n),
+    };
+    let records = InsightsRecords {
+        runs: vec![summary(1, Some("code"), "2026-11-10T10:00:00Z", None)],
+        entries: vec![
+            entry_summary("plan", 2),
+            entry_summary("write", 1),
+            entry_summary("review", 1),
+        ],
+        sessions: vec![
+            step(1, "plan", 1),
+            step(2, "plan", 2),
+            step(3, "write", 3),
+            step(4, "review", 4),
+        ],
+        ..InsightsRecords::default()
+    };
+    let used = |n, cost_usd, unpriced_calls| SessionTokens {
+        session_id: session(n),
+        input: 100,
+        output: 10,
+        cache_read: 0,
+        cache_write: 0,
+        cost_usd,
+        unpriced_calls,
+    };
+    let service = service(
+        records,
+        vec![used(1, 0.25, 0), used(2, 0.5, 0), used(3, 1.0, 2)],
+    );
+
+    let insights = service
+        .insights(&julia(), query("2026-11-10", "2026-11-12", "UTC"))
+        .await
+        .expect("insights");
+
+    let cost = |id: &str| {
+        insights
+            .entries
+            .iter()
+            .find(|insight| insight.entry == id)
+            .and_then(|insight| insight.cost_usd)
+    };
+    assert_eq!(cost("plan"), Some(0.75));
+    assert_eq!(cost("write"), None);
+    assert_eq!(cost("review"), None);
 }
 
 /// A Step that went on in a new session counts as one Step: one passed
