@@ -374,8 +374,9 @@ pub struct QualityRun {
     pub repository: Option<String>,
     /// The page of the pull request it opened.
     pub pull_request: Option<String>,
-    /// Whether it merged its pull request.
-    pub merged: bool,
+    /// When it merged its pull request, on the worker's clock; none when
+    /// it did not.
+    pub merged_at: Option<DateTime<Utc>>,
     /// Whether a person answered one of its Gates: not a Standing Rule, the
     /// stand-in or an agent.
     pub person_answered: bool,

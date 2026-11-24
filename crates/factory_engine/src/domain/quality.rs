@@ -571,6 +571,9 @@ pub struct DeliveryInsight {
     pub ended_runs: u32,
     /// Runs that merged their pull request.
     pub merged: u32,
+    /// How long those took from their creation to their merge; none while
+    /// none merged.
+    pub time_to_merge: Option<DurationStats>,
     /// Runs that merged with no person stepping in: no Gate a person
     /// answered, no Step they steered, and no manual end. A Run found
     /// flawed afterwards, cancelled, or ended for infrastructure is not.
@@ -1142,6 +1145,7 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
     let mut ended_runs = 0;
     let mut ended_on_their_own = 0;
     let mut merged = 0;
+    let mut merge_seconds = Vec::new();
     let mut autonomous = 0;
     let mut person_answered = 0;
     let mut steered = 0;
@@ -1177,8 +1181,10 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
             steered += u32::from(run.steered);
             manual += u32::from(is_manual);
         }
-        if run.merged {
+        if let Some(merged_at) = run.merged_at {
             merged += 1;
+            let seconds = (merged_at - run.run.created_at).num_milliseconds() as f64 / 1000.0;
+            merge_seconds.push(seconds);
             if on_its_own
                 && outcome != Some(RunOutcome::Flawed)
                 && !run.person_answered
@@ -1214,6 +1220,7 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
     DeliveryInsight {
         ended_runs,
         merged,
+        time_to_merge: duration_stats(merge_seconds),
         autonomous,
         autonomy_rate: share(autonomous, ended_on_their_own),
         person_answered,

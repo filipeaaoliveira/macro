@@ -65,7 +65,7 @@ fn job(name: &str, result: CiJobResult, failed_step: Option<&str>) -> CiJob {
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people", "quality"))
 )]
-async fn the_persons_runs_say_whether_they_merged_and_whether_a_person_stepped_in(pool: PgPool) {
+async fn the_persons_runs_say_when_they_merged_and_whether_a_person_stepped_in(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
 
     let records = repo.read_quality(&julia(None)).await.expect("read");
@@ -78,17 +78,17 @@ async fn the_persons_runs_say_whether_they_merged_and_whether_a_person_stepped_i
     let flags: Vec<_> = records
         .runs
         .iter()
-        .map(|run| (run.merged, run.person_answered, run.steered))
+        .map(|run| (run.merged_at, run.person_answered, run.steered))
         .collect();
     assert_eq!(
         flags,
         vec![
             // Her Orchestrator answered: not a person.
-            (true, false, false),
-            (false, false, true),
-            (true, true, false),
+            (Some(at("2026-11-13T10:00:00Z")), false, false),
+            (None, false, true),
+            (Some(at("2026-11-11T10:00:00Z")), true, false),
             // A Standing Rule answered: not a person.
-            (true, false, false),
+            (Some(at("2026-11-10T11:00:00Z")), false, false),
         ]
     );
     assert_eq!(records.runs[3].repository.as_deref(), Some(APP));
