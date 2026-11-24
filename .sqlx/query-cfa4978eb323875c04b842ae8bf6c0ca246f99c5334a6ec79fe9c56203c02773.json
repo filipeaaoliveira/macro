@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO factory_ci_quarantine\n            (task_id, repo_url, name, passed_retries, quarantined_by)\n        VALUES ($1, $2, $3, 0, $4)\n        ON CONFLICT (repo_url, name, coalesce(failed_step, ''), coalesce(failure, ''))\n        DO UPDATE SET\n            quarantined_by = coalesce(factory_ci_quarantine.quarantined_by, EXCLUDED.quarantined_by),\n            quarantined_at = CASE WHEN factory_ci_quarantine.last_passed_at < $5\n                THEN now() ELSE factory_ci_quarantine.quarantined_at END,\n            last_passed_at = greatest(factory_ci_quarantine.last_passed_at, now())\n        WHERE factory_ci_quarantine.quarantined_by IS NULL\n            OR factory_ci_quarantine.last_passed_at < $5\n        RETURNING task_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cfa4978eb323875c04b842ae8bf6c0ca246f99c5334a6ec79fe9c56203c02773"
+}

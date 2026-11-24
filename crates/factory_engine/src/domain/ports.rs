@@ -1245,6 +1245,29 @@ pub trait FactoryService: Send + Sync + 'static {
         base_branch: &str,
     ) -> impl Future<Output = Result<bool, FactoryError>> + Send;
 
+    /// Quarantine the CI job `job` of the repository `repo_url` by hand,
+    /// for `actor`: every failure of it is a known flake there, which the
+    /// `rerun_flaky_ci` rule reruns once, until it is released or lapses.
+    /// `actor` must own or administer their team, in person, and may push
+    /// to the repository.
+    fn quarantine_ci_job(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> impl Future<Output = Result<crate::domain::models::CiQuarantineChange, FactoryError>> + Send;
+
+    /// Release the CI job `job` of the repository `repo_url`, for `actor`:
+    /// lift every quarantine of it, by hand or by its reruns. As
+    /// [`Self::quarantine_ci_job`], `actor` must own or administer their
+    /// team, in person, and may push to the repository.
+    fn release_ci_job(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> impl Future<Output = Result<crate::domain::models::CiQuarantineChange, FactoryError>> + Send;
+
     /// Cancel `actor`'s Run. Cancelling a Run that ended cancelled changes
     /// nothing. For the agent `acting`, on a Run whose Definition has
     /// Standing Roles, its bot must fill one that allows `cancel`. The Run

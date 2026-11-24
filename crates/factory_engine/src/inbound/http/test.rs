@@ -37,6 +37,8 @@ use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
 mod board;
+mod ci_quarantine;
+mod ci_release;
 mod control_files;
 mod definition_changes;
 mod flaws;
@@ -517,6 +519,32 @@ impl FactoryService for FakeService {
         _base_branch: &str,
     ) -> Result<bool, FactoryError> {
         Ok(false)
+    }
+
+    async fn quarantine_ci_job(
+        &self,
+        _actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> Result<crate::domain::models::CiQuarantineChange, FactoryError> {
+        Ok(crate::domain::models::CiQuarantineChange {
+            repository: repo_url.to_lowercase(),
+            job: job.to_string(),
+            changed: true,
+        })
+    }
+
+    async fn release_ci_job(
+        &self,
+        _actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> Result<crate::domain::models::CiQuarantineChange, FactoryError> {
+        Ok(crate::domain::models::CiQuarantineChange {
+            repository: repo_url.to_lowercase(),
+            job: job.to_string(),
+            changed: false,
+        })
     }
 }
 

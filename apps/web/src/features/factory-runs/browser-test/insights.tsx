@@ -444,6 +444,8 @@ function createFixtureInsights(): InsightsContext {
       setUndoneAt(undoneAt() ?? new Date().toISOString());
       return { ok: true, value: undefined };
     },
+    isTeamAdmin: () => () => true,
+    setCiQuarantine: async () => ({ ok: true }),
   };
 }
 

@@ -14,7 +14,9 @@ use uuid::Uuid;
 
 use super::{CiCause, QualityQuery, ci_job, generic_step, summarize_quality};
 use crate::domain::insights::fakes::{FakeRecords, FakeUsage};
-use crate::domain::insights::{InsightsError, InsightsQuery, InsightsService, InsightsServiceImpl};
+use crate::domain::insights::{
+    DurationStats, InsightsError, InsightsQuery, InsightsService, InsightsServiceImpl,
+};
 use crate::domain::models::{CheckState, FailureAnnotation, FinishedJob};
 
 const APP: &str = "https://github.com/macro/app";
@@ -74,7 +76,7 @@ fn run(n: u128) -> QualityRun {
         },
         repository: Some(APP.to_string()),
         pull_request: Some(format!("{APP}/pull/{n}")),
-        merged: true,
+        merged_at: Some(at(&format!("2026-11-{n:02}T11:00:00Z"))),
         person_answered: false,
         steered: false,
         sessions: vec![on(session(n), Some(HOSTED))],
@@ -741,10 +743,10 @@ fn a_run_a_person_stepped_into_is_not_autonomous() {
     let mut steered = run(3);
     steered.steered = true;
     let mut manual = run(4);
-    manual.merged = false;
+    manual.merged_at = None;
     manual.run.end = Some((RunOutcome::Manual, at("2026-11-04T12:00:00Z")));
     let mut going = run(5);
-    going.merged = false;
+    going.merged_at = None;
     going.run.end = None;
     let records = QualityRecords {
         runs: vec![going, manual, steered, answered, run(1)],
@@ -763,10 +765,43 @@ fn a_run_a_person_stepped_into_is_not_autonomous() {
     );
 }
 
+/// Time to merge runs from a Run's creation to its merge, for the Runs
+/// that merged only.
+#[test]
+fn time_to_merge_is_timed_from_creation_to_the_merge() {
+    let mut quick = run(2);
+    quick.merged_at = Some(at("2026-11-02T09:30:00Z"));
+    let mut unmerged = run(3);
+    unmerged.merged_at = None;
+    let records = QualityRecords {
+        runs: vec![unmerged, quick, run(1)],
+        ..QualityRecords::default()
+    };
+    let none = QualityRecords {
+        runs: vec![ended(4, RunOutcome::Failed, false)],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(&query(None), records, &[]).delivery;
+    let unmerged = summarize_quality(&query(None), none, &[]).delivery;
+
+    assert_eq!(
+        delivery.time_to_merge,
+        Some(DurationStats {
+            count: 2,
+            median_seconds: 4500.0,
+            p90_seconds: 6660.0,
+        })
+    );
+    assert_eq!(unmerged.time_to_merge, None);
+}
+
 /// Run `n`, ended `outcome` on day `n`.
 fn ended(n: u128, outcome: RunOutcome, merged: bool) -> QualityRun {
     let mut run = run(n);
-    run.merged = merged;
+    if !merged {
+        run.merged_at = None;
+    }
     run.run.end = Some((outcome, at(&format!("2026-11-{n:02}T12:00:00Z"))));
     run
 }
@@ -842,7 +877,7 @@ fn the_autonomy_rate_leaves_out_cancelled_runs() {
 #[test]
 fn cost_per_merged_pull_request_is_money_where_priced_and_tokens_otherwise() {
     let mut unmerged = run(2);
-    unmerged.merged = false;
+    unmerged.merged_at = None;
     unmerged.run.end = Some((RunOutcome::Failed, at("2026-11-02T12:00:00Z")));
     let records = || QualityRecords {
         runs: vec![unmerged.clone(), run(1)],

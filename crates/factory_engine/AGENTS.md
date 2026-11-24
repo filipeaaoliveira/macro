@@ -483,8 +483,10 @@ unchecked, and a newer worker replays that history without the marker.
 `GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,
 `domain/insights.rs`) sums up how the caller's own Runs went over a period of
 at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step
-durations, Gate waits and answers, the entries that failed or were revisited
-with their newest Runs, and the tokens each agent Step's sessions used
+durations (each day's Runs timed apart too, `days[].runDuration`), Gate
+waits and answers, the entries that failed or were revisited with their
+newest Runs, and the tokens each agent Step's sessions used, with what an
+entry's calls cost when every one was priced (`entries[].costUsd`)
 (its current one and those it left for a new one, the same sessions the
 token budget counts), read from the usage log by session id
 (`ai_usage`'s `SessionUsageReader`). A Step counts once in the agent and
@@ -529,7 +531,9 @@ count red waits as CI fix rounds and review rounds that ended `changes` as
 review fix rounds, count rounds per Run, the share clean after the first
 round, Blockers by reviewer Role and by Agent, repeated Blockers (the same
 text an earlier round of the Run found) and texts found in two or more
-Runs. A Run merged with no person stepping in when it merged and ended
+Runs. Time to merge (`delivery.timeToMerge`) runs from a merged Run's
+creation to its merge (`factory_merge.merged_at`). A Run merged with no
+person stepping in when it merged and ended
 with no Gate a person answered (not a Standing Rule, the stand-in or an
 agent), no Step its owner steered, and no `manual` end. Cost per merged
 pull request is every Run's usage (the sessions its token budget counts)
@@ -543,6 +547,23 @@ one that failed before its first: it cost nothing and does not withhold
 the figure. A session a Step left for a new one has no known bot (the Step
 keeps only its current Agent's), so one that recorded none withholds the
 figure. A repository that names none is 400.
+
+`POST /insights/ci-quarantines` and `POST /insights/ci-quarantines/release`
+(`inbound/http/ci_quarantine.rs`, `domain/service/quarantine.rs`), with
+`{repository, job}`, quarantine a CI job by hand or release it. Only an
+owner or admin of a team, not an agent's account, in their own signed-in
+session (403), who may push to the repository (400). Quarantines are per
+repository, not per team: one admin's change reaches every team's Runs on
+the repository, which push access bounds. The job's name is trimmed and cut
+as CI health keeps names. A quarantine by hand is marked so
+(`quarantined_by`) and covers the whole job (`CiFlakes::quarantined_jobs`);
+one its reruns made covers only its own failure, even one that named no
+step and no test. A hand quarantine files no task: each passed rerun of the
+job extends it instead of quarantining a narrower failure beside it, and it
+lapses 30 days after it was made or a rerun last passed. A release lifts
+every quarantine of the job and keeps when (`factory_ci_release`): the
+reruns and greens before it no longer prove the job flaky, so only new
+evidence quarantines it again. Each answers whether it changed anything.
 
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
 `evaluation/insights.rs`, `inbound/evaluation.rs`): an

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH extended AS (\n            UPDATE factory_ci_quarantine\n            SET passed_retries = passed_retries + 1, last_passed_at = now()\n            WHERE repo_url = $2 AND name = ANY($3) AND quarantined_by IS NOT NULL\n            RETURNING name\n        )\n        INSERT INTO factory_ci_quarantine\n            (task_id, repo_url, name, failed_step, failure, run_id, passed_retries)\n        SELECT job.task_id, $2, job.name, job.failed_step, job.failure, $1, passed.retries\n        FROM unnest($3::text[], $4::text[], $5::text[], $6::uuid[])\n            AS job(name, failed_step, failure, task_id)\n        CROSS JOIN LATERAL (\n            SELECT count(*)::int AS retries\n            FROM factory_ci_retry t\n            JOIN factory_run r ON r.id = t.run_id\n            WHERE t.name = job.name\n              AND t.result = 'passed'\n              AND t.settled_at >= $7\n              AND t.failed_step IS NOT DISTINCT FROM job.failed_step\n              AND t.failure IS NOT DISTINCT FROM job.failure\n              AND lower(r.repo_url) = $2\n              AND NOT EXISTS (\n                  SELECT 1 FROM factory_ci_release x\n                  WHERE x.repo_url = $2 AND x.name = job.name AND x.released_at >= t.settled_at\n              )\n        ) passed\n        WHERE passed.retries >= $8\n          AND job.name NOT IN (SELECT name FROM extended)\n        ON CONFLICT (repo_url, name, coalesce(failed_step, ''), coalesce(failure, ''))\n        DO UPDATE SET passed_retries = EXCLUDED.passed_retries, last_passed_at = now()\n        RETURNING name AS \"name!\", (xmax = 0) AS \"inserted!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "inserted!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "UuidArray",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "af38951e0eb905b03504d30cc36122aa783a089d098f6922372c31d0a0be78b7"
+}

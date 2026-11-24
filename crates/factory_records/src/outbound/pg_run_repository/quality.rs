@@ -142,7 +142,7 @@ struct QualityRunRow {
     ended_at: Option<DateTime<Utc>>,
     repo_url: Option<String>,
     pull_request_url: Option<String>,
-    merged: bool,
+    merged_at: Option<DateTime<Utc>>,
     person_answered: bool,
     steered: bool,
 }
@@ -171,7 +171,7 @@ impl TryFrom<QualityRunRow> for QualityRun {
             },
             repository: row.repo_url,
             pull_request: row.pull_request_url,
-            merged: row.merged,
+            merged_at: row.merged_at,
             person_answered: row.person_answered,
             steered: row.steered,
             sessions: Vec::new(),
@@ -218,7 +218,7 @@ impl RunQualityRepository for PgRunRepository {
 
         // The person's Runs in the range, newest first, through
         // `factory_run_user_created_idx`, one past the cap. Each says
-        // whether it merged, and whether a person stepped in: answered one
+        // when it merged, through `factory_merge`'s primary key, and whether a person stepped in: answered one
         // of its Gates in person (not a Standing Rule, the stand-in or an
         // agent), or steered one of its Steps. Benchmark trials are no
         // one's work and are never read.
@@ -234,7 +234,7 @@ impl RunQualityRepository for PgRunRepository {
                 r.ended_at,
                 r.repo_url,
                 r.pull_request_url,
-                EXISTS (SELECT 1 FROM factory_merge m WHERE m.run_id = r.id) AS "merged!",
+                (SELECT m.merged_at FROM factory_merge m WHERE m.run_id = r.id) AS "merged_at?",
                 EXISTS (
                     SELECT 1 FROM factory_gate g
                     WHERE g.run_id = r.id AND g.seq >= COALESCE(r.first_seq, 1)

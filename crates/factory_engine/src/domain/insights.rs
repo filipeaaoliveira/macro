@@ -209,6 +209,10 @@ pub struct InsightDay {
     pub date: NaiveDate,
     /// How its Runs went.
     pub counts: OutcomeCounts,
+    /// How long its Runs took from creation to their end, as
+    /// [`RunInsights::run_duration`] measures them; none when none of them
+    /// ended but cancelled.
+    pub run_duration: Option<DurationStats>,
 }
 
 /// The Runs of one Flow.
@@ -357,6 +361,9 @@ pub struct EntryInsight {
     pub gate: Option<GateInsight>,
     /// The tokens its agent Steps used, if any recorded usage.
     pub tokens: Option<TokenCounts>,
+    /// What its agent Steps' model calls cost, in US dollars; none unless
+    /// every session of theirs recorded usage and every call was priced.
+    pub cost_usd: Option<f64>,
     /// The newest Runs where it failed or was visited more than once.
     pub trouble: Vec<TroubleRun>,
 }
@@ -577,6 +584,7 @@ fn summarize(
         .collect();
     let mut flows: BTreeMap<Option<String>, OutcomeCounts> = BTreeMap::new();
     let mut run_seconds = Vec::new();
+    let mut day_seconds: HashMap<NaiveDate, Vec<f64>> = HashMap::new();
     let retried: std::collections::HashSet<RunId> = records.retried.iter().copied().collect();
     for run in &records.runs {
         let outcome = run.end.map(|(outcome, _)| outcome);
@@ -593,7 +601,9 @@ fn summarize(
         if let Some((outcome, ended_at)) = run.end
             && outcome != RunOutcome::Cancelled
         {
-            run_seconds.push((ended_at - run.created_at).num_milliseconds() as f64 / 1000.0);
+            let seconds = (ended_at - run.created_at).num_milliseconds() as f64 / 1000.0;
+            run_seconds.push(seconds);
+            day_seconds.entry(day).or_default().push(seconds);
         }
     }
     let mut flows: Vec<FlowInsight> = flows
@@ -608,6 +618,12 @@ fn summarize(
         .map(|tokens| (tokens.session_id, tokens))
         .collect();
     let mut entry_tokens: HashMap<&str, TokenCounts> = HashMap::new();
+    // What each entry's priced calls cost, and how many of its calls had no
+    // price.
+    let mut entry_cost: HashMap<&str, (f64, u64)> = HashMap::new();
+    // The entries with a session that recorded no usage: what they spent is
+    // not known, so no cost is given for them, as delivery gives none.
+    let mut entry_unmeasured: HashSet<&str> = HashSet::new();
     let mut run_tokens: HashMap<RunId, TokenCounts> = HashMap::new();
     let mut usage_total = TokenCounts::default();
     // A Step counts once however many sessions it worked in, and is
@@ -622,6 +638,7 @@ fn summarize(
     let mut counted: HashSet<(RunId, &str, Uuid)> = HashSet::new();
     for session in &records.sessions {
         let Some(used) = tokens_by_session.get(&session.session_id) else {
+            entry_unmeasured.insert(session.entry.as_str());
             continue;
         };
         measured_steps.insert((session.run_id, session.seq));
@@ -633,6 +650,9 @@ fn summarize(
             .entry(session.entry.as_str())
             .or_default()
             .add(used);
+        let cost = entry_cost.entry(session.entry.as_str()).or_default();
+        cost.0 += used.cost_usd;
+        cost.1 += used.unpriced_calls;
         run_tokens.entry(session.run_id).or_default().add(used);
     }
     let mut heaviest: Vec<RunTokens> = run_tokens
@@ -709,6 +729,10 @@ fn summarize(
                 outcomes: by_count_then_name(outcomes.remove(entry).unwrap_or_default()),
                 gate,
                 tokens: entry_tokens.get(entry).copied(),
+                cost_usd: entry_cost
+                    .get(entry)
+                    .filter(|(_, unpriced)| *unpriced == 0 && !entry_unmeasured.contains(entry))
+                    .map(|(usd, _)| *usd),
                 trouble: trouble.remove(entry).unwrap_or_default(),
             }
         })
@@ -729,7 +753,11 @@ fn summarize(
         totals,
         days: days
             .into_iter()
-            .map(|(date, counts)| InsightDay { date, counts })
+            .map(|(date, counts)| InsightDay {
+                date,
+                counts,
+                run_duration: day_seconds.remove(&date).and_then(duration_stats),
+            })
             .collect(),
         flows,
         run_duration: duration_stats(run_seconds),

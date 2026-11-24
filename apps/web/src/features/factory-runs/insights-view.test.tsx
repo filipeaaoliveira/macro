@@ -287,6 +287,7 @@ function mount(options: {
   retry?: () => void;
   queue?: RunsQueue;
   undoDismissal?: InsightsContext['undoDismissal'];
+  setCiQuarantine?: InsightsContext['setCiQuarantine'];
 }) {
   const asked: InsightsParams[] = [];
   const insights: InsightsContext = {
@@ -320,6 +321,9 @@ function mount(options: {
       retry: vi.fn(),
     }),
     undoDismissal: options.undoDismissal ?? vi.fn(),
+    isTeamAdmin: () => () => false,
+    setCiQuarantine:
+      options.setCiQuarantine ?? vi.fn(async () => ({ ok: true as const })),
   };
   const runs: RunsContext = {
     taskRuns: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),

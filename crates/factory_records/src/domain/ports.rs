@@ -581,13 +581,31 @@ pub trait RunRepository: Send + Sync + 'static {
         task_id: Uuid,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Lift the quarantine whose task is `task_id`: its failure is no
-    /// known flake from then on, until its reruns quarantine it again.
-    /// Whether there was one.
-    fn lift_ci_quarantine(
+    /// Quarantine the CI job `name` in the repository `repository` (its URL
+    /// in lower case) by hand, for `by`: the whole job, every failure of
+    /// it, under the id `id`, with no task to file. One by hand already is
+    /// left as it is, unless it lapsed before `since`: then it starts over.
+    /// One its reruns made of a failure with no step and no test becomes
+    /// the hand's. Whether it is quarantined whole now and was not before.
+    fn quarantine_ci_job(
         &self,
-        task_id: Uuid,
+        repository: &str,
+        name: &str,
+        by: &MacroUserIdStr<'static>,
+        id: Uuid,
+        since: chrono::DateTime<chrono::Utc>,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Release the CI job `name` in the repository `repository` (its URL in
+    /// lower case), for `by`: lift every quarantine of it, by hand or by its
+    /// reruns, and keep the release, so the evidence before it no longer
+    /// proves the job flaky. How many quarantines were lifted.
+    fn lift_ci_job_quarantines(
+        &self,
+        repository: &str,
+        name: &str,
+        by: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<u32, Self::Err>> + Send;
 
     /// Keep the Control Files the Run's branch changed, as last read,
     /// replacing what was kept before: none clears it. Keeping it again

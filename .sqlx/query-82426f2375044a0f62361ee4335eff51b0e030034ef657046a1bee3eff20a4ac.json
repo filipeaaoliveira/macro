@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH released AS (\n            INSERT INTO factory_ci_release (repo_url, name, released_by)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (repo_url, name)\n            DO UPDATE SET released_at = now(), released_by = EXCLUDED.released_by\n        ),\n        lifted AS (\n            DELETE FROM factory_ci_quarantine\n            WHERE repo_url = $1 AND name = $2\n            RETURNING 1\n        )\n        SELECT count(*) AS \"lifted!\" FROM lifted\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lifted!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "82426f2375044a0f62361ee4335eff51b0e030034ef657046a1bee3eff20a4ac"
+}

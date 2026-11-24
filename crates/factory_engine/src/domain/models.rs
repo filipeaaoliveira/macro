@@ -1236,6 +1236,20 @@ fn queue_limit_source(source: RulesSource) -> &'static str {
     }
 }
 
+/// A CI job a person quarantined or released by hand, and whether that
+/// changed anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CiQuarantineChange {
+    /// The repository, by its URL in lower case, as quarantines name it.
+    pub repository: String,
+    /// The job.
+    pub job: String,
+    /// Whether anything changed: quarantining a job quarantined already,
+    /// or releasing one that is not, changes nothing.
+    pub changed: bool,
+}
+
 /// Errors of the factory's Run use cases.
 #[derive(Debug, thiserror::Error)]
 pub enum FactoryError {
@@ -1281,6 +1295,9 @@ pub enum FactoryError {
     /// The repository is not named by a `https://github.com/owner/name` URL.
     #[error("the repository must be named by a https://github.com/owner/name URL")]
     InvalidRepository,
+    /// A CI job to quarantine or release is named by no name.
+    #[error("name the ci job to quarantine or release")]
+    InvalidCiJob,
     /// The Run's owner cannot reach the repository with their GitHub
     /// account, has not connected one, or the repository has no branch yet.
     #[error(

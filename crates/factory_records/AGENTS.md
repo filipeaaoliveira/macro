@@ -142,7 +142,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261123100336_factory_ci_wait_recorded_index.sql`,
   `20261123130000_factory_break_record.sql`,
   `20261123221318_factory_run_scored.sql`,
-  `20261123221322_factory_split_task.sql`), `factory_break_record`,
+  `20261123221322_factory_split_task.sql`,
+  `20261124120000_factory_ci_quarantine_by_hand.sql`), `factory_break_record`,
   `factory_split_task`,
   `factory_step_steer`,
   `factory_run_score`, `factory_scorer_label`, `factory_run_arm`, `factory_run_agent_rule`,
@@ -151,7 +152,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
   `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait`,
-  `factory_ci_job`, `factory_ci_retry`, `factory_ci_quarantine` and
+  `factory_ci_job`, `factory_ci_retry`, `factory_ci_quarantine`, `factory_ci_release` and
   `factory_step_used_session`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
@@ -535,10 +536,27 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   case), job, failed step and test, whose reruns passed often enough there
   (`quarantine_ci_jobs`); a quarantine already kept keeps its task and Run
   and moves `passed_retries` and `last_passed_at` on. It lapses 30 days
-  after its last passed rerun and is lifted by deleting it
-  (`lift_ci_quarantine`). Its `task_id` is kept before the task is filed,
+  after its last passed rerun. Its `task_id` is kept before the task is filed,
   and `filed` set once it is (`mark_ci_quarantine_filed`), so filing again
-  makes no second task. It outlives its Run (`run_id` is set null).
+  makes no second task. It outlives its Run (`run_id` is set null). A
+  person quarantines a whole job by hand
+  (`20261124120000_factory_ci_quarantine_by_hand.sql`,
+  `quarantine_ci_job`): no step, no test, no Run, no passed retries, and
+  `quarantined_by` kept; its `task_id` only keys it, as it files no task.
+  `ci_flakes` lists it in `quarantined_jobs`, covering every failure of the
+  job. A quarantine its reruns made of a failure with no step and no test
+  shares its key, and becomes the hand's. Quarantining it again while it
+  holds changes nothing; once it lapsed, it starts over, `quarantined_at`
+  too. `quarantine_ci_jobs` extends a hand quarantine of the job instead
+  of quarantining a narrower failure of it. Quarantines are per repository:
+  a person's change reaches every team's Runs there.
+  `lift_ci_job_quarantines` lifts every quarantine of a job in a repository
+  by deleting them, through `factory_ci_quarantine_failure_idx`, and keeps
+  the release in `factory_ci_release` (one row per repository and job): the
+  passed reruns and greens before it count neither toward a new quarantine
+  nor as proof in `ci_flakes`.
+  `read_quality` reads each Run's merge time from `factory_merge`
+  (`QualityRun::merged_at`).
 
 - `factory_merge` keeps one row per Run that merged (`record_merge`, safe
   to repeat), with the base it merged into and the time on the worker's
