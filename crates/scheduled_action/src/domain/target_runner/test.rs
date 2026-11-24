@@ -149,7 +149,7 @@ impl RoutineSessions for Sessions {
         if self.stall_prepare {
             std::future::pending::<()>().await;
         }
-        if let Some(error) = self.prepare_error {
+        if let Some(error) = self.prepare_error.clone() {
             return Err(error);
         }
         let session_id = if self.wrong_session {
@@ -164,7 +164,7 @@ impl RoutineSessions for Sessions {
         command: PromptRoutineSession,
     ) -> std::result::Result<RoutinePromptAccepted, RoutineSessionError> {
         self.prompts.lock().unwrap().push(command.clone());
-        if let Some(error) = self.prompt_error {
+        if let Some(error) = self.prompt_error.clone() {
             return Err(error);
         }
         let action_id = if self.wrong_action {
@@ -538,7 +538,7 @@ async fn offline_byoa_and_rejected_overrides_never_fall_back() {
         RoutineSessionError::PersonaUnavailable,
     ] {
         let runner = runner(Sessions {
-            prepare_error: Some(error),
+            prepare_error: Some(error.clone()),
             statuses: Mutex::new([Err(RoutineSessionError::OperationFailed)].into()),
             ..Default::default()
         });
@@ -844,7 +844,7 @@ async fn executor_failed_prompt_finalizes_agent_history_and_stops_once() {
         RoutineSessionError::Admission(AiAdmissionError::Unavailable),
     ] {
         let (sessions, runner) = program_runner(Sessions {
-            prompt_error: Some(error),
+            prompt_error: Some(error.clone()),
             ..Default::default()
         });
         let live = Arc::new(Live::default());

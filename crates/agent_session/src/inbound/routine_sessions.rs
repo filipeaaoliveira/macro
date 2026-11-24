@@ -3,7 +3,7 @@
 //! All operations use POST with the domain command as JSON (including status,
 //! so explicit owner/action identity is not placed in URLs). Successful cancel
 //! returns 204; other successes return the domain result. Errors carry only a
-//! closed `code`. Prepare, prompt and follow-up must not be replayed after
+//! closed `code`, and a runtime's refusal its reason. Prepare, prompt and follow-up must not be replayed after
 //! ambiguous errors. Exec runs a command again when sent again, and may
 //! take as long as the command's timeout to answer.
 
@@ -92,7 +92,9 @@ pub fn routine_sessions_router<Service: RoutineSessions, Auth: MacroAuthorizatio
     )
 }
 
-/// Sanitized error envelope for scheduler mapping. Never contains upstream text.
+/// Sanitized error envelope for scheduler mapping. Never contains upstream
+/// text, but for a runtime's refusal: the reason its runtime gave the
+/// session's owner.
 #[derive(Debug, Serialize)]
 pub struct RoutineSessionErrorResponse {
     /// Closed domain code; prompt delivery uncertainty must never trigger replay.
@@ -115,9 +117,9 @@ impl From<JsonRejection> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match self.0 {
+        let status = match &self.0 {
             RoutineSessionError::Admission(error) => {
-                ai_billing::inbound::admission::admission_status(error)
+                ai_billing::inbound::admission::admission_status(*error)
             }
             RoutineSessionError::InvalidCommand => StatusCode::BAD_REQUEST,
             RoutineSessionError::AppNotConnected | RoutineSessionError::AppsUnsupported => {
@@ -126,6 +128,9 @@ impl IntoResponse for ApiError {
             RoutineSessionError::Forbidden => StatusCode::FORBIDDEN,
             RoutineSessionError::PersonaUnavailable => StatusCode::NOT_FOUND,
             RoutineSessionError::RuntimeUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            // A client that cannot read the code reads 422 as a command that
+            // fails the same way again, as a refusal does.
+            RoutineSessionError::Refused(_) => StatusCode::UNPROCESSABLE_ENTITY,
             RoutineSessionError::CommandUnsupported => StatusCode::NOT_IMPLEMENTED,
             RoutineSessionError::SessionMismatch
             | RoutineSessionError::ModelMismatch
