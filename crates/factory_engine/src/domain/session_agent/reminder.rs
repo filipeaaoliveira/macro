@@ -18,7 +18,7 @@ const REMINDER: &str = include_str!("remind.md");
 
 /// The reminder's place among its Step's later prompts: before the first
 /// round of checks, the earliest of them.
-const REMINDER_PLACE: u16 = 1;
+pub(crate) const REMINDER_PLACE: u16 = 1;
 
 /// What a Step shows of an agent that stopped without a result and said
 /// nothing.

@@ -253,6 +253,8 @@ pub enum BuiltInStepError {
         out_of_quota: bool,
         /// Whether the agent was still at work when the wait for it ended.
         overdue: bool,
+        /// Whether another attempt took the Step on to a later prompt.
+        superseded: bool,
     },
     /// The agent ended the Step with an outcome the Step does not have.
     #[error("the agent ended step {step} with {outcome}, which it does not end with")]
@@ -288,6 +290,7 @@ impl BuiltInStepError {
             retryable: error.retryable(),
             out_of_quota: error.out_of_quota(),
             overdue: error.overdue(),
+            superseded: error.superseded(),
             report: rootcause::Report::new(error).into_dynamic(),
         }
     }
@@ -329,6 +332,21 @@ impl AgentFailure for BuiltInStepError {
     fn overdue(&self) -> bool {
         match self {
             BuiltInStepError::Agent { overdue, .. } => *overdue,
+            BuiltInStepError::UnknownStep(_)
+            | BuiltInStepError::NotAnAgentStep(_)
+            | BuiltInStepError::NoRepository(_)
+            | BuiltInStepError::UnexpectedOutcome { .. }
+            | BuiltInStepError::PullRequest(_)
+            | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::ChildTask(_)
+            | BuiltInStepError::ChildTaskElsewhere(_)
+            | BuiltInStepError::Setup(_) => false,
+        }
+    }
+
+    fn superseded(&self) -> bool {
+        match self {
+            BuiltInStepError::Agent { superseded, .. } => *superseded,
             BuiltInStepError::UnknownStep(_)
             | BuiltInStepError::NotAnAgentStep(_)
             | BuiltInStepError::NoRepository(_)

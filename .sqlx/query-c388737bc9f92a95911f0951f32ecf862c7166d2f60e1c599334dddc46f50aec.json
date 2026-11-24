@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT reask_action_id\n            FROM factory_reviewer_answer\n            WHERE run_id = $1 AND seq = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reask_action_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c388737bc9f92a95911f0951f32ecf862c7166d2f60e1c599334dddc46f50aec"
+}

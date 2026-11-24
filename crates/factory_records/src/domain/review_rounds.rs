@@ -495,6 +495,13 @@ pub trait ReviewRoundRepository: Send + Sync + 'static {
         candidate: Uuid,
     ) -> impl Future<Output = Result<Uuid, Self::Err>> + Send;
 
+    /// The prompt in which the reviewer of the Step `key` is asked once
+    /// more, if an attempt kept one (see [`Self::reask_action`]).
+    fn reask_kept(
+        &self,
+        key: StepKey,
+    ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
+
     /// The id the follow-up at `place` of the Step `key` is made with:
     /// `candidate`, unless an earlier attempt kept one. None when the
     /// finding is not a follow-up.
