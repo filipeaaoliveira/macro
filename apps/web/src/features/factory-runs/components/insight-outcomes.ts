@@ -11,7 +11,7 @@ export const INSIGHT_OUTCOME_COLORS: Record<InsightOutcome, string> = {
   cancelled: 'var(--color-ink-muted)',
   infrastructure: 'var(--color-teal)',
   flawed: 'var(--color-pink)',
-  running: 'var(--color-purple)',
+  running: 'var(--color-accent)',
 };
 
 /** The word for a Run's state, as the Runs list says it. */
