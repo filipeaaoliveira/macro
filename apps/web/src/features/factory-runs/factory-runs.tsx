@@ -185,9 +185,12 @@ function useShowRunHere(): ((runId: string) => void) | undefined {
 /** The entries of the team's Definition's Flows, by name, once read. */
 function useFlowEntries() {
   const definition = useDefinitionQuery();
+  // Reading `data` while pending would suspend the whole page until the
+  // Definition answers, which can take seconds.
   return (flow: string) =>
-    definition.data?.contents?.flows.find((listed) => listed.name === flow)
-      ?.entries;
+    (definition.isPending ? undefined : definition.data)?.contents?.flows.find(
+      (listed) => listed.name === flow
+    )?.entries;
 }
 
 /** One Run as a page of its own, as the board and a Run's link open it. */
