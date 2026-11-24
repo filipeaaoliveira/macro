@@ -204,7 +204,7 @@ export function workingSteps(run: Run): RunStep[] {
 export type StepRuntime = {
   /** The model the Step's agent ran on, such as `claude-opus-4-5`. */
   model?: string;
-  /** The Machine the Step's session ran on, by its name. */
+  /** The Machine the Step's session first opened on, for the Run's owner. */
   machine?: string;
   /** The display name of the agent whose session it is. */
   agentName?: string;
@@ -276,12 +276,16 @@ export function formatElapsed(ms: number): string {
 export type LiveNumbers = {
   running: number;
   waiting: number;
+  /** The Runs read that merged today, flawed ones too. */
   mergedToday: number;
   /** Of the ended Runs read, in percent; none while none ended. */
   successRate?: number;
   /** How many ended Runs the rate counts. */
   ended: number;
-  /** The median time from start to merge of the merged Runs read. */
+  /**
+   * The median time from a Run's creation to its merge (`mergedAt`) of the
+   * merged Runs read, as Insights' time to merge counts it.
+   */
   medianToMerge?: number;
 };
 
@@ -303,7 +307,10 @@ export function liveNumbers(input: {
   const ended = input.recent.filter(
     (listed) => listed.run.end && listed.run.end.outcome !== 'cancelled'
   );
-  const merged = ended.filter(
+  // A flawed Run merged too, and was found wrong after: it counts as
+  // merged, as `mergedAt` reads it, but not as a success.
+  const merged = ended.filter((listed) => mergedAt(listed.run) !== undefined);
+  const succeeded = ended.filter(
     (listed) => listed.run.end?.outcome === 'success'
   );
   const durations = merged
@@ -319,7 +326,7 @@ export function liveNumbers(input: {
     ).length,
     successRate:
       ended.length > 0
-        ? Math.round((merged.length / ended.length) * 100)
+        ? Math.round((succeeded.length / ended.length) * 100)
         : undefined,
     ended: ended.length,
     medianToMerge:

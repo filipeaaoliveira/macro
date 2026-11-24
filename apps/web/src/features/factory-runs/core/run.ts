@@ -222,9 +222,12 @@ export type RunStep = {
 export type RunStepRuntime = {
   /** The model the session ran on, such as `claude-opus-4-5`. */
   model?: string;
-  /** The Machine the session ran on, by its name. */
+  /**
+   * The Machine the session first opened on, by its name; only the Run's
+   * owner reads it.
+   */
   machine?: string;
-  /** The agent's display name; the Definition names it `agent`. */
+  /** The agent's display name, as it is now; the Definition names it `agent`. */
   agentName?: string;
 };
 

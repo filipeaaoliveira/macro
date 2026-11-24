@@ -731,7 +731,7 @@ describe('createAppRunsContext', () => {
     const client = new QueryClient();
     const [step] = started.steps;
     if (!step) throw new Error('No Step');
-    // Hand-written until the client is regenerated (pending-api-fields.ts).
+    // Hand-written until the client is regenerated (service-factory/pending.ts).
     const detail = {
       ...started,
       run: { ...started.run, mergedAt: '2026-11-16T10:00:00Z' },

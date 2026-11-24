@@ -12,6 +12,10 @@ import type {
   RunDetail,
   RunScores,
 } from '@service-factory/generated/schemas';
+import type {
+  RunWithMergedAt,
+  StepWithRuntime,
+} from '@service-factory/pending';
 import {
   type QueryClient,
   queryOptions,
@@ -30,10 +34,6 @@ import type {
 import { scoresRefetchInterval } from '../core/evaluation';
 import { type GateModelReading, type Run, runStatus } from '../core/run';
 import { factoryRunKeys } from './keys';
-import type {
-  ApiRunWithMergedAt,
-  ApiStepWithRuntime,
-} from './pending-api-fields';
 
 /** How often an open Run, or a task with a Run going, is read again. */
 const LIVE_POLL_MS = 3_000;
@@ -79,7 +79,7 @@ function standingAnswer(
 }
 
 export function toRun(detail: RunDetail): Run {
-  const run: ApiRunWithMergedAt = detail.run;
+  const run: RunWithMergedAt = detail.run;
   return {
     id: run.id,
     request: run.request,
@@ -103,7 +103,7 @@ export function toRun(detail: RunDetail): Run {
       : undefined,
     // A Run that merged none, and a service older than merge times, send none.
     mergedAt: run.mergedAt ?? undefined,
-    steps: detail.steps.map((step: ApiStepWithRuntime) => ({
+    steps: detail.steps.map((step: StepWithRuntime) => ({
       seq: step.seq,
       entry: step.entry,
       visit: step.visit,

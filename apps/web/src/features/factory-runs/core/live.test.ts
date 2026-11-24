@@ -3,19 +3,31 @@ import type { BoardRun } from './board';
 import { liveNumbers, mergedAt, stepRuntime } from './live';
 import type { Run } from './run';
 
-const NOW = Date.parse('2026-11-24T12:00:00Z');
+/**
+ * A time on a day of November 2026, on the local clock: "today" is the
+ * local day, so the test reads the same in every time zone.
+ */
+function at(day: number, hour: number, minute = 0): string {
+  return new Date(2026, 10, day, hour, minute).toISOString();
+}
 
-function merged(id: string, end: string, merge?: string): BoardRun {
+const NOW = Date.parse(at(24, 12));
+
+function merged(
+  id: string,
+  times: { created: string; end: string; merge?: string },
+  outcome: 'success' | 'flawed' = 'success'
+): BoardRun {
   return {
     id,
     state: 'finished',
     run: {
       id,
       request: 'Add the coupon field',
-      createdAt: '2026-11-24T09:00:00Z',
+      createdAt: times.created,
       steps: [],
-      end: { outcome: 'success', endedAt: end },
-      mergedAt: merge,
+      end: { outcome, endedAt: times.end },
+      mergedAt: times.merge,
     },
   };
 }
@@ -61,17 +73,33 @@ describe('liveNumbers', () => {
       active: [],
       waiting: 0,
       recent: [
-        // Merged yesterday, ended today: not merged today.
-        merged('run-1', '2026-11-24T10:30:00Z', '2026-11-23T12:00:00Z'),
-        // From before merge times: its end stands in.
-        merged('run-2', '2026-11-24T11:00:00Z'),
-        merged('run-3', '2026-11-24T11:30:00Z', '2026-11-24T10:30:00Z'),
+        // Merged yesterday, ended today: not merged today. 3h to merge.
+        merged('run-1', {
+          created: at(23, 9),
+          merge: at(23, 12),
+          end: at(24, 10, 30),
+        }),
+        // From before merge times: its end stands in. 2h to merge.
+        merged('run-2', { created: at(24, 9), end: at(24, 11) }),
+        // 1h 30m to merge.
+        merged('run-3', {
+          created: at(24, 9),
+          merge: at(24, 10, 30),
+          end: at(24, 11, 30),
+        }),
+        // Merged and found wrong after: merged, but no success. 1h.
+        merged(
+          'run-4',
+          { created: at(24, 9), merge: at(24, 10), end: at(24, 10, 15) },
+          'flawed'
+        ),
       ],
       now: NOW,
     });
 
-    expect(numbers.mergedToday).toBe(2);
-    // To merge: before it started (none), 2h and 1h 30m; the median is 1h 30m.
+    expect(numbers.mergedToday).toBe(3);
+    // 1h, 1h 30m, 2h and 3h: the median is 1h 30m.
     expect(numbers.medianToMerge).toBe(90 * 60 * 1000);
+    expect(numbers.successRate).toBe(75);
   });
 });
