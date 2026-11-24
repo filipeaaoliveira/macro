@@ -708,18 +708,19 @@ impl RunRepository for FakeRepo {
         else {
             return Ok(RetryInsert::NotEnded);
         };
-        // As the database's index: a Run is retried once.
-        if self.runs.lock().expect("runs").values().any(|run| {
-            run.retry
-                .is_some_and(|kept| kept.retried_from == retry.retried)
-        }) {
-            return Ok(RetryInsert::Retried);
-        }
+        // As the database holds it: the Queue limit first, then the
+        // unique index on the insert, so a Run is retried once.
         if let Some(limit) = hold.limit {
             let places = self.queue_places(&retried.user_id, hold.asking_flows, limit);
             if places.held() >= limit {
                 return Ok(RetryInsert::QueueFull(places));
             }
+        }
+        if self.runs.lock().expect("runs").values().any(|run| {
+            run.retry
+                .is_some_and(|kept| kept.retried_from == retry.retried)
+        }) {
+            return Ok(RetryInsert::Retried);
         }
         let run = Run {
             id: retry.id,
@@ -1150,7 +1151,14 @@ impl RunRepository for FakeRepo {
     }
 
     async fn delete_run(&self, id: RunId) -> Result<(), FakeError> {
-        self.runs.lock().expect("runs").remove(&id);
+        let mut runs = self.runs.lock().expect("runs");
+        runs.remove(&id);
+        // As the database reads it: a Run whose retry is gone names none.
+        for run in runs.values_mut() {
+            if run.retried_by == Some(id) {
+                run.retried_by = None;
+            }
+        }
         Ok(())
     }
 
