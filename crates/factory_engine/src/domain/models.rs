@@ -962,10 +962,10 @@ pub struct DefinitionSettings {
     /// bypass list, admins when protection does not include them) still
     /// can: GitHub does not tell the factory who.
     pub requires_pull_request: Option<bool>,
-    /// Why `requires_pull_request` cannot be told, in GitHub's words, when
-    /// it is none and GitHub refused to show the rules or the protection
-    /// with a message, as "Upgrade to GitHub Pro or make this repository
-    /// public to enable this feature."
+    /// Why it cannot be told whether the default branch asks for a pull
+    /// request, in GitHub's words, when GitHub refused to show the rules or
+    /// the protection with a message, as "Upgrade to GitHub Pro or make
+    /// this repository public to enable this feature."
     pub requires_pull_request_unknown_reason: Option<String>,
     /// The team; none when the person is on no team.
     pub team_id: Option<Uuid>,
