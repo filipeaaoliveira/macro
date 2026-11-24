@@ -45,12 +45,12 @@ use std::future::Future;
 use std::sync::Mutex;
 
 use factory_records::domain::evaluation::BENCHMARK_FLOW;
-use futures::future::join_all;
 use factory_records::domain::models::{AgentName, Role};
 use factory_records::domain::self_improvement::IMPROVE_FLOW;
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MAX_TOKEN_BUDGET, MIN_QUEUE_LIMIT, MIN_TOKEN_BUDGET, OrchestratorDefinition,
 };
+use futures::future::join_all;
 use serde::Deserialize;
 
 use crate::domain::agents::{AgentDefinition, AgentDefinitionError};
@@ -190,12 +190,15 @@ pub trait DefinitionFiles: Send + Sync {
     fn read(&self, path: &str) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 }
 
+/// What reading one of a Definition's files came to.
+type FileRead<E> = Result<Option<String>, E>;
+
 /// A Definition's files, the ones it is known to read asked for at once:
 /// each read of another file, or of one whose first read failed, asks
 /// `files` again.
 struct Prefetched<'a, F: DefinitionFiles> {
     files: &'a F,
-    read: Mutex<HashMap<String, Result<Option<String>, F::Err>>>,
+    read: Mutex<HashMap<String, FileRead<F::Err>>>,
 }
 
 impl<'a, F: DefinitionFiles> Prefetched<'a, F> {

@@ -94,8 +94,10 @@ impl DefinitionReads {
         repo_url: &str,
         commit: &str,
     ) -> Option<FactoryDefinition> {
-        self.definitions
-            .get(&definition_key(reader, repo_url, commit), self.definition_kept)
+        self.definitions.get(
+            &definition_key(reader, repo_url, commit),
+            self.definition_kept,
+        )
     }
 
     /// Keep the Definition `reader` read in `repo_url` at `commit`.
@@ -118,11 +120,7 @@ fn head_key(reader: &MacroUserIdStr<'static>, repo_url: &str) -> HeadKey {
     (reader.as_ref().to_string(), repo_url.to_string())
 }
 
-fn definition_key(
-    reader: &MacroUserIdStr<'static>,
-    repo_url: &str,
-    commit: &str,
-) -> DefinitionKey {
+fn definition_key(reader: &MacroUserIdStr<'static>, repo_url: &str, commit: &str) -> DefinitionKey {
     (
         reader.as_ref().to_string(),
         repo_url.to_string(),
