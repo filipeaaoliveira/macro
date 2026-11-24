@@ -14,6 +14,16 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
+// The shared collapse animation measures with ResizeObserver, which jsdom lacks.
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+);
+
 const OWNER = 'macro|teo@example.com';
 
 /** A Run with a Step its agent works on and a Gate waiting after it. */
@@ -46,7 +56,7 @@ const run: Run = {
   ],
 };
 
-function mount(viewerId: Accessor<string | undefined>) {
+function mount(viewerId: Accessor<string | undefined>, shown: Run = run) {
   const context: RunsContext = {
     viewerId,
     taskRuns: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
@@ -55,7 +65,7 @@ function mount(viewerId: Accessor<string | undefined>) {
       data: () => ({ waiting: [], starting: [] }),
       retry: vi.fn(),
     }),
-    run: () => ({ state: () => 'ready', data: () => run, retry: vi.fn() }),
+    run: () => ({ state: () => 'ready', data: () => shown, retry: vi.fn() }),
     flows: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
     repositories: () => ({
       state: () => 'ready',
@@ -74,7 +84,7 @@ function mount(viewerId: Accessor<string | undefined>) {
   };
   render(() => (
     <RunsProvider value={context}>
-      <RunPageView runId={run.id} />
+      <RunPageView runId={shown.id} />
     </RunsProvider>
   ));
 }
@@ -104,6 +114,55 @@ describe('RunPageView', () => {
 
     expect(screen.getByText('Plan the export')).toBeTruthy();
     for (const control of ownerControls()) expect(control).toBeNull();
+  });
+
+  it('shows where each Step ran, in Working now and in the Steps, once known', () => {
+    const [write, plan] = run.steps;
+    if (!write || !plan) throw new Error('No Steps');
+    mount(() => OWNER, {
+      ...run,
+      steps: [
+        {
+          ...plan,
+          seq: 1,
+          gate: undefined,
+          role: 'planner',
+          agent: 'primary',
+          end: {
+            outcome: 'done',
+            output: 'The plan',
+            endedAt: '2026-11-18T09:00:30Z',
+          },
+          runtime: {
+            model: 'claude-opus-4-5',
+            machine: 'm4',
+            agentName: 'Planner bot',
+          },
+        },
+        {
+          ...write,
+          seq: 2,
+          agent: 'primary',
+          runtime: {
+            model: 'claude-sonnet-4-5',
+            machine: 'm3',
+            agentName: 'Writer bot',
+          },
+        },
+        // A Step from before Steps kept where they ran: no chips.
+        { ...write, seq: 3, agent: 'backup', terminal: undefined },
+      ],
+    });
+
+    // The working Step shows in Working now and in the Steps.
+    expect(screen.getAllByTitle('Model claude-sonnet-4-5')).toHaveLength(2);
+    expect(screen.getAllByTitle('Machine m3')).toHaveLength(2);
+    expect(screen.getAllByTitle('Agent Writer bot')).toHaveLength(2);
+    // The ended one only in the Steps.
+    expect(screen.getAllByTitle('Model claude-opus-4-5')).toHaveLength(1);
+    expect(screen.getAllByTitle('Machine m4')).toHaveLength(1);
+    expect(screen.getAllByTitle('Agent Planner bot')).toHaveLength(1);
+    expect(screen.queryAllByTitle(/^Model /)).toHaveLength(3);
   });
 
   it('shows no owner’s control while the viewer is not known yet', () => {

@@ -5,8 +5,8 @@ import type { Gate, Run, RunStep } from './run';
 /**
  * What the live dashboard and the Run page read of a Run: its Flow's stages
  * and where the Run is on them, the agents working now, and the numbers of
- * the header strip. Everything the API does not send yet comes from
- * `stepRuntime`, the one place to fill it in.
+ * the header strip. Where each Step ran comes from `stepRuntime`, and when
+ * a Run merged from `mergedAt`.
  */
 
 /**
@@ -195,19 +195,42 @@ export function workingSteps(run: Run): RunStep[] {
 }
 
 /**
- * Where a Step runs and on what. The API does not send these yet: the model
- * its agent runs, and the Machine its session runs on. Fill them in here
- * once a Step carries them; every view reads them from this one function.
+ * Where a Step runs and on what: the model its agent's session ran on, the
+ * Machine it ran on, and the agent's display name. Each is unset while the
+ * API doesn't know it: a Step no agent does, a session that hasn't opened
+ * yet (its agent's name is known from the start), a session on no Machine,
+ * and a Step from before Steps kept them. Every view reads them from here.
  */
 export type StepRuntime = {
-  /** The model the Step's agent runs, such as `claude-opus-4`. */
+  /** The model the Step's agent ran on, such as `claude-opus-4-5`. */
   model?: string;
-  /** The Machine the Step's session runs on, by its name. */
+  /** The Machine the Step's session ran on, by its name. */
   machine?: string;
+  /** The display name of the agent whose session it is. */
+  agentName?: string;
 };
 
-export function stepRuntime(_step: RunStep): StepRuntime {
-  return {};
+export function stepRuntime(step: Pick<RunStep, 'runtime'>): StepRuntime {
+  return {
+    model: step.runtime?.model || undefined,
+    machine: step.runtime?.machine || undefined,
+    agentName: step.runtime?.agentName || undefined,
+  };
+}
+
+/**
+ * When a Run merged its pull request: the time the factory recorded, else,
+ * for a merged Run from before it did, when the Run ended. None for a Run
+ * that didn't merge.
+ */
+export function mergedAt(
+  run: Pick<Run, 'mergedAt' | 'end'>
+): string | undefined {
+  if (run.mergedAt) return run.mergedAt;
+  const outcome = run.end?.outcome;
+  return outcome === 'success' || outcome === 'flawed'
+    ? run.end?.endedAt
+    : undefined;
 }
 
 /** What a Gate asks a person, as the dashboard sorts them. */
@@ -285,14 +308,14 @@ export function liveNumbers(input: {
   );
   const durations = merged
     .map((listed) =>
-      elapsedMs(listed.run.createdAt, listed.run.end?.endedAt, input.now)
+      elapsedMs(listed.run.createdAt, mergedAt(listed.run), input.now)
     )
     .sort((a, b) => a - b);
   return {
     running: input.active.filter((listed) => listed.state !== 'waiting').length,
     waiting: input.waiting,
     mergedToday: merged.filter((listed) =>
-      sameDay(new Date(listed.run.end?.endedAt ?? 0), today)
+      sameDay(new Date(mergedAt(listed.run) ?? 0), today)
     ).length,
     successRate:
       ended.length > 0

@@ -727,6 +727,39 @@ describe('createAppRunsContext', () => {
     ).toEqual([record]);
   });
 
+  it('reads where each Step ran and when the Run merged, none when not sent', async () => {
+    const client = new QueryClient();
+    const [step] = started.steps;
+    if (!step) throw new Error('No Step');
+    // Hand-written until the client is regenerated (pending-api-fields.ts).
+    const detail = {
+      ...started,
+      run: { ...started.run, mergedAt: '2026-11-16T10:00:00Z' },
+      steps: [
+        {
+          ...step,
+          runtime: { model: 'claude-opus-4-5', machine: 'm4', agentName: null },
+        },
+        { ...step, seq: 2, runtime: null },
+        { ...step, seq: 3 },
+      ],
+    } as RunDetail;
+    vi.mocked(factoryClient.getRun).mockResolvedValue(ok(detail));
+
+    const run = await client.fetchQuery(runOptions('run-2'));
+
+    expect(run.mergedAt).toBe('2026-11-16T10:00:00Z');
+    expect(run.steps.map((read) => read.runtime)).toEqual([
+      { model: 'claude-opus-4-5', machine: 'm4', agentName: undefined },
+      undefined,
+      undefined,
+    ]);
+
+    vi.mocked(factoryClient.getRun).mockResolvedValue(ok(started));
+    const unmerged = await client.fetchQuery(runOptions('run-3'));
+    expect(unmerged.mergedAt).toBeUndefined();
+  });
+
   it('stops reading a Run again once it has ended', async () => {
     vi.useFakeTimers();
     try {
