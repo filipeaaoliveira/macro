@@ -16,6 +16,7 @@ mod presentation;
 mod quota;
 mod run_command;
 mod runtime_access;
+mod session_close;
 mod user_cleanup;
 mod warm;
 

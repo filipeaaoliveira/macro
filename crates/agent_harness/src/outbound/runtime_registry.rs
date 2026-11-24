@@ -17,7 +17,8 @@ use agent_client_protocol::schema::v1::SessionId;
 use agent_runtime_protocol::domain::ports::{Transport, TransportSender};
 use agent_runtime_protocol::domain::schema::v0::{ToRuntimeMessage, ToServerMessage};
 use agent_session::domain::connection::{
-    ListedSession, RuntimeAttachment, RuntimeConnection, SessionChannel,
+    CloseSessionError, ListedSession, RuntimeAttachment, RuntimeConnection, SessionChannel,
+    SessionClose,
 };
 use agent_session::domain::model::AgentSessionId;
 use bot_id::BotId;
@@ -149,6 +150,22 @@ where
             .get(&harness)
             .map(|entry| Arc::clone(&entry.connection))?;
         Some(connection.probe_models().await)
+    }
+
+    /// Ask a harness's live runtime to close one of its ACP sessions.
+    ///
+    /// Returns `None` when this process holds no live connection for the
+    /// harness: a runtime that is gone already ended its sessions.
+    pub async fn close_session(
+        &self,
+        harness: HarnessId,
+        acp_session: SessionId,
+    ) -> Option<Result<SessionClose, CloseSessionError>> {
+        let connection = self
+            .connections
+            .get(&harness)
+            .map(|entry| Arc::clone(&entry.connection))?;
+        Some(connection.close_acp_session(acp_session).await)
     }
 }
 
@@ -414,5 +431,22 @@ where
         self.bindings
             .sessions_on_harness(harness, acp_sessions)
             .await
+    }
+
+    async fn close_acp_session(&self, bot: BotId, acp_session: SessionId) -> anyhow::Result<()> {
+        let Some(harness) = self.bindings.harness_for(bot).await? else {
+            return Ok(());
+        };
+        match self.registry.close_session(harness, acp_session).await {
+            None => {
+                tracing::debug!(%harness, "no live runtime here to close the session on");
+                Ok(())
+            }
+            Some(Ok(close)) => {
+                tracing::debug!(%harness, ?close, "asked the runtime to end the session");
+                Ok(())
+            }
+            Some(Err(error)) => Err(error.into()),
+        }
     }
 }
