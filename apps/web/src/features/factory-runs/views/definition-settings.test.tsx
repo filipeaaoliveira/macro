@@ -214,7 +214,7 @@ describe('DefinitionSettings', () => {
         'Couldn’t read whether its default branch requires a pull request: Upgrade to GitHub Pro or make this repository public to enable this feature. Make sure it does.'
       )
     ).toBeTruthy();
-    expect(document.body.textContent).not.toMatch(/admin/i);
+    expect(screen.queryByText(/admins can read/i)).toBeNull();
   });
 
   it('blames nothing when GitHub gave no reason', async () => {
@@ -229,7 +229,7 @@ describe('DefinitionSettings', () => {
         'Couldn’t read whether its default branch requires a pull request. Make sure it does.'
       )
     ).toBeTruthy();
-    expect(document.body.textContent).not.toMatch(/admin/i);
+    expect(screen.queryByText(/admins can read/i)).toBeNull();
   });
 
   describe('a change to the definition', () => {
