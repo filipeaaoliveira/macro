@@ -825,8 +825,9 @@ where
     /// How a Step whose agent handed back `done`, with `work_output`, ends
     /// when the Run's branch on GitHub does not hold its work: `failed`,
     /// saying why, when the branch changes nothing against the Run's base,
-    /// or, for a fix that says it fixed a Blocker of the review round
-    /// `answers` that needs a commit ([`needs_commit`]), is still at the
+    /// or, for a fix that says it fixed, or did not answer, a Blocker of the
+    /// review round `answers` that needs a commit ([`needs_commit`]), is
+    /// still at the
     /// commit that round reviewed; read again
     /// after [`BRANCH_HEAD_LAG`] before it fails. A branch GitHub does not
     /// have is left to a retry, as a round's read of it is, until the
@@ -1390,21 +1391,25 @@ fn failed() -> Outcome {
     outcome(CheckRoundOutcome::Failed.as_str())
 }
 
-/// Whether the fix that handed back `work_output` says it fixed a Blocker
-/// of `round` that only a commit fixes. A Blocker that asks only for a
-/// test's break record needs none once the fix reported a readable break:
-/// the next round reviews the same commit with the new record. Any other
-/// Blocker it says it fixed needs a commit.
+/// Whether the fix that handed back `work_output` leaves a Blocker of
+/// `round` that only a commit fixes: one it says it fixed, or one it did
+/// not answer. A Blocker that asks only for a test's break record needs
+/// none once the fix reported a readable break: the next round reviews the
+/// same commit with the new record. Only a Blocker it disputes needs no
+/// commit.
 fn needs_commit(round: &ReviewRound, work_output: &str) -> bool {
     let reported_break = reported([work_output])
         .iter()
         .any(|kept| matches!(kept, Reported::Break(_)));
-    round
-        .blockers()
-        .zip(fix_answers(round, work_output))
-        .any(|(blocker, answer)| {
-            answer.status == FixStatus::Fixed && !(reported_break && asks_for_break(blocker))
-        })
+    let answers = fix_answers(round, work_output);
+    round.blockers().any(|blocker| {
+        let disputed = answers.iter().any(|answer| {
+            answer.seq == blocker.seq
+                && answer.place == blocker.place
+                && answer.status == FixStatus::Disputed
+        });
+        !disputed && !(reported_break && asks_for_break(blocker))
+    })
 }
 
 /// What a Blocker that asks for a test's break record says of it.

@@ -9,8 +9,8 @@ use factory_records::domain::review_rounds::ReviewRound;
 use factory_records::domain::breaks::{BreakRecord, BreakStatus};
 
 use super::{
-    BREAKS_BUDGET, BRIEF_BUDGET, breaks_brief, carried_blockers, dropped_in_visit, fenced_review,
-    findings_block, fit_findings,
+    BREAKS_BUDGET, BRIEF_BUDGET, blockers_brief, breaks_brief, carried_blockers, dropped_in_visit,
+    fenced_review, findings_block, fit_findings,
 };
 
 fn finding(place: u16, problem: &str) -> ReviewFinding {
@@ -383,4 +383,38 @@ fn the_brief_opens_with_how_many_tests_have_a_record() {
     assert!(
         brief.contains("1. unchecked: the factory could not run it (step 5). Test `toggle_saves`.")
     );
+}
+
+/// The fix is told to answer in the text it hands back, and that a Blocker
+/// it leaves out of the block stays unanswered: the brief ends with these
+/// words, as they are.
+#[test]
+fn a_fix_is_told_where_to_answer_and_what_an_unanswered_blocker_does() {
+    let round = ReviewRound {
+        round: 1,
+        visit: 1,
+        seq: 3,
+        reviewers: 1,
+        head_sha: Some("aaa".to_string()),
+        diff_base: Some("main".to_string()),
+        fix_diff: false,
+        failure: None,
+        started_at: Utc::now(),
+        end: None,
+        findings: vec![finding(1, "It drops the error")],
+        answered: Vec::new(),
+    };
+
+    let brief = blockers_brief(&round);
+
+    let expected = "End the `text` you hand back with `macro.factory.handBack` with one fenced \
+`json` block that says, for each blocker by its number above, whether you fixed it or dispute \
+it:\n\n```json\n{\"blockers\": [{\"number\": 1, \"status\": \"fixed\"}, {\"number\": 2, \
+\"status\": \"disputed\", \"reason\": \"Why it should not block\"}]}\n```\n\nDispute a blocker \
+only when it must not be fixed as asked: it is wrong, or it asks for evidence this workspace \
+cannot produce. Give the evidence in its `reason`, at most 2 KiB. The next review round's \
+reviewer that found it rules on the dispute: it drops it, or it upholds it and the blocker \
+blocks again. A dispute written anywhere but this block is not read. A blocker you leave out of \
+the block stays unanswered and blocks again.\n";
+    assert!(brief.ends_with(expected), "{brief}");
 }

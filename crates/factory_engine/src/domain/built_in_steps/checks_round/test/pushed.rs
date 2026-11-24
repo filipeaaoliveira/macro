@@ -1,6 +1,8 @@
 //! A write or fix whose agent hands back `done` with nothing of its work on
 //! the Run's branch on GitHub fails, saying so, rather than ending `done`.
 
+use factory_records::domain::review_rounds::{FindingKind, ReviewFinding, ReviewRound};
+
 use super::*;
 
 /// The branch changes nothing against the base: the agent committed
@@ -146,4 +148,103 @@ async fn an_unchanged_write_does_not_need_a_branch() {
         .expect("write");
 
     assert_eq!(report.outcome, Outcome::unchanged());
+}
+
+/// A review round that reviewed [`HEAD`], with two Blockers.
+fn reviewed_round() -> ReviewRound {
+    let blocker = |place, path: &str| ReviewFinding {
+        seq: 3,
+        place,
+        role: Some(Role::try_from("tests-reviewer".to_string()).expect("valid")),
+        path: path.to_string(),
+        lines: None,
+        problem: format!("{path} skips the empty case"),
+        why: "An empty list panics".to_string(),
+        blocks_anywhere: false,
+        repeats_dropped: false,
+        fix_status: None,
+        dispute: None,
+        ruling: None,
+        ruled_by: None,
+        kind: Some(FindingKind::Blocker),
+        follow_up_task_id: None,
+        follow_up_key: None,
+        follow_up_commented: false,
+    };
+    ReviewRound {
+        round: 1,
+        visit: 1,
+        seq: 3,
+        reviewers: 1,
+        head_sha: Some(HEAD.to_string()),
+        diff_base: Some("main".to_string()),
+        fix_diff: false,
+        failure: None,
+        started_at: chrono::Utc::now(),
+        end: None,
+        findings: vec![blocker(1, "src/list.rs"), blocker(2, "src/map.rs")],
+        answered: Vec::new(),
+    }
+}
+
+/// A fix that leaves the branch where its round reviewed it fails as
+/// unpushed unless it disputes every Blocker in its block: a Blocker it
+/// does not answer, as one disputed only in prose, needs a commit as one
+/// it says it fixed does.
+#[tokio::test]
+async fn a_fix_that_leaves_a_blocker_unanswered_on_an_unmoved_head_fails() {
+    let dispute = |number| {
+        format!(
+            "{{\"number\": {number}, \"status\": \"disputed\", \"reason\": \"It is generated\"}}"
+        )
+    };
+    let cases = [
+        (
+            "I dispute both blockers: the files are generated.".to_string(),
+            Outcome::failed(),
+        ),
+        (
+            format!(
+                "Disputed.\n```json\n{{\"blockers\": [{}]}}\n```",
+                dispute(1)
+            ),
+            Outcome::failed(),
+        ),
+        (
+            format!(
+                "Disputed.\n```json\n{{\"blockers\": [{}, {}]}}\n```",
+                dispute(1),
+                dispute(2)
+            ),
+            Outcome::done(),
+        ),
+    ];
+    for (said, expected) in cases {
+        let mut agent = ScriptedAgent::new("done", Vec::new());
+        agent.work_text = said.clone();
+        let github = github(None, Some(&["src/list.rs"]));
+        let repo = FakeRepo::default();
+        let round = reviewed_round();
+        let mut input = input();
+        input.review = Some(&round);
+        repo.review_rounds
+            .lock()
+            .expect("rounds")
+            .push((input.key.run_id, round.clone()));
+
+        let report = run(&agent, &github, &repo, "fix", input)
+            .await
+            .expect("fix");
+
+        assert_eq!(report.outcome, expected, "{said}: {}", report.output);
+        if expected == Outcome::failed() {
+            assert!(
+                report.output.contains(&format!(
+                    "is still at `{HEAD}`, the commit review round 1 reviewed"
+                )),
+                "{}",
+                report.output
+            );
+        }
+    }
 }

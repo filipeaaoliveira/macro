@@ -117,24 +117,26 @@ async fn a_fix_records_each_blocker_fixed_or_disputed_with_its_reason() {
     );
 }
 
-/// A fix whose hand back names no Blocker fixed every one.
+/// A fix whose hand back names no Blocker in a block answered none: a
+/// dispute written in prose is not taken for a fix, and each Blocker stays
+/// unanswered for the next round to check.
 #[tokio::test]
-async fn a_fix_that_says_nothing_of_its_blockers_fixed_them() {
+async fn a_fix_that_says_nothing_of_its_blockers_answered_none() {
     let repo = FakeRepo::default();
 
-    let (run_id, _) = after_the_fix(&repo, "Fixed both.").await;
+    let (run_id, _) = after_the_fix(&repo, "Fixed one; the other cannot be done here.").await;
 
     let rounds = repo.review_rounds(run_id).await.expect("rounds");
     assert!(
         rounds[0]
             .findings
             .iter()
-            .all(|blocker| blocker.fix_status == Some(FixStatus::Fixed))
+            .all(|blocker| blocker.fix_status.is_none() && blocker.dispute.is_none())
     );
     assert_eq!(
         BlockerResolutions::of_rounds(&rounds),
         BlockerResolutions {
-            fixed: 2,
+            fixed: 0,
             disputed_upheld: 0,
             disputed_dropped: 0,
             dismissed: 0,

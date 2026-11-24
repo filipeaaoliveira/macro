@@ -48,15 +48,17 @@ pub fn carried_blockers<'a>(
 }
 
 /// How the fix hands back what it did of each Blocker.
-const FIX_ANSWER: &str = "End your text with one fenced `json` block that says, for each \
-blocker by its number above, whether you fixed it or dispute it:\n\n\
+const FIX_ANSWER: &str = "End the `text` you hand back with `macro.factory.handBack` with one \
+fenced `json` block that says, for each blocker by its number above, whether you fixed it or \
+dispute it:\n\n\
 ```json\n\
 {\"blockers\": [{\"number\": 1, \"status\": \"fixed\"}, {\"number\": 2, \"status\": \"disputed\", \"reason\": \"Why it should not block\"}]}\n\
 ```\n\n\
 Dispute a blocker only when it must not be fixed as asked: it is wrong, or it asks for \
 evidence this workspace cannot produce. Give the evidence in its `reason`, at most 2 KiB. \
 The next review round's reviewer that found it rules on the dispute: it drops it, or it \
-upholds it and the blocker blocks again. A blocker you leave out counts as fixed.\n";
+upholds it and the blocker blocks again. A dispute written anywhere but this block is not \
+read. A blocker you leave out of the block stays unanswered and blocks again.\n";
 
 /// The Blockers of `round`, for the fix to read, and how it says what it
 /// did of each; empty when it found none.
