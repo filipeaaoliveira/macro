@@ -1,5 +1,6 @@
 import type { Accessor } from 'solid-js';
 import { createContext, useContext } from 'solid-js';
+import type { ActivityLine } from '../core/activity';
 import type { RunScore } from '../core/evaluation';
 import type { Flow, Run, RunStep } from '../core/run';
 
@@ -170,6 +171,14 @@ export type RunsContext = {
    * paused (for a note), or its agent works on no turn.
    */
   steerStep: (input: SteerStepInput) => Promise<RunActionResult>;
+  /**
+   * What a running Step's agent did last, read from its session; none where
+   * the app can't read sessions.
+   */
+  stepActivity?: (
+    sessionId: Accessor<string | undefined>,
+    limit?: number
+  ) => Accessor<ActivityLine[]>;
 };
 
 const Context = createContext<RunsContext>();

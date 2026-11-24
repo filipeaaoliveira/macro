@@ -75,4 +75,4 @@ wiremock = { workspace = true }
 
 [package.metadata.cargo-shear]
 # Only referenced by the code the Temporal macros expand to.
-ignored = ["futures", "temporalio-workflow"]
+ignored = ["temporalio-workflow"]

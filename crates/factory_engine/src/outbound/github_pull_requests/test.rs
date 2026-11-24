@@ -212,11 +212,12 @@ fn only_outages_are_tried_again() {
     }
 }
 
-/// A linked token is read again on each call, never kept, so relinking or
-/// unlinking shows at once. GitHub here is a closed port, which fails each
-/// call as an outage after its token was read.
+/// A linked token is read once and kept for the calls that follow, even
+/// those GitHub fails: reading it costs as much as a call to GitHub. GitHub
+/// here is a closed port, which fails each call as an outage after its
+/// token was read.
 #[tokio::test]
-async fn a_linked_token_is_read_on_each_call() {
+async fn a_linked_token_is_kept_between_calls() {
     let tokens = Tokens {
         linked: Some("token"),
         ..Tokens::default()
@@ -234,7 +235,7 @@ async fn a_linked_token_is_read_on_each_call() {
         ));
     }
 
-    assert_eq!(tokens.reads.load(Ordering::SeqCst), 3);
+    assert_eq!(tokens.reads.load(Ordering::SeqCst), 1);
 }
 
 /// A merged pull request is read with the commit its merge made; an open

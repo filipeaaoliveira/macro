@@ -3,7 +3,7 @@ import { ViewSidebar } from '@app/components/view-shell/ViewSidebar';
 import { t } from '@app/lib/i18n';
 import { LoadingSpinner } from '@core/component/LoadingSpinner';
 import { Match, Show, Switch } from 'solid-js';
-import { runTitle } from '../core/run';
+import { RunLiveHero } from '../components/run-live-hero';
 import { createFocusRescue } from '../primitives/focus-rescue';
 import type { RunController } from '../primitives/run-controller';
 import { RunGate } from './run-dialog';
@@ -20,7 +20,11 @@ import { formatRunTime } from './shared/run-time';
  * Steps scroll, and, for its owner, the Gate it waits on and Cancel run, or
  * Retry run once it ended so, stay pinned under them, as in the dialog.
  */
-export function RunPane(props: { controller: RunController }) {
+export function RunPane(props: {
+  controller: RunController;
+  /** The entries of the team's Definition's Flow, by its name. */
+  flowEntries?: (flow: string) => readonly string[] | undefined;
+}) {
   let content: HTMLDivElement | undefined;
   let status: HTMLElement | undefined;
   const source = props.controller.source;
@@ -29,10 +33,6 @@ export function RunPane(props: { controller: RunController }) {
     () => content,
     () => status
   );
-  const title = () => {
-    const run = source.data();
-    return run ? runTitle(run) : t('factoryRuns.runDetails');
-  };
 
   return (
     <div
@@ -42,7 +42,11 @@ export function RunPane(props: { controller: RunController }) {
       class="flex size-full min-h-0 flex-col"
     >
       <ListHeader
-        title={<ViewSidebar.Title caret={false}>{title()}</ViewSidebar.Title>}
+        title={
+          <ViewSidebar.Title caret={false}>
+            {t('factoryDashboard.runCrumb')}
+          </ViewSidebar.Title>
+        }
       />
       <Switch>
         <Match when={source.state() === 'pending'}>
@@ -58,8 +62,32 @@ export function RunPane(props: { controller: RunController }) {
         <Match when={source.data()}>
           {(run) => (
             <>
-              <div class="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3">
+              <div class="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3 sm:px-6">
+                <RunLiveHero
+                  run={run()}
+                  entries={
+                    run().flow
+                      ? props.flowEntries?.(run().flow ?? '')
+                      : undefined
+                  }
+                  onWatch={
+                    props.controller.owned()
+                      ? props.controller.openTerminal
+                      : undefined
+                  }
+                  actions={
+                    <>
+                      <Show when={props.controller.owned() && !run().end}>
+                        <RunCancel controller={props.controller} />
+                      </Show>
+                      <Show when={props.controller.retriable()}>
+                        <RunRetry controller={props.controller} />
+                      </Show>
+                    </>
+                  }
+                />
                 <RunContent
+                  stepsFirst
                   controller={props.controller}
                   run={run()}
                   time={formatRunTime}
@@ -73,16 +101,6 @@ export function RunPane(props: { controller: RunController }) {
               >
                 <div class="shrink-0 border-t border-edge-divider px-4 pt-3">
                   <RunGate controller={props.controller} />
-                </div>
-              </Show>
-              <Show when={props.controller.owned() && !run().end}>
-                <div class="flex shrink-0 justify-end border-t border-edge-divider px-4 py-3">
-                  <RunCancel controller={props.controller} />
-                </div>
-              </Show>
-              <Show when={props.controller.retriable()}>
-                <div class="flex shrink-0 justify-end border-t border-edge-divider px-4 py-3">
-                  <RunRetry controller={props.controller} />
                 </div>
               </Show>
             </>

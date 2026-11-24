@@ -926,14 +926,21 @@ work on the branch on GitHub ends `failed`, saying why, before its checks
 the branch changes nothing against the Run's base (GitHub lists no changed
 path; a list GitHub cannot give in full passes), or, for a fix that says it
 fixed a Blocker of its review round, is still at the commit that round
-reviewed. Either is read again after 2 s before the Step fails. A branch
+reviewed. A Blocker of the `tests-reviewer` that speaks of a test's break
+(`asks_for_break`) needs no commit once the fix reported a readable break:
+the next round reviews the whole change again, on the same commit, with
+the new record; any other Blocker it says it fixed still needs one. Either
+is read again after 2 s before the Step fails. A branch
 GitHub does not have, even after 2 s, fails the attempt for a retry, as a
 round's read of it does, until the Step's time for rounds (105 minutes) is
 up: then the Step fails saying the branch is not on GitHub. Like the
 checks, this runs in the Step's activity, behind no patch marker. The pull request Steps act on GitHub as the Run's owner, with
 the token of the GitHub account they linked to Macro, which the
 authentication service gives (`outbound/github_pull_requests.rs`, over the
-`github` crate's user-token client), read on every call. A missing link, a
+`github` crate's user-token client), read again once kept 30 s (`TOKEN_KEPT`:
+the authentication service checks a token with GitHub before it gives it, so a
+read costs a GitHub call; an owner with no link is asked on every call). A
+missing link, a
 token GitHub no longer takes (401), a refusal that is not throttling (403) and
 a repository out of reach (404) fail the Step for good; throttling, 5xx and
 transport failures are tried again. Each Step reads before it writes, so a
@@ -1108,7 +1115,10 @@ space, no `..`, `.`, `.git` in any case, not absolute) and a quoted old text
 follow; the texts are split at their one `" -> "` (a line with more does
 not read), and the new one is never the old. The prompt's own form is not a
 break. The lines are read from every hand back of the Step's rounds (its
-work and each fix of a failed round), a later line for a test replacing an
+work and each fix of a failed round), where a session agent adds each
+readable break line of the agent's reply (`RoutineSessions::reply`, the
+last text of each turn it waited on) whose test the hand back names no
+break for (`session_agent/said_breaks.rs`), a later line for a test replacing an
 earlier one, at most 50 readable tests (`MAX_REPORTED`; an unreadable
 line only while there is room). Once the factory's own run
 of a round's checks passes, before the round ends, each break not yet
@@ -1149,8 +1159,9 @@ breaks still to run; one that would not end in the attempt, finds the lock
 held, or was interrupted for the first time fails the attempt for a retry,
 with the round still open. The `tests-reviewer` of a review panel reads
 the Run's records, the latest of each test, in a block marked as data
-(`review_rounds::breaks_brief`, 8 KiB), which says which statuses block (a
-new test with no record, or `not_reproduced`, `hung`, `not_run`,
+(`review_rounds::breaks_brief`, 8 KiB), which opens with the rule that a
+new test with no record blocks and how many tests the records name, then
+says which statuses block (a new test with no record, or `not_reproduced`, `hung`, `not_run`,
 `not_applied`, `unreadable`), which do not by themselves (`dropped`,
 `unchecked`, `interrupted`), and that a break that only stops compiling or
 a command that does not run the test alone is no proof. A retry keeps the
@@ -2302,7 +2313,7 @@ open pull requests (`openPullRequests`, at most
 which does not fail the setting). While a team names one, `POST /runs`, `GET
 /flows` and an Automation's check read it as the Run's owner at the commit its
 default branch is at (`PullRequests::branch_head`, then `file_text` at that
-commit; `service/definition.rs`): the Run walks the Definition's Flow of that
+commit, the files the manifest names asked for at once; `service/definition.rs`): the Run walks the Definition's Flow of that
 name (a built-in Flow it does not name is `UnknownFlow`), with its rules
 (`RulesSource::Definition`: neither the team's settings nor a Project's own
 apply) and Control Files, and keeps the repository, the commit
@@ -2332,7 +2343,15 @@ so a person approves it; `rules.json` lists at most
 /settings/definition` says whether the default branch takes changes only by
 pull request (`requiresPullRequest`, from its rulesets or, for its admins,
 its branch protection), and the Control Files and Standing Rules settings
-say a Definition is named (`definitionNamed`). Only the default
+say a Definition is named (`definitionNamed`). The service keeps what it
+read per person (`service/definition/kept.rs`): a Definition read at a
+commit for 10 minutes, since a commit's files never change, and the head
+for 10 s. The screens that read the Definition on every load (`GET
+/settings/definition`, `GET /flows`, and the Scorers, Experiments and
+Benchmarks that Insights, a Run's scores and self-improvement read,
+`FactoryService::team_evaluation`) take the head found in the last 10 s,
+so a change merged on GitHub shows there within that time; `POST /runs`, a
+retry, an Automation's check and naming a Definition read the head now. Only the default
 branch is read, so a change reaches Runs once its pull request merges, and a
 Run started already, or a Run's own branch, never changes the rules it runs
 under. The team's Control Files and Standing Rules settings are refused

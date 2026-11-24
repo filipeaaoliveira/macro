@@ -51,12 +51,16 @@ use factory_records::domain::models::{
     Outcome, Role,
 };
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::review_rounds::{FixStatus, ReviewRound, ReviewRoundRepository};
+use factory_records::domain::review_rounds::{
+    FixStatus, ReviewFinding, ReviewRound, ReviewRoundRepository,
+};
 use tokio::time::Instant;
 use uuid::Uuid;
 
 use self::breaks::{BreakPlace, NOT_RUN_BY_FACTORY};
+use super::review_panel::TESTS_REVIEWER;
 use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};
+use crate::domain::breaks::{Reported, reported};
 use crate::domain::check_context::CheckContext;
 use crate::domain::checks::{
     CHECKS_FILE, DEFAULT_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks, fence_for,
@@ -821,7 +825,8 @@ where
     /// when the Run's branch on GitHub does not hold its work: `failed`,
     /// saying why, when the branch changes nothing against the Run's base,
     /// or, for a fix that says it fixed a Blocker of the review round
-    /// `answers`, is still at the commit that round reviewed; read again
+    /// `answers` that needs a commit ([`needs_commit`]), is still at the
+    /// commit that round reviewed; read again
     /// after [`BRANCH_HEAD_LAG`] before it fails. A branch GitHub does not
     /// have is left to a retry, as a round's read of it is, until the
     /// Step's time for rounds is up: then the Step fails saying so. None
@@ -892,10 +897,7 @@ where
             }
         };
         let fixed = answers.filter(|round| {
-            round.head_sha.as_deref() == Some(head.as_str())
-                && fix_answers(round, work_output)
-                    .iter()
-                    .any(|answer| answer.status == FixStatus::Fixed)
+            round.head_sha.as_deref() == Some(head.as_str()) && needs_commit(round, work_output)
         });
         if let Some(round) = fixed {
             return Ok(Some(format!(
@@ -1384,4 +1386,42 @@ fn passed() -> Outcome {
 
 fn failed() -> Outcome {
     outcome(CheckRoundOutcome::Failed.as_str())
+}
+
+/// Whether the fix that handed back `work_output` says it fixed a Blocker
+/// of `round` that only a commit fixes. A Blocker that asks only for a
+/// test's break record needs none once the fix reported a readable break:
+/// the next round reviews the same commit with the new record. Any other
+/// Blocker it says it fixed needs a commit.
+fn needs_commit(round: &ReviewRound, work_output: &str) -> bool {
+    let reported_break = reported([work_output])
+        .iter()
+        .any(|kept| matches!(kept, Reported::Break(_)));
+    round
+        .blockers()
+        .zip(fix_answers(round, work_output))
+        .any(|(blocker, answer)| {
+            answer.status == FixStatus::Fixed && !(reported_break && asks_for_break(blocker))
+        })
+}
+
+/// What a Blocker that asks for a test's break record says of it.
+const BREAK_WORDS: [&str; 6] = [
+    "break record",
+    "break line",
+    "no break",
+    "its break",
+    "a break",
+    "the break",
+];
+
+/// Whether `blocker` asks only for a test's break record: the tests
+/// reviewer raised it, and it speaks of the test's break.
+fn asks_for_break(blocker: &ReviewFinding) -> bool {
+    let tests_reviewer = blocker
+        .role
+        .as_ref()
+        .is_some_and(|role| role.as_str() == TESTS_REVIEWER);
+    let said = format!("{} {}", blocker.problem, blocker.why).to_lowercase();
+    tests_reviewer && BREAK_WORDS.iter().any(|words| said.contains(words))
 }

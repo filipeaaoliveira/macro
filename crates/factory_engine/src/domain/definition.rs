@@ -40,8 +40,9 @@ pub use change::{
     ProposedChange, read_changed_definition,
 };
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
+use std::sync::Mutex;
 
 use factory_records::domain::evaluation::BENCHMARK_FLOW;
 use factory_records::domain::models::{AgentName, Role};
@@ -49,6 +50,7 @@ use factory_records::domain::self_improvement::IMPROVE_FLOW;
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MAX_TOKEN_BUDGET, MIN_QUEUE_LIMIT, MIN_TOKEN_BUDGET, OrchestratorDefinition,
 };
+use futures::future::join_all;
 use serde::Deserialize;
 
 use crate::domain::agents::{AgentDefinition, AgentDefinitionError};
@@ -186,6 +188,53 @@ pub trait DefinitionFiles: Send + Sync {
     /// The text of the file at `path` from the repository's root; none
     /// when there is no file there.
     fn read(&self, path: &str) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+}
+
+/// What reading one of a Definition's files came to.
+type FileRead<E> = Result<Option<String>, E>;
+
+/// A Definition's files, the ones it is known to read asked for at once:
+/// each read of another file, or of one whose first read failed, asks
+/// `files` again.
+struct Prefetched<'a, F: DefinitionFiles> {
+    files: &'a F,
+    read: Mutex<HashMap<String, FileRead<F::Err>>>,
+}
+
+impl<'a, F: DefinitionFiles> Prefetched<'a, F> {
+    /// Read `paths` of `files` at once, rather than one after another.
+    async fn read_at_once(files: &'a F, paths: Vec<String>) -> Self {
+        let read = join_all(paths.into_iter().map(|path| async move {
+            let text = files.read(&path).await;
+            (path, text)
+        }))
+        .await;
+        Self {
+            files,
+            read: Mutex::new(read.into_iter().collect()),
+        }
+    }
+}
+
+impl<F: DefinitionFiles> DefinitionFiles for Prefetched<'_, F> {
+    type Err = F::Err;
+
+    async fn read(&self, path: &str) -> Result<Option<String>, Self::Err> {
+        // A text read is kept for a second read of it; a failure is given
+        // once, and the next read asks again.
+        let prefetched = match self.read.lock() {
+            Ok(mut read) => match read.get(path) {
+                Some(Ok(text)) => Some(Ok(text.clone())),
+                Some(Err(_)) => read.remove(path),
+                None => None,
+            },
+            Err(_) => None,
+        };
+        match prefetched {
+            Some(text) => text,
+            None => self.files.read(path).await,
+        }
+    }
 }
 
 /// A Factory Definition, read and checked.
@@ -614,6 +663,21 @@ pub async fn read_definition<F: DefinitionFiles>(
     if manifest.flows.is_empty() || manifest.flows.len() > MAX_FLOWS {
         return Err(DefinitionError::FlowCount.into());
     }
+
+    // The files the manifest says the Definition holds are asked for at
+    // once; they are still checked in order, so the first problem found is
+    // the one a read of each in turn would find. A name that is not one
+    // goes to no path.
+    let mut paths: Vec<String> = manifest
+        .flows
+        .iter()
+        .filter(|name| is_name(name))
+        .map(|name| flow_path(name))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    paths.extend([AGENTS_FILE, RULES_FILE, SCORERS_FILE].map(str::to_string));
+    let files = &Prefetched::read_at_once(files, paths).await;
 
     // Each Flow the manifest names is read from its own file, and checked
     // as a built-in Flow is.
