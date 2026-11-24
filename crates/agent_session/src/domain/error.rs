@@ -66,6 +66,11 @@ pub enum AgentSessionError {
     /// is not in a state to serve it. Says what the operator has to fix.
     #[error("{0}")]
     RuntimeUnavailable(&'static str),
+    /// The bot's externally run runtime refused to open a requested
+    /// session, saying why: a machine asked for a repository it does not
+    /// work in, for one. Asking again is refused the same way.
+    #[error("this agent's machine refused the session: {0}")]
+    RuntimeRefused(String),
     /// The bot's harness is an agent teammate's computer: people message the
     /// agent, and no session is started there.
     #[error("{}", TEAM_AGENT_COMPUTER_MESSAGE)]

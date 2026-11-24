@@ -237,7 +237,7 @@ impl RoutineSessions for Sessions {
         command: PrepareRoutineSession,
     ) -> Result<PreparedRoutineSession, RoutineSessionError> {
         self.admitting.pass().await;
-        if let Some(error) = self.refuses {
+        if let Some(error) = self.refuses.clone() {
             return Err(error);
         }
         let session_id = command.session_id;

@@ -1597,6 +1597,11 @@ pub enum StepError {
     /// work's failure, not the factory's.
     #[error("the step's agent was still at work when the wait ended: {0:?}")]
     Overdue(rootcause::Report),
+    /// The agent's machine refused the Step's session, saying why: trying
+    /// again would repeat the refusal, and the work never started. Its
+    /// text is what the Run's owner is shown.
+    #[error("The agent's machine refused the step's session: {0}")]
+    Refused(String),
     /// The quota of the Agents that fill the Step's Role ran out: trying
     /// again would repeat the refusal, and the work never started.
     #[error("the step's agents are out of quota: {0:?}")]

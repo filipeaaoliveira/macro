@@ -36,6 +36,8 @@ sessions through `agent_harness_service`'s internal routes. It implements the
   failure: the client maps them to `OperationFailed` and
   `PromptDeliveryUnknown` and leaves
   recovery to the caller.
+- A session its runtime refused comes back as `Refused` with the runtime's
+  reason, read from the error body; it fails the same way when sent again.
 - A connection the harness refused is not ambiguous: nothing reached it, so
   every command answers `RuntimeUnavailable`, which a caller may send again.
 - `exec` waits as long as the command may run (30 minutes) and a margin: a

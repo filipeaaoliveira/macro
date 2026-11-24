@@ -20,7 +20,7 @@ use factory_records::domain::models::{Outcome, RunId, RunOutcome, StepKey};
 
 use super::step::ask;
 use super::work::{Work, WorkFailure};
-use super::{Asking, FAILED_STEP_OUTPUT, Question, Questions};
+use super::{Asking, Question, Questions};
 use crate::domain::built_in_steps::review_outcomes;
 use crate::domain::flow::Entry;
 use crate::domain::gate::{GateOpening, GateTelling};
@@ -200,7 +200,7 @@ async fn walk_round<W: Work>(
         Ended::Done { reviewed } => work_failed |= !reviewed,
         Ended::Failed(failure) => {
             any_failed = true;
-            work_failed |= failure == WorkFailure::Work;
+            work_failed |= !failure.infrastructure();
         }
     };
     let mut asking: Vec<(StepRequest, Question)> = Vec::new();
@@ -338,7 +338,7 @@ async fn end_reviewer<W: Work>(
         Err(failure) => (
             StepReport {
                 outcome: Outcome::failed(),
-                output: FAILED_STEP_OUTPUT.to_string(),
+                output: failure.output(),
             },
             Some(failure),
         ),

@@ -12,24 +12,45 @@ use temporalio_sdk::{
 };
 
 use super::{
-    Asking, CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FlowWorkflow, NO_RESULT_PATCH,
-    NOTIFY_ONLY_PATCH, OPEN_ROUND_TIMEOUT, STEP_HEARTBEAT_TIMEOUT, ask, is_cancelled,
-    notify_options, stop, within_budget,
+    Asking, CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FAILED_STEP_OUTPUT, FlowWorkflow,
+    NO_RESULT_PATCH, NOTIFY_ONLY_PATCH, OPEN_ROUND_TIMEOUT, STEP_HEARTBEAT_TIMEOUT, ask,
+    is_cancelled, notify_options, stop, within_budget,
 };
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
-use crate::inbound::temporal::activities::{FactoryActivities, INFRASTRUCTURE_FAILURE};
+use crate::inbound::temporal::activities::{
+    FactoryActivities, INFRASTRUCTURE_FAILURE, REFUSED_FAILURE,
+};
 
 /// Why a Step's work failed for good, as the workflow reads it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum WorkFailure {
     /// For a machine, quota or network reason: its agents' quota ran out,
     /// or its attempts ran out of time as their worker was lost.
     Infrastructure,
+    /// For infrastructure too: the agent's machine refused the Step's
+    /// session. It holds what the Run's owner is shown: the refusal and
+    /// the machine's reason.
+    Refused(String),
     /// For the work itself, as an agent that ended the Step with an
     /// outcome it does not offer.
     Work,
+}
+
+impl WorkFailure {
+    /// Whether the Step failed for a machine, quota or network reason.
+    pub(super) fn infrastructure(&self) -> bool {
+        matches!(self, WorkFailure::Infrastructure | WorkFailure::Refused(_))
+    }
+
+    /// What the Run's owner is shown of the Step that failed so.
+    pub(super) fn output(&self) -> String {
+        match self {
+            WorkFailure::Refused(refusal) => refusal.clone(),
+            WorkFailure::Infrastructure | WorkFailure::Work => FAILED_STEP_OUTPUT.to_string(),
+        }
+    }
 }
 
 /// Why the activity of a Step's work failed for good, read from its
@@ -40,7 +61,9 @@ pub(super) enum WorkFailure {
 /// ([`timeout_failure`]). Attempts whose time ran out after a failure
 /// Temporal retried come back as that last failure, not as a timeout: one
 /// of no known kind, as an agent still at work (`FactoryAgentOverdue`) or a
-/// round of checks that could not go on, is the work's. This decides
+/// round of checks that could not go on, is the work's. A session the
+/// agent's machine refused (`FactoryRefused`) is infrastructure's, and
+/// keeps the refusal for the Step's output. This decides
 /// whether the workflow asks for the `factory-infrastructure-outcome`
 /// marker, so changing it changes how recorded histories replay.
 pub(super) fn work_failure(error: &ActivityExecutionError) -> WorkFailure {
@@ -48,8 +71,29 @@ pub(super) fn work_failure(error: &ActivityExecutionError) -> WorkFailure {
         return timeout_failure(timeout);
     }
     match error.cause() {
-        Some(cause) if out_of_quota(cause) => WorkFailure::Infrastructure,
-        _ => WorkFailure::Work,
+        Some(cause) => known_failure(cause).unwrap_or(WorkFailure::Work),
+        None => WorkFailure::Work,
+    }
+}
+
+/// What `failure` is when the factory knows its kind: agents out of quota,
+/// or a session their machine refused.
+fn known_failure(failure: &IncomingError) -> Option<WorkFailure> {
+    if out_of_quota(failure) {
+        return Some(WorkFailure::Infrastructure);
+    }
+    match failure {
+        IncomingError::Application(application)
+            if application.type_name() == Some(REFUSED_FAILURE) =>
+        {
+            Some(WorkFailure::Refused(
+                application
+                    .failure()
+                    .map(|failure| failure.message.clone())
+                    .unwrap_or_else(|| FAILED_STEP_OUTPUT.to_string()),
+            ))
+        }
+        _ => None,
     }
 }
 
@@ -73,8 +117,7 @@ fn timeout_failure(timeout: &TimeoutError) -> WorkFailure {
         TimeoutType::ScheduleToClose => match timeout.cause() {
             None => WorkFailure::Infrastructure,
             Some(IncomingError::Timeout(last)) => timeout_failure(last),
-            Some(last) if out_of_quota(last) => WorkFailure::Infrastructure,
-            Some(_) => WorkFailure::Work,
+            Some(last) => known_failure(last).unwrap_or(WorkFailure::Work),
         },
         // `StartToClose`, and any kind this code does not know: unsure.
         _ => WorkFailure::Work,

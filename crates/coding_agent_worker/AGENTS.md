@@ -80,7 +80,13 @@ the local ACP process (Claude Code, Codex, ...), and drives native
   credential when harnessd holds one. ACP trace logs contain only direction
   and byte counts.
 - `src/trigger.rs` + `src/dispatch.rs`: agent-trigger broker events → session
-  create/dial/prompt against the live harness service.
+  create/dial/prompt against the live harness service. A requested session
+  this daemon cannot prepare a workspace for (`DispatchError::Workspace`: a
+  repository other than its workspace's without Herdr, a branch worktree
+  that could not be made) is refused to the service with the reason
+  (`HarnessApi::refuse`, `POST /agent-sessions/{id}/refusal`), so whoever
+  waits on it stops at once and shows why. A refusal that cannot be sent is
+  logged, and the requester times out as before.
 - `src/branch_worktrees.rs`: without Herdr, a requested session that names
   its `work_branch` (a factory Run's `factory/<run id>`) works in that
   branch's git worktree of the workspace, beside it rather than in it

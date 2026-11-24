@@ -3,8 +3,10 @@
 //! Composition-root adapter: the request goes out on the agent-trigger topic
 //! the same way a mention does, the runtime creates the session under the id
 //! it was handed, and this side waits for that row to appear so the caller
-//! gets the session back the way every other create does.
+//! gets the session back the way every other create does. A runtime that
+//! will not open it says why ([`refusals`]), and the wait ends with that.
 
+pub mod refusals;
 #[cfg(test)]
 mod test;
 
@@ -21,6 +23,8 @@ use macro_event_broker::MacroEventBroker;
 use model_owner::Owner;
 use tokio_util::task::TaskTracker;
 use tracing::Instrument as _;
+
+use refusals::{NoRefusals, SessionRefusals};
 
 /// How long a runtime gets to create the session before the request is
 /// refused. A daemon that is up answers well inside this; one that is down
@@ -71,12 +75,19 @@ fn origin_to_record(
         .then_some((request.source, request.visibility))
 }
 
-/// [`ExternalSessionRequester`] over the trigger topic and the session table.
-pub struct BrokerExternalSessionRequests<Broker, Sessions, Runtimes = PgHarnessRepo> {
+/// [`ExternalSessionRequester`] over the trigger topic and the session table,
+/// and the runtimes' refusals.
+pub struct BrokerExternalSessionRequests<
+    Broker,
+    Sessions,
+    Runtimes = PgHarnessRepo,
+    Refusals = NoRefusals,
+> {
     broker: Broker,
     sessions: Sessions,
     harnesses: Runtimes,
     tasks: TaskTracker,
+    refusals: Refusals,
 }
 
 impl<Broker, Sessions, Runtimes> BrokerExternalSessionRequests<Broker, Sessions, Runtimes> {
@@ -94,16 +105,37 @@ impl<Broker, Sessions, Runtimes> BrokerExternalSessionRequests<Broker, Sessions,
             sessions,
             harnesses,
             tasks,
+            refusals: NoRefusals,
         }
     }
 }
 
-impl<Broker, Sessions, Runtimes> ExternalSessionRequester
-    for BrokerExternalSessionRequests<Broker, Sessions, Runtimes>
+impl<Broker, Sessions, Runtimes, Refusals>
+    BrokerExternalSessionRequests<Broker, Sessions, Runtimes, Refusals>
+{
+    /// Stop waiting on a session once its runtime refused it in `refusals`,
+    /// and answer with the runtime's reason.
+    pub fn with_refusals<Kept>(
+        self,
+        refusals: Kept,
+    ) -> BrokerExternalSessionRequests<Broker, Sessions, Runtimes, Kept> {
+        BrokerExternalSessionRequests {
+            broker: self.broker,
+            sessions: self.sessions,
+            harnesses: self.harnesses,
+            tasks: self.tasks,
+            refusals,
+        }
+    }
+}
+
+impl<Broker, Sessions, Runtimes, Refusals> ExternalSessionRequester
+    for BrokerExternalSessionRequests<Broker, Sessions, Runtimes, Refusals>
 where
     Broker: MacroEventBroker,
     Sessions: AgentSessionRepo + Clone,
     Runtimes: RuntimeUsers,
+    Refusals: SessionRefusals + Clone,
 {
     async fn request(
         &self,
@@ -152,6 +184,7 @@ where
         // task is bounded, publication and database calls and all, and its
         // failure is logged there: its caller may be gone.
         let sessions = self.sessions.clone();
+        let refusals = self.refusals.clone();
         let settling = async move {
             let settled = tokio::time::timeout(SETTLE_TIMEOUT, async move {
                 publication
@@ -160,6 +193,7 @@ where
                     .map_err(|error| AgentSessionError::Unknown(anyhow::anyhow!(error)))?;
                 settle(
                     sessions,
+                    refusals,
                     Settle {
                         session_id,
                         bot_id: request.bot_id,
@@ -210,9 +244,11 @@ pub(crate) async fn drain(tasks: &TaskTracker, within: Duration) -> bool {
 }
 
 /// Wait up to [`RUNTIME_ANSWER_TIMEOUT`] for the runtime to create the
-/// session's row, then give it the requested model and origin.
-async fn settle<Sessions: AgentSessionRepo>(
+/// session's row, then give it the requested model and origin. A refusal
+/// the runtime sent in `refusals` meanwhile ends the wait with its reason.
+async fn settle<Sessions: AgentSessionRepo, Refusals: SessionRefusals>(
     sessions: Sessions,
+    refusals: Refusals,
     request: Settle,
 ) -> agent_session::domain::error::Result<AgentSession> {
     let Settle {
@@ -250,6 +286,24 @@ async fn settle<Sessions: AgentSessionRepo>(
                 return sessions.get(session_id).await;
             }
             Err(error) => {
+                // The runtime will not open it: no use waiting on. A
+                // refusal that could not be read is waited past, as the
+                // row is.
+                match refusals.refusal(session_id).await {
+                    Ok(Some(refusal)) if refusal.bot_id == bot_id => {
+                        tracing::info!(
+                            %session_id,
+                            %bot_id,
+                            reason = refusal.reason,
+                            "the runtime refused the requested session"
+                        );
+                        return Err(AgentSessionError::RuntimeRefused(refusal.reason));
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        tracing::warn!(%session_id, ?error, "a session's refusal could not be read");
+                    }
+                }
                 if tokio::time::Instant::now() >= deadline {
                     // Warn: the caller has waited the whole timeout and
                     // gets an error, and nothing else records why.

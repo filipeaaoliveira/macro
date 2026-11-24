@@ -370,6 +370,12 @@ impl IntoResponse for AgentSessionApiError {
                 tracing::info!(reason, "open refused: the bot's runtime is unavailable");
                 (StatusCode::CONFLICT, reason).into_response()
             }
+            // The runtime said why it opens no such session: the caller sees
+            // that, and asking again is refused the same way.
+            Self::Domain(error @ AgentSessionError::RuntimeRefused(_)) => {
+                tracing::info!(%error, "open refused by the bot's runtime");
+                (StatusCode::CONFLICT, error.to_string()).into_response()
+            }
             // Same class as a disconnected runtime: nothing is wrong, and
             // repeating the request will not land. The form the caller is
             // answering has already resolved (someone else answered, a stop
@@ -2039,6 +2045,22 @@ const THREAD_SESSION_EXISTS_MESSAGE: &str = "this bot already has a session for 
 const PROMPT_CLIENT_FROM_RUNTIME_MESSAGE: &str =
     "only a person's own request may name the tab a prompt was typed in";
 
+/// Body of `POST /agent-sessions/{session_id}/refusal`: a runtime refusing
+/// a session it was asked to open, and why. Only a runtime's daemon sends
+/// it, with its harness token; the requester waiting on the session reads
+/// the reason.
+///
+/// Clients serialize this, so both derives are used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeRefusalRequest {
+    /// The agent the session was requested for: one bound to the caller's
+    /// harness.
+    pub bot_id: Uuid,
+    /// Why the runtime opens no such session, for the session's owner.
+    pub reason: String,
+}
+
 /// Body of the 409 answered by `POST /agent-sessions` when the request's
 /// thread already routes to one of this bot's sessions.
 ///
@@ -2195,6 +2217,10 @@ impl IntoResponse for CreateSessionApiError {
             Self::Domain(AgentSessionError::RuntimeUnavailable(reason)) => {
                 tracing::info!(reason, "create refused: the bot's runtime is unavailable");
                 (StatusCode::CONFLICT, reason.to_owned())
+            }
+            Self::Domain(error @ AgentSessionError::RuntimeRefused(_)) => {
+                tracing::info!(%error, "create refused by the bot's runtime");
+                (StatusCode::CONFLICT, error.to_string())
             }
             Self::Domain(error @ AgentSessionError::TeamAgentComputer) => {
                 (StatusCode::CONFLICT, error.to_string())
