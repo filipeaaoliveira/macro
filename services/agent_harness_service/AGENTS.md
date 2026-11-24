@@ -29,6 +29,16 @@ network/resource-only Pulumi stacks; they do not host extra agent processes.
   `ahs.inmem.store_sessions`, `ahs.inmem.live_agents`,
   `ahs.tokio.alive_tasks`); no per-session attributes.
 - `src/trigger.rs`: turns channel/webhook triggers into sessions.
+- `src/external_session_requests.rs`: a session requested of a bot's own
+  runtime (macrod) goes out on the agent-trigger topic, and the request
+  waits up to 180 s for the runtime to create its row. A runtime that will
+  not open it posts `POST /agent-sessions/{session_id}/refusal` (harness
+  token only; the bot must be bound to the caller's harness; the reason
+  trimmed to 1 KiB), kept 10 minutes in Redis
+  (`agent-harness:session-refusal:<id>`, `refusals.rs`) so every replica's
+  wait sees it: the wait ends at its next poll with
+  `AgentSessionError::RuntimeRefused` and the reason. The route is for
+  daemons, not browsers, so it is not in the OpenAPI document.
 - `src/pull_request_archive.rs`: consumes `macro.github_pull_requests` (group
   `agent-harness-pull-request-archive`) and auto-archives sessions whose
   linked pull requests finished (`agent_session::domain::auto_archive`), and

@@ -13,6 +13,7 @@ use model_owner::Owner;
 use tokio::sync::Notify;
 use tokio_util::task::TaskTracker;
 
+use super::refusals::{Refusal, SessionRefusals};
 use super::{BrokerExternalSessionRequests, RuntimeUsers};
 
 fn owner() -> MacroUserIdStr<'static> {
@@ -235,6 +236,105 @@ async fn a_session_published_after_its_caller_left_is_still_hidden() {
 
     let stored = stored.expect("the row ends up hidden");
     assert_eq!(stored.source, SessionSource::User);
+}
+
+/// Refusals kept in memory.
+#[derive(Clone, Default)]
+struct Refusals(Arc<Mutex<std::collections::HashMap<AgentSessionId, Refusal>>>);
+
+impl SessionRefusals for Refusals {
+    async fn record(&self, session: AgentSessionId, refusal: Refusal) -> anyhow::Result<()> {
+        self.0.lock().expect("refusals").insert(session, refusal);
+        Ok(())
+    }
+
+    async fn refusal(&self, session: AgentSessionId) -> anyhow::Result<Option<Refusal>> {
+        Ok(self.0.lock().expect("refusals").get(&session).cloned())
+    }
+}
+
+/// A runtime that will not open the session it was asked for says why: the
+/// wait for the session ends at once with that reason, rather than at the
+/// timeout with a reason that only guesses. A refusal of the same session
+/// for another agent is not this request's.
+#[tokio::test(start_paused = true)]
+async fn a_refusal_ends_the_wait_with_its_reason() {
+    let sessions = InMemoryAgentSessionRepo::new();
+    let session_id = AgentSessionId::new();
+    let bot = BotId::new_from_uuid(macro_uuid::generate_uuid_v7());
+    // The runtime never creates the row.
+    let runtime = Runtime {
+        sessions: sessions.clone(),
+        creates: session_id,
+        bot,
+        requests: Arc::default(),
+        opens: Some(Arc::new(Notify::new())),
+        publishes: None,
+        taken: false,
+    };
+    let refusals = Refusals::default();
+    let requests =
+        BrokerExternalSessionRequests::new(runtime, sessions, Owners, TaskTracker::new())
+            .with_refusals(refusals.clone());
+    let reason = "this machine does not manage repositories; choose a Herdr agent in macrod";
+    refusals
+        .record(
+            session_id,
+            Refusal {
+                bot_id: BotId::new_from_uuid(macro_uuid::generate_uuid_v7()),
+                reason: "another agent's".to_owned(),
+            },
+        )
+        .await
+        .expect("recorded");
+    let refusing = refusals.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        refusing
+            .record(
+                session_id,
+                Refusal {
+                    bot_id: bot,
+                    reason: reason.to_owned(),
+                },
+            )
+            .await
+            .expect("recorded");
+    });
+    let started = tokio::time::Instant::now();
+
+    let refused = requests
+        .request(RequestedExternalSession {
+            session_id,
+            bot_id: bot,
+            owner: owner(),
+            model: None,
+            repo_url: Some("https://github.com/acme/other.git".to_owned()),
+            work_branch: None,
+            source: SessionSource::User,
+            visibility: SessionVisibility::Hidden,
+            origin: trigger_context::TriggerOrigin::Requested { by: owner() },
+        })
+        .await;
+
+    assert!(
+        matches!(&refused, Err(agent_session::domain::error::AgentSessionError::RuntimeRefused(said)) if said == reason),
+        "{refused:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+/// A refusal's reason is kept short, cut between two characters.
+#[test]
+fn a_refusal_s_reason_is_bounded() {
+    let long = format!("  {}é  ", "a".repeat(super::refusals::MAX_REASON_BYTES - 1));
+    let bounded = super::refusals::bounded_reason(&long);
+    assert_eq!(bounded, "a".repeat(super::refusals::MAX_REASON_BYTES - 1));
+    assert_eq!(super::refusals::bounded_reason("  why \n"), "why");
 }
 
 /// Counts the warnings logged while it is the default subscriber.
