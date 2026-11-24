@@ -53,6 +53,19 @@ function ShareBar(props: { share: number; tone: 'success' | 'accent' }) {
   );
 }
 
+/** A card's place while what fills it loads. */
+function Pending(props: { class?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      class={cn(
+        'min-h-64 animate-pulse rounded-2xl border border-edge-muted bg-surface-1',
+        props.class
+      )}
+    />
+  );
+}
+
 /** Each Scorer: how many of its judgments passed, and whether it is calibrated. */
 function ScorersCard(props: { scorers: ScorerInsight[] }) {
   return (
@@ -272,7 +285,12 @@ export function InsightsOverviewPanel(props: {
           />
           <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <RunsOverTime days={insights().days} totals={insights().totals} />
-            <ScorersCard scorers={evaluation.data()?.scorers ?? []} />
+            <Show
+              when={evaluation.state() !== 'pending'}
+              fallback={<Pending />}
+            >
+              <ScorersCard scorers={evaluation.data()?.scorers ?? []} />
+            </Show>
             <StepTimeChart steps={stepTimes(insights().entries)} />
             <div class="flex min-w-0 flex-col gap-4">
               <TroubleCard entries={troubledEntries(insights().entries)} />
@@ -286,16 +304,23 @@ export function InsightsOverviewPanel(props: {
                 quality.data()?.review.byReviewer
               )}
             />
-            <ParetoChart
-              points={evaluation.data() ? points(evaluation.data()!) : []}
-            />
+            <Show
+              when={evaluation.state() !== 'pending'}
+              fallback={<Pending class="lg:col-span-2" />}
+            >
+              <ParetoChart
+                points={evaluation.data() ? points(evaluation.data()!) : []}
+              />
+            </Show>
             <div class="flex min-w-0 flex-col gap-4">
               <Show when={quality.data()}>
                 {(read) => <PeopleCard delivery={read().delivery} />}
               </Show>
-              <ExperimentsCard
-                experiments={evaluation.data()?.experiments ?? []}
-              />
+              <Show when={evaluation.state() !== 'pending'}>
+                <ExperimentsCard
+                  experiments={evaluation.data()?.experiments ?? []}
+                />
+              </Show>
             </div>
           </div>
           <p class="text-[11px] text-ink-subtle">
