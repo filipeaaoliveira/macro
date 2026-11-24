@@ -16,6 +16,7 @@ pub use merge_queue::PgMergeTurn;
 mod quality;
 mod review_rounds;
 mod self_improvement;
+mod split_tasks;
 mod standing_acts;
 mod standing_rules;
 mod steering;
@@ -305,6 +306,7 @@ struct RunRow {
     retried_from: Option<Uuid>,
     branch_run_id: Option<Uuid>,
     first_seq: Option<i32>,
+    retried_by: Option<Uuid>,
 }
 
 /// The token budget a Run keeps, stored as `stored`.
@@ -435,6 +437,7 @@ impl TryFrom<RunRow> for Run {
                 (None, None, None) => None,
                 _ => return Err(PgRunRepositoryErr::PartialRetry),
             },
+            retried_by: row.retried_by.map(RunId::from_uuid),
         })
     }
 }
@@ -789,7 +792,8 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                NULL::uuid AS "retried_by?"
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -913,7 +917,8 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                NULL::uuid AS "retried_by?"
             "#,
             retry.id.as_uuid(),
             retry.retried.as_uuid(),
@@ -1212,6 +1217,14 @@ impl RunRepository for PgRunRepository {
         since: DateTime<Utc>,
     ) -> Result<crate::domain::quality::CiFlakes, Self::Err> {
         ci_retries::ci_flakes(&self.pool, id, repository, pull_request, since).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn run_ci_reruns(
+        &self,
+        id: RunId,
+    ) -> Result<crate::domain::quality::RunCiReruns, Self::Err> {
+        ci_retries::run_ci_reruns(&self.pool, id).await
     }
 
     #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
@@ -1553,8 +1566,9 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
-            FROM factory_run
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
+            FROM factory_run r
             WHERE id = $1
             "#,
             id.as_uuid(),
@@ -1658,8 +1672,9 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
-            FROM factory_run
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
+            FROM factory_run r
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
             LIMIT $3
@@ -1697,7 +1712,8 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1744,7 +1760,8 @@ impl RunRepository for PgRunRepository {
                 standing_rules, standing_rules_source, standing_rules_project_id,
                 automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
                 pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,
-                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq
+                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,
+                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS "retried_by?"
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -2537,6 +2554,25 @@ impl RunRepository for PgRunRepository {
     #[tracing::instrument(err, skip(self))]
     async fn runs_break_records(&self, ids: &[RunId]) -> Result<RunsBreakRecords, Self::Err> {
         self.select_runs_breaks(ids).await
+    }
+
+    #[tracing::instrument(err, skip(self, name))]
+    async fn record_split_task(
+        &self,
+        key: StepKey,
+        place: u16,
+        task_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Err> {
+        self.insert_split_task(key, place, task_id, name).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn run_split_tasks(
+        &self,
+        id: RunId,
+    ) -> Result<Vec<crate::domain::split_tasks::SplitTask>, Self::Err> {
+        self.select_split_tasks(id).await
     }
 
     #[tracing::instrument(err, skip(self))]

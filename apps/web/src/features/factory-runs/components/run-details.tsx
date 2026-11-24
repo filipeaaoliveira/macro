@@ -15,6 +15,7 @@ import {
   type RunStep,
   type RunTokenBudget,
   runRequestBody,
+  type SplitTask,
 } from '../core/run';
 import { formatTokens } from './insight-format';
 import { RunStatusDot, runStatusLabel } from './run-status';
@@ -344,6 +345,8 @@ export function RunSteps(props: {
   reviewRounds?: ReviewRound[];
   /** The breaks its write and fix Steps reported, each under its Step. */
   breakRecords?: BreakRecord[];
+  /** The child tasks its `split` Steps filed, each under its Step. */
+  splitTasks?: SplitTask[];
   status: RunStatus;
   time: (value: string) => string;
   /** Opens a running Step's Step Terminal. */
@@ -367,6 +370,7 @@ export function RunSteps(props: {
           baseBranch={props.baseBranch}
           reviewRounds={props.reviewRounds}
           breakRecords={props.breakRecords}
+          splitTasks={props.splitTasks}
           time={props.time}
           onWatch={props.onWatch}
           outputOpen={(step) =>

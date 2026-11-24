@@ -1,0 +1,260 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                r.id AS \"id!\", r.request AS \"request!\", r.user_id AS \"user_id!\",\n                r.flow AS \"flow?\", r.created_at AS \"created_at!\", r.task_id AS \"task_id?\",\n                r.project_id AS \"project_id?\", r.repo_url AS \"repo_url?\",\n                r.base_branch AS \"base_branch?\", r.created_in_person AS \"created_in_person!\",\n                r.control_file_patterns AS \"control_file_patterns?\",\n                r.control_files_team_id AS \"control_files_team_id?\",\n                r.tampered_files AS \"tampered_files?\",\n                r.named_control_files AS \"named_control_files?\",\n                r.control_files_unlisted AS \"control_files_unlisted!\",\n                r.standing_rules AS \"standing_rules?\",\n                r.standing_rules_source AS \"standing_rules_source?\",\n                r.standing_rules_project_id AS \"standing_rules_project_id?\",\n                r.automation_id AS \"automation_id?\", r.automation_name AS \"automation_name?\",\n                r.automation_trigger AS \"automation_trigger?\",\n                r.definition_repo_url AS \"definition_repo_url?\",\n                r.definition_commit AS \"definition_commit?\",\n                r.pull_request_url AS \"pull_request_url?\",\n                r.outcome AS \"outcome?\", r.ended_at AS \"ended_at?\",\n                r.flawed_at AS \"flawed_at?\", r.flawed_by_user_id AS \"flawed_by_user_id?\",\n                r.flawed_by_scorer AS \"flawed_by_scorer?\", r.flaw_reason AS \"flaw_reason?\",\n                r.token_budget AS \"token_budget?\", r.token_budget_stop AS \"token_budget_stop?\",\n                r.token_budget_used AS \"token_budget_used?\",\n                r.retried_from AS \"retried_from?\", r.branch_run_id AS \"branch_run_id?\",\n                r.first_seq AS \"first_seq?\",\n                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS \"retried_by?\",\n                CASE WHEN task.live THEN d.name END AS \"task_name?\",\n                task.live AS \"task_live!\",\n                place.state AS \"state!\"\n            FROM (SELECT DISTINCT url FROM unnest($3::text[]) AS asked(url)) asked\n            CROSS JOIN LATERAL (\n                SELECT heads.* FROM (\n                    SELECT DISTINCT ON (o.user_id, o.task_id) o.*\n                    FROM factory_run o\n                    WHERE lower(o.pull_request_url) = asked.url\n                        AND (\n                            o.user_id = $1\n                            OR o.user_id IN (\n                                SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2\n                            )\n                        )\n                    ORDER BY o.user_id, o.task_id, o.created_at DESC, o.id DESC\n                ) heads\n                ORDER BY heads.created_at DESC, heads.id DESC\n                LIMIT $5\n            ) r\n            LEFT JOIN \"Document\" d ON d.id = r.task_id\n            CROSS JOIN LATERAL (\n                SELECT d.id IS NOT NULL\n                    AND d.\"deletedAt\" IS NULL\n                    AND EXISTS (\n                        SELECT 1 FROM document_sub_type st\n                        WHERE st.document_id = d.id AND st.sub_type = 'task'\n                    ) AS live\n            ) task\n            CROSS JOIN LATERAL (\n                SELECT CASE\n                    WHEN r.outcome IN ('success', 'cancelled', 'flawed') THEN 'finished'\n                    WHEN r.outcome IS NOT NULL THEN 'stopped'\n                    WHEN EXISTS (\n                        SELECT 1 FROM factory_gate g\n                        WHERE g.run_id = r.id AND g.answer IS NULL\n                    ) THEN 'waiting'\n                    WHEN EXISTS (\n                        SELECT 1 FROM factory_main_hold h\n                        WHERE h.repo_url = r.repo_url\n                            AND h.base_branch = r.base_branch\n                            AND h.held_since IS NOT NULL\n                    ) AND (\n                        SELECT CASE\n                            WHEN r.flow_definition IS NULL\n                                THEN s.entry = ANY($4::text[])\n                            ELSE EXISTS (\n                                SELECT 1\n                                FROM jsonb_array_elements(r.flow_definition -> 'entries') e\n                                WHERE e ->> 'id' = s.entry\n                                    AND e ->> 'step' IN ('ready_to_merge', 'merge')\n                            )\n                        END\n                        FROM factory_step s\n                        WHERE s.run_id = r.id\n                        ORDER BY s.seq DESC\n                        LIMIT 1\n                    ) THEN 'held'\n                    ELSE 'running'\n                END AS state\n            ) place\n            ORDER BY r.created_at DESC, r.id DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "request!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "flow?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "task_id?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "project_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "repo_url?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "base_branch?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_in_person!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "control_file_patterns?",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 11,
+        "name": "control_files_team_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "tampered_files?",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 13,
+        "name": "named_control_files?",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 14,
+        "name": "control_files_unlisted!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "standing_rules?",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 16,
+        "name": "standing_rules_source?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "standing_rules_project_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 18,
+        "name": "automation_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 19,
+        "name": "automation_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "automation_trigger?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "definition_repo_url?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "definition_commit?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "pull_request_url?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "outcome?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "ended_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 26,
+        "name": "flawed_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 27,
+        "name": "flawed_by_user_id?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 28,
+        "name": "flawed_by_scorer?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 29,
+        "name": "flaw_reason?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 30,
+        "name": "token_budget?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 31,
+        "name": "token_budget_stop?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 32,
+        "name": "token_budget_used?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 33,
+        "name": "retried_from?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 34,
+        "name": "branch_run_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 35,
+        "name": "first_seq?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 36,
+        "name": "retried_by?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 37,
+        "name": "task_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 38,
+        "name": "task_live!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 39,
+        "name": "state!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "TextArray",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ddeb3613354bc9a427ab1800a443dcb2e25f493e21f6adbfdf07dc7765f0ac83"
+}

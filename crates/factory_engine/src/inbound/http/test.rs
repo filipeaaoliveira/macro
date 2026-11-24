@@ -352,6 +352,22 @@ impl FactoryService for FakeService {
         Err(self.refusing(&actor))
     }
 
+    async fn definition_file(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _path: String,
+    ) -> Result<crate::domain::models::DefinitionFile, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn check_definition_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _change: crate::domain::definition::ProposedChange,
+    ) -> Result<crate::domain::models::DefinitionChangeCheck, FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
     async fn set_control_files(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -798,7 +814,7 @@ async fn someone_else_s_run_is_missing_to_them() {
 
 /// Only a Run's owner retries it, and only once it ended: someone else's
 /// Run is missing to them, and a running one, or one retried already, is a
-/// conflict.
+/// conflict whose code says which.
 #[tokio::test]
 async fn a_retry_reaches_only_its_owner_s_ended_run() {
     let repo = FakeRepo::default();
@@ -814,16 +830,20 @@ async fn a_retry_reaches_only_its_owner_s_ended_run() {
             ))
             .await
             .expect("response")
-            .status()
     };
 
     let eve_retries = retry(records.clone(), "eve").await;
     let alice_retries_a_running_run = retry(records, "alice").await;
     let retried_again = retry(router(|| FactoryError::AlreadyRetried).0, "alice").await;
 
-    assert_eq!(eve_retries, StatusCode::NOT_FOUND);
-    assert_eq!(alice_retries_a_running_run, StatusCode::CONFLICT);
-    assert_eq!(retried_again, StatusCode::CONFLICT);
+    assert_eq!(eve_retries.status(), StatusCode::NOT_FOUND);
+    assert_eq!(alice_retries_a_running_run.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        body(alice_retries_a_running_run).await["code"],
+        "notRetriable"
+    );
+    assert_eq!(retried_again.status(), StatusCode::CONFLICT);
+    assert_eq!(body(retried_again).await["code"], "alreadyRetried");
     assert!(repo.runs.lock().expect("runs").len() == 1);
 }
 
@@ -1371,4 +1391,72 @@ async fn only_an_internal_caller_clears_a_main_hold() {
     assert_eq!(cleared.status(), StatusCode::OK);
     assert_eq!(body(cleared).await["held"], true);
     assert_eq!(repo.main_hold(&main).await.expect("read"), None);
+}
+
+/// A Definition's file is read for the caller, by the path the query
+/// names; a change is checked only for a person in their own session, as
+/// it is proposed, and its refusal carries the same code.
+#[tokio::test]
+async fn a_definition_file_and_a_change_check_reach_the_service() {
+    let (router, service) = router(|| FactoryError::NoDefinition);
+
+    let file = router
+        .clone()
+        .oneshot(call(
+            "GET",
+            "/settings/definition/file?path=flows%2Fcode.json",
+            Caller::User("alice"),
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("response");
+    let change = serde_json::json!({
+        "title": "Say more",
+        "files": { "flows/code.json": "{}" },
+    });
+    let internal = router
+        .clone()
+        .oneshot(call(
+            "POST",
+            "/settings/definition/changes/check",
+            Caller::Internal(Some(ALICE)),
+            change.clone(),
+        ))
+        .await
+        .expect("response");
+    let checked = router
+        .oneshot(call(
+            "POST",
+            "/settings/definition/changes/check",
+            Caller::User("alice"),
+            change,
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(file.status(), StatusCode::CONFLICT);
+    assert_eq!(body(file).await["code"], "noDefinition");
+    assert_eq!(internal.status(), StatusCode::FORBIDDEN);
+    assert_eq!(checked.status(), StatusCode::CONFLICT);
+    assert_eq!(body(checked).await["code"], "noDefinition");
+    assert_eq!(*service.actors.lock().expect("actors"), [ALICE, ALICE]);
+}
+
+/// A path that names no Definition file is refused with its own code.
+#[tokio::test]
+async fn a_path_that_is_no_definition_file_says_so() {
+    let (router, _) = router(|| FactoryError::NotADefinitionFile("README.md".to_string()));
+
+    let response = router
+        .oneshot(call(
+            "GET",
+            "/settings/definition/file?path=README.md",
+            Caller::User("alice"),
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(body(response).await["code"], "notADefinitionFile");
 }

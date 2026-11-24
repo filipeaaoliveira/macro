@@ -10,6 +10,7 @@ import {
 import type {
   GateModelReading as ApiGateModelReading,
   RunDetail,
+  RunScores,
 } from '@service-factory/generated/schemas';
 import {
   type QueryClient,
@@ -26,7 +27,7 @@ import type {
   RunsSource,
   StartRunFailure,
 } from '../context/runs-context';
-import { type RunScore, scoresRefetchInterval } from '../core/evaluation';
+import { scoresRefetchInterval } from '../core/evaluation';
 import { type GateModelReading, type Run, runStatus } from '../core/run';
 import { factoryRunKeys } from './keys';
 
@@ -188,6 +189,12 @@ export function toRun(detail: RunDetail): Run {
           stop: detail.tokenBudget.stop ?? undefined,
         }
       : undefined,
+    // A list of Runs, and a service older than split records, send none.
+    splitTasks: (detail.splitTasks ?? []).map((task) => ({
+      seq: task.seq,
+      id: task.taskId,
+      name: task.name,
+    })),
     // A list of Runs, and a service older than break records, send none.
     breakRecords: (detail.breakRecords ?? []).map((record) => ({
       seq: record.seq,
@@ -215,6 +222,7 @@ export function toRun(detail: RunDetail): Run {
     })),
     taskTagsUnread: detail.taskTagsUnread ?? false,
     // A service older than retries sends none.
+    retriedBy: run.retriedBy ?? undefined,
     retry: run.retry
       ? {
           retriedFrom: run.retry.retriedFrom,
@@ -254,7 +262,8 @@ export function toRun(detail: RunDetail): Run {
 
 /**
  * Seed the Run's own read with what a list read of it. A list reads no
- * Run's token use or break records, so what its own read found is kept,
+ * Run's token use, break records or split tasks, so what its own read found
+ * is kept,
  * rather than shown unknown until the next read.
  */
 export function seedRun(client: QueryClient, run: Run) {
@@ -269,7 +278,10 @@ export function seedRun(client: QueryClient, run: Run) {
   const breakRecords = run.breakRecords?.length
     ? run.breakRecords
     : (own?.breakRecords ?? run.breakRecords);
-  client.setQueryData(key, { ...run, tokenBudget, breakRecords });
+  const splitTasks = run.splitTasks?.length
+    ? run.splitTasks
+    : (own?.splitTasks ?? run.splitTasks);
+  client.setQueryData(key, { ...run, tokenBudget, breakRecords, splitTasks });
 }
 
 export function taskRunsOptions(client: QueryClient, taskId: string) {
@@ -331,6 +343,8 @@ function runScoresOptions(runId: string) {
     queryKey: factoryRunKeys.runScores(runId).queryKey,
     queryFn: ({ signal }) =>
       throwOnErr(() => factoryClient.getRunScores(runId, signal)),
+    // The Scorers still to judge it are read for when to read it again.
+    select: (read: RunScores) => read.scores,
   });
 }
 
@@ -385,6 +399,9 @@ function retryFailure(
   if (codes.includes('QUEUE_FULL')) return 'queueFull';
   if (codes.includes('NOT_IN_STANDING_ROLE')) return 'notInStandingRole';
   if (codes.includes('DEFINITION_UNREADABLE')) return 'definitionUnreadable';
+  if (codes.includes('ALREADY_RETRIED') || codes.includes('NOT_RETRIABLE')) {
+    return 'conflict';
+  }
   if (codes.includes('CONFLICT')) return 'conflict';
   return 'failed';
 }
@@ -441,7 +458,12 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
         useQuery(() => ({
           ...runScoresOptions(runId()),
           enabled: enabled() && Boolean(runId()),
-          refetchInterval: () => scoresRefetchInterval(endedAt(), Date.now()),
+          refetchInterval: (query) =>
+            scoresRefetchInterval(
+              endedAt(),
+              Date.now(),
+              query.state.data?.pending
+            ),
         }))
       ),
 
@@ -618,12 +640,15 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
       const result = await factoryClient.labelRunScore(runId, scorer, passed);
       if (result.isErr()) return failure(result.error);
       const label = result.value;
-      client.setQueryData<RunScore[]>(
+      client.setQueryData<RunScores>(
         factoryRunKeys.runScores(runId).queryKey,
-        (scores) =>
-          scores?.map((score) =>
-            score.scorer === scorer ? { ...score, label } : score
-          )
+        (read) =>
+          read && {
+            ...read,
+            scores: read.scores.map((score) =>
+              score.scorer === scorer ? { ...score, label } : score
+            ),
+          }
       );
       // The label moves the Scorer's calibration, here and in insights.
       fireAndForget(

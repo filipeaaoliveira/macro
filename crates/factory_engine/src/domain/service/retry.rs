@@ -118,6 +118,11 @@ where
         in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
         let run = self.owned_run(actor, id).await?;
+        // A Run retried already says so before any other refusal; the
+        // unique index on the retry's insert still settles a race.
+        if run.retried_by.is_some() {
+            return Err(FactoryError::AlreadyRetried);
+        }
         // A retry starts a Run: an agent retries one under a Definition
         // with Standing Roles only when its bot fills one that allows a
         // start.

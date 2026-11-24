@@ -22,6 +22,7 @@ use serde::Serialize;
 
 use super::{EvaluationServiceImpl, internal};
 use crate::domain::evaluation::EvaluationDefinition;
+use crate::domain::evaluation::service::pending_scorers;
 use crate::domain::ports::FactoryService;
 
 /// The judgments a person labels before a Scorer can be calibrated.
@@ -107,12 +108,19 @@ pub struct RunScore {
     pub calibration: ScorerCalibration,
 }
 
-/// The live Scorers' judgments of one Run.
+/// The live Scorers' judgments of one Run, and those still to come.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RunScores {
     /// One for each Scorer that judged it, by Scorer.
     pub scores: Vec<RunScore>,
+    /// The Scorers that will still judge it, by name: each of the Scorers
+    /// it is scored with whose sample takes it (by its Flow and a hash of
+    /// its id) and that has not judged it. Empty once none will: its
+    /// scoring finished, an hour passed since it ended, or no Scorer judges
+    /// it (it was cancelled or lost to infrastructure, or is a Benchmark
+    /// trial). While it goes, the Scorers that will judge it once it ends.
+    pub pending: Vec<String>,
 }
 
 /// Why reading or labelling a Run's judgments was refused.
@@ -179,6 +187,34 @@ where
     }
 }
 
+impl<R, F> EvaluationServiceImpl<R, F>
+where
+    R: EvaluationRepository,
+{
+    /// The live Scorers that will still judge `run_id`, by the Scorers it
+    /// is scored with: those its Factory Definition kept as it started, or
+    /// the deployment's, as scoring reads them.
+    async fn pending(&self, run_id: RunId) -> Result<Vec<String>, ScorerLabelError> {
+        let Some(state) = self
+            .repo
+            .scoring_state(run_id)
+            .await
+            .map_err(label_internal)?
+        else {
+            return Ok(Vec::new());
+        };
+        let kept = match &state.evaluation {
+            Some(kept) => Some(
+                serde_json::from_value::<EvaluationDefinition>(kept.clone())
+                    .map_err(label_internal)?,
+            ),
+            None => None,
+        };
+        let definition = kept.as_ref().unwrap_or(&self.definition);
+        Ok(pending_scorers(definition, run_id, &state, Utc::now()))
+    }
+}
+
 impl<R, F> ScorerLabelService for EvaluationServiceImpl<R, F>
 where
     R: EvaluationRepository + RunRepository,
@@ -196,6 +232,7 @@ where
             .run_judgments(run_id)
             .await
             .map_err(label_internal)?;
+        let pending = self.pending(run_id).await?;
         // The Scorers judge as the team's Definition says now, as in the
         // insights.
         let team = self
@@ -233,7 +270,7 @@ where
                 }
             })
             .collect();
-        Ok(RunScores { scores })
+        Ok(RunScores { scores, pending })
     }
 
     #[tracing::instrument(skip(self, actor))]

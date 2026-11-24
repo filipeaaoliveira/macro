@@ -477,6 +477,28 @@ export type BudgetStop = {
 };
 
 /**
+ * Request body for checking a change to the team's Factory Definition
+ * without proposing it.
+ */
+export type CheckDefinitionChangeRequest = {
+    /**
+     * Why, for whoever reviews the pull request.
+     */
+    description?: string | null;
+    /**
+     * The files it writes, by path, each with its whole new text, as
+     * `POST /settings/definition/changes` takes them.
+     */
+    files: {
+        [key: string]: string;
+    };
+    /**
+     * What the change does, in a line.
+     */
+    title: string;
+};
+
+/**
  * How one check of a verified round ran.
  */
 export type CheckResult = {
@@ -714,6 +736,50 @@ export type CiQuarantined = {
 };
 
 /**
+ * A failed CI job one of the Run's `ci` Steps reran, taking it for flaky.
+ */
+export type CiRerun = {
+    /**
+     * Which rerun of the job in the Run it is: 1 for its first, as each
+     * `ci` Step reruns a job at most once.
+     */
+    attempt: number;
+    /**
+     * The test that failed, as its check run annotated it.
+     */
+    failure?: string | null;
+    /**
+     * The commit whose checks it reran.
+     */
+    headSha: string;
+    /**
+     * The job.
+     */
+    job: string;
+    /**
+     * Why it was taken for flaky.
+     */
+    matched: CiRetryMatch;
+    /**
+     * When it was asked for.
+     */
+    requestedAt: string;
+    result?: null | CiRetryResult;
+    /**
+     * The `ci` Step that reran it.
+     */
+    seq: number;
+    /**
+     * When it ended; none while it runs.
+     */
+    settledAt?: string | null;
+    /**
+     * The first of its steps that failed, when it was read.
+     */
+    step?: string | null;
+};
+
+/**
  * How the reruns of flaky CI jobs ended; those still running are not
  * counted.
  */
@@ -732,6 +798,16 @@ export type CiRetryCounts = {
      */
     refused: number;
 };
+
+/**
+ * Why a `ci` Step took a failed CI job for flaky, and reran it.
+ */
+export type CiRetryMatch = 'known' | 'quarantined' | 'record';
+
+/**
+ * How a rerun of a failed CI job ended.
+ */
+export type CiRetryResult = 'passed' | 'failed' | 'refused';
 
 /**
  * The Control Files a Run's branch changed: files that decide whether the
@@ -831,6 +907,17 @@ export type CreatedAutomation = {
 };
 
 /**
+ * A change to a Factory Definition that passed every check proposing it
+ * makes, without proposing it.
+ */
+export type DefinitionChangeCheck = {
+    /**
+     * The commit of the default branch it was checked against.
+     */
+    commit: string;
+};
+
+/**
  * What a Factory Definition holds at one commit, as its setting shows it.
  */
 export type DefinitionContents = {
@@ -855,6 +942,27 @@ export type DefinitionContents = {
      */
     scorers: Array<DefinitionScorer>;
     standingRules?: null | OrchestratorDefinition;
+};
+
+/**
+ * One file of a Factory Definition, as it is at its default branch's head:
+ * the text a change to it starts from.
+ */
+export type DefinitionFile = {
+    /**
+     * The commit of the default branch it was read at: the one a change
+     * proposed now goes on top of.
+     */
+    commit: string;
+    /**
+     * Its path from the repository's root.
+     */
+    path: string;
+    /**
+     * Its whole text; none when the repository holds no file there yet,
+     * as for a Flow being added.
+     */
+    text?: string | null;
 };
 
 /**
@@ -2349,6 +2457,7 @@ export type Run = {
      * What the Run was asked to do.
      */
     request: string;
+    retriedBy?: null | RunId;
     retry?: null | RunRetry;
     standingRules?: null | RunRules;
     /**
@@ -2438,6 +2547,17 @@ export type RunDetail = {
      * Run's own read (`GET /runs/{id}`) only, empty in a list of Runs.
      */
     breakRecords: Array<BreakRecord>;
+    /**
+     * The failures its passed reruns quarantined in its repository: in a
+     * Run's own read only, empty in a list of Runs.
+     */
+    ciQuarantines: Array<CiQuarantined>;
+    /**
+     * The failed CI jobs its `ci` Steps reran under the `rerun_flaky_ci`
+     * rule, by Step then job, each with how it ended: in a Run's own read
+     * only, empty in a list of Runs.
+     */
+    ciReruns: Array<CiRerun>;
     mainHold?: null | MainHold;
     /**
      * Its review rounds, in order, each with what its reviewers found.
@@ -2447,6 +2567,12 @@ export type RunDetail = {
      * The Run.
      */
     run: Run;
+    /**
+     * The child tasks its `split` Steps filed, by Step then place, with
+     * their ids and names: in a Run's own read only, empty in a list of
+     * Runs.
+     */
+    splitTasks: Array<SplitTask>;
     /**
      * What agents did to it under its Factory Definition's Standing
      * Roles, in order: who started, cancelled or linked it, and answered
@@ -2485,7 +2611,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson' | 'notInStandingRole' | 'unreachableDefinition' | 'invalidDefinition' | 'definitionNamed' | 'noDefinition' | 'invalidDefinitionChange' | 'definitionChangeNotOpened' | 'definitionChangeClosed';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'notRetriable' | 'alreadyRetried' | 'reservedForAPerson' | 'notInStandingRole' | 'unreachableDefinition' | 'invalidDefinition' | 'definitionNamed' | 'noDefinition' | 'invalidDefinitionChange' | 'definitionChangeNotOpened' | 'definitionChangeClosed' | 'notADefinitionFile';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -2681,9 +2807,18 @@ export type RunScore = {
 };
 
 /**
- * The live Scorers' judgments of one Run.
+ * The live Scorers' judgments of one Run, and those still to come.
  */
 export type RunScores = {
+    /**
+     * The Scorers that will still judge it, by name: each of the Scorers
+     * it is scored with whose sample takes it (by its Flow and a hash of
+     * its id) and that has not judged it. Empty once none will: its
+     * scoring finished, an hour passed since it ended, or no Scorer judges
+     * it (it was cancelled or lost to infrastructure, or is a Benchmark
+     * trial). While it goes, the Scorers that will judge it once it ends.
+     */
+    pending: Array<string>;
     /**
      * One for each Scorer that judged it, by Scorer.
      */
@@ -2911,6 +3046,28 @@ export type SetDefinitionRequest = {
  */
 export type SetStandingRulesRequest = {
     definition?: null | OrchestratorDefinition;
+};
+
+/**
+ * A child task a `split` Step filed.
+ */
+export type SplitTask = {
+    /**
+     * Its name, as the plan named it.
+     */
+    name: string;
+    /**
+     * Its place in the plan's children, from 0.
+     */
+    place: number;
+    /**
+     * The `split` Step that filed it.
+     */
+    seq: number;
+    /**
+     * The task document's id.
+     */
+    taskId: string;
 };
 
 /**
@@ -4446,6 +4603,57 @@ export type ProposeFactoryDefinitionChangeResponses = {
 };
 
 export type ProposeFactoryDefinitionChangeResponse = ProposeFactoryDefinitionChangeResponses[keyof ProposeFactoryDefinitionChangeResponses];
+
+export type CheckFactoryDefinitionChangeData = {
+    body: CheckDefinitionChangeRequest;
+    path?: never;
+    query?: never;
+    url: '/settings/definition/changes/check';
+};
+
+export type CheckFactoryDefinitionChangeErrors = {
+    400: RunErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    409: RunErrorResponse;
+    500: ErrorResponse;
+};
+
+export type CheckFactoryDefinitionChangeError = CheckFactoryDefinitionChangeErrors[keyof CheckFactoryDefinitionChangeErrors];
+
+export type CheckFactoryDefinitionChangeResponses = {
+    200: DefinitionChangeCheck;
+};
+
+export type CheckFactoryDefinitionChangeResponse = CheckFactoryDefinitionChangeResponses[keyof CheckFactoryDefinitionChangeResponses];
+
+export type GetFactoryDefinitionFileData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Its path from the repository's root: `factory.json`,
+         * `flows/{name}.json`, `agents.json`, `rules.json` or `scorers.json`.
+         */
+        path: string;
+    };
+    url: '/settings/definition/file';
+};
+
+export type GetFactoryDefinitionFileErrors = {
+    400: RunErrorResponse;
+    401: ErrorResponse;
+    409: RunErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryDefinitionFileError = GetFactoryDefinitionFileErrors[keyof GetFactoryDefinitionFileErrors];
+
+export type GetFactoryDefinitionFileResponses = {
+    200: DefinitionFile;
+};
+
+export type GetFactoryDefinitionFileResponse = GetFactoryDefinitionFileResponses[keyof GetFactoryDefinitionFileResponses];
 
 export type GetFactoryStandingRulesData = {
     body?: never;

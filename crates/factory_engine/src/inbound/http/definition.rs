@@ -1,10 +1,15 @@
 //! The Run API's Factory Definition setting: the repository whose files a
 //! team's Runs take their Flows, Agents and rules from
-//! (`domain/definition.rs`), and changes to it proposed as pull requests.
+//! (`domain/definition.rs`), the text of one of its files, and changes to
+//! it checked or proposed as pull requests.
 
 use std::collections::BTreeMap;
 
-use axum::{Json, extract::State, http::HeaderMap};
+use axum::{
+    Json,
+    extract::{Query, State},
+    http::HeaderMap,
+};
 use macro_authorization::{MacroAuthorizationExtractor, MacroAuthorizationService, UserOrInternal};
 use model_error_response::ErrorResponse;
 use serde::Deserialize;
@@ -12,7 +17,9 @@ use uuid::Uuid;
 
 use super::{FactoryRouterState, RunErrorResponse, in_person};
 use crate::domain::definition::ProposedChange;
-use crate::domain::models::{DefinitionPullRequest, DefinitionSettings, FactoryError};
+use crate::domain::models::{
+    DefinitionChangeCheck, DefinitionFile, DefinitionPullRequest, DefinitionSettings, FactoryError,
+};
 use crate::domain::ports::FactoryService;
 
 /// Request body for naming the team's Factory Definition.
@@ -164,5 +171,112 @@ where
             .service
             .propose_definition_change(actor, body.change_id, change)
             .await?,
+    ))
+}
+
+/// Which file of the team's Factory Definition to read.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct DefinitionFileParams {
+    /// Its path from the repository's root: `factory.json`,
+    /// `flows/{name}.json`, `agents.json`, `rules.json` or `scorers.json`.
+    pub path: String,
+}
+
+/// The whole text of one file of the caller's team's Factory Definition, as
+/// it is at its default branch's head, the commit a change proposed now
+/// goes on top of, read as the caller reaches it on GitHub. A file not
+/// there yet, as a Flow being added, answers no text. A path that names no
+/// Definition file is 400 `notADefinitionFile`; a repository the caller
+/// does not reach is 400 `unreachableDefinition`; a file GitHub will not
+/// give (too large) is 400 `invalidDefinition`; a team that names no
+/// Definition is 409 `noDefinition`.
+#[utoipa::path(
+    get,
+    tag = "factory",
+    operation_id = "get_factory_definition_file",
+    path = "/settings/definition/file",
+    params(DefinitionFileParams),
+    responses(
+        (status = 200, body = DefinitionFile),
+        (status = 400, body = RunErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 409, body = RunErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all)]
+pub async fn get_definition_file_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    Query(params): Query<DefinitionFileParams>,
+) -> Result<Json<DefinitionFile>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = caller.authorization.user.macro_user_id;
+    Ok(Json(
+        state.service.definition_file(&actor, params.path).await?,
+    ))
+}
+
+/// Request body for checking a change to the team's Factory Definition
+/// without proposing it.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckDefinitionChangeRequest {
+    /// What the change does, in a line.
+    pub title: String,
+    /// Why, for whoever reviews the pull request.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// The files it writes, by path, each with its whole new text, as
+    /// `POST /settings/definition/changes` takes them.
+    pub files: BTreeMap<String, String>,
+}
+
+/// Check a change to the caller's team's Factory Definition as `POST
+/// /settings/definition/changes` would, without proposing it: nothing is
+/// written to GitHub. It is refused with the same statuses and codes (403
+/// for someone who does not administer the team, in person; 409
+/// `noDefinition`; 400 `noPushAccess`, `unreachableDefinition`,
+/// `invalidDefinition` or `invalidDefinitionChange`), and answers the
+/// commit it was checked against. A pull request sent later is checked
+/// again, against the head it is sent at.
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "check_factory_definition_change",
+    path = "/settings/definition/changes/check",
+    request_body = CheckDefinitionChangeRequest,
+    responses(
+        (status = 200, body = DefinitionChangeCheck),
+        (status = 400, body = RunErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 409, body = RunErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all)]
+pub async fn check_definition_change_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Json(body): Json<CheckDefinitionChangeRequest>,
+) -> Result<Json<DefinitionChangeCheck>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = in_person(caller.authorization, &headers)?;
+    let change = ProposedChange {
+        title: body.title,
+        description: body.description,
+        files: body.files,
+    };
+    Ok(Json(
+        state.service.check_definition_change(actor, change).await?,
     ))
 }

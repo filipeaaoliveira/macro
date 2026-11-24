@@ -552,6 +552,10 @@ export const factoryExcluded = [
   // Only the person in their own session proposes a change to the Factory
   // Definition, as a pull request to its repository.
   'proposeFactoryDefinitionChange',
+  // The web app's change editor reads a Definition file to start a change
+  // from, and checks the change before the person proposes it.
+  'getFactoryDefinitionFile',
+  'checkFactoryDefinitionChange',
   // Only the person in their own session names the Factory Definition
   // whose Flows, Agents and rules their team's Runs take.
   'setFactoryDefinition',

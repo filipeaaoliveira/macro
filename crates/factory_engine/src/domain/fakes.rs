@@ -163,6 +163,9 @@ pub(crate) struct FakeRepo {
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
     /// The break records kept, in order, each with its Step.
     pub(crate) breaks: Arc<Mutex<Vec<(StepKey, factory_records::domain::breaks::BreakRecord)>>>,
+    /// The child tasks `split` Steps filed, each with its Run.
+    pub(crate) split_tasks:
+        Arc<Mutex<Vec<(RunId, factory_records::domain::split_tasks::SplitTask)>>>,
     /// The task documents that exist.
     pub(crate) tasks: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The documents that exist and are not tasks.
@@ -661,6 +664,7 @@ impl RunRepository for FakeRepo {
             end: None,
             budget_stop: None,
             retry: None,
+            retried_by: None,
         };
         if let Some(kept) = kept_flow {
             self.kept_flows
@@ -704,18 +708,19 @@ impl RunRepository for FakeRepo {
         else {
             return Ok(RetryInsert::NotEnded);
         };
-        // As the database's index: a Run is retried once.
-        if self.runs.lock().expect("runs").values().any(|run| {
-            run.retry
-                .is_some_and(|kept| kept.retried_from == retry.retried)
-        }) {
-            return Ok(RetryInsert::Retried);
-        }
+        // As the database holds it: the Queue limit first, then the
+        // unique index on the insert, so a Run is retried once.
         if let Some(limit) = hold.limit {
             let places = self.queue_places(&retried.user_id, hold.asking_flows, limit);
             if places.held() >= limit {
                 return Ok(RetryInsert::QueueFull(places));
             }
+        }
+        if self.runs.lock().expect("runs").values().any(|run| {
+            run.retry
+                .is_some_and(|kept| kept.retried_from == retry.retried)
+        }) {
+            return Ok(RetryInsert::Retried);
         }
         let run = Run {
             id: retry.id,
@@ -729,9 +734,17 @@ impl RunRepository for FakeRepo {
                 branch_of: retried.branch_of(),
                 first_seq: retry.first_seq,
             }),
+            retried_by: None,
             ..retried.clone()
         };
-        self.runs.lock().expect("runs").insert(run.id, run.clone());
+        {
+            // As the database reads it: the retried Run names its retry.
+            let mut runs = self.runs.lock().expect("runs");
+            runs.insert(run.id, run.clone());
+            if let Some(retried) = runs.get_mut(&retry.retried) {
+                retried.retried_by = Some(run.id);
+            }
+        }
         let flow = self
             .flows
             .lock()
@@ -932,6 +945,39 @@ impl RunRepository for FakeRepo {
         })
     }
 
+    async fn run_ci_reruns(
+        &self,
+        id: RunId,
+    ) -> Result<factory_records::domain::quality::RunCiReruns, FakeError> {
+        let mut retries: Vec<_> = self
+            .ci_retries
+            .lock()
+            .expect("retries")
+            .iter()
+            .filter(|(kept, _)| kept.run_id == id)
+            .map(
+                |(kept, retry)| factory_records::domain::quality::RunCiRetry {
+                    seq: kept.seq,
+                    retry: retry.clone(),
+                },
+            )
+            .collect();
+        retries
+            .sort_by(|one, other| (one.seq, &one.retry.name).cmp(&(other.seq, &other.retry.name)));
+        let quarantines = self
+            .ci_quarantines
+            .lock()
+            .expect("quarantines")
+            .iter()
+            .filter(|quarantine| quarantine.run_id == Some(id))
+            .cloned()
+            .collect();
+        Ok(factory_records::domain::quality::RunCiReruns {
+            retries,
+            quarantines,
+        })
+    }
+
     async fn ci_retries(
         &self,
         key: StepKey,
@@ -974,6 +1020,7 @@ impl RunRepository for FakeRepo {
                         matched: retry.matched,
                         result: None,
                         requested_at: Utc::now(),
+                        settled_at: None,
                     },
                 ));
                 added.push(retry.name.clone());
@@ -992,6 +1039,7 @@ impl RunRepository for FakeRepo {
             for (step, retry) in kept.iter_mut() {
                 if *step == key && retry.name == *name && retry.result.is_none() {
                     retry.result = Some(*result);
+                    retry.settled_at = Some(Utc::now());
                 }
             }
         }
@@ -1103,7 +1151,14 @@ impl RunRepository for FakeRepo {
     }
 
     async fn delete_run(&self, id: RunId) -> Result<(), FakeError> {
-        self.runs.lock().expect("runs").remove(&id);
+        let mut runs = self.runs.lock().expect("runs");
+        runs.remove(&id);
+        // As the database reads it: a Run whose retry is gone names none.
+        for run in runs.values_mut() {
+            if run.retried_by == Some(id) {
+                run.retried_by = None;
+            }
+        }
         Ok(())
     }
 
@@ -2026,6 +2081,50 @@ impl RunRepository for FakeRepo {
         ids: &[RunId],
     ) -> Result<factory_records::domain::breaks::RunsBreakRecords, FakeError> {
         Ok(self.breaks_of(ids))
+    }
+
+    async fn record_split_task(
+        &self,
+        key: StepKey,
+        place: u16,
+        task_id: Uuid,
+        name: &str,
+    ) -> Result<(), FakeError> {
+        if self.fails("record_split_task") {
+            return Err(FakeError);
+        }
+        let mut kept = self.split_tasks.lock().expect("split tasks");
+        let filed = kept
+            .iter()
+            .any(|(run, task)| *run == key.run_id && task.seq == key.seq && task.place == place);
+        if !filed {
+            kept.push((
+                key.run_id,
+                factory_records::domain::split_tasks::SplitTask {
+                    seq: key.seq,
+                    place,
+                    task_id,
+                    name: name.to_string(),
+                },
+            ));
+        }
+        Ok(())
+    }
+
+    async fn run_split_tasks(
+        &self,
+        id: RunId,
+    ) -> Result<Vec<factory_records::domain::split_tasks::SplitTask>, FakeError> {
+        let mut tasks: Vec<_> = self
+            .split_tasks
+            .lock()
+            .expect("split tasks")
+            .iter()
+            .filter(|(run, _)| *run == id)
+            .map(|(_, task)| task.clone())
+            .collect();
+        tasks.sort_by_key(|task| (task.seq, task.place));
+        Ok(tasks)
     }
 
     async fn step_sessions(&self, id: RunId) -> Result<Vec<Uuid>, FakeError> {

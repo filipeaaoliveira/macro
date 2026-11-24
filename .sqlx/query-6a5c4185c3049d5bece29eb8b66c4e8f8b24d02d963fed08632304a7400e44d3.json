@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT seq, name, head_sha, job_id, workflow_run_id, failed_step, failure, matched,\n            result, requested_at, settled_at\n        FROM factory_ci_retry\n        WHERE run_id = $1\n        ORDER BY seq, name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "head_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "job_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "workflow_run_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "failed_step",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "failure",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "matched",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "result",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "settled_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "6a5c4185c3049d5bece29eb8b66c4e8f8b24d02d963fed08632304a7400e44d3"
+}

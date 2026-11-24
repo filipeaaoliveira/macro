@@ -13,6 +13,7 @@ use factory_records::domain::models::{
     RunRetry, SteerRefusal, Step, StepKey,
 };
 use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRound};
+use factory_records::domain::split_tasks::SplitTask;
 use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -23,6 +24,8 @@ use crate::domain::control_files::ControlFilesError;
 use crate::domain::definition::{DefinitionChangeError, DefinitionError};
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 use crate::domain::gate_owner::OwnerNote;
+use crate::domain::quality::CiQuarantined;
+use crate::domain::quality::reruns::CiRerun;
 use crate::domain::setup::RepositorySetup;
 use crate::domain::token_budget::RunTokenBudget;
 
@@ -871,6 +874,17 @@ pub struct RunDetail {
     /// added, by Step, each with how the factory's run of it went: in a
     /// Run's own read (`GET /runs/{id}`) only, empty in a list of Runs.
     pub break_records: Vec<BreakRecord>,
+    /// The failed CI jobs its `ci` Steps reran under the `rerun_flaky_ci`
+    /// rule, by Step then job, each with how it ended: in a Run's own read
+    /// only, empty in a list of Runs.
+    pub ci_reruns: Vec<CiRerun>,
+    /// The failures its passed reruns quarantined in its repository: in a
+    /// Run's own read only, empty in a list of Runs.
+    pub ci_quarantines: Vec<CiQuarantined>,
+    /// The child tasks its `split` Steps filed, by Step then place, with
+    /// their ids and names: in a Run's own read only, empty in a list of
+    /// Runs.
+    pub split_tasks: Vec<SplitTask>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their
@@ -923,13 +937,38 @@ pub struct DefinitionSettings {
     /// The commit the newest Run of the team's members started under it
     /// read, and when that Run started; none when none has.
     pub newest_run: Option<DefinitionRead>,
-    /// What it holds at the commit the newest Run read, or at its head when
-    /// no Run read it yet or that commit does not read as the person
-    /// reaches it; none when it reads at neither.
+    /// What it holds at `commit`, its head, as a Run started now reads it;
+    /// at the commit the newest Run read when the head does not read as
+    /// the person reaches it; none when it reads at neither. Its own
+    /// `commit` says which.
     pub contents: Option<DefinitionContents>,
     /// Its repository's open pull requests, the most recently updated first,
     /// at most 20; none when GitHub could not list them for the person.
     pub open_pull_requests: Option<Vec<DefinitionPullRequest>>,
+}
+
+/// One file of a Factory Definition, as it is at its default branch's head:
+/// the text a change to it starts from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionFile {
+    /// Its path from the repository's root.
+    pub path: String,
+    /// The commit of the default branch it was read at: the one a change
+    /// proposed now goes on top of.
+    pub commit: String,
+    /// Its whole text; none when the repository holds no file there yet,
+    /// as for a Flow being added.
+    pub text: Option<String>,
+}
+
+/// A change to a Factory Definition that passed every check proposing it
+/// makes, without proposing it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionChangeCheck {
+    /// The commit of the default branch it was checked against.
+    pub commit: String,
 }
 
 /// The most open pull requests of a Factory Definition's repository its
@@ -1257,6 +1296,11 @@ pub enum FactoryError {
     /// The team names no Factory Definition, so there is none to change.
     #[error("the team names no factory definition: name its repository first")]
     NoDefinition,
+    /// A path that names no file a Factory Definition holds.
+    #[error(
+        "{0} is not a definition file: name factory.json, agents.json, rules.json, scorers.json or flows/{{name}}.json"
+    )]
+    NotADefinitionFile(String),
     /// A change to the team's Factory Definition is refused: the
     /// Definition does not read with it, or the change itself is wrong.
     #[error(transparent)]

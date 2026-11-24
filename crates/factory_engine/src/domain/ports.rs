@@ -1181,6 +1181,25 @@ pub trait FactoryService: Send + Sync + 'static {
         change: crate::domain::definition::ProposedChange,
     ) -> impl Future<Output = Result<DefinitionPullRequest, FactoryError>> + Send;
 
+    /// The file `path` of the Factory Definition `actor`'s team names, as
+    /// it is at its default branch's head as `actor` reaches it: what a
+    /// change to it starts from. A file not there yet has no text.
+    fn definition_file(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        path: String,
+    ) -> impl Future<Output = Result<crate::domain::models::DefinitionFile, FactoryError>> + Send;
+
+    /// Check `change` to the Factory Definition of `actor`'s team as
+    /// [`Self::propose_definition_change`] would, refusing it with the same
+    /// errors, and write nothing to GitHub. The actor must administer the
+    /// team, which is checked before the change is.
+    fn check_definition_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        change: crate::domain::definition::ProposedChange,
+    ) -> impl Future<Output = Result<crate::domain::models::DefinitionChangeCheck, FactoryError>> + Send;
+
     /// The Standing Rules `actor`'s Runs are created with: their team's
     /// Orchestrator Definition, or the factory's default, and the team's
     /// Projects' own.

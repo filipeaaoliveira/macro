@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use factory_records::domain::evaluation::{
     AgentChoices, CalibrationTally, EvaluationRecords, EvaluationRepository, Judgment,
     MAX_OPEN_TRIALS, NewSuite, PASS_SCORE, RunAgentRule, RunAgents, RunArm, RunJudgment,
-    ScorerJudge, ScorerLabel, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert, TrialKey,
-    TrialResult,
+    ScorerJudge, ScorerLabel, ScoringState, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert,
+    TrialKey, TrialResult,
 };
 use factory_records::domain::insights::InsightsScope;
 use factory_records::domain::models::RunId;
@@ -55,6 +55,8 @@ pub(crate) struct FakeEvaluation {
     pub(crate) base_commits: BTreeMap<(Uuid, String), String>,
     /// The trials whose branch was deleted.
     pub(crate) branches_deleted: Vec<(Uuid, String)>,
+    /// When each Run's scoring finished.
+    pub(crate) scored: BTreeMap<RunId, DateTime<Utc>>,
 }
 
 impl FakeEvaluation {
@@ -261,6 +263,45 @@ impl EvaluationRepository for FakeRepo {
                 .get(&run_id)
                 .cloned(),
         }))
+    }
+
+    async fn scoring_state(&self, run_id: RunId) -> Result<Option<ScoringState>, FakeError> {
+        let Some(run) = self.runs.lock().expect("runs").get(&run_id).cloned() else {
+            return Ok(None);
+        };
+        let flow = self.flows.lock().expect("flows").get(&run_id).cloned();
+        let evaluation = self
+            .definition_evaluations
+            .lock()
+            .expect("definition evaluations")
+            .get(&run_id)
+            .cloned();
+        let kept = self.evaluation.lock().expect("evaluation");
+        Ok(Some(ScoringState {
+            flow,
+            outcome: run.end.as_ref().map(|end| end.outcome),
+            ended_at: run.end.as_ref().map(|end| end.ended_at),
+            scored_at: kept.scored.get(&run_id).copied(),
+            trial: kept.trial_of(run_id).is_some(),
+            judged: kept
+                .run_scores
+                .get(&run_id)
+                .into_iter()
+                .flatten()
+                .map(|judgment| judgment.scorer.clone())
+                .collect(),
+            evaluation,
+        }))
+    }
+
+    async fn mark_run_scored(&self, run_id: RunId) -> Result<(), FakeError> {
+        self.evaluation
+            .lock()
+            .expect("evaluation")
+            .scored
+            .entry(run_id)
+            .or_insert_with(Utc::now);
+        Ok(())
     }
 
     async fn record_run_score(&self, run_id: RunId, judgment: &Judgment) -> Result<(), FakeError> {

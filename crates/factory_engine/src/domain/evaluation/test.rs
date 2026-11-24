@@ -444,6 +444,15 @@ async fn a_failed_judge_is_asked_again_and_a_cancelled_run_is_not_judged() {
             .run_scores
             .is_empty()
     );
+    // Its scoring is not finished while a judge is asked again.
+    assert!(
+        !repo
+            .evaluation
+            .lock()
+            .expect("evaluation")
+            .scored
+            .contains_key(&run)
+    );
     scoring
         .score_run(run, false)
         .await
@@ -451,6 +460,13 @@ async fn a_failed_judge_is_asked_again_and_a_cancelled_run_is_not_judged() {
     assert_eq!(
         repo.evaluation.lock().expect("evaluation").run_scores[&run].len(),
         1
+    );
+    assert!(
+        repo.evaluation
+            .lock()
+            .expect("evaluation")
+            .scored
+            .contains_key(&run)
     );
 
     let cancelled = ended_run(&repo, "code", RunOutcome::Cancelled, "done", session).await;
@@ -467,6 +483,34 @@ async fn a_failed_judge_is_asked_again_and_a_cancelled_run_is_not_judged() {
             .contains_key(&cancelled)
     );
     assert_eq!(judge.asked().len(), 2);
+}
+
+/// A judge that fails on scoring's last attempt is given up on: the Run's
+/// scoring is finished all the same, so no Scorer reads as still to judge
+/// it.
+#[tokio::test]
+async fn a_judge_failing_on_the_last_attempt_finishes_scoring_without_it() {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let run = ended_run(&repo, "code", RunOutcome::Success, "done", session).await;
+    let judge = Arc::new(FakeJudge::default());
+    judge.then_fail();
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge.clone(),
+        usage(session),
+        FakeGithub::default(),
+        Arc::new(definition()),
+    );
+
+    scoring
+        .score_run(run, true)
+        .await
+        .expect_err("the judge failed");
+
+    let kept = repo.evaluation.lock().expect("evaluation").clone();
+    assert!(kept.run_scores.is_empty());
+    assert!(kept.scored.contains_key(&run));
 }
 
 /// A Run that ended `infrastructure` never had its work run: no live

@@ -1,7 +1,7 @@
 //! The Run API's side of the Factory Definition: reading a team's at the
 //! head of its repository's default branch, as the person who asks, and
-//! the Flow a Run of it starts with, and changes to it proposed as pull
-//! requests (`change`).
+//! the Flow a Run of it starts with, the text of one of its files, and
+//! changes to it checked or proposed as pull requests (`change`).
 
 mod change;
 mod kept;
@@ -28,13 +28,14 @@ use macro_user_id::user_id::MacroUserIdStr;
 use super::{FactoryServiceImpl, internal};
 use crate::domain::built_in_flows::{BuiltInFlow, walked_flow};
 use crate::domain::definition::{
-    DefinitionError, DefinitionFiles, DefinitionReadError, FactoryDefinition, read_definition,
+    DefinitionError, DefinitionFiles, DefinitionReadError, FactoryDefinition, is_definition_file,
+    read_definition,
 };
 use crate::domain::flow::Flow;
 use crate::domain::models::{
-    CodeRepository, DEFINITION_PULL_REQUESTS_LISTED, DefinitionContents, DefinitionFlow,
-    DefinitionPullRequest, DefinitionRole, DefinitionScorer, DefinitionSettings, FactoryError,
-    RepositoryAccess,
+    CodeRepository, DEFINITION_PULL_REQUESTS_LISTED, DefinitionContents, DefinitionFile,
+    DefinitionFlow, DefinitionPullRequest, DefinitionRole, DefinitionScorer, DefinitionSettings,
+    FactoryError, RepositoryAccess,
 };
 use crate::domain::ports::{
     FileRefusal, PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
@@ -528,11 +529,13 @@ where
         })
     }
 
-    /// What the setting shows the Definition `repo_url` holds: at the
-    /// commit `newest_run` read, or at its head (`head`, when it reads
-    /// there) when no Run read it yet or that commit does not read as
-    /// `actor` reaches it: not linked to GitHub, the commit gone, GitHub
-    /// down or limiting them. That is not the settings' failure.
+    /// What the setting shows the Definition `repo_url` holds: at its head
+    /// (`head`), the commit the setting names, whenever it reads there, so
+    /// the two never disagree once a change merged and no Run read it yet.
+    /// When the head does not read, at the commit `newest_run` read, which
+    /// the team's Runs under way still walk, if that commit reads as `actor`
+    /// reaches it: GitHub down or limiting them, or the commit gone, is
+    /// logged, never the settings' failure.
     async fn shown_contents(
         &self,
         actor: &MacroUserIdStr<'static>,
@@ -540,16 +543,11 @@ where
         newest_run: Option<&DefinitionRead>,
         head: Option<&PinnedDefinition>,
     ) -> Option<DefinitionContents> {
-        let at_head = || head.map(|pinned| contents_of(&pinned.commit, &pinned.definition));
-        let Some(read) = newest_run else {
-            return at_head();
-        };
-        if let Some(pinned) = head.filter(|pinned| pinned.commit == read.commit) {
+        if let Some(pinned) = head {
             return Some(contents_of(&pinned.commit, &pinned.definition));
         }
-        let Some(repository) = CodeRepository::parse(repo_url) else {
-            return at_head();
-        };
+        let read = newest_run?;
+        let repository = CodeRepository::parse(repo_url)?;
         match self.definition_at(actor, &repository, &read.commit).await {
             Ok(definition) => Some(contents_of(&read.commit, &definition)),
             Err(error) => {
@@ -557,9 +555,44 @@ where
                     ?error,
                     "the definition at the newest run's commit could not be read"
                 );
-                at_head()
+                None
             }
         }
+    }
+
+    /// The file `path` of the Factory Definition `actor`'s team names, as
+    /// it is at its default branch's head, read as `actor` reaches it on
+    /// GitHub: what a change to it starts from. A file not there yet has
+    /// no text.
+    pub(super) async fn read_definition_file(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        path: String,
+    ) -> Result<DefinitionFile, FactoryError> {
+        if !is_definition_file(&path) {
+            return Err(FactoryError::NotADefinitionFile(path));
+        }
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        let repo_url = self
+            .named_definition(team)
+            .await?
+            .ok_or(FactoryError::NoDefinition)?;
+        let DefinitionHead {
+            repository, commit, ..
+        } = self.definition_head(actor, &repo_url).await?;
+        let files = RepositoryFiles {
+            github: &self.github,
+            reader: actor,
+            repository: &repository,
+            commit: &commit,
+        };
+        let text = files.read(&path).await.map_err(|error| match error {
+            RepositoryFileError::Refused { path, refusal } => {
+                FactoryError::InvalidDefinition(refused_file(path, refusal))
+            }
+            RepositoryFileError::Github(error) => FactoryError::Internal(internal(error)),
+        })?;
+        Ok(DefinitionFile { path, commit, text })
     }
 
     /// The open pull requests of the Definition `repo_url`, as `reader`

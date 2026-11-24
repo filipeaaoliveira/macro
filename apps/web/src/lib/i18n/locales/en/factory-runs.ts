@@ -268,8 +268,8 @@ export default {
   definitionNoRunYet: 'No run has read it yet.',
   definitionContents: 'What the definition holds',
   definitionShownAt: 'As it is at {{commit}}',
-  definitionShownAtHead:
-    'The newest run’s commit couldn’t be read, so this is its default branch now.',
+  definitionShownAtNewestRun:
+    'Its default branch doesn’t read now, so this is the commit the newest run read.',
   definitionFlows: 'Flows',
   definitionRoles: 'Roles',
   definitionStandingRules: 'Standing rules',
@@ -301,6 +301,15 @@ export default {
   definitionChangeFilePlaceholder: 'flows/code.json',
   definitionChangeFileText: 'File {{number}}’s new text',
   definitionChangeCurrentFile: 'The file as it is now',
+  definitionChangeReading: 'Reading the file as it is now…',
+  definitionChangeNewFile: 'There’s no file here yet: this change adds it.',
+  definitionChangeReadFailed:
+    'Couldn’t read the file as it is now: {{message}}',
+  definitionChangeCheck: 'Check',
+  definitionChangeMoved:
+    'The definition moved to {{commit}} since you read {{paths}}: sending overwrites what merged since. Empty a file and pick its path again to start from it as it is now, or send again to go ahead.',
+  definitionChangeChecked:
+    'The definition reads with this change at {{commit}}. Nothing was sent.',
   definitionChangePathProblem:
     'Name factory.json, agents.json, rules.json, scorers.json or a flow’s file, flows/name.json.',
   definitionChangeDuplicateProblem: 'Another file of this change writes it.',

@@ -61,12 +61,13 @@ function standingRulesText(rules: Contents['standingRules']): string {
 
 /**
  * Which commit of the team's Factory Definition the newest Run read, and,
- * read-only, what the Definition holds there (or at its head, saying so,
- * when that commit couldn't be read): its Flows, Roles, Standing Rules and
- * Scorers.
+ * read-only, what the Definition holds at its head, `head`, the commit a
+ * Run started now reads (or at the newest Run's commit, saying so, when
+ * the head doesn't read): its Flows, Roles, Standing Rules and Scorers.
  */
 export function DefinitionContents(props: {
   repoUrl: string;
+  head: string | null | undefined;
   newestRun: DefinitionRead | null | undefined;
   contents: Contents | null | undefined;
 }) {
@@ -104,13 +105,9 @@ export function DefinitionContents(props: {
                 })}
               </CommitLink>
             </p>
-            <Show
-              when={
-                props.newestRun && props.newestRun.commit !== contents().commit
-              }
-            >
+            <Show when={props.head !== contents().commit}>
               <p class="text-xs text-ink-muted">
-                {t('factoryRuns.definitionShownAtHead')}
+                {t('factoryRuns.definitionShownAtNewestRun')}
               </p>
             </Show>
             <Show when={contents().description}>

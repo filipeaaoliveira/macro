@@ -8,12 +8,14 @@ import { statusError } from '@core/util/safeFetch';
 import {
   getAnswerFactoryGateUrl,
   getCancelFactoryRunUrl,
+  getCheckFactoryDefinitionChangeUrl,
   getCreateFactoryAutomationUrl,
   getCreateFactoryRunUrl,
   getDeleteFactoryAutomationUrl,
   getFindPullRequestRunsUrl,
   getFlawFactoryRunUrl,
   getGetFactoryControlFilesUrl,
+  getGetFactoryDefinitionFileUrl,
   getGetFactoryDefinitionUrl,
   getGetFactoryEvaluationUrl,
   getGetFactoryInsightsUrl,
@@ -47,9 +49,12 @@ import type {
   AutomationRequest,
   AutomationsSettings,
   BoardPage,
+  CheckDefinitionChangeRequest,
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionChangeCheck,
+  DefinitionFile,
   DefinitionPullRequest,
   DefinitionSettings,
   DismissalUndoneResponse,
@@ -79,6 +84,12 @@ import type {
 
 const host = () => SERVER_HOSTS.factory;
 
+export type {
+  CheckDefinitionChangeRequest,
+  DefinitionChangeCheck,
+  DefinitionFile,
+};
+
 /** Why a Run wasn't started, when the service names the cause. */
 export type StartRunErrorCode =
   | 'UNREACHABLE_REPOSITORY'
@@ -101,6 +112,9 @@ type StartRunRefusal = Exclude<
   | 'invalidDefinitionChange'
   | 'definitionChangeNotOpened'
   | 'definitionChangeClosed'
+  | 'notADefinitionFile'
+  | 'notRetriable'
+  | 'alreadyRetried'
 >;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
@@ -154,13 +168,17 @@ async function refusal(
 export type RetryRunErrorCode =
   | 'QUEUE_FULL'
   | 'NOT_IN_STANDING_ROLE'
-  | 'DEFINITION_UNREADABLE';
+  | 'DEFINITION_UNREADABLE'
+  | 'ALREADY_RETRIED'
+  | 'NOT_RETRIABLE';
 
 const RETRY_RUN_ERROR_CODES = {
   queueFull: 'QUEUE_FULL',
   notInStandingRole: 'NOT_IN_STANDING_ROLE',
   unreachableDefinition: 'DEFINITION_UNREADABLE',
   invalidDefinition: 'DEFINITION_UNREADABLE',
+  alreadyRetried: 'ALREADY_RETRIED',
+  notRetriable: 'NOT_RETRIABLE',
 } as const satisfies Partial<Record<RunErrorCode, RetryRunErrorCode>>;
 
 function isRetryRefusal(
@@ -171,9 +189,9 @@ function isRetryRefusal(
 
 /**
  * A refused retry: the cause the service names (a full Queue, no Standing
- * Role that allows a start, a Definition that doesn't read), else the
- * status's error (a Run retried already, or that can't be retried, is a
- * `CONFLICT`), with the service's message either way.
+ * Role that allows a start, a Definition that doesn't read, a Run retried
+ * already or one that can't be retried), else the status's error, with the
+ * service's message either way.
  */
 async function retryRunError(
   response: Response
@@ -200,7 +218,8 @@ export type DefinitionChangeErrorCode =
   | 'INVALID_DEFINITION_CHANGE'
   | 'DEFINITION_CHANGE_NOT_OPENED'
   | 'DEFINITION_CHANGE_CLOSED'
-  | 'NO_PUSH_ACCESS';
+  | 'NO_PUSH_ACCESS'
+  | 'NOT_A_DEFINITION_FILE';
 
 const DEFINITION_CHANGE_ERROR_CODES = {
   noDefinition: 'NO_DEFINITION',
@@ -210,6 +229,7 @@ const DEFINITION_CHANGE_ERROR_CODES = {
   definitionChangeNotOpened: 'DEFINITION_CHANGE_NOT_OPENED',
   definitionChangeClosed: 'DEFINITION_CHANGE_CLOSED',
   noPushAccess: 'NO_PUSH_ACCESS',
+  notADefinitionFile: 'NOT_A_DEFINITION_FILE',
 } as const satisfies Partial<Record<RunErrorCode, DefinitionChangeErrorCode>>;
 
 function isDefinitionChangeRefusal(
@@ -301,13 +321,14 @@ export const factoryClient = {
   /**
    * The live Scorers' judgments of one of the caller's Runs, each with
    * their label of it and how far the Scorer's judge agrees with their
-   * labels. Only the Run's owner reads them (`NOT_FOUND` otherwise).
+   * labels, and the Scorers that will still judge it (`pending`). Only the
+   * Run's owner reads them (`NOT_FOUND` otherwise).
    */
   getRunScores(runId: string, signal?: AbortSignal) {
     return fetchWithToken<RunScores>(
       `${host()}${getGetFactoryRunScoresUrl(encodeURIComponent(runId))}`,
       { method: 'GET', signal }
-    ).then((result) => result.map((data) => data.scores));
+    );
   },
 
   /**
@@ -527,6 +548,36 @@ export const factoryClient = {
   proposeDefinitionChange(request: ProposeDefinitionChangeRequest) {
     return fetchWithToken<DefinitionPullRequest, DefinitionChangeErrorCode>(
       `${host()}${getProposeFactoryDefinitionChangeUrl()}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+        errorResponseHandler: definitionChangeError,
+      }
+    );
+  },
+
+  /**
+   * One file of the team's Factory Definition as it is at its default
+   * branch's head, to start a change from. A path the Definition doesn't
+   * hold fails `NOT_A_DEFINITION_FILE`; a team that names none fails
+   * `NO_DEFINITION`, and a repository the person doesn't reach
+   * `DEFINITION_UNREACHABLE`, each with the service's message.
+   */
+  getDefinitionFile(path: string, signal?: AbortSignal) {
+    return fetchWithToken<DefinitionFile, DefinitionChangeErrorCode>(
+      `${host()}${getGetFactoryDefinitionFileUrl({ path })}`,
+      { method: 'GET', signal, errorResponseHandler: definitionChangeError }
+    );
+  },
+
+  /**
+   * Checks a change to the team's Factory Definition as proposing it
+   * would, writing nothing to GitHub, and answers the commit it was
+   * checked against. It is refused with the codes a proposal is.
+   */
+  checkDefinitionChange(request: CheckDefinitionChangeRequest) {
+    return fetchWithToken<DefinitionChangeCheck, DefinitionChangeErrorCode>(
+      `${host()}${getCheckFactoryDefinitionChangeUrl()}`,
       {
         method: 'POST',
         body: JSON.stringify(request),

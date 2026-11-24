@@ -36,9 +36,10 @@ use crate::domain::board::{
     BoardNext, BoardPage, BoardRun, BoardScope, PullRequestRun, PullRequestRuns,
 };
 use crate::domain::models::{
-    ActingAgent, Answerer, ControlFilesSettings, DefinitionContents, DefinitionFlow,
-    DefinitionPullRequest, DefinitionRole, DefinitionScorer, DefinitionSettings, FactoryError,
-    FlowSummary, PersonOnly, RunDetail, SessionStepRef, StandingRulesSettings,
+    ActingAgent, Answerer, ControlFilesSettings, DefinitionChangeCheck, DefinitionContents,
+    DefinitionFile, DefinitionFlow, DefinitionPullRequest, DefinitionRole, DefinitionScorer,
+    DefinitionSettings, FactoryError, FlowSummary, PersonOnly, RunDetail, SessionStepRef,
+    StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -126,6 +127,11 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `GET /settings/definition` — the Factory Definition the caller's team
 ///   names, and whether it reads.
 /// - `PUT /settings/definition` — name one, or none.
+/// - `GET /settings/definition/file` — one of its files' text at its head.
+/// - `POST /settings/definition/changes` — propose a change to it as a
+///   pull request.
+/// - `POST /settings/definition/changes/check` — check a change as
+///   proposing it would, writing nothing.
 /// - `GET /settings/standing-rules` — the Standing Rules the caller's Runs
 ///   are created with.
 /// - `PUT /settings/standing-rules` — set the team's, or go back to the
@@ -201,8 +207,16 @@ where
                 .put(definition::set_definition_handler::<S, Auth>),
         )
         .route(
+            "/settings/definition/file",
+            get(definition::get_definition_file_handler::<S, Auth>),
+        )
+        .route(
             "/settings/definition/changes",
             post(definition::propose_definition_change_handler::<S, Auth>),
+        )
+        .route(
+            "/settings/definition/changes/check",
+            post(definition::check_definition_change_handler::<S, Auth>),
         )
         .route(
             "/settings/standing-rules",
@@ -1045,8 +1059,9 @@ where
 /// entry it stopped at, with their outputs, and starts there; its
 /// `retry.retriedFrom` names the Run it retries. A Run is retried once: a
 /// second retry, a running Run, a Run that ended otherwise, a Benchmark
-/// trial and a self-improvement Run are refused (409), as is a retry past
-/// the caller's Queue limit (`queueFull`). An agent acting for the owner
+/// trial and a self-improvement Run are refused (409 `notRetriable`, and
+/// `alreadyRetried` for a second retry), as is a retry past the caller's
+/// Queue limit (`queueFull`). An agent acting for the owner
 /// needs a Standing Role that allows `start`, as a new Run does.
 #[utoipa::path(
     post,
@@ -1236,6 +1251,7 @@ impl FactoryError {
             | FactoryError::UnreachableDefinition
             | FactoryError::InvalidDefinition(_)
             | FactoryError::InvalidDefinitionChange(_)
+            | FactoryError::NotADefinitionFile(_)
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
@@ -1301,6 +1317,13 @@ pub enum RunErrorCode {
     /// a question, and Runs of a Flow with a Gate that have not reached one
     /// yet. No new Run starts until they answer some, or cancel one.
     QueueFull,
+    /// The Run cannot be retried: it has not ended, it ended other than
+    /// `failed`, `infrastructure` or `blocked`, it is a Benchmark trial or
+    /// a self-improvement Run, or it keeps no Flow to start again.
+    NotRetriable,
+    /// The Run was retried already: its `retriedBy` names the retry, which
+    /// is the one to retry next.
+    AlreadyRetried,
     /// An agent answering for the Run's owner tried what the factory keeps
     /// for the owner in person.
     ReservedForAPerson,
@@ -1329,6 +1352,8 @@ pub enum RunErrorCode {
     /// The change's pull request was closed without merging; it is not
     /// opened again.
     DefinitionChangeClosed,
+    /// The path names no file a Factory Definition holds.
+    NotADefinitionFile,
 }
 
 /// What a refused or failed request answers: a message, and for a refusal
@@ -1351,6 +1376,8 @@ impl FactoryError {
             FactoryError::NoPushAccess => Some(RunErrorCode::NoPushAccess),
             FactoryError::ControlFilesNotApproved => Some(RunErrorCode::ControlFilesNotApproved),
             FactoryError::QueueFull { .. } => Some(RunErrorCode::QueueFull),
+            FactoryError::NotRetriable => Some(RunErrorCode::NotRetriable),
+            FactoryError::AlreadyRetried => Some(RunErrorCode::AlreadyRetried),
             FactoryError::ReservedForAPerson(_) => Some(RunErrorCode::ReservedForAPerson),
             FactoryError::NotInStandingRole { .. } => Some(RunErrorCode::NotInStandingRole),
             FactoryError::UnreachableDefinition => Some(RunErrorCode::UnreachableDefinition),
@@ -1362,6 +1389,7 @@ impl FactoryError {
                 Some(RunErrorCode::DefinitionChangeNotOpened)
             }
             FactoryError::DefinitionChangeClosed(_) => Some(RunErrorCode::DefinitionChangeClosed),
+            FactoryError::NotADefinitionFile(_) => Some(RunErrorCode::NotADefinitionFile),
             _ => None,
         }
     }
@@ -1417,6 +1445,8 @@ impl IntoResponse for FactoryError {
         definition::get_definition_handler,
         definition::set_definition_handler,
         definition::propose_definition_change_handler,
+        definition::get_definition_file_handler,
+        definition::check_definition_change_handler,
         standing_rules::get_standing_rules_handler,
         standing_rules::set_standing_rules_handler,
         standing_rules::set_project_standing_rules_handler
@@ -1466,6 +1496,9 @@ impl IntoResponse for FactoryError {
         DefinitionSettings,
         definition::SetDefinitionRequest,
         definition::ProposeDefinitionChangeRequest,
+        definition::CheckDefinitionChangeRequest,
+        DefinitionFile,
+        DefinitionChangeCheck,
         DefinitionRead,
         DefinitionContents,
         DefinitionFlow,

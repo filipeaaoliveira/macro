@@ -157,6 +157,10 @@ describe('retries', () => {
     expect(retryOf({ id: 'run-1' }, [other, retry])?.id).toBe('run-2');
     expect(retryOf({ id: 'run-2' }, [other, retry])).toBeUndefined();
   });
+
+  it('takes the retry a Run names, listed or not', () => {
+    expect(retryOf({ id: 'run-1', retriedBy: 'run-9' }, [])?.id).toBe('run-9');
+  });
 });
 
 describe('splitChildTasks', () => {
@@ -215,6 +219,21 @@ describe('splitChildTasks', () => {
     ].join('\n');
 
     expect(splitChildTasks(split(output))).toEqual([
+      { id: A, name: 'Add the column' },
+    ]);
+  });
+
+  it('reads the child tasks the factory recorded for the split, before its list', () => {
+    const output = `${header('big', 1)}\n\n- ${mention(A, 'Add the column')}`;
+    const recorded = [
+      { seq: 3, id: B, name: 'Show it in the list' },
+      { seq: 5, id: PARENT, name: 'Another split’s' },
+    ];
+
+    expect(splitChildTasks(split(output), recorded)).toEqual([
+      { id: B, name: 'Show it in the list' },
+    ]);
+    expect(splitChildTasks(split(output), recorded.slice(1))).toEqual([
       { id: A, name: 'Add the column' },
     ]);
   });

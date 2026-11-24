@@ -281,9 +281,15 @@ Its first own Step's prompt says it takes over a failed Step's checkout,
 which may hold that Step's unfinished changes (`RESUMED_RUN_NOTE`), unless
 its Step only reads its checkout (`reads_only`, by the Step, whatever Role
 its entry names: `plan`, `plan_review`, `review`, `accept`, `verify`). A Run
-is retried at most once (`AlreadyRetried`, 409; retry the newest retry
-instead); a retry is held to the Queue limit a new Run would be, and an
-agent acting for the owner needs a Standing Role that allows `start`. The
+is retried at most once (`AlreadyRetried`, 409 `alreadyRetried`; retry
+the newest retry instead), and a Run that may not be retried is 409
+`notRetriable`. A Run that names its retry already is refused so before
+any other check, and the unique index on the retry's insert settles a race.
+A retried Run names its retry (`retriedBy`, on its read and in every list
+of Runs, read through `factory_run_retried_from_idx`), so a chain of
+retries is followed forward without a search. A retry is held to the Queue
+limit a new Run would be, and an agent acting for the owner needs a
+Standing Role that allows `start`. The
 retry is created in person only when its owner retried it in person, from
 an account that is not an agent's. The kept Steps' sessions count against
 its token budget, so a Run its budget stopped stops again; Insights, the
@@ -664,6 +670,16 @@ is 404; and a Scorer name outside the name rules is 400 before anything
 is read. `GET /runs/{id}/scores` lists the Run's judgments with their
 labels for its owner, however they call (an API key, an agent session
 or an internal caller for them too), as `GET /insights/evaluation` does.
+It also names the Scorers that will still judge the Run (`pending`,
+`evaluation::service::pending_scorers`): those of the Scorers it is
+scored with (its Definition's kept evaluation, or the deployment's) whose
+sample takes it and that have not judged it; none for a cancelled Run, one
+lost to infrastructure, or a Benchmark trial; and none once its scoring
+finished (`factory_run.scored_at`, kept by `score_run` once every judge it
+asked judged, or on its last attempt however that went) or
+`SCORING_WINDOW` (an hour) after it ended, which covers a scoring that
+never kept its end (Runs before `scored_at`, an attempt that ran out of
+time). A reader stops reading the scores again once `pending` is empty.
 
 A Scorer's judge is the model the Scorers judge with
 (`FACTORY_SCORER_MODEL`) and the Scorer's instructions with what it
@@ -1167,8 +1183,14 @@ says which statuses block (a new test with no record, or `not_reproduced`, `hung
 a command that does not run the test alone is no proof. A retry keeps the
 break records of the Steps it keeps (`retry_run`). The Run API lists them
 on a Run's own read (`breakRecords` on `GET /runs/{id}`); a list of Runs
-leaves them out. A round the agent runs (no `exec`) and a red Step run no
-break.
+leaves them out. The same read lists the Run's flaky CI reruns
+(`ciReruns`, `domain/quality/reruns.rs`: each `ci` Step's rerun of a job
+under `rerun_flaky_ci`, by Step then job, with its job, failed step, test,
+`attempt` among the job's reruns in the Run, why it was taken for flaky,
+and how it ended) and the quarantines its passed reruns made
+(`ciQuarantines`), and the child tasks its `split` Step filed
+(`splitTasks`); a list of Runs leaves them out too. A round the agent
+runs (no `exec`) and a red Step run no break.
 
 Each check the engine runs is told the change it checks
 (`src/domain/check_context.rs`), since its worktree may hold only the
@@ -1664,7 +1686,9 @@ list must add it).
   linking that task), with an id fixed by the Run, the Step and the child
   (`child_task_id`; for a retry, by the Run whose branch it works on), so
   a retried `split`, or a retry of a Run that failed at it, files no
-  second task; it ends
+  second task; each child filed is kept with its id, name and place
+  (`record_split_task`), so the Run's read lists them (`splitTasks`)
+  without document storage or the Step's text; it ends
   `done` with their links, and the Run ends `manual`. Where nothing files
   tasks (`NoChildTasks`), `split` ends `failed`.
 - Trust: the checks live in the plan Step's recorded output, never in the
@@ -2301,12 +2325,13 @@ does not read (400 `invalidDefinition`, naming the file and the problem, or
 why it does not read (`problem`). It also names the commit the newest Run of
 the team's members started under it read (`newestRun`,
 `RunRepository::newest_definition_read`), shows read-only what the
-Definition holds at that commit, or at its head when no Run read it yet or
-that commit does not read as the caller reaches it, for any reason (not
-linked to GitHub, the commit gone, GitHub down or limiting them: logged,
-never the setting's failure; none when the head does not read either)
-(`contents`: Flows with their entries, Roles with their Agents, Standing
-Rules and Scorers), and lists the repository's
+Definition holds at its head, the commit it names (`commit`), so the two
+never disagree once a change merged and no Run read it yet; when the head
+does not read, at the newest Run's commit, if that reads as the caller
+reaches it (not linked to GitHub, the commit gone, GitHub down or limiting
+them: logged, never the setting's failure; none then), its own `commit`
+saying which (`contents`: Flows with their entries, Roles with their
+Agents, Standing Rules and Scorers), and lists the repository's
 open pull requests (`openPullRequests`, at most
 `DEFINITION_PULL_REQUESTS_LISTED`; null when GitHub fails to list them,
 which does not fail the setting). While a team names one, `POST /runs`, `GET
@@ -2350,8 +2375,10 @@ for 10 s. The screens that read the Definition on every load (`GET
 Benchmarks that Insights, a Run's scores and self-improvement read,
 `FactoryService::team_evaluation`) take the head found in the last 10 s,
 so a change merged on GitHub shows there within that time; `POST /runs`, a
-retry, an Automation's check and naming a Definition read the head now. Only the default
-branch is read, so a change reaches Runs once its pull request merges, and a
+retry, an Automation's check, naming a Definition, and the change editor's
+`GET /settings/definition/file`, `POST /settings/definition/changes/check`
+and `POST /settings/definition/changes` (`definition_head`) read the head
+now. Only the default branch is read, so a change reaches Runs once its pull request merges, and a
 Run started already, or a Run's own branch, never changes the rules it runs
 under. The team's Control Files and Standing Rules settings are refused
 meanwhile (409 `definitionNamed`) and read as not editable. A team that names
@@ -2364,6 +2391,20 @@ replaced: `read_definition` refuses a placeholder bot id, all zeros but its
 last two digits (`is_placeholder_bot`), so the template as shipped does not
 read; a person merges), which a test reads with its bots replaced; `factory_definition_check`
 (`services/factory_service`) checks one in a folder.
+
+`GET /settings/definition/file?path=` answers one file of the team's
+Definition, as the caller reaches it at its default branch's head, the
+commit a change proposed now goes on top of (`DefinitionFile`: `path`,
+`commit`, and its whole `text`, null for a file not there yet, as a Flow
+being added), so the change editor starts from it. Only a path a
+Definition holds is read (`is_definition_file`: `factory.json`,
+`agents.json`, `rules.json`, `scorers.json`, or `flows/{name}.json` with a
+name a Run keeps; 400 `notADefinitionFile` otherwise, before GitHub is
+asked); a repository the caller does not reach is 400
+`unreachableDefinition`, a file GitHub will not give 400
+`invalidDefinition`, and a team that names none 409 `noDefinition`. Any
+member of the team reads it, as they read the setting: GitHub decides what
+they reach.
 
 An admin of the team changes the Definition from the factory's settings
 with `POST /settings/definition/changes` (`{"changeId", "title",
@@ -2407,6 +2448,15 @@ pull requests that each read may not read once both merge (one adds a
 Flow, the other drops the Role it names). Run `factory_definition_check`
 in the Definition repository's CI, and require it on its default branch,
 so the merged result is checked too.
+
+`POST /settings/definition/changes/check` (`{"title", "description"?,
+"files"}`, the change without its id) checks a change as proposing it
+would and writes nothing to GitHub (`check_change`): the same admin in
+person, `noDefinition`, push access, change and Definition checks, with
+the same statuses and codes, answering the commit it was checked against
+(`DefinitionChangeCheck`). It looks up no pull request, as a check has no
+change id, and a change sent later is checked again at the head it is
+sent at. The web editor checks a draft with it before it sends it.
 
 Self-improvement (`src/domain/self_improvement.rs`): a team's Definition
 learns from the Runs that failed under it. A failure is a live Scorer's

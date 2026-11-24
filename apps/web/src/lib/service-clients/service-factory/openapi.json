@@ -1710,7 +1710,7 @@
     "/runs/{id}/retry": {
       "post": {
         "tags": ["factory"],
-        "summary": "Retry one of the caller's Runs that ended `failed`, `infrastructure` or\n`blocked`: a new Run of the same task, Flow and Factory Definition\ncommit, on the same branch, that keeps the Steps the Run took before the\nentry it stopped at, with their outputs, and starts there; its\n`retry.retriedFrom` names the Run it retries. A Run is retried once: a\nsecond retry, a running Run, a Run that ended otherwise, a Benchmark\ntrial and a self-improvement Run are refused (409), as is a retry past\nthe caller's Queue limit (`queueFull`). An agent acting for the owner\nneeds a Standing Role that allows `start`, as a new Run does.",
+        "summary": "Retry one of the caller's Runs that ended `failed`, `infrastructure` or\n`blocked`: a new Run of the same task, Flow and Factory Definition\ncommit, on the same branch, that keeps the Steps the Run took before the\nentry it stopped at, with their outputs, and starts there; its\n`retry.retriedFrom` names the Run it retries. A Run is retried once: a\nsecond retry, a running Run, a Run that ended otherwise, a Benchmark\ntrial and a self-improvement Run are refused (409 `notRetriable`, and\n`alreadyRetried` for a second retry), as is a retry past the caller's\nQueue limit (`queueFull`). An agent acting for the owner\nneeds a Standing Role that allows `start`, as a new Run does.",
         "operationId": "retry_factory_run",
         "parameters": [
           {
@@ -3184,6 +3184,155 @@
         }
       }
     },
+    "/settings/definition/changes/check": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Check a change to the caller's team's Factory Definition as `POST\n/settings/definition/changes` would, without proposing it: nothing is\nwritten to GitHub. It is refused with the same statuses and codes (403\nfor someone who does not administer the team, in person; 409\n`noDefinition`; 400 `noPushAccess`, `unreachableDefinition`,\n`invalidDefinition` or `invalidDefinitionChange`), and answers the\ncommit it was checked against. A pull request sent later is checked\nagain, against the head it is sent at.",
+        "operationId": "check_factory_definition_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckDefinitionChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionChangeCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/definition/file": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "The whole text of one file of the caller's team's Factory Definition, as\nit is at its default branch's head, the commit a change proposed now\ngoes on top of, read as the caller reaches it on GitHub. A file not\nthere yet, as a Flow being added, answers no text. A path that names no\nDefinition file is 400 `notADefinitionFile`; a repository the caller\ndoes not reach is 400 `unreachableDefinition`; a file GitHub will not\ngive (too large) is 400 `invalidDefinition`; a team that names no\nDefinition is 409 `noDefinition`.",
+        "operationId": "get_factory_definition_file",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Its path from the repository's root: `factory.json`,\n`flows/{name}.json`, `agents.json`, `rules.json` or `scorers.json`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionFile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/settings/standing-rules": {
       "get": {
         "tags": ["factory"],
@@ -4115,6 +4264,31 @@
         ],
         "description": "Why a Run's token budget ended it, before an agent Step."
       },
+      "CheckDefinitionChangeRequest": {
+        "type": "object",
+        "description": "Request body for checking a change to the team's Factory Definition\nwithout proposing it.",
+        "required": ["title", "files"],
+        "properties": {
+          "description": {
+            "type": ["string", "null"],
+            "description": "Why, for whoever reviews the pull request."
+          },
+          "files": {
+            "type": "object",
+            "description": "The files it writes, by path, each with its whole new text, as\n`POST /settings/definition/changes` takes them.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string",
+            "description": "What the change does, in a line."
+          }
+        }
+      },
       "CheckResult": {
         "type": "object",
         "description": "How one check of a verified round ran.",
@@ -4441,6 +4615,73 @@
           }
         }
       },
+      "CiRerun": {
+        "type": "object",
+        "description": "A failed CI job one of the Run's `ci` Steps reran, taking it for flaky.",
+        "required": [
+          "seq",
+          "job",
+          "attempt",
+          "matched",
+          "headSha",
+          "requestedAt"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Which rerun of the job in the Run it is: 1 for its first, as each\n`ci` Step reruns a job at most once.",
+            "minimum": 0
+          },
+          "failure": {
+            "type": ["string", "null"],
+            "description": "The test that failed, as its check run annotated it."
+          },
+          "headSha": {
+            "type": "string",
+            "description": "The commit whose checks it reran."
+          },
+          "job": {
+            "type": "string",
+            "description": "The job."
+          },
+          "matched": {
+            "$ref": "#/components/schemas/CiRetryMatch",
+            "description": "Why it was taken for flaky."
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was asked for."
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CiRetryResult",
+                "description": "How it ended; none while it runs."
+              }
+            ]
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The `ci` Step that reran it.",
+            "minimum": 0
+          },
+          "settledAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it ended; none while it runs."
+          },
+          "step": {
+            "type": ["string", "null"],
+            "description": "The first of its steps that failed, when it was read."
+          }
+        }
+      },
       "CiRetryCounts": {
         "type": "object",
         "description": "How the reruns of flaky CI jobs ended; those still running are not\ncounted.",
@@ -4465,6 +4706,16 @@
             "minimum": 0
           }
         }
+      },
+      "CiRetryMatch": {
+        "type": "string",
+        "description": "Why a `ci` Step took a failed CI job for flaky, and reran it.",
+        "enum": ["known", "quarantined", "record"]
+      },
+      "CiRetryResult": {
+        "type": "string",
+        "description": "How a rerun of a failed CI job ended.",
+        "enum": ["passed", "failed", "refused"]
       },
       "ControlFileChanges": {
         "type": "object",
@@ -4561,6 +4812,17 @@
           }
         }
       },
+      "DefinitionChangeCheck": {
+        "type": "object",
+        "description": "A change to a Factory Definition that passed every check proposing it\nmakes, without proposing it.",
+        "required": ["commit"],
+        "properties": {
+          "commit": {
+            "type": "string",
+            "description": "The commit of the default branch it was checked against."
+          }
+        }
+      },
       "DefinitionContents": {
         "type": "object",
         "description": "What a Factory Definition holds at one commit, as its setting shows it.",
@@ -4605,6 +4867,25 @@
                 "description": "Its Standing Rules, from `rules.json`; none when it leaves them to\nthe factory's default."
               }
             ]
+          }
+        }
+      },
+      "DefinitionFile": {
+        "type": "object",
+        "description": "One file of a Factory Definition, as it is at its default branch's head:\nthe text a change to it starts from.",
+        "required": ["path", "commit"],
+        "properties": {
+          "commit": {
+            "type": "string",
+            "description": "The commit of the default branch it was read at: the one a change\nproposed now goes on top of."
+          },
+          "path": {
+            "type": "string",
+            "description": "Its path from the repository's root."
+          },
+          "text": {
+            "type": ["string", "null"],
+            "description": "Its whole text; none when the repository holds no file there yet,\nas for a Flow being added."
           }
         }
       },
@@ -4733,7 +5014,7 @@
               },
               {
                 "$ref": "#/components/schemas/DefinitionContents",
-                "description": "What it holds at the commit the newest Run read, or at its head when\nno Run read it yet or that commit does not read as the person\nreaches it; none when it reads at neither."
+                "description": "What it holds at `commit`, its head, as a Run started now reads it;\nat the commit the newest Run read when the head does not read as\nthe person reaches it; none when it reads at neither. Its own\n`commit` says which."
               }
             ]
           },
@@ -6673,6 +6954,17 @@
             "type": "string",
             "description": "What the Run was asked to do."
           },
+          "retriedBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunId",
+                "description": "The Run that retried it; none until one does. A Run is retried at\nmost once, so this names the next Run of a chain of retries."
+              }
+            ]
+          },
           "retry": {
             "oneOf": [
               {
@@ -6771,7 +7063,10 @@
           "standingActs",
           "agentRules",
           "taskTagsUnread",
-          "breakRecords"
+          "breakRecords",
+          "ciReruns",
+          "ciQuarantines",
+          "splitTasks"
         ],
         "properties": {
           "agentRules": {
@@ -6803,6 +7098,20 @@
             },
             "description": "The breaks its write and fix Steps reported for the tests they\nadded, by Step, each with how the factory's run of it went: in a\nRun's own read (`GET /runs/{id}`) only, empty in a list of Runs."
           },
+          "ciQuarantines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CiQuarantined"
+            },
+            "description": "The failures its passed reruns quarantined in its repository: in a\nRun's own read only, empty in a list of Runs."
+          },
+          "ciReruns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CiRerun"
+            },
+            "description": "The failed CI jobs its `ci` Steps reran under the `rerun_flaky_ci`\nrule, by Step then job, each with how it ended: in a Run's own read\nonly, empty in a list of Runs."
+          },
           "mainHold": {
             "oneOf": [
               {
@@ -6824,6 +7133,13 @@
           "run": {
             "$ref": "#/components/schemas/Run",
             "description": "The Run."
+          },
+          "splitTasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SplitTask"
+            },
+            "description": "The child tasks its `split` Steps filed, by Step then place, with\ntheir ids and names: in a Run's own read only, empty in a list of\nRuns."
           },
           "standingActs": {
             "type": "array",
@@ -6891,6 +7207,8 @@
           "noPushAccess",
           "controlFilesNotApproved",
           "queueFull",
+          "notRetriable",
+          "alreadyRetried",
           "reservedForAPerson",
           "notInStandingRole",
           "unreachableDefinition",
@@ -6899,7 +7217,8 @@
           "noDefinition",
           "invalidDefinitionChange",
           "definitionChangeNotOpened",
-          "definitionChangeClosed"
+          "definitionChangeClosed",
+          "notADefinitionFile"
         ]
       },
       "RunErrorResponse": {
@@ -7183,9 +7502,16 @@
       },
       "RunScores": {
         "type": "object",
-        "description": "The live Scorers' judgments of one Run.",
-        "required": ["scores"],
+        "description": "The live Scorers' judgments of one Run, and those still to come.",
+        "required": ["scores", "pending"],
         "properties": {
+          "pending": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Scorers that will still judge it, by name: each of the Scorers\nit is scored with whose sample takes it (by its Flow and a hash of\nits id) and that has not judged it. Empty once none will: its\nscoring finished, an hour passed since it ended, or no Scorer judges\nit (it was cancelled or lost to infrastructure, or is a Benchmark\ntrial). While it goes, the Scorers that will judge it once it ends."
+          },
           "scores": {
             "type": "array",
             "items": {
@@ -7481,6 +7807,34 @@
                 "description": "Which kinds of Gate the factory answers on its own. Null goes back\nto the factory's default (a team's), or removes the Project's own\n(a Project's)."
               }
             ]
+          }
+        }
+      },
+      "SplitTask": {
+        "type": "object",
+        "description": "A child task a `split` Step filed.",
+        "required": ["seq", "place", "taskId", "name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name, as the plan named it."
+          },
+          "place": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its place in the plan's children, from 0.",
+            "minimum": 0
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The `split` Step that filed it.",
+            "minimum": 0
+          },
+          "taskId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The task document's id."
           }
         }
       },

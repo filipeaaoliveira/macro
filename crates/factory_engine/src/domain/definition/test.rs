@@ -9,7 +9,7 @@ use tokio::time::timeout;
 
 use super::{
     DEFINITION_FILE_PATTERNS, DefinitionError, DefinitionFiles, DefinitionReadError,
-    FactoryDefinition, MAX_KNOWN_FLAKES, read_definition,
+    FactoryDefinition, MAX_KNOWN_FLAKES, is_definition_file, read_definition,
 };
 use crate::domain::agents::AgentDefinitionError;
 use crate::domain::built_in_steps::built_in_step_use;
@@ -1492,5 +1492,34 @@ fn the_template_s_flows_are_the_built_in_ones() {
             read(std::path::Path::new(built_in).join(name)),
             "the template's {name} drifted from the built-in Flow"
         );
+    }
+}
+
+/// The files a Definition may hold are its four named files and a Flow's
+/// file one level down, named as a Run keeps a Flow's name; nothing else.
+#[test]
+fn a_definition_file_is_one_the_definition_may_hold() {
+    for path in [
+        "factory.json",
+        "agents.json",
+        "rules.json",
+        "scorers.json",
+        "flows/code.json",
+        "flows/fix-ci_2.json",
+    ] {
+        assert!(is_definition_file(path), "{path}");
+    }
+    for path in [
+        "",
+        "README.md",
+        "flows/.json",
+        "flows/Code.json",
+        "flows/a/b.json",
+        "flows/../agents.json",
+        "flows/code.yaml",
+        "other/factory.json",
+        "/factory.json",
+    ] {
+        assert!(!is_definition_file(path), "{path}");
     }
 }

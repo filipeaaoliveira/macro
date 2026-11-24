@@ -2,10 +2,12 @@
 
 use std::sync::Arc;
 
+use chrono::{TimeDelta, Utc};
 use factory_records::domain::evaluation::{
-    AgentChoices, BENCHMARK_FLOW, EvaluationRepository, Judgment, TrialKey,
+    AgentChoices, BENCHMARK_FLOW, EvaluationRepository, Judgment, ScoringState, TrialKey,
 };
-use factory_records::domain::models::{AgentName, Role};
+use factory_records::domain::models::{AgentName, Role, RunOutcome};
+use factory_records::domain::ports::RunRepository;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -15,6 +17,7 @@ use crate::domain::evaluation::insights::calibration::{
     RunScores, ScorerLabelError, ScorerLabelService,
 };
 use crate::domain::evaluation::insights::{EvaluationService, EvaluationServiceImpl, SuiteError};
+use crate::domain::evaluation::service::pending_scorers;
 use crate::domain::evaluation::{EvaluationDefinition, EvaluationDefinitionError};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::models::FactoryError;
@@ -514,4 +517,99 @@ async fn a_label_of_a_badly_named_scorer_is_refused() {
         .expect_err("refused");
 
     assert!(matches!(refused, ScorerLabelError::InvalidScorer(_)));
+}
+
+/// The live Scorers that will still judge a Run: those whose sample takes
+/// it and that have not judged it, never one sampled out; none once its
+/// scoring finished, an hour after it ended, for a Benchmark trial, nor
+/// for a Run cancelled or ended on infrastructure.
+#[tokio::test]
+async fn the_scores_say_which_scorers_will_still_judge_a_run() {
+    let repo = FakeRepo::default();
+    let definition: Arc<EvaluationDefinition> = Arc::new(
+        serde_json::from_value(json!({ "scorers": [
+            { "name": "correctness", "instructions": "Did it work?", "samplePercent": 100 },
+            { "name": "tidiness", "instructions": "Is it tidy?", "samplePercent": 100 },
+            { "name": "sampled-out", "instructions": "Is it short?", "samplePercent": 0 }
+        ]}))
+        .expect("a definition"),
+    );
+    let service = EvaluationServiceImpl::new(
+        repo.clone(),
+        Arc::new(code_service(
+            &repo,
+            &FakeWorkflows::default(),
+            &FakeGithub::default(),
+        )),
+        definition.clone(),
+        None,
+        HAIKU.to_string(),
+    );
+    let run_id = julia_s_run(&repo).await;
+    let pending = || async {
+        service
+            .run_scores(&julia(), run_id)
+            .await
+            .expect("read")
+            .pending
+    };
+
+    let going = pending().await;
+    repo.end_run(run_id, RunOutcome::Success)
+        .await
+        .expect("end");
+    repo.record_run_score(run_id, &judgment("correctness", 0.9))
+        .await
+        .expect("scored");
+    let judging = pending().await;
+    repo.mark_run_scored(run_id)
+        .await
+        .expect("scoring finished");
+    let finished = pending().await;
+    let cancelled = julia_s_run(&repo).await;
+    repo.end_run(cancelled, RunOutcome::Cancelled)
+        .await
+        .expect("end");
+    let cancelled_pending = service
+        .run_scores(&julia(), cancelled)
+        .await
+        .expect("read")
+        .pending;
+    let state = repo
+        .scoring_state(run_id)
+        .await
+        .expect("read")
+        .expect("kept");
+    let long_ago = ScoringState {
+        scored_at: None,
+        ended_at: Some(Utc::now() - TimeDelta::hours(2)),
+        judged: Vec::new(),
+        ..state.clone()
+    };
+    let just_ended = ScoringState {
+        scored_at: None,
+        ended_at: Some(Utc::now()),
+        judged: Vec::new(),
+        ..state
+    };
+    let trial = ScoringState {
+        trial: true,
+        ..just_ended.clone()
+    };
+    let infrastructure = ScoringState {
+        outcome: Some(RunOutcome::Infrastructure),
+        ..just_ended.clone()
+    };
+
+    assert_eq!(going, ["correctness", "tidiness"]);
+    assert_eq!(judging, ["tidiness"]);
+    assert!(finished.is_empty());
+    assert!(cancelled_pending.is_empty());
+    assert!(pending_scorers(&definition, run_id, &long_ago, Utc::now()).is_empty());
+    assert_eq!(
+        pending_scorers(&definition, run_id, &just_ended, Utc::now()),
+        ["correctness", "tidiness"]
+    );
+    assert!(pending_scorers(&definition, run_id, &trial, Utc::now()).is_empty());
+    assert!(pending_scorers(&definition, run_id, &infrastructure, Utc::now()).is_empty());
 }

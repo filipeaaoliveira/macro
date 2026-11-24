@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO factory_run (\n                id, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,\n                created_in_person, control_file_patterns, control_files_team_id, tampered_files,\n                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,\n                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,\n                definition_commit, definition_agents, flow_definition, flow_asks,\n                definition_evaluation, token_budget, known_ci_flakes, retried_from, branch_run_id,\n                first_seq\n            )\n            SELECT\n                $1, user_id, flow, request, task_id, repo_url, base_branch, merge_head_sha,\n                $4, control_file_patterns, control_files_team_id, tampered_files,\n                named_control_files, control_files_unlisted, standing_rules, standing_rules_source,\n                standing_rules_project_id, project_id, pull_request_url, definition_repo_url,\n                definition_commit, definition_agents, flow_definition, flow_asks,\n                definition_evaluation, token_budget, known_ci_flakes, id, COALESCE(branch_run_id, id),\n                $3\n            FROM factory_run\n            WHERE id = $2\n            RETURNING\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq\n            ",
+  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger,\n                automation_firing_key, definition_repo_url, definition_commit, definition_agents,\n                definition_evaluation, flow_definition, flow_asks, project_id, token_budget\n            )\n            VALUES (\n                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,\n                $19, $20, $21, $22, $23, $24, $25\n            )\n            RETURNING\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,\n                NULL::uuid AS \"retried_by?\"\n            ",
   "describe": {
     "columns": [
       {
@@ -182,14 +182,40 @@
         "ordinal": 35,
         "name": "first_seq",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 36,
+        "name": "retried_by?",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "TextArray",
         "Uuid",
-        "Int4",
-        "Bool"
+        "TextArray",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Bool",
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
@@ -228,8 +254,9 @@
       true,
       true,
       true,
-      true
+      true,
+      null
     ]
   },
-  "hash": "6f8713eab758db052bb7f055b142fe8a1572206f5db55674ae78b8c7dd246d23"
+  "hash": "37db5efb20276d40f459d41808b65380e83c663387b6dfec434c989e2bda79fb"
 }
