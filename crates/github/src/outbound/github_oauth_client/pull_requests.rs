@@ -67,6 +67,41 @@ pub enum GithubBranchUpdate {
     Declined(String),
 }
 
+/// Whether a change reaches a branch only through a pull request
+/// ([`GithubOauthImpl::get_requires_pull_request`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GithubPullRequestRequirement {
+    /// A ruleset or the branch protection asks for one.
+    Required,
+    /// Neither does: a push reaches the branch.
+    NotRequired,
+    /// It cannot be told: GitHub refused to show the rules or the
+    /// protection, with its message when it gave one, as "Upgrade to GitHub
+    /// Pro or make this repository public to enable this feature."
+    Unknown {
+        /// What GitHub said when it refused.
+        github_message: Option<String>,
+    },
+}
+
+/// A read GitHub refused, with its message when the refusal is a 403 that
+/// carries one.
+pub(super) struct ExplainedRefusal {
+    /// What the refusal is.
+    pub(super) error: GithubError,
+    /// GitHub's message on a 403.
+    pub(super) github_message: Option<String>,
+}
+
+impl From<GithubError> for ExplainedRefusal {
+    fn from(error: GithubError) -> Self {
+        Self {
+            error,
+            github_message: None,
+        }
+    }
+}
+
 /// Whether git takes `branch` as a branch's name, by the rules of
 /// `git check-ref-format --branch`: no empty part and none that starts with
 /// `.` or ends with `.lock`, no `..` or `@{`, no control character, space,
@@ -341,6 +376,20 @@ impl GithubOauthImpl {
         query: &[(&str, &str)],
         context: &str,
     ) -> Result<T, GithubError> {
+        self.read_explained(access_token, path, query, context)
+            .await
+            .map_err(|refusal| refusal.error)
+    }
+
+    /// [`Self::read`], keeping GitHub's message when it refuses with a 403
+    /// that is not throttling, for a caller that shows the user why.
+    pub(super) async fn read_explained<T: DeserializeOwned>(
+        &self,
+        access_token: &str,
+        path: &str,
+        query: &[(&str, &str)],
+        context: &str,
+    ) -> Result<T, ExplainedRefusal> {
         let response = self
             .client
             .get(format!("{}{path}", self.api_base_url()))
@@ -356,14 +405,23 @@ impl GithubOauthImpl {
 
         let status = response.status();
         if status.is_success() {
-            return response.json().await.map_err(transport_error);
+            return Ok(response.json().await.map_err(transport_error)?);
         }
         let headers = response.headers().clone();
         let body = response_text(response).await;
         if throttling(status, &headers, &body).is_some() {
-            return Err(unexpected(status, &headers, body, context));
+            return Err(unexpected(status, &headers, body, context).into());
         }
-        Err(refusal(status).unwrap_or_else(|| unexpected(status, &headers, body, context)))
+        let github_message = (status == StatusCode::FORBIDDEN)
+            .then(|| serde_json::from_str::<GithubErrorBody>(&body).ok())
+            .flatten()
+            .map(GithubErrorBody::reason)
+            .filter(|message| !message.trim().is_empty());
+        let error = refusal(status).unwrap_or_else(|| unexpected(status, &headers, body, context));
+        Err(ExplainedRefusal {
+            error,
+            github_message,
+        })
     }
 
     /// Every page of the list at `path`, each read as `T` and its items
@@ -377,12 +435,26 @@ impl GithubOauthImpl {
         context: &str,
         items: impl Fn(T) -> Vec<I>,
     ) -> Result<GithubListing<I>, GithubError> {
+        self.read_pages_explained(access_token, path, context, items)
+            .await
+            .map_err(|refusal| refusal.error)
+    }
+
+    /// [`Self::read_pages`], keeping GitHub's message as
+    /// [`Self::read_explained`] does.
+    pub(super) async fn read_pages_explained<T: DeserializeOwned, I>(
+        &self,
+        access_token: &str,
+        path: &str,
+        context: &str,
+        items: impl Fn(T) -> Vec<I>,
+    ) -> Result<GithubListing<I>, ExplainedRefusal> {
         let page_size = PAGE_SIZE.to_string();
         let mut all = Vec::new();
         for page in 1..=MAX_PAGES {
             let page = page.to_string();
             let read: T = self
-                .read(
+                .read_explained(
                     access_token,
                     path,
                     &[("per_page", page_size.as_str()), ("page", page.as_str())],
@@ -408,9 +480,11 @@ impl GithubOauthImpl {
 
     /// Whether a change reaches `branch` only through a pull request: a
     /// ruleset that applies to it requires one, or its branch protection
-    /// requires pull request reviews. `None` when that cannot be told: the
+    /// requires pull request reviews. Unknown when that cannot be told: the
     /// rulesets cannot be read, or the protection is refused to the caller,
-    /// as it is to one who does not administer the repository.
+    /// with GitHub's message, which says why: the caller does not administer
+    /// the repository, or its plan does not offer protection on a private
+    /// repository.
     #[tracing::instrument(skip(self, access_token), err)]
     pub async fn get_requires_pull_request(
         &self,
@@ -418,10 +492,10 @@ impl GithubOauthImpl {
         owner: &str,
         repo: &str,
         branch: &str,
-    ) -> Result<Option<bool>, GithubError> {
+    ) -> Result<GithubPullRequestRequirement, GithubError> {
         let branch = urlencoding::encode(branch);
         let rules = self
-            .read_pages(
+            .read_pages_explained(
                 access_token,
                 &format!("/repos/{owner}/{repo}/rules/branches/{branch}"),
                 "failed to read branch rules",
@@ -435,18 +509,21 @@ impl GithubOauthImpl {
                     .iter()
                     .any(|rule| rule.kind == BranchRuleKind::PullRequest) =>
             {
-                return Ok(Some(true));
+                return Ok(GithubPullRequestRequirement::Required);
             }
             Ok(_) => {}
-            Err(GithubError::Forbidden | GithubError::RepositoryUnavailable) => return Ok(None),
-            Err(error) => return Err(error),
+            Err(ExplainedRefusal {
+                error: GithubError::Forbidden | GithubError::RepositoryUnavailable,
+                github_message,
+            }) => return Ok(GithubPullRequestRequirement::Unknown { github_message }),
+            Err(refusal) => return Err(refusal.error),
         }
 
         // No ruleset asks for one: the branch protection may, which only
         // the repository's admins may read. GitHub answers 404 when it
         // asks for none, or the branch has no protection.
-        let reviews: Result<serde_json::Value, GithubError> = self
-            .read(
+        let reviews: Result<serde_json::Value, ExplainedRefusal> = self
+            .read_explained(
                 access_token,
                 &format!(
                     "/repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews"
@@ -456,10 +533,16 @@ impl GithubOauthImpl {
             )
             .await;
         match reviews {
-            Ok(_) => Ok(Some(true)),
-            Err(GithubError::RepositoryUnavailable) => Ok(Some(false)),
-            Err(GithubError::Forbidden) => Ok(None),
-            Err(error) => Err(error),
+            Ok(_) => Ok(GithubPullRequestRequirement::Required),
+            Err(ExplainedRefusal {
+                error: GithubError::RepositoryUnavailable,
+                ..
+            }) => Ok(GithubPullRequestRequirement::NotRequired),
+            Err(ExplainedRefusal {
+                error: GithubError::Forbidden,
+                github_message,
+            }) => Ok(GithubPullRequestRequirement::Unknown { github_message }),
+            Err(refusal) => Err(refusal.error),
         }
     }
 

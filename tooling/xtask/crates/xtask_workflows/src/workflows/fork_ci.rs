@@ -3,25 +3,30 @@
 //!
 //! A fork has no Namespace runners, so the checks of `PR CI` queue there
 //! forever. This workflow runs a smaller set of the same checks, with the same
-//! scripts, path filters and `just` recipes: on a self-hosted runner labelled
-//! [`RUNNER`], fmt, unused dependencies, clippy as the offline SQLx check, and
-//! cargo nextest against Postgres and Redis for the Rust packages a pull
-//! request affects; on a GitHub-hosted runner, Biome, the app's types and the
-//! affected Vitest tests for the web app. `Fork CI gate` is the one check a
-//! branch rule requires.
+//! scripts, path filters and `just` recipes, on GitHub-hosted runners, free on
+//! a public repository: fmt, unused dependencies, clippy as the offline SQLx
+//! check, and cargo nextest against Postgres and Redis for the Rust packages a
+//! pull request affects, split across [`MAX_TEST_SHARDS`] jobs at most; and
+//! Biome, the app's types and the affected Vitest tests for the web app.
+//! `Fork CI gate` is the one check a branch rule requires.
 //!
-//! Only branches pushed to the fork itself reach the self-hosted runner, and a
-//! pull request from another repository fails the gate. That condition is not
-//! the protection: such a pull request runs its own copy of this workflow, with
-//! the condition removed if it likes. The protection is the fork's Actions
-//! setting "Require approval for all external contributors", which must stay on,
-//! and never approving a run from another repository's pull request. A pull
-//! request from the upstream repository counts as one, so an upstream sync
-//! goes through a branch of the fork instead.
+//! A hosted runner keeps nothing between jobs, so the Rust jobs save their
+//! compiled dependencies and the code-mode assets to the Actions cache. A
+//! pull request reads the entries its own earlier runs saved, and those of its
+//! base branch.
+//!
+//! The Rust jobs run only for a manual run or a branch pushed to the fork
+//! itself, and a pull request from another repository fails the gate. That
+//! condition is not the protection: such a pull request runs its own copy of
+//! this workflow, with the condition removed if it likes. The protection is the
+//! fork's Actions setting "Require approval for all external contributors",
+//! which must stay on, and never approving a run from another repository's pull
+//! request. A pull request from the upstream repository counts as one, so an
+//! upstream sync goes through a branch of the fork instead.
 
 use gh_workflow::{
     Concurrency, Event, Expression, Job, Level, Permissions, PullRequest, PullRequestType, Run,
-    Step, Use, Workflow, WorkflowDispatch,
+    Step, Strategy, Use, Workflow, WorkflowDispatch,
 };
 use xtask_paths::RuntimePath;
 
@@ -34,20 +39,17 @@ use crate::workflows::{
 #[cfg(test)]
 mod test;
 
-/// The self-hosted runner scale set's name, which is its `runs-on` label.
-const RUNNER: &str = "macro-fork";
-
-/// GitHub-hosted runner, free on a public repository, for the light jobs. A
-/// pull request from another repository runs only there.
+/// GitHub-hosted runner, free on a public repository: 4 CPUs and 16 GB. Its
+/// one disk had 86 GB free before [`free_disk_space`] and 117 GB after.
 const HOSTED_RUNNER: &str = "ubuntu-latest";
 
 /// The name of the job a branch rule requires.
 pub const GATE_NAME: &str = "Fork CI gate";
 
-/// A manual run, or a pull request from a branch of this repository. Jobs on
-/// [`RUNNER`] run only then. This only keeps this repository's copy of the
-/// workflow from running another repository's code; see the module docs for
-/// what protects the runner.
+/// A manual run, or a pull request from a branch of this repository. The Rust
+/// jobs run only then. This only keeps this repository's copy of the workflow
+/// from running another repository's code; see the module docs for what
+/// protects it.
 const TRUSTED: &str = "github.event_name == 'workflow_dispatch' || \
      github.event.pull_request.head.repo.full_name == github.repository";
 
@@ -55,19 +57,37 @@ const TRUSTED: &str = "github.event_name == 'workflow_dispatch' || \
 const FILTER_CACHE_DIR: RuntimePath<'static> =
     xtask_paths::runtime_path!("/home/runner/.cache/macro-nextest-filter");
 
-/// Nextest's threads on the self-hosted runner. More than its CPUs: most tests
-/// wait on Postgres in the Docker sidecar, which has 3 CPUs of its own.
-const NEXTEST_TEST_THREADS: u32 = 12;
+/// The Rust jobs' build output and caches, relative to the checkout: under
+/// `target/`, which git and the Rust tools ignore, and inside the workspace,
+/// where `rust-cache` looks for target directories.
+const BUILD_DIR: &str = "target/fork-ci";
 
-/// Cargo's jobs in the test job. The runner has the whole node, 8 CPUs and
-/// 11 GiB, one job at a time. One compiler of a large crate alone held
-/// 4.4 GiB, and three filled 9 GiB until the kernel killed the runner; at
-/// 11 GiB three fit with room for cargo, sccache and one link.
+/// Nextest's threads in a test shard. More than its 4 CPUs: most tests wait
+/// on Postgres, in a service container on the same runner.
+const NEXTEST_TEST_THREADS: u32 = 8;
+
+/// Cargo's jobs in a test shard. One compiler of a large crate alone held
+/// 4.4 GiB, so three fit in the runner's 16 GB with room for cargo and one
+/// link.
 const TEST_BUILD_JOBS: u32 = 3;
 
-/// Cargo's jobs in the clippy job. Clippy generates no code and holds less
-/// than a build, so four of the 8 CPUs.
+/// Cargo's jobs in the clippy job: all 4 CPUs. Clippy generates no code and
+/// holds less than a build.
 const CHECK_BUILD_JOBS: u32 = 4;
+
+/// The most test shards a run splits the affected packages across. Each
+/// shard builds and tests its own share of the packages on its own runner.
+const MAX_TEST_SHARDS: u32 = 4;
+
+/// Affected packages per test shard, until [`MAX_TEST_SHARDS`].
+const PACKAGES_PER_SHARD: u32 = 4;
+
+/// `Swatinem/rust-cache`, which saves the compiled dependencies of a target
+/// directory and cargo's registry.
+const RUST_CACHE_VERSION: &str = "v2.9.3";
+
+/// actions/cache v5.0.5, as `build_web_app` pins it.
+const ACTIONS_CACHE_SHA: &str = "27d5ce7f107fe9357f9df03efb73ab90386fccae";
 
 /// Build the workflow.
 pub fn fork_ci() -> Workflow {
@@ -149,81 +169,249 @@ fn changes() -> Job {
         .add_step(steps::setup_rust_light().if_condition(Expression::new(scope_rust.clone())))
         .add_step(compute_changed_files().if_condition(Expression::new(scope_rust.clone())))
         .add_step(compute_nextest_filter().if_condition(Expression::new(scope_rust)))
+        .add_step(test_shards())
+        .add_output("test_shards", "${{ steps.test-shards.outputs.shards }}")
+        .add_output("test_shard_count", "${{ steps.test-shards.outputs.count }}")
+}
+
+/// How many test shards the affected packages need: one per
+/// [`PACKAGES_PER_SHARD`] packages, at most [`MAX_TEST_SHARDS`], and the most
+/// for every package. `sync_service` has no tests here, so it doesn't count.
+/// Writes `count` and `shards`, the matrix of shard numbers. It reads only
+/// the other steps' outputs, never the pull request's code.
+fn test_shards() -> Step<Run> {
+    Step::new("count the test shards")
+        .run(indoc::indoc! {r#"
+            set -euo pipefail
+            if [ "$RUST_PACKAGES" = all ]; then
+              count=$MAX_TEST_SHARDS
+            else
+              packages=$(tr ' ' '\n' <<< "$RUST_PACKAGES" | grep -cvE '^(sync_service|none|)$' || true)
+              count=$(( (packages + PACKAGES_PER_SHARD - 1) / PACKAGES_PER_SHARD ))
+              count=$(( count < 1 ? 1 : count > MAX_TEST_SHARDS ? MAX_TEST_SHARDS : count ))
+            fi
+            echo "count=$count" >> "$GITHUB_OUTPUT"
+            echo "shards=$(seq -s , 1 "$count" | sed 's/.*/[&]/')" >> "$GITHUB_OUTPUT"
+            echo "$count test shards"
+        "#})
+        .id("test-shards")
+        .shell("bash")
+        .add_env((
+            "RUST_PACKAGES",
+            "${{ github.event_name == 'workflow_dispatch' && 'all' \
+             || steps.nextest-filter.outputs.rust_packages }}",
+        ))
+        .add_env(("MAX_TEST_SHARDS", MAX_TEST_SHARDS))
+        .add_env(("PACKAGES_PER_SHARD", PACKAGES_PER_SHARD))
 }
 
 /// fmt, unused dependencies and clippy on the affected packages. Clippy runs
 /// with `SQLX_OFFLINE=true`, so a missing or stale `.sqlx` entry fails it. Its
-/// own job: the runner takes it and the tests one after the other, and a
-/// failure here shows without waiting for the tests.
+/// own job, beside the test shards, so a failure here shows without waiting
+/// for the tests.
 fn rust_check() -> Job {
-    filtered_job("rust")
+    hosted_rust_job(filtered_job("rust"))
         .timeout_minutes(120u32)
         .add_env(("CARGO_BUILD_JOBS", CHECK_BUILD_JOBS))
-        .add_env((
-            "RUST_PACKAGES",
-            "${{ needs.changes.outputs.rust_packages }}",
-        ))
         .map(code_check_cloud_storage::with_test_compile_env)
         .add_step(steps::checkout(false, false).add_with(("fetch-depth", 2)))
         // Before the dev shell, as in `web`.
         .add_step(changed_files_on_pull_request())
+        .add_step(free_disk_space())
         .add_step(steps::setup_nix())
         .add_step(steps::setup_dev_shell().timeout_minutes(vars::DEV_SHELL_TIMEOUT_MINUTES))
         .add_step(use_runner_cache())
-        .add_step(steps::start_sccache_server())
+        .add_step(without_sccache())
+        .add_step(rust_cache("clippy", "clippy"))
+        .add_step(code_mode_assets_key())
+        .add_step(cache_code_mode_assets())
+        .add_step(import_code_mode_assets())
         .add_step(steps::code_mode_assets())
+        .add_step(export_code_mode_assets())
         .add_step(cargo_fmt())
         .add_step(Step::new("unused dependencies").run("cargo shear --format github"))
-        .add_step(cargo_clippy())
-        .add_step(steps::show_sccache_stats())
-        .add_step(show_cache_sizes())
-        .add_step(steps::teardown_nix())
+        .add_step(cargo_clippy().add_env(rust_packages()))
+        .add_step(show_disk_usage())
 }
 
 /// The tests of the affected packages, after every migration runs on an empty
-/// Postgres. Skipped when no package is affected, or only `.sqlx` changed.
-/// A change to a widely used crate selects dozens of packages, which take this
-/// runner's 4 CPUs over an hour to build and test cold, hence the timeout.
+/// Postgres, split across the shards `changes` counted: shard `k` of `n` takes
+/// every `n`th package from the `k`th, so each builds only its share. Skipped
+/// when no package is affected, or only `.sqlx` changed. A change to a widely
+/// used crate selects dozens of packages, which take a shard's 4 CPUs over an
+/// hour to build and test cold, hence the timeout.
 fn rust_test() -> Job {
-    Job::default()
+    let job = Job::default()
         .needs(vec!["changes".to_string()])
         .cond(Expression::new(format!(
             "needs.changes.outputs.rust == 'true' \
              && needs.changes.outputs.rust_packages != 'none' \
              && needs.changes.outputs.skip_tests != 'true' && ({TRUSTED})"
-        )))
-        .runs_on(RUNNER)
+        )));
+    hosted_rust_job(job)
+        .strategy(Strategy {
+            fail_fast: Some(false),
+            matrix: Some(serde_json::json!({
+                "shard": "${{ fromJSON(needs.changes.outputs.test_shards) }}",
+            })),
+            max_parallel: None,
+        })
         .timeout_minutes(180u32)
+        .add_env(("TEST_SHARD", "${{ matrix.shard }}"))
         .add_env((
-            "RUST_PACKAGES",
-            "${{ needs.changes.outputs.rust_packages }}",
+            "TEST_SHARD_COUNT",
+            "${{ needs.changes.outputs.test_shard_count }}",
         ))
         .add_env(("NEXTEST_TEST_THREADS", NEXTEST_TEST_THREADS))
-        // The runner has 11 GiB. Unbounded, rustc and linker processes on the
-        // large service crates fill it, and the job pages instead of building:
-        // one run held the runner for three hours on half an hour of CPU.
+        // Unbounded, rustc and linker processes on the large service crates
+        // fill the runner's memory, and the job pages instead of building.
         .add_env(("CARGO_BUILD_JOBS", TEST_BUILD_JOBS))
         .add_env(("MOLD_JOBS", 1u32))
         .add_env(("REDIS_URI", "redis://127.0.0.1:6379"))
         .map(code_check_cloud_storage::with_test_compile_env)
-        // The default 10-minute idle timeout can stop the server during long
-        // link or test phases, which resets the stats reported at the end.
-        .add_env(("SCCACHE_IDLE_TIMEOUT", "0"))
         .add_service("postgres", code_check_cloud_storage::postgres_service())
         .add_service("redis", code_check_cloud_storage::redis_service())
         .add_step(steps::checkout(false, false))
+        .add_step(free_disk_space())
         .add_step(steps::setup_nix())
         .add_step(steps::setup_dev_shell().timeout_minutes(vars::DEV_SHELL_TIMEOUT_MINUTES))
         .add_step(use_runner_cache())
-        .add_step(steps::start_sccache_server())
+        .add_step(without_sccache())
+        .add_step(rust_cache("test", "test-${{ matrix.shard }}"))
+        .add_step(code_mode_assets_key())
+        .add_step(cache_code_mode_assets())
+        .add_step(import_code_mode_assets())
         .add_step(steps::code_mode_assets())
+        .add_step(export_code_mode_assets())
         .add_step(code_check_cloud_storage::configure_postgres())
         .add_step(prepare_tests())
-        .add_step(run_tests())
-        .add_step(steps::show_sccache_stats())
-        .add_step(trim_test_binaries())
-        .add_step(show_cache_sizes())
-        .add_step(steps::teardown_nix())
+        .add_step(run_tests().add_env(rust_packages()))
+        .add_step(show_disk_usage())
+}
+
+/// The packages `changes` selected, for the one step that reads them.
+/// `rust-cache` keys its entries on every `RUST*` variable it sees, so a
+/// job-wide `RUST_PACKAGES` would give each set of packages its own entries,
+/// and a pull request would never restore another's.
+fn rust_packages() -> (&'static str, &'static str) {
+    (
+        "RUST_PACKAGES",
+        "${{ needs.changes.outputs.rust_packages }}",
+    )
+}
+
+/// A Rust job on a hosted runner, building in [`BUILD_DIR`]. No
+/// `teardown_nix`: it frees /nix for a cache volume to unmount, and on a hosted
+/// runner, where /nix is on the root file system, its `fuser -km /nix` kills
+/// every process on it, the runner's included.
+fn hosted_rust_job(job: Job) -> Job {
+    job.runs_on(HOSTED_RUNNER).add_env((
+        "CI_CACHE_DIR",
+        format!("${{{{ github.workspace }}}}/{BUILD_DIR}"),
+    ))
+}
+
+/// Deletes the hosted image's SDKs and Docker images that no job here uses,
+/// in parallel, and creates [`BUILD_DIR`]. Prints the free space before and
+/// after.
+fn free_disk_space() -> Step<Run> {
+    Step::new("free disk space")
+        .run(indoc::indoc! {r#"
+            set -euo pipefail
+            df -h /
+            for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+              /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
+              /usr/local/share/powershell /usr/local/share/chromium; do
+              sudo rm -rf "$dir" &
+            done
+            # Images a service container uses stay.
+            docker image prune --all --force > /dev/null &
+            wait
+            mkdir -p "$CI_CACHE_DIR"
+            df -h /
+        "#})
+        .shell("bash")
+}
+
+/// Builds without the dev shell's sccache. Its local cache starts empty on a
+/// hosted runner and would only copy every compiled crate; `rust_cache`
+/// restores the compiled dependencies instead.
+fn without_sccache() -> Step<Run> {
+    Step::new("build without sccache").run("echo 'unset RUSTC_WRAPPER' >> \"$BASH_ENV\"")
+}
+
+/// Restores the compiled dependencies of `target`, a directory under
+/// `CARGO_TARGET_ROOT`, and cargo's registry, and saves them when the job
+/// ends, failed or not: a failed test leaves a good build behind. `key` tells
+/// the job's entries from the other jobs'.
+fn rust_cache(target: &str, key: &str) -> Step<Use> {
+    Step::new("cache compiled dependencies")
+        .uses("Swatinem", "rust-cache", RUST_CACHE_VERSION)
+        .add_with(("workspaces", format!(". -> {BUILD_DIR}/target/{target}")))
+        .add_with(("key", key))
+        .add_with(("cache-on-failure", true))
+}
+
+/// The store path of the code-mode assets, which names every input of their
+/// build, as `code_mode_assets.sh` keys its remote cache.
+fn code_mode_assets_key() -> Step<Run> {
+    Step::new("code-mode assets key")
+        .run(indoc::indoc! {r#"
+            set -euo pipefail
+            path="$(nix eval --raw .#code-mode-assets.outPath)"
+            echo "path=$path" >> "$GITHUB_OUTPUT"
+            echo "name=$(basename "$path")" >> "$GITHUB_OUTPUT"
+        "#})
+        .id("code-mode-assets")
+}
+
+/// Under [`BUILD_DIR`], relative to the checkout.
+const CODE_MODE_ASSETS_EXPORT: &str = "target/fork-ci/code-mode-assets.closure";
+
+/// Building the code-mode assets installs node_modules and takes minutes, so
+/// the job keeps an export of the store path in the Actions cache.
+fn cache_code_mode_assets() -> Step<Use> {
+    Step::new("cache the code-mode assets")
+        .uses("actions", "cache", ACTIONS_CACHE_SHA)
+        .id("code-mode-assets-cache")
+        .continue_on_error(true)
+        .add_with(("path", CODE_MODE_ASSETS_EXPORT))
+        .add_with((
+            "key",
+            "code-mode-assets-${{ steps.code-mode-assets.outputs.name }}",
+        ))
+}
+
+fn import_code_mode_assets() -> Step<Run> {
+    Step::new("import the cached code-mode assets")
+        .run(format!(
+            "nix-store --import < {CODE_MODE_ASSETS_EXPORT} \
+             || echo '::warning::Could not import the cached code-mode assets'"
+        ))
+        .if_condition(Expression::new(
+            "steps.code-mode-assets-cache.outputs.cache-hit == 'true'",
+        ))
+}
+
+fn export_code_mode_assets() -> Step<Run> {
+    Step::new("export the code-mode assets for the cache")
+        .run(format!(
+            "nix-store --export \"$ASSETS\" > {CODE_MODE_ASSETS_EXPORT}"
+        ))
+        .add_env(("ASSETS", "${{ steps.code-mode-assets.outputs.path }}"))
+        .if_condition(Expression::new(
+            "steps.code-mode-assets-cache.outputs.cache-hit != 'true'",
+        ))
+}
+
+/// The free space left, and what the job's build directories hold.
+fn show_disk_usage() -> Step<Run> {
+    Step::new("show disk usage")
+        .run(indoc::indoc! {r#"
+            df -h /
+            du -sh /nix/store "$CI_CACHE_DIR"/target/* ~/.cargo/registry 2>/dev/null || true
+        "#})
+        .if_condition(Expression::new("always()"))
 }
 
 /// Biome on the changed files, the app's types, and the Vitest tests the
@@ -333,15 +521,13 @@ const GATE_SCRIPT: &str = indoc::indoc! {r#"
     fi
 "#};
 
-/// A job on the self-hosted runner, after `changes`, when its filter matched
-/// and the run is trusted. The web job moves to a hosted runner.
+/// A job after `changes`, when its filter matched and the run is trusted.
 fn filtered_job(filter_output: &str) -> Job {
     Job::default()
         .needs(vec!["changes".to_string()])
         .cond(Expression::new(format!(
             "needs.changes.outputs.{filter_output} == 'true' && ({TRUSTED})"
         )))
-        .runs_on(RUNNER)
 }
 
 fn on_pull_request(step: Step<Use>) -> Step<Use> {
@@ -477,8 +663,8 @@ fn prepare_tests() -> Step<Run> {
 /// Every failure is reported, so one run shows all of them.
 ///
 /// The email repository's paging tests compare many pages of one query on
-/// Postgres, which shares two CPUs with Redis here: beside the rest of the
-/// suite several took between two and five minutes, so they get ten.
+/// Postgres, which shares the runner with Redis and the tests: beside the rest
+/// of the suite several took between two and five minutes, so they get ten.
 const NEXTEST_PROFILE: &str = indoc::indoc! {r#"
     [profile.fork-ci]
     slow-timeout = { period = "60s", terminate-after = 5 }
@@ -494,7 +680,8 @@ const NEXTEST_PROFILE: &str = indoc::indoc! {r#"
 fn run_tests() -> Step<Run> {
     Step::new("run tests")
         .run(format!(
-            "export CARGO_TARGET_DIR=\"$CARGO_TARGET_ROOT/test\"\n\
+            "{SHARD_PACKAGES}\
+             export CARGO_TARGET_DIR=\"$CARGO_TARGET_ROOT/test\"\n\
              config=\"$RUNNER_TEMP/nextest-fork-ci.toml\"\n\
              cat > \"$config\" <<'EOF'\n{NEXTEST_PROFILE}EOF\n\
              export NEXTEST_TOOL_CONFIG=\"fork-ci:$config\" NEXTEST_PROFILE=fork-ci\n{}",
@@ -503,55 +690,29 @@ fn run_tests() -> Step<Run> {
         .timeout_minutes(RUN_TESTS_TIMEOUT_MINUTES)
 }
 
+/// Narrows `RUST_PACKAGES` to this shard's share: shard `TEST_SHARD` of
+/// `TEST_SHARD_COUNT` takes every `TEST_SHARD_COUNT`th package, from the
+/// `TEST_SHARD`th. `all` stands for every package of the workspace but
+/// `sync_service`, which `run_tests.sh` leaves out of `all` too.
+const SHARD_PACKAGES: &str = indoc::indoc! {r#"
+    if [ "$RUST_PACKAGES" = all ]; then
+      packages=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sort)
+    else
+      packages=$(tr ' ' '\n' <<< "$RUST_PACKAGES")
+    fi
+    RUST_PACKAGES=$( { grep -vE '^(sync_service|)$' <<< "$packages" || true; } \
+      | awk -v shard="$TEST_SHARD" -v count="$TEST_SHARD_COUNT" '(NR - 1) % count == shard - 1' \
+      | tr '\n' ' ' | sed 's/ $//')
+    if [ -z "$RUST_PACKAGES" ]; then
+      echo "No packages in test shard $TEST_SHARD of $TEST_SHARD_COUNT"
+      exit 0
+    fi
+    echo "Test shard $TEST_SHARD of $TEST_SHARD_COUNT: $RUST_PACKAGES"
+    export RUST_PACKAGES
+"#};
+
 /// Below the job's timeout, so the steps after it still report.
 const RUN_TESTS_TIMEOUT_MINUTES: u32 = 150;
-
-/// The size of the runner's cache slot, in MB, above which the test job drops
-/// its linked test binaries. The node empties a slot over 20 GB when the next
-/// job starts, and the test build of a change to a widely used crate alone
-/// took 26 GB, so every such run left the next one to build from nothing.
-const SLOT_TRIM_MB: u32 = 15360;
-
-/// Keeps the cache slot under the node's cap by deleting the linked test
-/// binaries, most of the test build's size, when the slot is over
-/// [`SLOT_TRIM_MB`]. The compiled libraries stay, so the next run links its
-/// tests again and compiles only the test crates, instead of everything.
-fn trim_test_binaries() -> Step<Run> {
-    Step::new("keep the cache slot under its cap")
-        .run(indoc::indoc! {r#"
-            set -euo pipefail
-            cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-            size=$(du -sm "$cache/" | cut -f1)
-            echo "cache slot: $size MB"
-            if [ "$size" -le "$SLOT_TRIM_MB" ]; then
-              exit 0
-            fi
-            deps="${CARGO_TARGET_ROOT:-$cache/target}/test/debug/deps"
-            [ -d "$deps" ] || exit 0
-            # A test binary is an executable with no extension; libraries
-            # (.rlib, .rmeta, .so) and dependency files stay.
-            find "$deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -delete
-            echo "after dropping the test binaries: $(du -sm "$cache/" | cut -f1) MB"
-        "#})
-        .add_env(("SLOT_TRIM_MB", SLOT_TRIM_MB))
-        .if_condition(Expression::new("always()"))
-}
-
-/// The size of each cache in the runner's cache slot, and of each target
-/// directory in it. The node empties a slot over its cap when the next job
-/// starts, which makes that job cold.
-fn show_cache_sizes() -> Step<Run> {
-    Step::new("show cache sizes")
-        .run(indoc::indoc! {r#"
-            cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-            du -sh "$cache/" 2>/dev/null || true
-            # One du per directory: du counts a directory once per call.
-            for dir in "$cache"/* "$cache"/target/*; do
-              du -sh "$dir" 2>/dev/null || true
-            done
-        "#})
-        .if_condition(Expression::new("always()"))
-}
 
 /// Biome on the files changed since the base revision, as `Web App Pr Checks`
 /// runs it against `main`. Without a base revision (a manual run, or no

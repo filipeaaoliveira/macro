@@ -578,6 +578,23 @@ pub struct FailureAnnotation {
     pub message: String,
 }
 
+/// Whether a change reaches a branch only through a pull request, as its
+/// rulesets and branch protection say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PullRequestRequirement {
+    /// A ruleset or the branch protection asks for one.
+    Required,
+    /// Neither does: a push reaches the branch.
+    NotRequired,
+    /// It cannot be told: GitHub refused to show the rules or the
+    /// protection, with its message when it gave one, which says why, as
+    /// a plan that offers no protection on a private repository.
+    Unknown {
+        /// What GitHub said when it refused.
+        github_message: Option<String>,
+    },
+}
+
 /// The checks a pull request's base requires, as far as they could be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequiredChecks {
@@ -939,11 +956,17 @@ pub struct DefinitionSettings {
     pub problem: Option<String>,
     /// Whether a ruleset or the branch protection of its default branch
     /// asks for a pull request; none when that cannot be told, as when the
-    /// person does not administer it. Without one, a push changes the
-    /// factory's rules unreviewed. With one, whoever may bypass the rules
-    /// (a ruleset's bypass list, admins when protection does not include
-    /// them) still can: GitHub does not tell the factory who.
+    /// person does not administer it, or its plan offers no protection on a
+    /// private repository. Without one, a push changes the factory's rules
+    /// unreviewed. With one, whoever may bypass the rules (a ruleset's
+    /// bypass list, admins when protection does not include them) still
+    /// can: GitHub does not tell the factory who.
     pub requires_pull_request: Option<bool>,
+    /// Why it cannot be told whether the default branch asks for a pull
+    /// request, in GitHub's words, when GitHub refused to show the rules or
+    /// the protection with a message, as "Upgrade to GitHub Pro or make
+    /// this repository public to enable this feature."
+    pub requires_pull_request_unknown_reason: Option<String>,
     /// The team; none when the person is on no team.
     pub team_id: Option<Uuid>,
     /// Whether the person may change it: they administer the team.
@@ -1597,6 +1620,11 @@ pub enum StepError {
     /// work's failure, not the factory's.
     #[error("the step's agent was still at work when the wait ended: {0:?}")]
     Overdue(rootcause::Report),
+    /// The agent's machine refused the Step's session, saying why: trying
+    /// again would repeat the refusal, and the work never started. Its
+    /// text is what the Run's owner is shown.
+    #[error("The agent's machine refused the step's session: {0}")]
+    Refused(String),
     /// The quota of the Agents that fill the Step's Role ran out: trying
     /// again would repeat the refusal, and the work never started.
     #[error("the step's agents are out of quota: {0:?}")]

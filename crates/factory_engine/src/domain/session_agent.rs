@@ -126,6 +126,10 @@ pub enum SessionAgentError {
     /// The session did not open, or did not show it opened in time.
     #[error("the agent session did not open")]
     NotOpened,
+    /// The Agent's machine refused to open the session, and said why: asking
+    /// again is refused the same way.
+    #[error("the agent's machine refused the session: {0}")]
+    Refused(String),
     /// The prompt's delivery was unknown, and the session never showed it
     /// arrived.
     #[error("the agent session never showed its prompt arrived")]
@@ -242,7 +246,8 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::StoppedByOwner
             | SessionAgentError::PausedTooLong
             | SessionAgentError::SetupFailed(_)
-            | SessionAgentError::SetupUnsupported(_) => false,
+            | SessionAgentError::SetupUnsupported(_)
+            | SessionAgentError::Refused(_) => false,
         }
     }
 }
@@ -272,6 +277,13 @@ impl AgentFailure for SessionAgentError {
     fn stopped_without_result(&self) -> Option<&str> {
         match self {
             SessionAgentError::StoppedWithoutResult(last_words) => Some(last_words),
+            _ => None,
+        }
+    }
+
+    fn refused(&self) -> Option<&str> {
+        match self {
+            SessionAgentError::Refused(reason) => Some(reason),
             _ => None,
         }
     }
@@ -1801,12 +1813,14 @@ fn lost(error: &SessionAgentError) -> bool {
 }
 
 /// What a session's refusal means for the Step: an Agent out of quota
-/// passes the Step on; anything else is the session's failure.
+/// passes the Step on; a machine that will not open the session fails it
+/// for good, saying why; anything else is the session's failure.
 fn refusal(error: RoutineSessionError) -> SessionAgentError {
     match error {
         RoutineSessionError::Admission(AiAdmissionError::Denied(reason)) => {
             SessionAgentError::NoQuota(reason)
         }
+        RoutineSessionError::Refused(reason) => SessionAgentError::Refused(reason),
         error => SessionAgentError::Session(error),
     }
 }

@@ -11,6 +11,7 @@ import type { DefinitionSettingsOpenPullRequests } from './definitionSettingsOpe
 import type { DefinitionSettingsProblem } from './definitionSettingsProblem';
 import type { DefinitionSettingsRepoUrl } from './definitionSettingsRepoUrl';
 import type { DefinitionSettingsRequiresPullRequest } from './definitionSettingsRequiresPullRequest';
+import type { DefinitionSettingsRequiresPullRequestUnknownReason } from './definitionSettingsRequiresPullRequestUnknownReason';
 import type { DefinitionSettingsTeamId } from './definitionSettingsTeamId';
 
 /**
@@ -37,11 +38,17 @@ factory's built-in Flows and Agents. */
   repoUrl?: DefinitionSettingsRepoUrl;
   /** Whether a ruleset or the branch protection of its default branch
 asks for a pull request; none when that cannot be told, as when the
-person does not administer it. Without one, a push changes the
-factory's rules unreviewed. With one, whoever may bypass the rules
-(a ruleset's bypass list, admins when protection does not include
-them) still can: GitHub does not tell the factory who. */
+person does not administer it, or its plan offers no protection on a
+private repository. Without one, a push changes the factory's rules
+unreviewed. With one, whoever may bypass the rules (a ruleset's
+bypass list, admins when protection does not include them) still
+can: GitHub does not tell the factory who. */
   requiresPullRequest?: DefinitionSettingsRequiresPullRequest;
+  /** Why it cannot be told whether the default branch asks for a pull
+request, in GitHub's words, when GitHub refused to show the rules or
+the protection with a message, as "Upgrade to GitHub Pro or make
+this repository public to enable this feature." */
+  requiresPullRequestUnknownReason?: DefinitionSettingsRequiresPullRequestUnknownReason;
   /** The team; none when the person is on no team. */
   teamId?: DefinitionSettingsTeamId;
 }

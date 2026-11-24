@@ -48,8 +48,8 @@ use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     DefinitionPullRequest, FinishedJob, GITHUB_COMMITTER, HeadChecks, JobRerun, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState, PullRequestText,
-    RepositoryAccess, RequiredChecks, run_branch,
+    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestRequirement,
+    PullRequestState, PullRequestText, RepositoryAccess, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -2300,6 +2300,16 @@ impl RunRepository for FakeRepo {
     }
 }
 
+/// A branch whose rules nothing set: whether it requires a pull request
+/// cannot be told, and GitHub gave no reason.
+impl Default for PullRequestRequirement {
+    fn default() -> Self {
+        Self::Unknown {
+            github_message: None,
+        }
+    }
+}
+
 /// What [`FakeGithub`] holds: one repository, and the pull request a Run's
 /// branch opens in it.
 #[derive(Default)]
@@ -2441,8 +2451,8 @@ pub(crate) struct FakeGithubState {
     /// When set, each deletion of a branch waits to be let go.
     pub(crate) delete_gate: Option<Arc<tokio::sync::Semaphore>>,
     /// Whether the default branch takes changes only through a pull
-    /// request; none when that cannot be told.
-    pub(crate) requires_pull_request: Option<bool>,
+    /// request; unknown when that cannot be told.
+    pub(crate) requires_pull_request: PullRequestRequirement,
     /// The `owner/name` GitHub answers a repository with, when it says.
     pub(crate) full_name: Option<String>,
     /// The paths of the files GitHub will not give, as one over 1 MB.
@@ -2731,8 +2741,8 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _branch: &str,
-    ) -> Result<Option<bool>, FakeGithubError> {
-        Ok(self.state().requires_pull_request)
+    ) -> Result<PullRequestRequirement, FakeGithubError> {
+        Ok(self.state().requires_pull_request.clone())
     }
 
     async fn file_text(

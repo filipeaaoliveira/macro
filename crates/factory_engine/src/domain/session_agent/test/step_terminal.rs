@@ -102,7 +102,7 @@ impl RoutineSessions for ScriptedSessions {
         &self,
         command: PromptRoutineSession,
     ) -> Result<RoutinePromptAccepted, RoutineSessionError> {
-        if let Some(error) = self.refuse {
+        if let Some(error) = self.refuse.clone() {
             return Err(error);
         }
         let action_id = command.action.action_id;
@@ -405,7 +405,7 @@ async fn the_terminal_reaches_the_step_s_session() {
         (RoutineSessionError::RuntimeUnavailable, false),
     ] {
         let refusing = ScriptedSessions {
-            refuse: Some(refusal),
+            refuse: Some(refusal.clone()),
             ..ScriptedSessions::default()
         };
         let agent = SessionAgent::new(refusing, repo.clone(), agents());

@@ -825,7 +825,11 @@ counts; when unsure, the failure is the work's (`workflow/work.rs`,
 `work_failure`). A Step's work failed for infrastructure when every Agent of
 its Role was out of quota, or the usage limit of its Agent's own provider
 account ended a turn that did work (`StepError::OutOfQuota`, type
-`FactoryInfrastructure`), or when it timed out because its worker went
+`FactoryInfrastructure`), or when its Agent's machine refused to open its
+session (`RoutineSessionError::Refused`, `SessionAgentError::Refused`,
+`StepError::Refused`, type `FactoryRefused`: never retried, and the
+failure's message, the refusal with the machine's reason, is the Step's
+output instead of the fixed text, `WorkFailure::Refused`), or when it timed out because its worker went
 quiet (`Heartbeat`) or no worker took it (`ScheduleToStart`); an attempt
 that ran past its own time (`StartToClose`) may be an agent slower than its
 deadline, and is the work's. A Step whose whole time ran out reads as its
@@ -2430,7 +2434,10 @@ so a person approves it; `rules.json` lists at most
 `MAX_DEFINITION_CONTROL_FILES` (195) patterns to leave them room. `GET
 /settings/definition` says whether the default branch takes changes only by
 pull request (`requiresPullRequest`, from its rulesets or, for its admins,
-its branch protection), and the Control Files and Standing Rules settings
+its branch protection); when GitHub refuses to show them, it is null and
+`requiresPullRequestUnknownReason` carries GitHub's message, such as a plan
+that offers no protection on a private repository, so the screen does not
+guess the reason. The Control Files and Standing Rules settings
 say a Definition is named (`definitionNamed`). The service keeps what it
 read per person (`service/definition/kept.rs`): a Definition read at a
 commit for 10 minutes, since a commit's files never change, and the head

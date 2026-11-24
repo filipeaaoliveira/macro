@@ -11,6 +11,9 @@ use crate::outbound::agent_session::{ApiError, HarnessApi};
 use crate::runtime::Runtime;
 use crate::trigger::{TriggerWork, WorkExecutor};
 
+#[cfg(test)]
+mod test;
+
 /// A failure doing an event's work.
 #[derive(Debug, thiserror::Error)]
 pub enum DispatchError {
@@ -132,6 +135,21 @@ impl Dispatcher {
             }
         }
         Ok(self.workspace.path.to_string_lossy().into_owned())
+    }
+
+    /// Report that `session`, requested by `sender` for `bot`, will not open
+    /// here, and why. A report that fails leaves the requester to time out,
+    /// as before runtimes could refuse.
+    async fn refuse(
+        &self,
+        session: AgentSessionId,
+        bot: bot_id::BotId,
+        sender: &MacroUserIdStr<'static>,
+        reason: &str,
+    ) {
+        if let Err(error) = self.api.refuse(session, bot, sender, reason).await {
+            tracing::warn!(%session, ?error, "the session's refusal could not be reported");
+        }
     }
 
     fn created(&self, session: AgentSessionId, sender: &MacroUserIdStr<'static>) {
@@ -275,9 +293,19 @@ impl WorkExecutor for Dispatcher {
                 sender,
                 origin,
             } => {
-                let workspace = self
+                let workspace = match self
                     .workspace_for(session, repo_url.as_deref(), work_branch.as_deref())
-                    .await?;
+                    .await
+                {
+                    Ok(workspace) => workspace,
+                    // The requester waits on this session: tell it why none
+                    // opens, rather than leave it to time out.
+                    Err(DispatchError::Workspace(reason)) => {
+                        self.refuse(session, bot, &sender, &reason).await;
+                        return Err(DispatchError::Workspace(reason));
+                    }
+                    Err(error) => return Err(error),
+                };
                 // Same create as a mention, minus the thread: the requester is
                 // waiting on this id, so the session is created under it. No
                 // prompt here - whoever asked sends their own through the

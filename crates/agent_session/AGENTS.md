@@ -191,6 +191,11 @@ skips the turn before any model call; unset or unreadable, summaries run.
 - Persist `AcpReady` through the fenced session log before opening or restoring
   a session on an already-initialized shared runtime; MCP and model-gateway
   credentials remain revoked while the durable status is disconnected.
+- A runtime that refuses a requested session says why
+  (`AgentSessionError::RuntimeRefused`, a 409 with the reason on the create
+  routes; `RoutineSessionError::Refused` on the routine routes, a 422 whose
+  `code` carries the reason). It is the one routine error with text in it,
+  so `RoutineSessionError` is `Clone`, not `Copy`.
 - The scheduler's routine-session operations (`domain/routines.rs`,
   `/internal/routine-sessions/*`) also serve routine drafts: `delete` removes
   a session the scheduler opened for its owner, a routine's run (source

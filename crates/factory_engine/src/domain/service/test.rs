@@ -155,6 +155,8 @@ struct WorkFailure {
     retryable: bool,
     out_of_quota: bool,
     overdue: bool,
+    /// Why the agent's machine refused the Step's session, if it did.
+    refused: Option<&'static str>,
 }
 
 impl Retryable for WorkFailure {
@@ -170,6 +172,10 @@ impl AgentFailure for WorkFailure {
 
     fn overdue(&self) -> bool {
         self.overdue
+    }
+
+    fn refused(&self) -> Option<&str> {
+        self.refused
     }
 }
 
@@ -237,6 +243,7 @@ impl StepExecutor for FakeExecutor {
                 retryable: false,
                 out_of_quota: false,
                 overdue: false,
+                refused: None,
             });
         }
         self.steered
@@ -1087,6 +1094,7 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
                 retryable: false,
                 out_of_quota: false,
                 overdue: false,
+                refused: None,
             }),
             ..FakeExecutor::default()
         },
@@ -1098,6 +1106,7 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
                 retryable: true,
                 out_of_quota: false,
                 overdue: false,
+                refused: None,
             }),
             ..FakeExecutor::default()
         },
@@ -1109,6 +1118,7 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
                 retryable: true,
                 out_of_quota: false,
                 overdue: true,
+                refused: None,
             }),
             ..FakeExecutor::default()
         },
@@ -1120,12 +1130,27 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
                 retryable: false,
                 out_of_quota: true,
                 overdue: false,
+                refused: None,
+            }),
+            ..FakeExecutor::default()
+        },
+    );
+
+    let refused = StepServiceImpl::new(
+        repo.clone(),
+        FakeExecutor {
+            failure: Some(WorkFailure {
+                retryable: false,
+                out_of_quota: false,
+                overdue: false,
+                refused: Some("this machine does not manage repositories"),
             }),
             ..FakeExecutor::default()
         },
     );
 
     let final_failure = for_good.run_step(reply_step(run_id, 1)).await;
+    let refused_failure = refused.run_step(reply_step(run_id, 1)).await;
     let passing_failure = for_now.run_step(reply_step(run_id, 1)).await;
     let quota_failure = out_of_quota.run_step(reply_step(run_id, 1)).await;
     let overdue_failure = overdue.run_step(reply_step(run_id, 1)).await;
@@ -1143,6 +1168,12 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
         quota_failure,
         Err(crate::domain::models::StepError::OutOfQuota(_))
     ));
+    // A session its machine refused is infrastructure's, for good, and says
+    // why for the Step's output.
+    let Err(crate::domain::models::StepError::Refused(reason)) = &refused_failure else {
+        panic!("not a refusal: {refused_failure:?}");
+    };
+    assert_eq!(reason, "this machine does not manage repositories");
     // An agent still at work when the wait ended is the work's, retried.
     assert!(matches!(
         overdue_failure,

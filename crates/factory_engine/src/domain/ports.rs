@@ -35,9 +35,10 @@ use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
     BranchUpdating, CodeRepository, CommitMade, ControlFilesSettings, DefinitionPullRequest,
     DefinitionSettings, FactoryError, FinishedJob, FlowSummary, HeadChecks, JobRerun, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestText, RepositoryAccess,
-    RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
-    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestRequirement,
+    PullRequestText, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart,
+    SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError, StepInput,
+    StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -133,6 +134,13 @@ pub trait AgentFailure: Retryable {
     /// The agent's last message, when it stopped without handing back a
     /// result even once reminded: the Step then waits for its Run's owner.
     fn stopped_without_result(&self) -> Option<&str> {
+        None
+    }
+
+    /// Why the agent's machine refused the Step's session, when it did:
+    /// trying again is refused the same way, and the Step fails for
+    /// infrastructure, showing the Run's owner why.
+    fn refused(&self) -> Option<&str> {
         None
     }
 
@@ -360,14 +368,14 @@ pub trait PullRequests: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<RequiredChecks>, Self::Err>> + Send;
 
     /// Whether a change reaches `branch` of `repository` only through a
-    /// pull request, by its rulesets or branch protection; none when
-    /// `owner` cannot tell.
+    /// pull request, by its rulesets or branch protection; unknown, with
+    /// GitHub's reason when it gave one, when `owner` cannot tell.
     fn requires_pull_request(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         branch: &str,
-    ) -> impl Future<Output = Result<Option<bool>, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<PullRequestRequirement, Self::Err>> + Send;
 
     /// The text of the file at `path` on `branch` of `repository`; none
     /// when the branch holds no file there.

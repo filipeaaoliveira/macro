@@ -937,7 +937,9 @@ impl IntoResponse for ScheduledActionApiError {
                     (StatusCode::NOT_FOUND, session.to_string())
                 }
                 RoutineSessionError::Forbidden => (StatusCode::FORBIDDEN, session.to_string()),
-                RoutineSessionError::AppNotConnected | RoutineSessionError::AppsUnsupported => {
+                RoutineSessionError::AppNotConnected
+                | RoutineSessionError::AppsUnsupported
+                | RoutineSessionError::Refused(_) => {
                     (StatusCode::UNPROCESSABLE_ENTITY, session.to_string())
                 }
                 RoutineSessionError::Conflict | RoutineSessionError::TeamAgentComputer => {

@@ -263,7 +263,9 @@ export default {
   definitionPullRequestRequired:
     'GitHub asks for a pull request on its default branch. Anyone allowed to bypass that rule can still push to it.',
   definitionPullRequestUnknown:
-    'Couldn’t tell whether its default branch requires a pull request: only its admins can read that. Make sure it does.',
+    'Couldn’t read whether its default branch requires a pull request. Make sure it does.',
+  definitionPullRequestUnknownReason:
+    'Couldn’t read whether its default branch requires a pull request: {{reason}}. Make sure it does.',
   definitionNewestRun: 'The newest run read it at {{commit}}.',
   definitionNoRunYet: 'No run has read it yet.',
   definitionContents: 'What the definition holds',

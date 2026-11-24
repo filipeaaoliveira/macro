@@ -674,7 +674,7 @@ async fn preparation_reauthorizes_previously_saved_selection_after_deletion_or_r
         config.task = agent_task();
         let created = svc.create_action(&user_principal(), config).await.unwrap();
         assert!(sessions.preparations.lock().unwrap().is_empty());
-        *sessions.error.lock().unwrap() = Some(denial);
+        *sessions.error.lock().unwrap() = Some(denial.clone());
         let runner = TargetRunner::new(sessions.clone());
         let mut handle = ExecutionHandle::default();
         let program = routine_program::RoutineProgram::from_task(&created.task).unwrap();

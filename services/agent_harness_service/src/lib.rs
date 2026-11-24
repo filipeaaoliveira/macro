@@ -1901,6 +1901,9 @@ pub async fn run() -> anyhow::Result<()> {
     );
     // Requested sessions settle in tasks of their own, drained on shutdown.
     let session_request_tasks = tokio_util::task::TaskTracker::new();
+    // What runtimes refused of those, seen by every replica.
+    let session_refusals =
+        external_session_requests::refusals::RedisSessionRefusals::new(redis.clone());
     let bots_directory = Arc::new(PgBotDirectory::new(
         PgBotsRepo::new(pool.clone()),
         computers::harness_service(&pool),
@@ -1914,7 +1917,8 @@ pub async fn run() -> anyhow::Result<()> {
                 session_repo.clone(),
                 PgHarnessRepo::new(pool.clone()),
                 session_request_tasks.clone(),
-            ),
+            )
+            .with_refusals(session_refusals.clone()),
         ),
         harness.clone(),
         MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
@@ -1929,7 +1933,8 @@ pub async fn run() -> anyhow::Result<()> {
             session_repo.clone(),
             PgHarnessRepo::new(pool.clone()),
             session_request_tasks.clone(),
-        ),
+        )
+        .with_refusals(session_refusals.clone()),
         PgConnectionRepo::new(pool.clone()),
         MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
     );
@@ -1952,7 +1957,8 @@ pub async fn run() -> anyhow::Result<()> {
                 session_repo.clone(),
                 PgHarnessRepo::new(pool.clone()),
                 session_request_tasks.clone(),
-            ),
+            )
+            .with_refusals(session_refusals.clone()),
             draining_sessions.clone(),
             (*harness).clone(),
             routine_sessions::PipedreamConnectedApps(PgConnectionRepo::new(pool.clone())),
@@ -2181,6 +2187,13 @@ pub async fn run() -> anyhow::Result<()> {
             .with_activity(agent_activity)
             .with_sharing(sharing)
             .with_routine_sessions(routine_sessions)
+            .with_refusals(external_session_requests::refusals::router(
+                external_session_requests::refusals::RefusalsState::new(
+                    bots_directory.clone(),
+                    session_refusals,
+                    MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
+                ),
+            ))
             .with_conversations(conversations)
             .with_coding_agents(coding_agents)
             .with_claude_access(computer_claude)

@@ -28,7 +28,7 @@ impl RoutineSessions for Sessions {
         if command.bot_id.to_string() != BOT && command.bot_id != bot_id::MACRO_NEW_BOT_ID {
             return Err(RoutineSessionError::PersonaUnavailable);
         }
-        if let Some(error) = *self.error.lock().unwrap() {
+        if let Some(error) = self.error.lock().unwrap().clone() {
             return Err(error);
         }
         // External runtime need not be online for its authorized selection to be saved.

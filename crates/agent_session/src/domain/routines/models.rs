@@ -223,7 +223,7 @@ pub enum RoutineFailureReason {
 }
 
 /// Safe errors shared by internal adapters and the scheduler.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutineSessionError {
     /// Definitive refusal before Macro-funded work was accepted.
@@ -249,6 +249,11 @@ pub enum RoutineSessionError {
     /// A runtime could not serve the selected agent.
     #[error("selected runtime is unavailable")]
     RuntimeUnavailable,
+    /// The selected agent's runtime refused to open the session, and said
+    /// why: the only text an error carries, written by the runtime for the
+    /// session's owner. Asking again is refused the same way.
+    #[error("the agent's machine refused the session: {0}")]
+    Refused(String),
     /// The selected agent's harness is an agent teammate's computer.
     #[error("{}", crate::domain::error::TEAM_AGENT_COMPUTER_MESSAGE)]
     TeamAgentComputer,
@@ -290,6 +295,7 @@ impl RoutineSessionError {
             | Self::AppNotConnected
             | Self::AppsUnsupported
             | Self::TeamAgentComputer
+            | Self::Refused(_)
             | Self::SessionMismatch
             | Self::ModelMismatch
             | Self::Conflict

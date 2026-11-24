@@ -32,6 +32,8 @@ jobs:
       web: ${{ github.event_name == 'workflow_dispatch' || steps.web-filter.outputs.should_run == 'true' || steps.fork-filter.outputs.should_run == 'true' }}
       rust_packages: ${{ github.event_name == 'workflow_dispatch' && 'all' || steps.nextest-filter.outputs.rust_packages }}
       skip_tests: ${{ github.event_name == 'pull_request' && steps.nextest-filter.outputs.skip_tests == 'true' }}
+      test_shards: ${{ steps.test-shards.outputs.shards }}
+      test_shard_count: ${{ steps.test-shards.outputs.count }}
     timeout-minutes: 20
     steps:
     - name: Checkout
@@ -375,14 +377,33 @@ jobs:
       shell: bash
       env:
         FILTER_CACHE_DIR: /home/runner/.cache/macro-nextest-filter
+    - id: test-shards
+      name: count the test shards
+      run: |
+        set -euo pipefail
+        if [ "$RUST_PACKAGES" = all ]; then
+          count=$MAX_TEST_SHARDS
+        else
+          packages=$(tr ' ' '\n' <<< "$RUST_PACKAGES" | grep -cvE '^(sync_service|none|)$' || true)
+          count=$(( (packages + PACKAGES_PER_SHARD - 1) / PACKAGES_PER_SHARD ))
+          count=$(( count < 1 ? 1 : count > MAX_TEST_SHARDS ? MAX_TEST_SHARDS : count ))
+        fi
+        echo "count=$count" >> "$GITHUB_OUTPUT"
+        echo "shards=$(seq -s , 1 "$count" | sed 's/.*/[&]/')" >> "$GITHUB_OUTPUT"
+        echo "$count test shards"
+      shell: bash
+      env:
+        RUST_PACKAGES: ${{ github.event_name == 'workflow_dispatch' && 'all' || steps.nextest-filter.outputs.rust_packages }}
+        MAX_TEST_SHARDS: '4'
+        PACKAGES_PER_SHARD: '4'
   rust-check:
     needs:
     - changes
     if: needs.changes.outputs.rust == 'true' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: macro-fork
+    runs-on: ubuntu-latest
     env:
+      CI_CACHE_DIR: ${{ github.workspace }}/target/fork-ci
       CARGO_BUILD_JOBS: '4'
-      RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
       RUSTFLAGS: '-Dwarnings -C link-arg=-fuse-ld=mold'
@@ -435,6 +456,21 @@ jobs:
         printf '%s\n' "$compare_rev" > /tmp/base-revision
         git diff --name-only --no-renames "$compare_rev" "$GITHUB_SHA" > /tmp/changed-files
       shell: bash
+    - name: free disk space
+      run: |
+        set -euo pipefail
+        df -h /
+        for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+          /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
+          /usr/local/share/powershell /usr/local/share/chromium; do
+          sudo rm -rf "$dir" &
+        done
+        # Images a service container uses stay.
+        docker image prune --all --force > /dev/null &
+        wait
+        mkdir -p "$CI_CACHE_DIR"
+        df -h /
+      shell: bash
     - name: Setup Nix
       uses: './.github/actions/setup-nix'
     - name: Setup Nix dev shell
@@ -450,8 +486,31 @@ jobs:
           echo "WASM_PKG_CACHE_DIR=$cache/wasm-pkgs"
           echo "VITEST_MODULE_CACHE_DIR=$cache/vitest"
         } >> "$GITHUB_ENV"
-    - name: Start sccache server
-      run: sccache --start-server
+    - name: build without sccache
+      run: echo 'unset RUSTC_WRAPPER' >> "$BASH_ENV"
+    - name: cache compiled dependencies
+      uses: Swatinem/rust-cache@v2.9.3
+      with:
+        workspaces: '. -> target/fork-ci/target/clippy'
+        key: clippy
+        cache-on-failure: 'true'
+    - id: code-mode-assets
+      name: code-mode assets key
+      run: |
+        set -euo pipefail
+        path="$(nix eval --raw .#code-mode-assets.outPath)"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "name=$(basename "$path")" >> "$GITHUB_OUTPUT"
+    - id: code-mode-assets-cache
+      name: cache the code-mode assets
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+      with:
+        path: target/fork-ci/code-mode-assets.closure
+        key: code-mode-assets-${{ steps.code-mode-assets.outputs.name }}
+      continue-on-error: true
+    - name: import the cached code-mode assets
+      if: steps.code-mode-assets-cache.outputs.cache-hit == 'true'
+      run: nix-store --import < target/fork-ci/code-mode-assets.closure || echo '::warning::Could not import the cached code-mode assets'
     - name: Build code-mode assets
       run: |
         set -euo pipefail
@@ -515,6 +574,11 @@ jobs:
         else
           echo "::warning::Could not save code-mode assets to the remote cache"
         fi
+    - name: export the code-mode assets for the cache
+      if: steps.code-mode-assets-cache.outputs.cache-hit != 'true'
+      run: nix-store --export "$ASSETS" > target/fork-ci/code-mode-assets.closure
+      env:
+        ASSETS: ${{ steps.code-mode-assets.outputs.path }}
     - name: fmt
       run: |
         set -euo pipefail
@@ -619,36 +683,28 @@ jobs:
         RUSTFLAGS: '-Dwarnings -Dclippy::disallowed_methods -C link-arg=-fuse-ld=mold'
         RUSTDOCFLAGS: '-Dwarnings'
         SQLX_OFFLINE: 'true'
-    - name: show sccache stats
-      if: always()
-      run: sccache --show-stats || true
-    - name: show cache sizes
+        RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
+    - name: show disk usage
       if: always()
       run: |
-        cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-        du -sh "$cache/" 2>/dev/null || true
-        # One du per directory: du counts a directory once per call.
-        for dir in "$cache"/* "$cache"/target/*; do
-          du -sh "$dir" 2>/dev/null || true
-        done
-    - name: Teardown Nix
-      if: always()
-      uses: './.github/actions/teardown-nix'
+        df -h /
+        du -sh /nix/store "$CI_CACHE_DIR"/target/* ~/.cargo/registry 2>/dev/null || true
   rust-test:
     needs:
     - changes
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.rust_packages != 'none' && needs.changes.outputs.skip_tests != 'true' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: macro-fork
+    runs-on: ubuntu-latest
     env:
-      RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
-      NEXTEST_TEST_THREADS: '12'
+      CI_CACHE_DIR: ${{ github.workspace }}/target/fork-ci
+      TEST_SHARD: ${{ matrix.shard }}
+      TEST_SHARD_COUNT: ${{ needs.changes.outputs.test_shard_count }}
+      NEXTEST_TEST_THREADS: '8'
       CARGO_BUILD_JOBS: '3'
       MOLD_JOBS: '1'
       REDIS_URI: redis://127.0.0.1:6379
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
       RUSTFLAGS: '-Dwarnings -C link-arg=-fuse-ld=mold'
-      SCCACHE_IDLE_TIMEOUT: '0'
     timeout-minutes: 180
     services:
       postgres:
@@ -665,12 +721,31 @@ jobs:
         ports:
         - '6379:6379'
         options: '--health-cmd "redis-cli ping" --health-interval 1s --health-start-period 30s --health-timeout 5s --health-retries 5'
+    strategy:
+      matrix:
+        shard: ${{ fromJSON(needs.changes.outputs.test_shards) }}
+      fail-fast: false
     steps:
     - name: Checkout
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         clean: 'false'
         persist-credentials: 'false'
+    - name: free disk space
+      run: |
+        set -euo pipefail
+        df -h /
+        for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+          /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
+          /usr/local/share/powershell /usr/local/share/chromium; do
+          sudo rm -rf "$dir" &
+        done
+        # Images a service container uses stay.
+        docker image prune --all --force > /dev/null &
+        wait
+        mkdir -p "$CI_CACHE_DIR"
+        df -h /
+      shell: bash
     - name: Setup Nix
       uses: './.github/actions/setup-nix'
     - name: Setup Nix dev shell
@@ -686,8 +761,31 @@ jobs:
           echo "WASM_PKG_CACHE_DIR=$cache/wasm-pkgs"
           echo "VITEST_MODULE_CACHE_DIR=$cache/vitest"
         } >> "$GITHUB_ENV"
-    - name: Start sccache server
-      run: sccache --start-server
+    - name: build without sccache
+      run: echo 'unset RUSTC_WRAPPER' >> "$BASH_ENV"
+    - name: cache compiled dependencies
+      uses: Swatinem/rust-cache@v2.9.3
+      with:
+        workspaces: '. -> target/fork-ci/target/test'
+        key: test-${{ matrix.shard }}
+        cache-on-failure: 'true'
+    - id: code-mode-assets
+      name: code-mode assets key
+      run: |
+        set -euo pipefail
+        path="$(nix eval --raw .#code-mode-assets.outPath)"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "name=$(basename "$path")" >> "$GITHUB_OUTPUT"
+    - id: code-mode-assets-cache
+      name: cache the code-mode assets
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+      with:
+        path: target/fork-ci/code-mode-assets.closure
+        key: code-mode-assets-${{ steps.code-mode-assets.outputs.name }}
+      continue-on-error: true
+    - name: import the cached code-mode assets
+      if: steps.code-mode-assets-cache.outputs.cache-hit == 'true'
+      run: nix-store --import < target/fork-ci/code-mode-assets.closure || echo '::warning::Could not import the cached code-mode assets'
     - name: Build code-mode assets
       run: |
         set -euo pipefail
@@ -751,6 +849,11 @@ jobs:
         else
           echo "::warning::Could not save code-mode assets to the remote cache"
         fi
+    - name: export the code-mode assets for the cache
+      if: steps.code-mode-assets-cache.outputs.cache-hit != 'true'
+      run: nix-store --export "$ASSETS" > target/fork-ci/code-mode-assets.closure
+      env:
+        ASSETS: ${{ steps.code-mode-assets.outputs.path }}
     - name: configure postgres for concurrent tests
       run: |
         postgres_container="$(docker ps --format '{{.ID}} {{.Image}}' | awk '$2 == "pgvector/pgvector:pg14" { print $1; exit }')"
@@ -777,6 +880,20 @@ jobs:
       run: just setup_test_envs && just initialize_dbs && just setup_test_template
     - name: run tests
       run: |
+        if [ "$RUST_PACKAGES" = all ]; then
+          packages=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sort)
+        else
+          packages=$(tr ' ' '\n' <<< "$RUST_PACKAGES")
+        fi
+        RUST_PACKAGES=$( { grep -vE '^(sync_service|)$' <<< "$packages" || true; } \
+          | awk -v shard="$TEST_SHARD" -v count="$TEST_SHARD_COUNT" '(NR - 1) % count == shard - 1' \
+          | tr '\n' ' ' | sed 's/ $//')
+        if [ -z "$RUST_PACKAGES" ]; then
+          echo "No packages in test shard $TEST_SHARD of $TEST_SHARD_COUNT"
+          exit 0
+        fi
+        echo "Test shard $TEST_SHARD of $TEST_SHARD_COUNT: $RUST_PACKAGES"
+        export RUST_PACKAGES
         export CARGO_TARGET_DIR="$CARGO_TARGET_ROOT/test"
         config="$RUNNER_TEMP/nextest-fork-ci.toml"
         cat > "$config" <<'EOF'
@@ -851,40 +968,14 @@ jobs:
         fi
 
         cargo nextest run "${common[@]}" "${pkg_args[@]}"
-      timeout-minutes: 150
-    - name: show sccache stats
-      if: always()
-      run: sccache --show-stats || true
-    - name: keep the cache slot under its cap
-      if: always()
-      run: |
-        set -euo pipefail
-        cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-        size=$(du -sm "$cache/" | cut -f1)
-        echo "cache slot: $size MB"
-        if [ "$size" -le "$SLOT_TRIM_MB" ]; then
-          exit 0
-        fi
-        deps="${CARGO_TARGET_ROOT:-$cache/target}/test/debug/deps"
-        [ -d "$deps" ] || exit 0
-        # A test binary is an executable with no extension; libraries
-        # (.rlib, .rmeta, .so) and dependency files stay.
-        find "$deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -delete
-        echo "after dropping the test binaries: $(du -sm "$cache/" | cut -f1) MB"
       env:
-        SLOT_TRIM_MB: '15360'
-    - name: show cache sizes
+        RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
+      timeout-minutes: 150
+    - name: show disk usage
       if: always()
       run: |
-        cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-        du -sh "$cache/" 2>/dev/null || true
-        # One du per directory: du counts a directory once per call.
-        for dir in "$cache"/* "$cache"/target/*; do
-          du -sh "$dir" 2>/dev/null || true
-        done
-    - name: Teardown Nix
-      if: always()
-      uses: './.github/actions/teardown-nix'
+        df -h /
+        du -sh /nix/store "$CI_CACHE_DIR"/target/* ~/.cargo/registry 2>/dev/null || true
   web:
     needs:
     - changes

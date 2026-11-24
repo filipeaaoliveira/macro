@@ -583,6 +583,7 @@ fn session_error(error: AgentSessionError) -> RoutineSessionError {
         AgentSessionError::RuntimeUnavailable(_) | AgentSessionError::Disconnected(_) => {
             RoutineSessionError::RuntimeUnavailable
         }
+        AgentSessionError::RuntimeRefused(reason) => RoutineSessionError::Refused(reason),
         _ => RoutineSessionError::OperationFailed,
     }
 }

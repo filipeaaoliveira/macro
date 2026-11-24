@@ -105,6 +105,7 @@ export * from './definitionSettingsOpenPullRequests';
 export * from './definitionSettingsProblem';
 export * from './definitionSettingsRepoUrl';
 export * from './definitionSettingsRequiresPullRequest';
+export * from './definitionSettingsRequiresPullRequestUnknownReason';
 export * from './definitionSettingsTeamId';
 export * from './deliveryInsight';
 export * from './deliveryInsightAutonomyRate';

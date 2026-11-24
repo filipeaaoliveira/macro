@@ -5,9 +5,10 @@
 use agent_runtime_protocol::domain::action::{AgentAction, AgentActionId};
 use agent_session::domain::model::AgentSessionId;
 use agent_session::inbound::axum_router::{
-    ControlRequest, CreateAgentSessionRequest, CreateAgentSessionResponse,
+    ControlRequest, CreateAgentSessionRequest, CreateAgentSessionResponse, RuntimeRefusalRequest,
     ThreadSessionExistsResponse,
 };
+use bot_id::BotId;
 use macro_user_id::user_id::MacroUserIdStr;
 use reqwest::StatusCode;
 use trigger_context::TriggerContext;
@@ -154,6 +155,31 @@ impl HarnessApi {
                 context,
                 client_id: None,
                 action,
+            })
+            .send()
+            .await?;
+        refuse_errors(response).await?;
+        Ok(())
+    }
+
+    /// Tell the service this daemon will not open `session`, requested for
+    /// `bot` by `requester`, and why: whoever waits on the session stops
+    /// waiting and shows `reason`.
+    pub async fn refuse(
+        &self,
+        session: AgentSessionId,
+        bot: BotId,
+        requester: &MacroUserIdStr<'static>,
+        reason: &str,
+    ) -> Result<(), ApiError> {
+        let response = self
+            .http
+            .post(format!("{}/agent-sessions/{session}/refusal", self.base))
+            .header(HARNESS_TOKEN_HEADER, &self.token)
+            .header(HARNESS_ACTING_USER_HEADER, requester.as_ref())
+            .json(&RuntimeRefusalRequest {
+                bot_id: bot.as_uuid(),
+                reason: reason.to_owned(),
             })
             .send()
             .await?;

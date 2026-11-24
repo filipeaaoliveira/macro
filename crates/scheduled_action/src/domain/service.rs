@@ -716,6 +716,7 @@ fn check_problem(error: anyhow::Error) -> Result<String> {
                             | RoutineSessionError::Forbidden
                             | RoutineSessionError::AppNotConnected
                             | RoutineSessionError::AppsUnsupported
+                            | RoutineSessionError::Refused(_)
                     )
                 )
         }

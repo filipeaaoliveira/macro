@@ -118,7 +118,7 @@ impl ServiceSpy {
             .lock()
             .unwrap()
             .push((operation, serde_json::to_value(command).unwrap()));
-        self.error.map_or(Ok(()), Err)
+        self.error.clone().map_or(Ok(()), Err)
     }
 }
 
@@ -430,10 +430,15 @@ async fn domain_denials_are_preserved_as_content_free_error_codes() {
             RoutineSessionError::OperationFailed,
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
+        // The one code with text: the runtime's reason for its owner.
+        (
+            RoutineSessionError::Refused("this machine does not manage repositories".into()),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
     ] {
         for operation in OPERATIONS {
             let service = Arc::new(ServiceSpy {
-                error: Some(error),
+                error: Some(error.clone()),
                 ..Default::default()
             });
             let response = app(service.clone())
