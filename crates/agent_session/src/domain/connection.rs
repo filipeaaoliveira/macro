@@ -20,10 +20,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, McpServer, RequestId, Response,
-    SessionId,
+    CancelNotification, CloseSessionRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, McpServer, RequestId, Response, SessionId,
 };
 use agent_client_protocol::{JsonRpcMessage, RawJsonRpcMessage};
 use agent_runtime_protocol::domain::ports::{
@@ -456,6 +457,62 @@ where
         ))
     }
 
+    /// Ask the agent to end one of its ACP sessions and free what it holds.
+    ///
+    /// Without this a session Macro deletes stays alive in the runtime: an
+    /// adapter keeps each session's agent process until it is told to close
+    /// it or the adapter itself exits, which happens only when the runtime
+    /// redials. Sent as a request of the connection's own, so its answer
+    /// routes here whether or not the session's actor is still bound. An
+    /// agent that does not advertise `sessionCapabilities.close`, or a
+    /// connection that never finished its `initialize`, is sent
+    /// `session/cancel` instead: it stops any turn still running, which is
+    /// all such an agent offers. Bounded by [`CLOSE_SESSION_TIMEOUT`].
+    pub async fn close_acp_session(
+        &self,
+        acp_session: SessionId,
+    ) -> Result<SessionClose, CloseSessionError> {
+        if !self.agent_closes_sessions() {
+            let cancel = CancelNotification::new(acp_session);
+            let params = serde_json::to_value(&cancel)
+                .map_err(|error| CloseSessionError::Runtime(error.to_string()))?;
+            let frame = RawJsonRpcMessage::notification(cancel.method().to_owned(), params)
+                .map_err(|error| CloseSessionError::Runtime(error.to_string()))?;
+            self.outbound
+                .send(ToRuntimeMessage::Acp(AcpMessage(frame)))
+                .await
+                .map_err(CloseSessionError::Transport)?;
+            return Ok(SessionClose::Cancelled);
+        }
+        let (method, params) = CloseSessionRequest::new(acp_session)
+            .to_untyped_message()
+            .map_err(|error| CloseSessionError::Runtime(error.to_string()))?
+            .into_parts();
+        match tokio::time::timeout(CLOSE_SESSION_TIMEOUT, self.request(method, params)).await {
+            Ok(Ok(_)) => Ok(SessionClose::Closed),
+            Ok(Err(error)) => Err(error.into()),
+            Err(_) => Err(CloseSessionError::TimedOut),
+        }
+    }
+
+    /// Whether this connection's `initialize` answer advertises
+    /// `sessionCapabilities.close`. Read from the handshake already held,
+    /// never by waiting for one: a connection still handshaking has no
+    /// session to close.
+    fn agent_closes_sessions(&self) -> bool {
+        let handshake = self.handshake.borrow();
+        let HandshakeStatus::ReadyWithContext { context, .. } = &*handshake else {
+            return false;
+        };
+        initialize_result(context).is_ok_and(|initialized| {
+            initialized
+                .agent_capabilities
+                .session_capabilities
+                .close
+                .is_some()
+        })
+    }
+
     /// Send this connection's `initialize` and publish its answer to every
     /// session on the connection, as a session that initialized would.
     async fn initialize(&self) -> Result<InitializeResponse, ListSessionsError> {
@@ -489,17 +546,7 @@ where
             }
             () = self.closed.cancelled() => return Err(ListSessionsError::Closed),
         };
-        let ToServerMessage::Acp(AcpMessage(RawJsonRpcMessage::Response(Response::Result {
-            result,
-            ..
-        }))) = &context.response
-        else {
-            return Err(ListSessionsError::Runtime(
-                "the shared handshake has no initialize result".to_owned(),
-            ));
-        };
-        serde_json::from_value::<InitializeResponse>(result.clone())
-            .map_err(|error| ListSessionsError::Runtime(error.to_string()))
+        initialize_result(&context).map_err(ListSessionsError::Runtime)
     }
 
     /// Send a request of the connection's own and await its result.
@@ -806,6 +853,60 @@ pub enum ListSessionsError {
     /// The runtime refused or answered something unreadable.
     #[error("runtime could not list its sessions: {0}")]
     Runtime(String),
+}
+
+/// What [`RuntimeConnection::close_acp_session`] asked of the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionClose {
+    /// The agent closed the session and freed what it held.
+    Closed,
+    /// The agent cannot close sessions, so it was only told to stop the
+    /// session's turn.
+    Cancelled,
+}
+
+/// Why a runtime could not close a session.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum CloseSessionError {
+    /// Sending the request over the runtime transport failed.
+    #[error("could not ask the runtime to close the session: {0}")]
+    Transport(#[source] TransportError),
+    /// The runtime connection closed before answering.
+    #[error("runtime connection closed before closing the session")]
+    Closed,
+    /// The runtime did not answer within [`CLOSE_SESSION_TIMEOUT`].
+    #[error("runtime did not close the session in time")]
+    TimedOut,
+    /// The runtime refused or answered something unreadable.
+    #[error("runtime could not close the session: {0}")]
+    Runtime(String),
+}
+
+impl From<ListSessionsError> for CloseSessionError {
+    fn from(error: ListSessionsError) -> Self {
+        match error {
+            ListSessionsError::Transport(error) => Self::Transport(error),
+            ListSessionsError::Closed => Self::Closed,
+            ListSessionsError::Runtime(message) => Self::Runtime(message),
+        }
+    }
+}
+
+/// How long an agent has to answer `session/close`. Its adapter ends the
+/// session's agent process before answering, which takes a moment.
+pub const CLOSE_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The `initialize` result a published handshake holds.
+fn initialize_result(context: &InitializationContext) -> Result<InitializeResponse, String> {
+    let ToServerMessage::Acp(AcpMessage(RawJsonRpcMessage::Response(Response::Result {
+        result,
+        ..
+    }))) = &context.response
+    else {
+        return Err("the shared handshake has no initialize result".to_owned());
+    };
+    serde_json::from_value::<InitializeResponse>(result.clone()).map_err(|error| error.to_string())
 }
 
 /// Pages of `session/list` read before an agent is assumed to loop.
