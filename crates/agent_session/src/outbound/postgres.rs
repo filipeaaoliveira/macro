@@ -1947,7 +1947,9 @@ impl<B: BotFacts + 'static> AgentSessionLogRepo for PgAgentSessionRepo<B> {
         agent_session_id: AgentSessionId,
     ) -> Result<Vec<StoredAgentSessionLog>> {
         // The whole log, with no history boundary: a resumed session's
-        // turns before its load used tokens too.
+        // turns before its load used tokens too. The requests that start
+        // the runtime's process again come along: its cost count starts
+        // over after them.
         let rows = sqlx::query_as!(
             AgentSessionLogRow,
             r#"
@@ -1955,10 +1957,18 @@ impl<B: BotFacts + 'static> AgentSessionLogRepo for PgAgentSessionRepo<B> {
                    direction, content, created_at
             FROM agent_session_log
             WHERE agent_session_id = $1
-              AND direction = 'to_server'
               AND (
-                  content->'result' ? 'usage'
-                  OR content->'params'->'update'->>'sessionUpdate' = 'usage_update'
+                  (
+                      direction = 'to_server'
+                      AND (
+                          content->'result' ? 'usage'
+                          OR content->'params'->'update'->>'sessionUpdate' = 'usage_update'
+                      )
+                  )
+                  OR (
+                      direction = 'to_runtime'
+                      AND content->>'method' IN ('initialize', 'session/load', 'session/resume')
+                  )
               )
             ORDER BY created_at, id
             "#,

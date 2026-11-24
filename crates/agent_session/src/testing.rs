@@ -966,7 +966,12 @@ impl AgentSessionLogRepo for InMemoryAgentSessionRepo {
             .get(&agent_session_id)
             .cloned()
             .unwrap_or_default();
-        rows.retain(|row| matches!(row.entry.content, Message::ToServer(_)));
+        rows.retain(|row| {
+            matches!(
+                row.entry.content,
+                Message::ToServer(_) | Message::ToRuntime(_)
+            )
+        });
         rows.sort_unstable_by_key(|row| (row.created_at, row.id));
         Ok(rows)
     }

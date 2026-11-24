@@ -439,6 +439,7 @@ async fn usage_is_summed_by_entry_and_run_for_the_caller() {
         cache_write: 0,
         cost_usd: 0.0,
         unpriced_calls: 0,
+        reported_by_runtime: false,
     };
     let service = service(records, vec![used(1, 100, 10), used(2, 50, 5)]);
 
@@ -505,6 +506,7 @@ async fn an_entry_costs_its_priced_calls_when_every_call_was_priced() {
         cache_write: 0,
         cost_usd,
         unpriced_calls,
+        reported_by_runtime: false,
     };
     let service = service(
         records,
@@ -577,6 +579,7 @@ async fn a_step_counts_once_however_many_sessions_it_worked_in() {
         cache_write: 0,
         cost_usd: 0.0,
         unpriced_calls: 0,
+        reported_by_runtime: false,
     };
     let service = service(
         records,

@@ -15,11 +15,16 @@ use crate::domain::model::StoredAgentSessionLog;
 /// The currency a cost is summed in.
 const USD: &str = "USD";
 
+/// The requests that start a runtime's process on the session again: its
+/// cost count starts over after them.
+const RESTARTS: [&str; 3] = ["initialize", "session/load", "session/resume"];
+
 /// Sum what `entries`, a session's frames oldest first, report it used. A
 /// prompt response's `usage` counts its own turn, once per request id. A
 /// usage update's `cost` is the session's total so far, as the runtime's
 /// process counts it: a process that starts over (a resumed session) counts
-/// from zero again, so a total lower than the one before starts a new
+/// from zero again, so an `initialize`, `session/load` or `session/resume`
+/// sent to the runtime, or a total lower than the one before, starts a new
 /// count, and the session's cost is the sum of each count's last total.
 /// None when no frame reported any usage.
 pub(super) fn session_usage(entries: Vec<StoredAgentSessionLog>) -> Option<RoutineUsage> {
@@ -37,12 +42,22 @@ pub(super) fn session_usage(entries: Vec<StoredAgentSessionLog>) -> Option<Routi
         let Ok(frame) = serde_json::to_value(&row.entry.content) else {
             continue;
         };
-        if frame.get("direction").and_then(Value::as_str) != Some("to_server") {
-            continue;
-        }
         let Some(content) = frame.get("content") else {
             continue;
         };
+        match frame.get("direction").and_then(Value::as_str) {
+            Some("to_server") => {}
+            Some("to_runtime") => {
+                let method = content.get("method").and_then(Value::as_str);
+                if method.is_some_and(|method| RESTARTS.contains(&method))
+                    && let Some(previous) = current.take()
+                {
+                    banked += previous;
+                }
+                continue;
+            }
+            _ => continue,
+        }
         if let Some(reported) = content.pointer("/result/usage") {
             let id = content.get("id").map(Value::to_string).unwrap_or_default();
             if !counted.insert(id) {

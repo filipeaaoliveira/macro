@@ -738,6 +738,9 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
         let mut wait = FIRST_LOOK;
         let mut failed_reads = 0;
         let mut disconnected_since: Option<tokio::time::Instant> = None;
+        // The turn whose usage was kept last: once per turn, not on every
+        // look at a paused Step's ended turn.
+        let mut kept_after: Option<AgentActionId> = None;
         loop {
             let steering = self.repo.steering(key).await.map_err(Self::records)?;
             if steering.stop_asked {
@@ -818,7 +821,10 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
             };
 
             if let Some(ended) = ended {
-                self.keep_usage(&watched).await;
+                if kept_after != Some(watched.action_id) {
+                    kept_after = Some(watched.action_id);
+                    self.keep_usage(&watched).await;
+                }
                 match steering.prompt {
                     // The owner sent a note or a resume after this turn: the
                     // Step goes on with its turn.

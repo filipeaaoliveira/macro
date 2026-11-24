@@ -59,6 +59,7 @@ fn tokens(usage: SessionUsage) -> SessionTokens {
         cache_write: usage.cache_write_tokens,
         cost_usd: usage.cost_usd.unwrap_or(0.0),
         unpriced_calls: u64::from(usage.cost_usd.is_none()),
+        reported_by_runtime: true,
     }
 }
 
@@ -69,9 +70,11 @@ where
 {
     type Err = AgentUsageError;
 
-    /// A session with usage kept reads as its runtime reported it, and is
-    /// not read from the usage log too: a runtime on Macro's model router
-    /// reports the same calls the log recorded.
+    /// Each session counts once. One whose runtime reported its cost reads
+    /// as reported. Otherwise, one the usage log recorded calls for reads
+    /// from the log, whose calls are priced: a runtime on Macro's model
+    /// router may report its tokens with no cost. Any other session with
+    /// usage kept reads as its runtime reported it, its cost unknown.
     async fn session_tokens(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -82,10 +85,14 @@ where
             .session_usage(user, sessions)
             .await
             .map_err(|error| AgentUsageError::Kept(report(error)))?;
-        let kept_sessions: HashSet<Uuid> = kept.iter().map(|usage| usage.session_id).collect();
+        let costed: HashSet<Uuid> = kept
+            .iter()
+            .filter(|usage| usage.cost_usd.is_some())
+            .map(|usage| usage.session_id)
+            .collect();
         let rest: Vec<Uuid> = sessions
             .iter()
-            .filter(|session| !kept_sessions.contains(session))
+            .filter(|session| !costed.contains(session))
             .copied()
             .collect();
         let mut read = if rest.is_empty() {
@@ -96,7 +103,14 @@ where
                 .await
                 .map_err(|error| AgentUsageError::Log(report(error)))?
         };
-        read.extend(kept.into_iter().map(tokens));
+        let logged: HashSet<Uuid> = read.iter().map(|tokens| tokens.session_id).collect();
+        read.extend(
+            kept.into_iter()
+                .filter(|usage| {
+                    costed.contains(&usage.session_id) || !logged.contains(&usage.session_id)
+                })
+                .map(tokens),
+        );
         Ok(read)
     }
 }

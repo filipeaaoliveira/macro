@@ -137,3 +137,23 @@ fn a_log_that_reported_nothing_has_no_usage() {
 
     assert_eq!(session_usage(vec![prompt, ended, update(None)]), None);
 }
+
+#[test]
+fn a_restarted_runtime_starts_its_cost_count_over() {
+    // A load sent to the runtime: its new process counts from zero, though
+    // its first total is above the old one's last.
+    let load = frame(
+        "to_runtime",
+        json!({"id": "load", "method": "session/load", "params": {
+            "sessionId": "s", "cwd": "/", "mcpServers": []
+        }}),
+    );
+    let usage = session_usage(vec![
+        update(Some((0.10, "USD"))),
+        load,
+        update(Some((0.15, "USD"))),
+    ])
+    .expect("usage");
+
+    approx(usage.cost_usd, 0.25);
+}

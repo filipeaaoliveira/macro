@@ -43,6 +43,7 @@ async fn each_session_sums_the_tokens_its_calls_used(pool: PgPool) {
                 cache_write: 50,
                 cost_usd: 0.75,
                 unpriced_calls: 0,
+                reported_by_runtime: false,
             },
             SessionTokens {
                 session_id: session(WRITE),
@@ -52,6 +53,7 @@ async fn each_session_sums_the_tokens_its_calls_used(pool: PgPool) {
                 cache_write: 0,
                 cost_usd: 0.0,
                 unpriced_calls: 1,
+                reported_by_runtime: false,
             },
         ]
     );

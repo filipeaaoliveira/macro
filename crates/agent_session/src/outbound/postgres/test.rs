@@ -2023,11 +2023,15 @@ async fn cursor_checkpoint_advances_atomically_under_the_session_fence(pool: PgP
 }
 
 fn runtime_frame(id: AgentSessionId, content: serde_json::Value) -> AgentSessionLog {
+    frame_to(id, "to_server", content)
+}
+
+fn frame_to(id: AgentSessionId, direction: &str, content: serde_json::Value) -> AgentSessionLog {
     AgentSessionLog {
         agent_session_id: id,
         user_id: None,
         content: serde_json::from_value(serde_json::json!({
-            "direction": "to_server",
+            "direction": direction,
             "content": content,
         }))
         .expect("a runtime frame"),
@@ -2036,8 +2040,8 @@ fn runtime_frame(id: AgentSessionId, content: serde_json::Value) -> AgentSession
 }
 
 /// The usage frames span the whole log: a turn from before a load's
-/// boundary still used its tokens. Only prompt responses with usage and
-/// usage updates are read.
+/// boundary still used its tokens. Only prompt responses with usage, usage
+/// updates and the requests that start the runtime again are read.
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
 async fn usage_frames_span_the_whole_log(pool: PgPool) {
     use serde_json::json;
@@ -2067,7 +2071,15 @@ async fn usage_frames_span_the_whole_log(pool: PgPool) {
         .await
         .unwrap();
     let init = repo
-        .create_fenced(fenced_log(session.id), &claim)
+        .create_fenced(
+            frame_to(
+                session.id,
+                "to_runtime",
+                json!({"type": "acp", "jsonrpc": "2.0", "id": "load", "method": "session/load",
+                    "params": {"sessionId": "s", "cwd": "/", "mcpServers": []}}),
+            ),
+            &claim,
+        )
         .await
         .unwrap();
     repo.create_fenced_with_boundary(
@@ -2092,7 +2104,7 @@ async fn usage_frames_span_the_whole_log(pool: PgPool) {
         .into_iter()
         .map(|row| row.id)
         .collect();
-    assert_eq!(frames, vec![before.id, after.id, costed.id]);
+    assert_eq!(frames, vec![before.id, init.id, after.id, costed.id]);
 }
 
 /// Exercise the generic boundary contract without asking persistence to inspect ACP JSON.

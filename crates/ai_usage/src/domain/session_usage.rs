@@ -22,6 +22,11 @@ pub struct SessionTokens {
     /// How many of its calls have no price, as a model with no price
     /// recorded when they were made: their cost is not in `cost_usd`.
     pub unpriced_calls: u64,
+    /// Whether the session's runtime reported this itself, rather than the
+    /// usage log recording each model call: a runtime that calls its model
+    /// directly. Such a runtime's session with nothing reported is not
+    /// known to have made no call.
+    pub reported_by_runtime: bool,
 }
 
 /// Reads the usage recorded for agent sessions.

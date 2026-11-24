@@ -45,6 +45,7 @@ fn logged(n: u128, input: u64, cost_usd: f64) -> SessionTokens {
         cache_write: 0,
         cost_usd,
         unpriced_calls: 0,
+        reported_by_runtime: false,
     }
 }
 
@@ -83,11 +84,28 @@ async fn kept_usage_is_read_and_the_rest_from_the_usage_log() {
                 cache_write: 10,
                 cost_usd: 0.27,
                 unpriced_calls: 0,
+                reported_by_runtime: true,
             },
             logged(2, 40, 0.01),
         ]
     );
     assert_eq!(*reader.log.asked.lock().expect("asked"), vec![(julia(), 2)]);
+}
+
+/// A session whose runtime reported tokens and no cost, and whose calls the
+/// usage log recorded, as one on Macro's model router, reads from the log,
+/// whose calls are priced.
+#[tokio::test]
+async fn a_session_with_no_cost_reported_reads_its_priced_calls_from_the_log() {
+    let repo = kept(&[reported(1, 6, 1165, None)]).await;
+    let reader = AgentUsageReader::new(FakeUsage::new(vec![logged(1, 6, 0.02)]), repo);
+
+    let read = reader
+        .session_tokens(&julia(), &[session(1)])
+        .await
+        .expect("read");
+
+    assert_eq!(read, vec![logged(1, 6, 0.02)]);
 }
 
 /// A session whose runtime reported tokens but no cost keeps its tokens,

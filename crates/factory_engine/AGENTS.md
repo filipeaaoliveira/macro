@@ -482,10 +482,12 @@ unchecked, and a newer worker replays that history without the marker.
 What a Step's agent session used comes through one `SessionUsageReader`,
 `domain/agent_usage.rs`'s `AgentUsageReader`, which the token budget,
 Insights, quality, Scorers and Benchmarks all read. A session whose
-runtime reported its usage reads as reported, kept in
+runtime reported its usage and cost reads as reported, kept in
 `factory_session_usage` (`factory_records`'s `SessionUsageRepository`);
-any other session is read from the usage log (`ai_usage`), so none counts
-twice. A runtime that calls its model directly, as Claude Code does through
+any other session is read from the usage log (`ai_usage`), whose calls are
+priced, and one the log has nothing for reads as its runtime reported it,
+so none counts twice. Such tokens are marked
+`SessionTokens::reported_by_runtime`. A runtime that calls its model directly, as Claude Code does through
 claude-agent-acp on macrod, records nothing in the usage log, but its
 prompt responses report each turn's tokens and its usage updates the
 session's cost so far: `SessionAgent` reads them
@@ -493,7 +495,8 @@ session's cost so far: `SessionAgent` reads them
 `/internal/routine-sessions/usage`, over the session's whole log) and
 keeps them as each turn ends, and again before it deletes the session
 (`release`, `stop`, and a session it leaves), since the log goes with the
-session. A read or a write that fails is logged and the Step goes on. A
+session. It keeps a turn's usage once, not on every look at a paused
+Step's ended turn. A Run's token budget now counts these sessions too. A read or a write that fails is logged and the Step goes on. A
 session that reported tokens but no cost (or a cost in another currency)
 reads as one call with no price, so no money figure is given for what it
 is part of; one that reported nothing keeps nothing and reads as
@@ -560,9 +563,11 @@ tokens otherwise, and neither while a Run of the period has an agent
 session that recorded no usage (a Step on a runtime its owner signed in
 to, as Codex or Claude Code through macrod), whose spend is unknown, not
 nothing. A session that recorded none, of a bot another session of the
-period recorded usage for (its Step's `bot_id`), made no model call, as
-one that failed before its first: it cost nothing and does not withhold
-the figure. A session a Step left for a new one keeps the bot that ran it
+period recorded usage for in the usage log (its Step's `bot_id`), made no
+model call, as one that failed before its first: it cost nothing and does
+not withhold the figure. Usage a runtime reported itself does not count
+for that: a session of such a bot with none kept may have spent before
+usage was kept, or when keeping it failed. A session a Step left for a new one keeps the bot that ran it
 (`factory_step_used_session.bot_id`); one left before sessions kept their
 bot has none, so one of those that recorded none withholds the figure. A repository that names none is 400.
 
