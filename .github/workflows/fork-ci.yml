@@ -402,9 +402,8 @@ jobs:
     if: needs.changes.outputs.rust == 'true' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     env:
-      CI_CACHE_DIR: /mnt/fork-ci
+      CI_CACHE_DIR: ${{ github.workspace }}/target/fork-ci
       CARGO_BUILD_JOBS: '4'
-      RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
       RUSTFLAGS: '-Dwarnings -C link-arg=-fuse-ld=mold'
@@ -460,7 +459,7 @@ jobs:
     - name: free disk space
       run: |
         set -euo pipefail
-        df -h / /mnt
+        df -h /
         for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
           /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
           /usr/local/share/powershell /usr/local/share/chromium; do
@@ -469,9 +468,8 @@ jobs:
         # Images a service container uses stay.
         docker image prune --all --force > /dev/null &
         wait
-        sudo mkdir -p "$CI_CACHE_DIR"
-        sudo chown "$(id -u):$(id -g)" "$CI_CACHE_DIR"
-        df -h / /mnt
+        mkdir -p "$CI_CACHE_DIR"
+        df -h /
       shell: bash
     - name: Setup Nix
       uses: './.github/actions/setup-nix'
@@ -493,7 +491,7 @@ jobs:
     - name: cache compiled dependencies
       uses: Swatinem/rust-cache@v2.9.3
       with:
-        workspaces: '. -> /mnt/fork-ci/target/clippy'
+        workspaces: '. -> target/fork-ci/target/clippy'
         key: clippy
         cache-on-failure: 'true'
     - id: code-mode-assets
@@ -507,12 +505,12 @@ jobs:
       name: cache the code-mode assets
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
       with:
-        path: /mnt/fork-ci/code-mode-assets.closure
+        path: target/fork-ci/code-mode-assets.closure
         key: code-mode-assets-${{ steps.code-mode-assets.outputs.name }}
       continue-on-error: true
     - name: import the cached code-mode assets
       if: steps.code-mode-assets-cache.outputs.cache-hit == 'true'
-      run: nix-store --import < /mnt/fork-ci/code-mode-assets.closure || echo '::warning::Could not import the cached code-mode assets'
+      run: nix-store --import < target/fork-ci/code-mode-assets.closure || echo '::warning::Could not import the cached code-mode assets'
     - name: Build code-mode assets
       run: |
         set -euo pipefail
@@ -578,7 +576,7 @@ jobs:
         fi
     - name: export the code-mode assets for the cache
       if: steps.code-mode-assets-cache.outputs.cache-hit != 'true'
-      run: nix-store --export "$ASSETS" > /mnt/fork-ci/code-mode-assets.closure
+      run: nix-store --export "$ASSETS" > target/fork-ci/code-mode-assets.closure
       env:
         ASSETS: ${{ steps.code-mode-assets.outputs.path }}
     - name: fmt
@@ -685,10 +683,11 @@ jobs:
         RUSTFLAGS: '-Dwarnings -Dclippy::disallowed_methods -C link-arg=-fuse-ld=mold'
         RUSTDOCFLAGS: '-Dwarnings'
         SQLX_OFFLINE: 'true'
+        RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
     - name: show disk usage
       if: always()
       run: |
-        df -h / /mnt
+        df -h /
         du -sh /nix/store "$CI_CACHE_DIR"/target/* ~/.cargo/registry 2>/dev/null || true
   rust-test:
     needs:
@@ -696,8 +695,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.rust_packages != 'none' && needs.changes.outputs.skip_tests != 'true' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     env:
-      CI_CACHE_DIR: /mnt/fork-ci
-      RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
+      CI_CACHE_DIR: ${{ github.workspace }}/target/fork-ci
       TEST_SHARD: ${{ matrix.shard }}
       TEST_SHARD_COUNT: ${{ needs.changes.outputs.test_shard_count }}
       NEXTEST_TEST_THREADS: '8'
@@ -736,7 +734,7 @@ jobs:
     - name: free disk space
       run: |
         set -euo pipefail
-        df -h / /mnt
+        df -h /
         for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
           /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
           /usr/local/share/powershell /usr/local/share/chromium; do
@@ -745,9 +743,8 @@ jobs:
         # Images a service container uses stay.
         docker image prune --all --force > /dev/null &
         wait
-        sudo mkdir -p "$CI_CACHE_DIR"
-        sudo chown "$(id -u):$(id -g)" "$CI_CACHE_DIR"
-        df -h / /mnt
+        mkdir -p "$CI_CACHE_DIR"
+        df -h /
       shell: bash
     - name: Setup Nix
       uses: './.github/actions/setup-nix'
@@ -769,7 +766,7 @@ jobs:
     - name: cache compiled dependencies
       uses: Swatinem/rust-cache@v2.9.3
       with:
-        workspaces: '. -> /mnt/fork-ci/target/test'
+        workspaces: '. -> target/fork-ci/target/test'
         key: test-${{ matrix.shard }}
         cache-on-failure: 'true'
     - id: code-mode-assets
@@ -783,12 +780,12 @@ jobs:
       name: cache the code-mode assets
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
       with:
-        path: /mnt/fork-ci/code-mode-assets.closure
+        path: target/fork-ci/code-mode-assets.closure
         key: code-mode-assets-${{ steps.code-mode-assets.outputs.name }}
       continue-on-error: true
     - name: import the cached code-mode assets
       if: steps.code-mode-assets-cache.outputs.cache-hit == 'true'
-      run: nix-store --import < /mnt/fork-ci/code-mode-assets.closure || echo '::warning::Could not import the cached code-mode assets'
+      run: nix-store --import < target/fork-ci/code-mode-assets.closure || echo '::warning::Could not import the cached code-mode assets'
     - name: Build code-mode assets
       run: |
         set -euo pipefail
@@ -854,7 +851,7 @@ jobs:
         fi
     - name: export the code-mode assets for the cache
       if: steps.code-mode-assets-cache.outputs.cache-hit != 'true'
-      run: nix-store --export "$ASSETS" > /mnt/fork-ci/code-mode-assets.closure
+      run: nix-store --export "$ASSETS" > target/fork-ci/code-mode-assets.closure
       env:
         ASSETS: ${{ steps.code-mode-assets.outputs.path }}
     - name: configure postgres for concurrent tests
@@ -971,11 +968,13 @@ jobs:
         fi
 
         cargo nextest run "${common[@]}" "${pkg_args[@]}"
+      env:
+        RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
       timeout-minutes: 150
     - name: show disk usage
       if: always()
       run: |
-        df -h / /mnt
+        df -h /
         du -sh /nix/store "$CI_CACHE_DIR"/target/* ~/.cargo/registry 2>/dev/null || true
   web:
     needs:

@@ -173,3 +173,26 @@ fn the_web_job_runs_on_a_hosted_runner() {
 
     assert_eq!(job["runs-on"], HOSTED_RUNNER);
 }
+
+/// `rust-cache` keys its entries on every `RUST*` variable it sees, and looks
+/// for target directories inside the workspace. A job-wide `RUST_PACKAGES`
+/// would key each set of packages apart, and an absolute target directory
+/// would leave the compiled dependencies out of the cache.
+#[test]
+fn rust_cache_sees_one_key_per_job_and_its_target_directory() {
+    let workflow = serde_json::to_value(fork_ci()).unwrap();
+    for id in ["rust-check", "rust-test"] {
+        let job = &workflow["jobs"][id];
+        assert!(job["env"].get("RUST_PACKAGES").is_none(), "{id}");
+
+        let cache = job["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|step| step["name"] == "cache compiled dependencies")
+            .unwrap();
+        let workspaces = cache["with"]["workspaces"].as_str().unwrap();
+        let target = workspaces.split(" -> ").nth(1).unwrap();
+        assert!(!target.starts_with('/'), "{id}: {workspaces}");
+    }
+}

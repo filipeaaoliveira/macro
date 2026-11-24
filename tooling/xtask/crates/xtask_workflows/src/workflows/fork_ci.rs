@@ -39,9 +39,8 @@ use crate::workflows::{
 #[cfg(test)]
 mod test;
 
-/// GitHub-hosted runner, free on a public repository: 4 CPUs, 16 GB and
-/// about 14 GB of free disk on its root file system before
-/// [`free_disk_space`].
+/// GitHub-hosted runner, free on a public repository: 4 CPUs and 16 GB. Its
+/// one disk had 86 GB free before [`free_disk_space`] and 117 GB after.
 const HOSTED_RUNNER: &str = "ubuntu-latest";
 
 /// The name of the job a branch rule requires.
@@ -58,10 +57,10 @@ const TRUSTED: &str = "github.event_name == 'workflow_dispatch' || \
 const FILTER_CACHE_DIR: RuntimePath<'static> =
     xtask_paths::runtime_path!("/home/runner/.cache/macro-nextest-filter");
 
-/// The Rust jobs' build output and caches, on the hosted runner's second disk
-/// (`/mnt`), which has more room than its root file system. The Nix store
-/// stays on the root.
-const BUILD_DIR: &str = "/mnt/fork-ci";
+/// The Rust jobs' build output and caches, relative to the checkout: under
+/// `target/`, which git and the Rust tools ignore, and inside the workspace,
+/// where `rust-cache` looks for target directories.
+const BUILD_DIR: &str = "target/fork-ci";
 
 /// Nextest's threads in a test shard. More than its 4 CPUs: most tests wait
 /// on Postgres, in a service container on the same runner.
@@ -214,10 +213,6 @@ fn rust_check() -> Job {
     hosted_rust_job(filtered_job("rust"))
         .timeout_minutes(120u32)
         .add_env(("CARGO_BUILD_JOBS", CHECK_BUILD_JOBS))
-        .add_env((
-            "RUST_PACKAGES",
-            "${{ needs.changes.outputs.rust_packages }}",
-        ))
         .map(code_check_cloud_storage::with_test_compile_env)
         .add_step(steps::checkout(false, false).add_with(("fetch-depth", 2)))
         // Before the dev shell, as in `web`.
@@ -235,7 +230,7 @@ fn rust_check() -> Job {
         .add_step(export_code_mode_assets())
         .add_step(cargo_fmt())
         .add_step(Step::new("unused dependencies").run("cargo shear --format github"))
-        .add_step(cargo_clippy())
+        .add_step(cargo_clippy().add_env(rust_packages()))
         .add_step(show_disk_usage())
 }
 
@@ -262,10 +257,6 @@ fn rust_test() -> Job {
             max_parallel: None,
         })
         .timeout_minutes(180u32)
-        .add_env((
-            "RUST_PACKAGES",
-            "${{ needs.changes.outputs.rust_packages }}",
-        ))
         .add_env(("TEST_SHARD", "${{ matrix.shard }}"))
         .add_env((
             "TEST_SHARD_COUNT",
@@ -294,8 +285,19 @@ fn rust_test() -> Job {
         .add_step(export_code_mode_assets())
         .add_step(code_check_cloud_storage::configure_postgres())
         .add_step(prepare_tests())
-        .add_step(run_tests())
+        .add_step(run_tests().add_env(rust_packages()))
         .add_step(show_disk_usage())
+}
+
+/// The packages `changes` selected, for the one step that reads them.
+/// `rust-cache` keys its entries on every `RUST*` variable it sees, so a
+/// job-wide `RUST_PACKAGES` would give each set of packages its own entries,
+/// and a pull request would never restore another's.
+fn rust_packages() -> (&'static str, &'static str) {
+    (
+        "RUST_PACKAGES",
+        "${{ needs.changes.outputs.rust_packages }}",
+    )
 }
 
 /// A Rust job on a hosted runner, building in [`BUILD_DIR`]. No
@@ -303,18 +305,20 @@ fn rust_test() -> Job {
 /// runner, where /nix is on the root file system, its `fuser -km /nix` kills
 /// every process on it, the runner's included.
 fn hosted_rust_job(job: Job) -> Job {
-    job.runs_on(HOSTED_RUNNER)
-        .add_env(("CI_CACHE_DIR", BUILD_DIR))
+    job.runs_on(HOSTED_RUNNER).add_env((
+        "CI_CACHE_DIR",
+        format!("${{{{ github.workspace }}}}/{BUILD_DIR}"),
+    ))
 }
 
 /// Deletes the hosted image's SDKs and Docker images that no job here uses,
-/// in parallel, for the Nix store on the root file system, and creates
-/// [`BUILD_DIR`] on the second disk. Prints the free space before and after.
+/// in parallel, and creates [`BUILD_DIR`]. Prints the free space before and
+/// after.
 fn free_disk_space() -> Step<Run> {
     Step::new("free disk space")
         .run(indoc::indoc! {r#"
             set -euo pipefail
-            df -h / /mnt
+            df -h /
             for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
               /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
               /usr/local/share/powershell /usr/local/share/chromium; do
@@ -323,9 +327,8 @@ fn free_disk_space() -> Step<Run> {
             # Images a service container uses stay.
             docker image prune --all --force > /dev/null &
             wait
-            sudo mkdir -p "$CI_CACHE_DIR"
-            sudo chown "$(id -u):$(id -g)" "$CI_CACHE_DIR"
-            df -h / /mnt
+            mkdir -p "$CI_CACHE_DIR"
+            df -h /
         "#})
         .shell("bash")
 }
@@ -362,7 +365,8 @@ fn code_mode_assets_key() -> Step<Run> {
         .id("code-mode-assets")
 }
 
-const CODE_MODE_ASSETS_EXPORT: &str = "/mnt/fork-ci/code-mode-assets.closure";
+/// Under [`BUILD_DIR`], relative to the checkout.
+const CODE_MODE_ASSETS_EXPORT: &str = "target/fork-ci/code-mode-assets.closure";
 
 /// Building the code-mode assets installs node_modules and takes minutes, so
 /// the job keeps an export of the store path in the Actions cache.
@@ -404,7 +408,7 @@ fn export_code_mode_assets() -> Step<Run> {
 fn show_disk_usage() -> Step<Run> {
     Step::new("show disk usage")
         .run(indoc::indoc! {r#"
-            df -h / /mnt
+            df -h /
             du -sh /nix/store "$CI_CACHE_DIR"/target/* ~/.cargo/registry 2>/dev/null || true
         "#})
         .if_condition(Expression::new("always()"))
