@@ -368,14 +368,26 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/** The text of the overview's success rate tile. */
+function successRateTile() {
+  return screen.getByText('Success rate').closest('div')?.textContent;
+}
+
 describe('RunInsightsView', () => {
   it('reads the last 30 days of every flow in the person’s time zone', () => {
     const { asked } = mount({ insights: november });
 
+    // The period, then the one of the same length before it, to compare.
     expect(asked).toEqual([
       {
         from: '2026-10-13',
         to: '2026-11-11',
+        timeZone: 'Europe/Lisbon',
+        flow: undefined,
+      },
+      {
+        from: '2026-09-13',
+        to: '2026-10-12',
         timeZone: 'Europe/Lisbon',
         flow: undefined,
       },
@@ -403,15 +415,12 @@ describe('RunInsightsView', () => {
   it('shows how the runs went, the success rate leaving the running one out', () => {
     mount({ insights: november });
 
-    const outcomesList = screen.getByRole('list', { name: 'Run outcomes' });
+    const outcomesList = screen.getByRole('list', { name: 'How runs ended' });
     expect(
       within(outcomesList).getByText('Failed').nextSibling?.textContent
     ).toBe('1');
     // One done and one failed run ended on their own: 50%.
-    expect(
-      screen.getByText('Success rate').closest('div')?.parentElement
-        ?.textContent
-    ).toContain('50');
+    expect(successRateTile()).toContain('50%');
     expect(screen.queryByText(/No runs match this period/)).toBeNull();
   });
 
@@ -428,14 +437,12 @@ describe('RunInsightsView', () => {
       },
     });
 
-    const outcomesList = screen.getByRole('list', { name: 'Run outcomes' });
+    // Failures of the work and of the machines, and flawed runs, are all
+    // failed in the chart: 2 + 2 + 1.
+    const outcomesList = screen.getByRole('list', { name: 'How runs ended' });
     expect(
-      within(outcomesList).getByText('Infrastructure failure').nextSibling
-        ?.textContent
-    ).toBe('2');
-    expect(
-      within(outcomesList).getByText('Flawed').nextSibling?.textContent
-    ).toBe('1');
+      within(outcomesList).getByText('Failed').nextSibling?.textContent
+    ).toBe('5');
     const kinds = screen
       .getByRole('heading', { name: 'Quality and infrastructure' })
       .closest('section');
@@ -457,12 +464,7 @@ describe('RunInsightsView', () => {
     expect(figure('Flawed')).toBe('25%');
     expect(figure('Infrastructure failures')).toBe('25%');
     // The success rate leaves the infrastructure failures out: 3 of 6.
-    expect(
-      screen
-        .getByText('Success rate')
-        .closest('div')
-        ?.parentElement?.querySelector('p')?.textContent
-    ).toBe('50%');
+    expect(successRateTile()).toContain('50%');
   });
 
   it('says how many ended runs were retried, without counting them again', () => {
@@ -478,19 +480,10 @@ describe('RunInsightsView', () => {
       },
     });
 
-    expect(
-      screen.getByText(
-        '1 of these runs was retried after it ended. Its retry is a run of its own, counted by how it went.'
-      )
-    ).toBeTruthy();
+    expect(screen.getByText('1 retried')).toBeTruthy();
     // The retried failure stays one failure: one done of two ended, 50%.
-    expect(
-      screen
-        .getByText('Success rate')
-        .closest('div')
-        ?.parentElement?.querySelector('p')?.textContent
-    ).toBe('50%');
-    const outcomesList = screen.getByRole('list', { name: 'Run outcomes' });
+    expect(successRateTile()).toContain('50%');
+    const outcomesList = screen.getByRole('list', { name: 'How runs ended' });
     expect(within(outcomesList).queryByText(/Retried/)).toBeNull();
   });
 
@@ -510,11 +503,8 @@ describe('RunInsightsView', () => {
 
     expect(screen.getByText(/No runs match this period/)).toBeTruthy();
     // With no run ended, there is no rate or time to show, not a zero.
-    const figure = (label: string) =>
-      screen.getByText(label).closest('div')?.parentElement?.querySelector('p')
-        ?.textContent;
-    expect(figure('Success rate')).toBe('–');
-    expect(figure('Median run time')).toBe('–');
+    expect(screen.queryByText('Success rate')).toBeNull();
+    expect(screen.queryByText('Median run time')).toBeNull();
     expect(
       screen.getByText('No step failed or went again in this period.')
     ).toBeTruthy();

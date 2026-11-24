@@ -6,6 +6,7 @@ import type { InsightsState } from '../../primitives/insights-state';
 import { EvaluationPanel } from '../shared/evaluation-panel';
 import { InsightsBody } from '../shared/insights-body';
 import { InsightsFilters } from '../shared/insights-filters';
+import { InsightsOverviewPanel } from '../shared/insights-overview-panel';
 import { QualityPanel } from '../shared/quality-panel';
 import { WaitingRuns } from '../shared/waiting-runs';
 
@@ -25,14 +26,16 @@ export function MobileInsightsView(props: {
       </MobileHeader>
       <div class="size-full min-h-0 overflow-y-auto px-4 pb-(--mobile-content-inset-bottom) pt-(--mobile-content-inset-top)">
         <WaitingRuns onOpenRun={props.state.setOpenRunId} />
+        <div class="flex justify-end pb-3">
+          <InsightsFilters state={props.state} flows={props.flows} />
+        </div>
+        <InsightsOverviewPanel
+          params={props.state.params}
+          source={props.source}
+        />
         <InsightsBody
           source={props.source}
           onOpenRun={props.state.setOpenRunId}
-          toolbar={
-            <div class="flex justify-end">
-              <InsightsFilters state={props.state} flows={props.flows} />
-            </div>
-          }
         />
         <QualityPanel
           params={props.state.params}
