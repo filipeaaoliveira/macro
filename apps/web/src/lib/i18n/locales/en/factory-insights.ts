@@ -36,6 +36,8 @@ export default {
   failedForInfrastructure: 'Failed for infrastructure',
   flawedRuns: 'Flawed runs',
   medianRunTime: 'Median run time',
+  timeToMerge: 'Time to merge',
+  median: 'median',
   medianRunTimeDefinition:
     'Half of the runs that ended took less than this, from start to end, waiting for your answers included.',
   slowRunTime: 'Slowest runs',
@@ -96,6 +98,7 @@ export default {
   tokensDefinition:
     'Input, output and prompt cache tokens of the agents’ model calls, as Macro recorded them.',
   tokensPerRun: 'Tokens per run',
+  costPerRun: 'Cost per run',
   tokensPerRunDefinition: 'Tokens per run, among the runs with usage recorded.',
   measuredSteps: {
     one: 'Usage recorded for {{measured}} of {{count}} agent step. Agents on your own computer record none.',
@@ -184,6 +187,9 @@ export default {
   ciActive: 'Active',
   ciQuarantined: 'Quarantined',
   ciOpenTask: 'Task',
+  ciQuarantine: 'Quarantine',
+  ciRelease: 'Release',
+  ciQuarantineFailed: 'The job’s quarantine could not be changed.',
   ciRetries:
     'Reruns of flaky checks: {{passed}} passed, {{failed}} failed, {{refused}} refused by GitHub.',
   scorerPassRates: 'Scorer pass rates',

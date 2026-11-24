@@ -4,12 +4,13 @@ import {
   type InsightPlotModule,
 } from '@app/features/scheduling/components/insight-plot';
 import { formatLocale, t } from '@app/lib/i18n';
+import { fireAndForget } from '@core/util/fireAndForget';
 import { buildSimpleEntityUrl } from '@core/util/url';
 import ArrowDownIcon from '@icon/system/regular/arrow-down.svg';
 import ArrowUpIcon from '@icon/system/regular/arrow-up.svg';
 import type { PlotOptions } from '@observablehq/plot';
-import { Badge, cn } from '@ui';
-import { For, type JSX, Show } from 'solid-js';
+import { Badge, Button, cn } from '@ui';
+import { createSignal, For, type JSX, Show } from 'solid-js';
 import { repositoryName } from '../core/board';
 import { flowWordLabel } from '../core/flow-words';
 import {
@@ -271,6 +272,17 @@ export function KpiStrip(props: { kpis: Kpis; retried?: number }) {
         {(kpi) => (
           <KpiTile
             label={t('factoryInsights.medianRunTime')}
+            kpi={kpi()}
+            format={formatInsightDuration}
+            lowerIsBetter
+          />
+        )}
+      </Show>
+      <Show when={props.kpis.timeToMergeSeconds}>
+        {(kpi) => (
+          <KpiTile
+            label={t('factoryInsights.timeToMerge')}
+            note={t('factoryInsights.median')}
             kpi={kpi()}
             format={formatInsightDuration}
             lowerIsBetter
@@ -711,14 +723,30 @@ export function RoleCards(props: { roles: RoleInsight[] }) {
                       {(role.blockersPerReview ?? 0).toFixed(2)}
                     </dd>
                   </Show>
-                  <Show when={role.tokensPerRun}>
-                    {(tokens) => (
+                  <Show
+                    when={role.usdPerRun}
+                    fallback={
+                      <Show when={role.tokensPerRun}>
+                        {(tokens) => (
+                          <>
+                            <dt class="text-ink-muted">
+                              {t('factoryInsights.tokensPerRun')}
+                            </dt>
+                            <dd class="text-right tabular-nums text-ink">
+                              {formatTokens(tokens())}
+                            </dd>
+                          </>
+                        )}
+                      </Show>
+                    }
+                  >
+                    {(usd) => (
                       <>
                         <dt class="text-ink-muted">
-                          {t('factoryInsights.tokensPerRun')}
+                          {t('factoryInsights.costPerRun')}
                         </dt>
                         <dd class="text-right tabular-nums text-ink">
-                          {formatTokens(tokens())}
+                          {`$${usd().toFixed(2)}`}
                         </dd>
                       </>
                     )}
@@ -913,8 +941,47 @@ function ciRows(ci: QualityInsights['ci']): CiRow[] {
  * many of those were flaky, the pull requests they held, and whether the
  * factory quarantined them, with the task that tracks it.
  */
-export function FlakyCiTable(props: { ci: QualityInsights['ci'] }) {
+export function FlakyCiTable(props: {
+  ci: QualityInsights['ci'];
+  /**
+   * Quarantines the job, or releases it; the table reads its rows again
+   * once quality is read again. None leaves the jobs as they are.
+   */
+  onQuarantine?: (
+    job: { repository: string; job: string },
+    quarantine: boolean
+  ) => Promise<void>;
+}) {
   const rows = () => ciRows(props.ci);
+  // The row whose job is being quarantined or released, by its key.
+  const [changing, setChanging] = createSignal<string>();
+  const change = async (row: CiRow, quarantine: boolean) => {
+    if (!props.onQuarantine || changing()) return;
+    setChanging(row.key);
+    await props.onQuarantine(
+      { repository: row.repository, job: row.job },
+      quarantine
+    );
+    setChanging(undefined);
+  };
+  const ChangeButton = (button: { row: CiRow; quarantine: boolean }) => (
+    <Show when={props.onQuarantine && button.row.repository}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        loading={changing() === button.row.key}
+        disabled={changing() !== undefined}
+        onClick={() =>
+          fireAndForget(change(button.row, button.quarantine), 'factory-runs')
+        }
+      >
+        {button.quarantine
+          ? t('factoryInsights.ciQuarantine')
+          : t('factoryInsights.ciRelease')}
+      </Button>
+    </Show>
+  );
   return (
     <OverviewCard
       title={t('factoryInsights.flakyCi')}
@@ -987,9 +1054,12 @@ export function FlakyCiTable(props: { ci: QualityInsights['ci'] }) {
                     <Show
                       when={row.quarantined}
                       fallback={
-                        <Badge variant="outline" size="xs">
-                          {t('factoryInsights.ciActive')}
-                        </Badge>
+                        <span class="inline-flex flex-col items-end gap-0.5">
+                          <Badge variant="outline" size="xs">
+                            {t('factoryInsights.ciActive')}
+                          </Badge>
+                          <ChangeButton row={row} quarantine />
+                        </span>
                       }
                     >
                       {(held) => (
@@ -997,6 +1067,7 @@ export function FlakyCiTable(props: { ci: QualityInsights['ci'] }) {
                           <Badge variant="violet" size="xs">
                             {t('factoryInsights.ciQuarantined')}
                           </Badge>
+                          <ChangeButton row={row} quarantine={false} />
                           <Show when={held().taskId}>
                             {(taskId) => (
                               <a

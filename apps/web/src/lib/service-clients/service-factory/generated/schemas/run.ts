@@ -13,6 +13,7 @@ import type { RunDefinitionProperty } from './runDefinitionProperty';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunFlow } from './runFlow';
 import type { RunId } from './runId';
+import type { RunMergedAt } from './runMergedAt';
 import type { RunProjectId } from './runProjectId';
 import type { RunPullRequestUrl } from './runPullRequestUrl';
 import type { RunRepository } from './runRepository';
@@ -41,6 +42,9 @@ before Runs kept it. */
   flow?: RunFlow;
   /** The Run's id, also its Temporal workflow id. */
   id: RunId;
+  /** When its pull request was merged, as its `merge` Step saw it merged
+(`factory_merge`); none for a Run that merged none. */
+  mergedAt?: RunMergedAt;
   /** The Project (an initiative) its task was in when it was created,
 kept as a record: none without a task or Project, and for a Run
 created before Runs kept it. */

@@ -20,9 +20,7 @@ import {
 
 /**
  * What the insights overview reads from the period's insights, its quality
- * and evaluation, and the same of the period before it. Figures the API
- * does not send yet come from the functions marked so, the one place to
- * fill them in.
+ * and evaluation, and the same of the period before it.
  */
 
 /** The period of the same length just before `params`'. */
@@ -92,17 +90,16 @@ export type Kpi = {
   trend?: (number | undefined)[];
 };
 
-/**
- * A day's median run time. The API does not send it yet: a day carries
- * only its counts. Fill it in here once `days[].runDuration` arrives.
- */
+/** A day's median run time; none when none of its Runs ended timed. */
 export function dayMedianRunSeconds(day: InsightDay): number | undefined {
-  const duration = (
-    day as InsightDay & {
-      runDuration?: { medianSeconds: number } | null;
-    }
-  ).runDuration;
-  return duration?.medianSeconds ?? undefined;
+  return day.runDuration?.medianSeconds ?? undefined;
+}
+
+/** The median time from a Run's start to its merge; none before a merge. */
+export function medianMergeSeconds(
+  delivery: DeliveryInsight | undefined
+): number | undefined {
+  return delivery?.timeToMerge?.medianSeconds ?? undefined;
 }
 
 /** The days from the first that has a Run on; all of them when none has. */
@@ -122,6 +119,8 @@ export type Kpis = {
   merged?: Kpi;
   successRate?: Kpi;
   medianRunSeconds?: Kpi;
+  /** From a Run's start to its merge, median. */
+  timeToMergeSeconds?: Kpi;
   autonomy?: Kpi;
   costPerMerge?: Kpi & { kind: 'money' | 'tokens' };
 };
@@ -146,6 +145,7 @@ export function insightKpis(input: {
   const autonomy = percentOf(quality?.delivery.autonomyRate);
   const merge = cost(quality?.delivery);
   const previousMerge = cost(previousQuality?.delivery);
+  const toMerge = medianMergeSeconds(quality?.delivery);
   return {
     runs: {
       value: runCount(insights.totals),
@@ -180,6 +180,13 @@ export function insightKpis(input: {
             : undefined,
         }
       : undefined,
+    timeToMergeSeconds:
+      toMerge === undefined
+        ? undefined
+        : {
+            value: toMerge,
+            previous: medianMergeSeconds(previousQuality?.delivery),
+          },
     autonomy:
       autonomy === undefined
         ? undefined
@@ -274,6 +281,11 @@ export type RoleInsight = {
   roundsPerRun: number;
   /** Its tokens a Run; none while its usage is not measured. */
   tokensPerRun?: number;
+  /**
+   * What it cost a Run, in US dollars; none unless each of its entries with
+   * usage was priced in full.
+   */
+  usdPerRun?: number;
   /** For a reviewer, the blockers it raised a review. */
   blockersPerReview?: number;
   medianSeconds?: number;
@@ -313,6 +325,13 @@ export function roleInsights(
       (sum, entry) => sum + (entry.tokens ? tokenTotal(entry.tokens) : 0),
       0
     );
+    // Money only when every entry that used tokens was priced in full: a
+    // sum that left one out would read its cost as nothing.
+    const measured = list.filter((entry) => entry.tokens);
+    const priced = measured.every(
+      (entry) => entry.costUsd !== undefined && entry.costUsd !== null
+    );
+    const usd = measured.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0);
     const main = list[0];
     return {
       role,
@@ -322,6 +341,8 @@ export function roleInsights(
       passRate: judged > 0 ? passed / judged : undefined,
       roundsPerRun: runs > 0 ? steps / runs : 0,
       tokensPerRun: tokens > 0 && runs > 0 ? tokens / runs : undefined,
+      usdPerRun:
+        measured.length > 0 && priced && runs > 0 ? usd / runs : undefined,
       blockersPerReview:
         role === 'reviewer' && reviews > 0 ? blockers / reviews : undefined,
       medianSeconds: main?.duration?.medianSeconds ?? undefined,

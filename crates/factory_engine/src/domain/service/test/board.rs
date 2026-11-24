@@ -5,7 +5,7 @@ mod pull_requests;
 
 use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
-    EntryId, NewRun, RunId, RunInsert, RunOutcome, StepKey, TeamMembership,
+    EntryId, NewRun, RunId, RunInsert, RunOutcome, StepKey, StepRuntime, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::RunRules;
@@ -577,4 +577,49 @@ async fn a_run_keeps_the_project_its_task_is_in() {
         .expect("get")
         .expect("kept");
     assert_eq!(kept.project_id, Some(project));
+}
+
+/// The Machines a Run's Steps ran on are its owner's: a team member reads
+/// the Run, its model and its agent, on its page and on the board, but no
+/// Machine.
+#[tokio::test]
+async fn a_team_member_reads_no_machine_of_a_run() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let shared_task = task(&repo);
+    let run_id = keep(&repo, &teo(), Some(shared_task)).await;
+    let key = StepKey { run_id, seq: 1 };
+    repo.start_step(
+        key,
+        &EntryId::try_from("write".to_string()).expect("entry"),
+        1,
+    )
+    .await
+    .expect("start");
+    let runtime = StepRuntime {
+        model: Some("claude-opus-4-5".to_string()),
+        machine: Some("teo-laptop".to_string()),
+        agent_name: Some("Writer".to_string()),
+    };
+    for (_, step) in repo.steps.lock().expect("steps").iter_mut() {
+        step.runtime = runtime.clone();
+    }
+
+    let owner_s = service.get_run(&teo(), run_id).await.expect("read");
+    assert_eq!(owner_s.steps[0].runtime, runtime);
+
+    let hidden = StepRuntime {
+        machine: None,
+        ..runtime
+    };
+    let member_s = service.get_run(&julia(), run_id).await.expect("read");
+    assert_eq!(member_s.steps[0].runtime, hidden);
+    let page = service
+        .board(&julia(), filter(BoardScope::Team))
+        .await
+        .expect("board");
+    assert_eq!(page.runs.len(), 1);
+    assert_eq!(page.runs[0].detail.steps[0].runtime, hidden);
 }

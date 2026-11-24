@@ -566,6 +566,10 @@ export const factoryExcluded = [
   // Only the person in their own session undoes the dismissal of a rejected
   // self-improvement Run's failures, from Insights.
   'undoFactoryImprovementDismissal',
+  // Only an owner or admin, in their own session, quarantines a CI job of
+  // their team's repository by hand, or releases it, from Insights.
+  'quarantineFactoryCiJob',
+  'releaseFactoryCiJob',
 ] as const satisfies readonly (keyof FactorySdk)[];
 
 export const factoryBacklog =

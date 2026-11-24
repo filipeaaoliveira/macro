@@ -5,7 +5,8 @@
 //!
 //! A job is a known flake when the Run's Factory Definition names it in
 //! `knownFlakes`; when the same failure (its job, step and test, as CI
-//! health tells failures apart) is quarantined in the Run's repository; or
+//! health tells failures apart) is quarantined in the Run's repository, or
+//! the whole job is, by a person in Insights; or
 //! when that failure proved flaky on [`FLAKY_OTHER_PULL_REQUESTS`] other
 //! pull requests of the repository within [`FLAKY_PERIOD`], a rerun of it
 //! passing or the same head going green after it. Only GitHub Actions jobs
@@ -180,6 +181,7 @@ fn named_in(names: &BTreeSet<String>, flakes: &CiFlakes) -> bool {
                 .quarantined
                 .iter()
                 .any(|quarantined| quarantined.name == *name)
+            || flakes.quarantined_jobs.contains(name)
             || flakes.failures.iter().any(|failure| failure.name == *name)
     })
 }
@@ -215,7 +217,9 @@ pub(crate) fn flaky_retries(
         };
         let matched = if flakes.known.contains(&kept.name) {
             CiRetryMatch::Known
-        } else if flakes.quarantined.contains(&failure) {
+        } else if flakes.quarantined.contains(&failure)
+            || flakes.quarantined_jobs.contains(&kept.name)
+        {
             CiRetryMatch::Quarantined
         } else {
             // The same job, failing the same way, proved flaky on enough

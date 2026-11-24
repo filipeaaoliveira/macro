@@ -227,7 +227,10 @@ where
             .collect();
         let details = self
             .details(listed.into_iter().map(|listed| listed.run).collect())
-            .await?;
+            .await?
+            .into_iter()
+            .map(|detail| detail.as_seen_by(actor))
+            .collect::<Vec<_>>();
         let runs = shown
             .into_iter()
             .zip(details)
@@ -338,7 +341,10 @@ where
             .collect();
         let details = self
             .details(shown.into_iter().map(|(_, listed)| listed.run).collect())
-            .await?;
+            .await?
+            .into_iter()
+            .map(|detail| detail.as_seen_by(actor))
+            .collect::<Vec<_>>();
         // Whether a Run is at its merge is read from the Flow it walks, so
         // a Definition's merge entry counts by its own id. A Run whose Flow
         // does not read waits at no merge Gate, and so merges nothing.

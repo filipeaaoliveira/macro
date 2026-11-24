@@ -32,6 +32,7 @@ mod definition_changes;
 mod evaluation;
 mod gate_owner;
 mod orchestrator;
+mod quarantine;
 mod retry;
 mod run_detail;
 mod self_improvement;

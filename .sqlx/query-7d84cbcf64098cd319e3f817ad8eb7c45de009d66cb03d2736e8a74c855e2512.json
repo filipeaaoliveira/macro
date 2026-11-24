@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,\n                (SELECT n.id FROM factory_run n WHERE n.retried_from = r.id) AS \"retried_by?\"\n            FROM factory_run r\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
+  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger,\n                automation_firing_key, definition_repo_url, definition_commit, definition_agents,\n                definition_evaluation, flow_definition, flow_asks, project_id, token_budget\n            )\n            VALUES (\n                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,\n                $19, $20, $21, $22, $23, $24, $25\n            )\n            RETURNING\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used, retried_from, branch_run_id, first_seq,\n                NULL::uuid AS \"retried_by?\",\n                NULL::timestamptz AS \"merged_at?\"\n            ",
   "describe": {
     "columns": [
       {
@@ -187,12 +187,39 @@
         "ordinal": 36,
         "name": "retried_by?",
         "type_info": "Uuid"
+      },
+      {
+        "ordinal": 37,
+        "name": "merged_at?",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Text",
         "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "TextArray",
+        "Uuid",
+        "TextArray",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Bool",
+        "Uuid",
         "Int8"
       ]
     },
@@ -233,8 +260,9 @@
       true,
       true,
       true,
+      null,
       null
     ]
   },
-  "hash": "78711c5a9c6d87fa94b37f98974fc19c99f92b231ac5e6b0c0988e2a6601be2f"
+  "hash": "7d84cbcf64098cd319e3f817ad8eb7c45de009d66cb03d2736e8a74c855e2512"
 }

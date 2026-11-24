@@ -22,7 +22,7 @@ pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
 pub(crate) use task_thread::FakeTaskThread;
 pub(crate) use token_budget::FakeRunTokens;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use agent_session::domain::session_task::TaskDocumentId;
@@ -159,6 +159,11 @@ pub(crate) struct FakeRepo {
     pub(crate) ci_retries: Arc<Mutex<Vec<(StepKey, factory_records::domain::quality::CiRetry)>>>,
     /// The CI jobs quarantined, in order.
     pub(crate) ci_quarantines: Arc<Mutex<Vec<factory_records::domain::quality::CiQuarantine>>>,
+    /// The ids of the quarantines made by hand, which cover their whole
+    /// job.
+    pub(crate) ci_hand_quarantines: Arc<Mutex<HashSet<Uuid>>>,
+    /// The CI jobs released, by repository and name.
+    pub(crate) ci_releases: Arc<Mutex<Vec<(String, String)>>>,
     /// Each Step's rounds of checks, in order.
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
     /// The break records kept, in order, each with its Step.
@@ -665,6 +670,7 @@ impl RunRepository for FakeRepo {
             budget_stop: None,
             retry: None,
             retried_by: None,
+            merged_at: None,
         };
         if let Some(kept) = kept_flow {
             self.kept_flows
@@ -735,6 +741,7 @@ impl RunRepository for FakeRepo {
                 first_seq: retry.first_seq,
             }),
             retried_by: None,
+            merged_at: None,
             ..retried.clone()
         };
         {
@@ -923,6 +930,18 @@ impl RunRepository for FakeRepo {
             return Err(FakeError);
         }
         self.ci_flakes_reads.lock().expect("reads").push(id);
+        let hand = self.ci_hand_quarantines.lock().expect("hand").clone();
+        let live = || -> Vec<factory_records::domain::quality::CiQuarantine> {
+            self.ci_quarantines
+                .lock()
+                .expect("quarantines")
+                .iter()
+                .filter(|quarantine| {
+                    quarantine.repository == repository && quarantine.last_passed_at >= since
+                })
+                .cloned()
+                .collect()
+        };
         Ok(factory_records::domain::quality::CiFlakes {
             known: self
                 .known_ci_flakes
@@ -931,15 +950,15 @@ impl RunRepository for FakeRepo {
                 .get(&id)
                 .cloned()
                 .unwrap_or_default(),
-            quarantined: self
-                .ci_quarantines
-                .lock()
-                .expect("quarantines")
+            quarantined: live()
                 .iter()
-                .filter(|quarantine| {
-                    quarantine.repository == repository && quarantine.last_passed_at >= since
-                })
+                .filter(|quarantine| !hand.contains(&quarantine.task_id))
                 .map(|quarantine| quarantine.failure.clone())
+                .collect(),
+            quarantined_jobs: live()
+                .iter()
+                .filter(|quarantine| hand.contains(&quarantine.task_id))
+                .map(|quarantine| quarantine.failure.name.clone())
                 .collect(),
             failures: self.ci_failures.lock().expect("failures").clone(),
         })
@@ -1068,8 +1087,22 @@ impl RunRepository for FakeRepo {
                 })
                 .count()
         };
+        let hand = self.ci_hand_quarantines.lock().expect("hand").clone();
         let mut made = Vec::new();
         for job in jobs {
+            // A job quarantined whole by hand is extended instead.
+            let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
+            let whole = quarantines.iter_mut().find(|quarantine| {
+                hand.contains(&quarantine.task_id)
+                    && quarantine.repository == repository
+                    && quarantine.failure.name == job.failure.name
+            });
+            if let Some(whole) = whole {
+                whole.passed_retries += 1;
+                whole.last_passed_at = Utc::now();
+                continue;
+            }
+            drop(quarantines);
             let retries = u32::try_from(passed(&job.failure)).unwrap_or(u32::MAX);
             if retries < threshold {
                 continue;
@@ -1124,11 +1157,67 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
-    async fn lift_ci_quarantine(&self, task_id: Uuid) -> Result<bool, FakeError> {
+    async fn quarantine_ci_job(
+        &self,
+        repository: &str,
+        name: &str,
+        _by: &MacroUserIdStr<'static>,
+        id: Uuid,
+        since: chrono::DateTime<Utc>,
+    ) -> Result<bool, FakeError> {
+        let failure = factory_records::domain::quality::CiFailureIdentity {
+            name: name.to_string(),
+            failed_step: None,
+            failure: None,
+        };
+        let mut hand = self.ci_hand_quarantines.lock().expect("hand");
+        let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
+        let kept = quarantines.iter_mut().find(|quarantine| {
+            quarantine.repository == repository && quarantine.failure == failure
+        });
+        match kept {
+            Some(kept) if hand.contains(&kept.task_id) && kept.last_passed_at >= since => Ok(false),
+            Some(kept) => {
+                if kept.last_passed_at < since {
+                    kept.quarantined_at = Utc::now();
+                }
+                kept.last_passed_at = kept.last_passed_at.max(Utc::now());
+                hand.insert(kept.task_id);
+                Ok(true)
+            }
+            None => {
+                quarantines.push(factory_records::domain::quality::CiQuarantine {
+                    repository: repository.to_string(),
+                    failure,
+                    run_id: None,
+                    passed_retries: 0,
+                    task_id: id,
+                    filed: false,
+                    quarantined_at: Utc::now(),
+                    last_passed_at: Utc::now(),
+                });
+                hand.insert(id);
+                Ok(true)
+            }
+        }
+    }
+
+    async fn lift_ci_job_quarantines(
+        &self,
+        repository: &str,
+        name: &str,
+        _by: &MacroUserIdStr<'static>,
+    ) -> Result<u32, FakeError> {
+        self.ci_releases
+            .lock()
+            .expect("releases")
+            .push((repository.to_string(), name.to_string()));
         let mut quarantines = self.ci_quarantines.lock().expect("quarantines");
         let before = quarantines.len();
-        quarantines.retain(|quarantine| quarantine.task_id != task_id);
-        Ok(quarantines.len() < before)
+        quarantines.retain(|quarantine| {
+            quarantine.repository != repository || quarantine.failure.name != name
+        });
+        Ok(u32::try_from(before - quarantines.len()).unwrap_or(u32::MAX))
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
@@ -1501,6 +1590,7 @@ impl RunRepository for FakeRepo {
                 passed_over: Vec::new(),
                 checks: Vec::new(),
                 terminal: Default::default(),
+                runtime: Default::default(),
             },
         ));
         Ok(())

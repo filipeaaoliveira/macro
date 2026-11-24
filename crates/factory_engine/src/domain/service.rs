@@ -1492,7 +1492,10 @@ where
             run = self.owned_run(actor, id).await?;
         }
         let review_rounds = self.repo.review_rounds(id).await.map_err(internal)?;
-        self.detail(run, steps, review_rounds).await
+        Ok(self
+            .detail(run, steps, review_rounds)
+            .await?
+            .as_seen_by(actor))
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -1565,6 +1568,24 @@ where
             .await
             .map_err(internal)?;
         self.details(runs).await
+    }
+
+    async fn quarantine_ci_job(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> Result<crate::domain::models::CiQuarantineChange, FactoryError> {
+        self.quarantine_job(actor, repo_url, job).await
+    }
+
+    async fn release_ci_job(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+        job: &str,
+    ) -> Result<crate::domain::models::CiQuarantineChange, FactoryError> {
+        self.release_job(actor, repo_url, job).await
     }
 
     #[tracing::instrument(skip(self))]

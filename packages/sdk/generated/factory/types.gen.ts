@@ -696,6 +696,40 @@ export type CiJobHealth = {
 };
 
 /**
+ * The CI job to quarantine or release.
+ */
+export type CiJobRequest = {
+    /**
+     * The job's name: its check run's, or its commit status's context.
+     */
+    job: string;
+    /**
+     * The repository's `https://github.com/owner/name` URL.
+     */
+    repository: string;
+};
+
+/**
+ * A CI job a person quarantined or released by hand, and whether that
+ * changed anything.
+ */
+export type CiQuarantineChange = {
+    /**
+     * Whether anything changed: quarantining a job quarantined already,
+     * or releasing one that is not, changes nothing.
+     */
+    changed: boolean;
+    /**
+     * The job.
+     */
+    job: string;
+    /**
+     * The repository, by its URL in lower case, as quarantines name it.
+     */
+    repository: string;
+};
+
+/**
  * A failure of a CI job quarantined in a repository: its reruns passed
  * often enough that it counts as a known flake there, until no rerun of
  * it passed for 30 days.
@@ -1152,6 +1186,7 @@ export type DeliveryInsight = {
      * Ended Runs with a Step their owner steered.
      */
     steered: number;
+    timeToMerge?: null | DurationStats;
     /**
      * The tokens every Run's agents used.
      */
@@ -1220,6 +1255,11 @@ export type EntryId = string;
  * One of a Flow's entries, across the period's Runs.
  */
 export type EntryInsight = {
+    /**
+     * What its agent Steps' model calls cost, in US dollars; none unless
+     * every session of theirs recorded usage and every call was priced.
+     */
+    costUsd?: number | null;
     duration?: null | DurationStats;
     /**
      * The entry's id, as its Flow names it.
@@ -1645,6 +1685,7 @@ export type InsightDay = {
      * The day, in the period's time zone.
      */
     date: string;
+    runDuration?: null | DurationStats;
 };
 
 /**
@@ -2441,6 +2482,11 @@ export type Run = {
      * The Run's id, also its Temporal workflow id.
      */
     id: RunId;
+    /**
+     * When its pull request was merged, as its `merge` Step saw it merged
+     * (`factory_merge`); none for a Run that merged none.
+     */
+    mergedAt?: string | null;
     /**
      * The Project (an initiative) its task was in when it was created,
      * kept as a record: none without a task or Project, and for a Run
@@ -3261,6 +3307,10 @@ export type Step = {
     passedOver: Array<PassedOver>;
     role?: null | Role;
     /**
+     * Where its agent's session ran, and as which agent.
+     */
+    runtime: StepRuntime;
+    /**
      * The Step's place among the Run's Steps, from 1.
      */
     seq: number;
@@ -3295,6 +3345,33 @@ export type StepEnd = {
      * What the Step produced, for a person to read.
      */
     output: string;
+};
+
+/**
+ * Where an agent Step's session ran: the model, the Machine, and the
+ * Macro agent (bot) whose session it is, by its display name. Each is none
+ * for a Step no agent does, and for a Step from before Steps kept it; a
+ * Step that went on in a new session reads that session's.
+ */
+export type StepRuntime = {
+    /**
+     * The display name of the Macro agent (bot) whose session it is, read
+     * live, so renaming the agent renames it on old Runs too; none for a
+     * first-party bot, which has no row of its own.
+     */
+    agentName?: string | null;
+    /**
+     * The Machine the session first opened on: the name of the harness its
+     * bot was bound to when the Step first saw it open, a macrod machine
+     * or a Macro computer. None for an in-memory runtime. Only the Run's
+     * owner reads it: a harness is private to whoever paired it.
+     */
+    machine?: string | null;
+    /**
+     * The model the session ran on, as the session recorded it when the
+     * Step first saw it open.
+     */
+    model?: string | null;
 };
 
 /**
@@ -3829,6 +3906,50 @@ export type GetFactoryInsightsResponses = {
 };
 
 export type GetFactoryInsightsResponse = GetFactoryInsightsResponses[keyof GetFactoryInsightsResponses];
+
+export type QuarantineFactoryCiJobData = {
+    body: CiJobRequest;
+    path?: never;
+    query?: never;
+    url: '/insights/ci-quarantines';
+};
+
+export type QuarantineFactoryCiJobErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type QuarantineFactoryCiJobError = QuarantineFactoryCiJobErrors[keyof QuarantineFactoryCiJobErrors];
+
+export type QuarantineFactoryCiJobResponses = {
+    200: CiQuarantineChange;
+};
+
+export type QuarantineFactoryCiJobResponse = QuarantineFactoryCiJobResponses[keyof QuarantineFactoryCiJobResponses];
+
+export type ReleaseFactoryCiJobData = {
+    body: CiJobRequest;
+    path?: never;
+    query?: never;
+    url: '/insights/ci-quarantines/release';
+};
+
+export type ReleaseFactoryCiJobErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type ReleaseFactoryCiJobError = ReleaseFactoryCiJobErrors[keyof ReleaseFactoryCiJobErrors];
+
+export type ReleaseFactoryCiJobResponses = {
+    200: CiQuarantineChange;
+};
+
+export type ReleaseFactoryCiJobResponse = ReleaseFactoryCiJobResponses[keyof ReleaseFactoryCiJobResponses];
 
 export type GetFactoryEvaluationData = {
     body?: never;

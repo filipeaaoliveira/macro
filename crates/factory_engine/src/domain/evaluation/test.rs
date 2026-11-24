@@ -332,6 +332,7 @@ async fn ended_run(
             passed_over: Vec::new(),
             checks: Vec::new(),
             terminal: StepTerminal::default(),
+            runtime: Default::default(),
         },
     ));
     repo.sessions.lock().expect("sessions").push(FakeSession {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT name, failed_step, failure\n        FROM factory_ci_quarantine\n        WHERE repo_url = $1 AND last_passed_at >= $2\n        ORDER BY name, failed_step, failure\n        LIMIT $3\n        ",
+  "query": "\n        SELECT name, failed_step, failure, quarantined_by IS NOT NULL AS \"by_hand!\"\n        FROM factory_ci_quarantine\n        WHERE repo_url = $1 AND last_passed_at >= $2\n        ORDER BY name, failed_step, failure\n        LIMIT $3\n        ",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "ordinal": 2,
         "name": "failure",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "by_hand!",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -29,8 +34,9 @@
     "nullable": [
       false,
       true,
-      true
+      true,
+      null
     ]
   },
-  "hash": "85b2830f64e29121a4edf9cfd00d75548e8863d0be81968e944c212d26b2119c"
+  "hash": "f152166e362da5ad3f7268390b313c1433bdaa5445e4b90921ae4144ccdc4cb6"
 }

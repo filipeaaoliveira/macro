@@ -41,6 +41,7 @@ fn run() -> Run {
         budget_stop: None,
         retry: None,
         retried_by: None,
+        merged_at: None,
     }
 }
 
@@ -74,6 +75,7 @@ fn step_with(gate: Option<Gate>) -> Step {
         passed_over: Vec::new(),
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 

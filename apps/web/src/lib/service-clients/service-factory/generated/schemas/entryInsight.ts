@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { EntryInsightCostUsd } from './entryInsightCostUsd';
 import type { EntryInsightDuration } from './entryInsightDuration';
 import type { EntryInsightGate } from './entryInsightGate';
 import type { EntryInsightTokens } from './entryInsightTokens';
@@ -14,6 +15,9 @@ import type { TroubleRun } from './troubleRun';
  * One of a Flow's entries, across the period's Runs.
  */
 export interface EntryInsight {
+  /** What its agent Steps' model calls cost, in US dollars; none unless
+every session of theirs recorded usage and every call was priced. */
+  costUsd?: EntryInsightCostUsd;
   duration?: EntryInsightDuration;
   /** The entry's id, as its Flow names it. */
   entry: string;

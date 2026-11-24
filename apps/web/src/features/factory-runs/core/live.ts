@@ -5,8 +5,8 @@ import type { Gate, Run, RunStep } from './run';
 /**
  * What the live dashboard and the Run page read of a Run: its Flow's stages
  * and where the Run is on them, the agents working now, and the numbers of
- * the header strip. Everything the API does not send yet comes from
- * `stepRuntime`, the one place to fill it in.
+ * the header strip. Where each Step ran comes from `stepRuntime`, and when
+ * a Run merged from `mergedAt`.
  */
 
 /**
@@ -195,19 +195,42 @@ export function workingSteps(run: Run): RunStep[] {
 }
 
 /**
- * Where a Step runs and on what. The API does not send these yet: the model
- * its agent runs, and the Machine its session runs on. Fill them in here
- * once a Step carries them; every view reads them from this one function.
+ * Where a Step runs and on what: the model its agent's session ran on, the
+ * Machine it ran on, and the agent's display name. Each is unset while the
+ * API doesn't know it: a Step no agent does, a session that hasn't opened
+ * yet (its agent's name is known from the start), a session on no Machine,
+ * and a Step from before Steps kept them. Every view reads them from here.
  */
 export type StepRuntime = {
-  /** The model the Step's agent runs, such as `claude-opus-4`. */
+  /** The model the Step's agent ran on, such as `claude-opus-4-5`. */
   model?: string;
-  /** The Machine the Step's session runs on, by its name. */
+  /** The Machine the Step's session first opened on, for the Run's owner. */
   machine?: string;
+  /** The display name of the agent whose session it is. */
+  agentName?: string;
 };
 
-export function stepRuntime(_step: RunStep): StepRuntime {
-  return {};
+export function stepRuntime(step: Pick<RunStep, 'runtime'>): StepRuntime {
+  return {
+    model: step.runtime?.model || undefined,
+    machine: step.runtime?.machine || undefined,
+    agentName: step.runtime?.agentName || undefined,
+  };
+}
+
+/**
+ * When a Run merged its pull request: the time the factory recorded, else,
+ * for a merged Run from before it did, when the Run ended. None for a Run
+ * that didn't merge.
+ */
+export function mergedAt(
+  run: Pick<Run, 'mergedAt' | 'end'>
+): string | undefined {
+  if (run.mergedAt) return run.mergedAt;
+  const outcome = run.end?.outcome;
+  return outcome === 'success' || outcome === 'flawed'
+    ? run.end?.endedAt
+    : undefined;
 }
 
 /** What a Gate asks a person, as the dashboard sorts them. */
@@ -253,12 +276,16 @@ export function formatElapsed(ms: number): string {
 export type LiveNumbers = {
   running: number;
   waiting: number;
+  /** The Runs read that merged today, flawed ones too. */
   mergedToday: number;
   /** Of the ended Runs read, in percent; none while none ended. */
   successRate?: number;
   /** How many ended Runs the rate counts. */
   ended: number;
-  /** The median time from start to merge of the merged Runs read. */
+  /**
+   * The median time from a Run's creation to its merge (`mergedAt`) of the
+   * merged Runs read, as Insights' time to merge counts it.
+   */
   medianToMerge?: number;
 };
 
@@ -280,23 +307,26 @@ export function liveNumbers(input: {
   const ended = input.recent.filter(
     (listed) => listed.run.end && listed.run.end.outcome !== 'cancelled'
   );
-  const merged = ended.filter(
+  // A flawed Run merged too, and was found wrong after: it counts as
+  // merged, as `mergedAt` reads it, but not as a success.
+  const merged = ended.filter((listed) => mergedAt(listed.run) !== undefined);
+  const succeeded = ended.filter(
     (listed) => listed.run.end?.outcome === 'success'
   );
   const durations = merged
     .map((listed) =>
-      elapsedMs(listed.run.createdAt, listed.run.end?.endedAt, input.now)
+      elapsedMs(listed.run.createdAt, mergedAt(listed.run), input.now)
     )
     .sort((a, b) => a - b);
   return {
     running: input.active.filter((listed) => listed.state !== 'waiting').length,
     waiting: input.waiting,
     mergedToday: merged.filter((listed) =>
-      sameDay(new Date(listed.run.end?.endedAt ?? 0), today)
+      sameDay(new Date(mergedAt(listed.run) ?? 0), today)
     ).length,
     successRate:
       ended.length > 0
-        ? Math.round((merged.length / ended.length) * 100)
+        ? Math.round((succeeded.length / ended.length) * 100)
         : undefined,
     ended: ended.length,
     medianToMerge:

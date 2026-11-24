@@ -4,6 +4,8 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+
+import type { InsightDayRunDuration } from './insightDayRunDuration';
 import type { OutcomeCounts } from './outcomeCounts';
 
 /**
@@ -14,4 +16,5 @@ export interface InsightDay {
   counts: OutcomeCounts;
   /** The day, in the period's time zone. */
   date: string;
+  runDuration?: InsightDayRunDuration;
 }

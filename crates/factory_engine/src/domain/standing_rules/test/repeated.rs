@@ -74,6 +74,7 @@ fn reviewed(seq: u16, entry: &str) -> Step {
         passed_over: Vec::new(),
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 
@@ -115,6 +116,7 @@ fn fixed(seq: u16, rule: Option<StandingRule>) -> Step {
         passed_over: Vec::new(),
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 

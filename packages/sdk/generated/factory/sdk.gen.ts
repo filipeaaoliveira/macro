@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CheckFactoryDefinitionChangeData, CheckFactoryDefinitionChangeErrors, CheckFactoryDefinitionChangeResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FindPullRequestRunsData, FindPullRequestRunsErrors, FindPullRequestRunsResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, FlawFactoryRunData, FlawFactoryRunErrors, FlawFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryDefinitionData, GetFactoryDefinitionErrors, GetFactoryDefinitionFileData, GetFactoryDefinitionFileErrors, GetFactoryDefinitionFileResponses, GetFactoryDefinitionResponses, GetFactoryEvaluationData, GetFactoryEvaluationErrors, GetFactoryEvaluationResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryQualityData, GetFactoryQualityErrors, GetFactoryQualityResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryRunScoresData, GetFactoryRunScoresErrors, GetFactoryRunScoresResponses, GetFactorySessionStepData, GetFactorySessionStepErrors, GetFactorySessionStepResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LabelFactoryRunScoreData, LabelFactoryRunScoreErrors, LabelFactoryRunScoreResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryBoardData, ListFactoryBoardErrors, ListFactoryBoardResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ProposeFactoryDefinitionChangeData, ProposeFactoryDefinitionChangeErrors, ProposeFactoryDefinitionChangeResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, RetryFactoryRunData, RetryFactoryRunErrors, RetryFactoryRunResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryDefinitionData, SetFactoryDefinitionErrors, SetFactoryDefinitionResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StartFactoryBenchmarkSuiteData, StartFactoryBenchmarkSuiteErrors, StartFactoryBenchmarkSuiteResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses, UndoFactoryImprovementDismissalData, UndoFactoryImprovementDismissalErrors, UndoFactoryImprovementDismissalResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CheckFactoryDefinitionChangeData, CheckFactoryDefinitionChangeErrors, CheckFactoryDefinitionChangeResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FindPullRequestRunsData, FindPullRequestRunsErrors, FindPullRequestRunsResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, FlawFactoryRunData, FlawFactoryRunErrors, FlawFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryDefinitionData, GetFactoryDefinitionErrors, GetFactoryDefinitionFileData, GetFactoryDefinitionFileErrors, GetFactoryDefinitionFileResponses, GetFactoryDefinitionResponses, GetFactoryEvaluationData, GetFactoryEvaluationErrors, GetFactoryEvaluationResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryQualityData, GetFactoryQualityErrors, GetFactoryQualityResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryRunScoresData, GetFactoryRunScoresErrors, GetFactoryRunScoresResponses, GetFactorySessionStepData, GetFactorySessionStepErrors, GetFactorySessionStepResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LabelFactoryRunScoreData, LabelFactoryRunScoreErrors, LabelFactoryRunScoreResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryBoardData, ListFactoryBoardErrors, ListFactoryBoardResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ProposeFactoryDefinitionChangeData, ProposeFactoryDefinitionChangeErrors, ProposeFactoryDefinitionChangeResponses, QuarantineFactoryCiJobData, QuarantineFactoryCiJobErrors, QuarantineFactoryCiJobResponses, ReleaseFactoryCiJobData, ReleaseFactoryCiJobErrors, ReleaseFactoryCiJobResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, RetryFactoryRunData, RetryFactoryRunErrors, RetryFactoryRunResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryDefinitionData, SetFactoryDefinitionErrors, SetFactoryDefinitionResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StartFactoryBenchmarkSuiteData, StartFactoryBenchmarkSuiteErrors, StartFactoryBenchmarkSuiteResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses, UndoFactoryImprovementDismissalData, UndoFactoryImprovementDismissalErrors, UndoFactoryImprovementDismissalResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -216,6 +216,49 @@ export class Sdk extends HeyApiClient {
      */
     public getFactoryInsights<ThrowOnError extends boolean = false>(options: Options<GetFactoryInsightsData, ThrowOnError>): RequestResult<GetFactoryInsightsResponses, GetFactoryInsightsErrors, ThrowOnError> {
         return (options.client ?? this.client).get<GetFactoryInsightsResponses, GetFactoryInsightsErrors, ThrowOnError>({ url: '/insights', ...options });
+    }
+
+    /**
+     * Quarantine a CI job of a repository: every failure of it is a known
+     * flake there, which the `rerun_flaky_ci` Standing Rule reruns once before
+     * any CI fix. Quarantines are per repository, so this reaches every team's
+     * Runs on it, not only the caller's team's. It files no task; each passed
+     * rerun of the job extends it, and it lapses 30 days after it was made or
+     * a rerun of it last passed. Quarantining a job that is so already
+     * changes nothing. Only an owner or admin of a team, from an account that
+     * is not an agent's, in their own signed-in session (403 otherwise), who
+     * may push to the repository (400 otherwise). The job's name is trimmed,
+     * and cut as CI health keeps job names.
+     */
+    public quarantineFactoryCiJob<ThrowOnError extends boolean = false>(options: Options<QuarantineFactoryCiJobData, ThrowOnError>): RequestResult<QuarantineFactoryCiJobResponses, QuarantineFactoryCiJobErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<QuarantineFactoryCiJobResponses, QuarantineFactoryCiJobErrors, ThrowOnError>({
+            url: '/insights/ci-quarantines',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Release a CI job of a repository: lift every quarantine of it, made by
+     * hand or by its passed reruns, for every team's Runs on it. Its reruns and
+     * greens before the release no longer prove it flaky, so its failures go
+     * to a CI fix again until new evidence, or a person, quarantines it anew;
+     * a job the Factory Definition names in `knownFlakes` stays a known flake.
+     * Releasing a job that is not quarantined changes nothing. The same
+     * people as for a quarantine may.
+     */
+    public releaseFactoryCiJob<ThrowOnError extends boolean = false>(options: Options<ReleaseFactoryCiJobData, ThrowOnError>): RequestResult<ReleaseFactoryCiJobResponses, ReleaseFactoryCiJobErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<ReleaseFactoryCiJobResponses, ReleaseFactoryCiJobErrors, ThrowOnError>({
+            url: '/insights/ci-quarantines/release',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
     }
 
     /**

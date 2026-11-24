@@ -35,6 +35,7 @@ function page(steps: number): BoardPage {
             entry: 'write',
             visit: 1,
             startedAt: '2026-11-18T09:00:00Z',
+            runtime: {},
             checks: [],
             passedOver: [],
             terminal: { betweenTurns: false, steers: [] },
