@@ -3,6 +3,7 @@
 //! person gives, and which settles them.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bot_id::BotId;
 use chrono::{TimeDelta, Utc};
@@ -173,7 +174,11 @@ impl Bench {
     ) -> Self {
         let github = FakeGithub::default();
         definition(&github, agents, rules);
-        let service = Arc::new(code_service(&repo, &workflows, &github));
+        // The tests change the Definition's files in place, at the commit
+        // it is at: nothing read of it is kept between reads.
+        let service = Arc::new(
+            code_service(&repo, &workflows, &github).with_definition_reads_kept(Duration::ZERO),
+        );
         Self {
             repo,
             github,

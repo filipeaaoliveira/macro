@@ -171,6 +171,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     review_rounds: Option<NonZeroU8>,
     questions: u8,
     task_views: board::TaskViews,
+    definition_reads: definition::DefinitionReads,
     evaluation: Arc<EvaluationDefinition>,
     usage: Option<UsageLog>,
 }
@@ -205,6 +206,7 @@ where
             review_rounds: None,
             questions: DEFAULT_QUESTIONS,
             task_views: board::TaskViews::default(),
+            definition_reads: definition::DefinitionReads::default(),
             evaluation: Arc::default(),
             usage: None,
         }
@@ -221,6 +223,14 @@ where
     #[cfg(test)]
     pub(crate) fn with_task_views_kept(mut self, kept: std::time::Duration) -> Self {
         self.task_views = board::TaskViews::kept_for(kept);
+        self
+    }
+
+    /// Keep the Definition heads and contents people read for `kept` each,
+    /// in place of 10 s and 10 minutes.
+    #[cfg(test)]
+    pub(crate) fn with_definition_reads_kept(mut self, kept: std::time::Duration) -> Self {
+        self.definition_reads = definition::DefinitionReads::kept_for(kept);
         self
     }
 
@@ -1249,7 +1259,7 @@ where
         actor: &MacroUserIdStr<'static>,
     ) -> Result<Vec<FlowSummary>, FactoryError> {
         let team = self.repo.team_of(actor).await.map_err(internal)?;
-        if let Some(pinned) = self.team_definition(actor, team).await? {
+        if let Some(pinned) = self.recent_team_definition(actor, team).await? {
             let flows = pinned.definition.flows.into_iter();
             return Ok(flows
                 .map(|(name, flow)| FlowSummary {
@@ -1331,7 +1341,7 @@ where
         actor: &MacroUserIdStr<'static>,
     ) -> Result<Option<TeamEvaluation>, FactoryError> {
         let team = self.repo.team_of(actor).await.map_err(internal)?;
-        let pinned = self.team_definition(actor, team).await?;
+        let pinned = self.recent_team_definition(actor, team).await?;
         Ok(pinned.map(|pinned| TeamEvaluation {
             evaluation: pinned.definition.evaluation,
             agents: pinned.definition.agents,
