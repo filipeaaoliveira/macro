@@ -937,7 +937,10 @@ up: then the Step fails saying the branch is not on GitHub. Like the
 checks, this runs in the Step's activity, behind no patch marker. The pull request Steps act on GitHub as the Run's owner, with
 the token of the GitHub account they linked to Macro, which the
 authentication service gives (`outbound/github_pull_requests.rs`, over the
-`github` crate's user-token client), read on every call. A missing link, a
+`github` crate's user-token client), read again once kept 30 s (`TOKEN_KEPT`:
+the authentication service checks a token with GitHub before it gives it, so a
+read costs a GitHub call; an owner with no link is asked on every call). A
+missing link, a
 token GitHub no longer takes (401), a refusal that is not throttling (403) and
 a repository out of reach (404) fail the Step for good; throttling, 5xx and
 transport failures are tried again. Each Step reads before it writes, so a
@@ -2309,7 +2312,7 @@ open pull requests (`openPullRequests`, at most
 which does not fail the setting). While a team names one, `POST /runs`, `GET
 /flows` and an Automation's check read it as the Run's owner at the commit its
 default branch is at (`PullRequests::branch_head`, then `file_text` at that
-commit; `service/definition.rs`): the Run walks the Definition's Flow of that
+commit, the files the manifest names asked for at once; `service/definition.rs`): the Run walks the Definition's Flow of that
 name (a built-in Flow it does not name is `UnknownFlow`), with its rules
 (`RulesSource::Definition`: neither the team's settings nor a Project's own
 apply) and Control Files, and keeps the repository, the commit
@@ -2339,7 +2342,15 @@ so a person approves it; `rules.json` lists at most
 /settings/definition` says whether the default branch takes changes only by
 pull request (`requiresPullRequest`, from its rulesets or, for its admins,
 its branch protection), and the Control Files and Standing Rules settings
-say a Definition is named (`definitionNamed`). Only the default
+say a Definition is named (`definitionNamed`). The service keeps what it
+read per person (`service/definition/kept.rs`): a Definition read at a
+commit for 10 minutes, since a commit's files never change, and the head
+for 10 s. The screens that read the Definition on every load (`GET
+/settings/definition`, `GET /flows`, and the Scorers, Experiments and
+Benchmarks that Insights, a Run's scores and self-improvement read,
+`FactoryService::team_evaluation`) take the head found in the last 10 s,
+so a change merged on GitHub shows there within that time; `POST /runs`, a
+retry, an Automation's check and naming a Definition read the head now. Only the default
 branch is read, so a change reaches Runs once its pull request merges, and a
 Run started already, or a Run's own branch, never changes the rules it runs
 under. The team's Control Files and Standing Rules settings are refused
