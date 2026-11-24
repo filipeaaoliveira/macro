@@ -996,11 +996,12 @@ work on the branch on GitHub ends `failed`, saying why, before its checks
 (`checks_round.rs`, `unpushed`, which `update` and conflict resolution skip):
 the branch changes nothing against the Run's base (GitHub lists no changed
 path; a list GitHub cannot give in full passes), or, for a fix that says it
-fixed a Blocker of its review round, is still at the commit that round
-reviewed. A Blocker of the `tests-reviewer` that speaks of a test's break
+fixed a Blocker of its review round, or does not answer one, is still at the
+commit that round reviewed; only a Blocker it disputes needs no commit. A Blocker of the `tests-reviewer` that speaks of a test's break
 (`asks_for_break`) needs no commit once the fix reported a readable break:
 the next round reviews the whole change again, on the same commit, with
-the new record; any other Blocker it says it fixed still needs one. Either
+the new record; any other Blocker it says it fixed or left unanswered still
+needs one. Either
 is read again after 2 s before the Step fails. A branch
 GitHub does not have, even after 2 s, fails the attempt for a retry, as a
 round's read of it does, until the Step's time for rounds (105 minutes) is
@@ -1371,7 +1372,10 @@ Each visit is a review round: the workflow opens it
 reviews (read from GitHub as the owner) and the diff under review: the Run's
 whole change against its base in round 1, and in a later round the fix diff,
 from the commit the round before reviewed; a fix that pushed nothing has the
-whole change reviewed again. Then it starts one Step per reviewer, at the
+whole change reviewed again. A whole-change round of a branch GitHub lists
+no changed file for against its base (head at base) fails, saying the
+branch changes nothing against its base, and runs no Step; a list GitHub
+cannot give in full opens the round. Then it starts one Step per reviewer, at the
 places after the round's own (`NextStep::Run`'s `seq` and the ones after it,
 in the entry's order; the interpreter counts them all against `MAX_STEPS`),
 runs their work at once (`join_all`, scheduled and read in the entry's order),
@@ -1427,7 +1431,7 @@ most two hours, then the round fails; a project the owner may not edit
 no project, saying so; properties of the Run's task that do not read put it
 in none too; a refusal leaves the follow-up with no task; and a task made under another id stops the round for good, since every
 retry would make another. A diff GitHub
-cannot list in full makes every finding a Blocker. The round ends `changes`
+cannot list in full, or lists empty, makes every finding a Blocker. The round ends `changes`
 with a Blocker, `pass` without, and `failed` when a reviewer's work failed or
 a reviewer's Step ended with no answer read (a worker without review panels
 ran it). A round that cannot open, as when the Run's branch is gone, is
@@ -1442,13 +1446,18 @@ data: no `<` or `>`, code fence or heading line (ATX or setext) left in it,
 paths included, cut to `BRIEF_BUDGET`. Reviewers' outputs reach every later
 Step's history fenced the same way. A finding's path must be a plain path:
 no control character, backtick or angle bracket. An answer that never read
-is not carried to the next round. The fix ends its text with a fenced `json` block that
+is not carried to the next round. The fix ends the text it hands back with a fenced `json` block that
 says, per Blocker by its number in its brief, `fixed` or `disputed` with a
 `reason` (`review_rounds/fix_answer.rs`); once its work hands back `done`,
-before its checks, that is kept on the Blockers (`fix_status`, `dispute`, cut
-to `MAX_DISPUTE_BYTES`, 2 KiB). A Blocker it leaves out, a dispute with no
-reason, a block that does not read and an answer that never read are
-`fixed`. A reason is kept on one line, with no NUL or other control
+before its checks, that is kept on the Blockers the block names
+(`fix_status`, `dispute`, cut to `MAX_DISPUTE_BYTES`, 2 KiB). A dispute with
+no reason and one of an answer that never read are `fixed`. A Blocker the
+block leaves out, and every one when the hand back holds no block that
+reads (a dispute written in prose included), gets no answer: its
+`fix_status` stays empty, it needs a commit, and the next round's reviewer
+checks it again. A session agent adds the last block of the agent's reply
+that names `blockers` when the hand back holds none
+(`session_agent/said_breaks.rs`). A reason is kept on one line, with no NUL or other control
 character. In the next round's brief every carried Blocker is listed
 first, within `BRIEF_BUDGET`; the reasons follow in a budget of their own
 (`DISPUTE_BUDGET`), each escaped as findings are and then cut to 2 KiB

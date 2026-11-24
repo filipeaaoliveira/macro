@@ -12,28 +12,25 @@ use factory_records::domain::review_rounds::{
 use super::answer::{WHOLE_CHANGE, cut, json_block};
 use super::brief::one_line;
 
-/// What the fix handed back, `text`, says of each Blocker of `round`,
-/// numbered from 1 as its brief numbers them. A Blocker it disputes with a
-/// reason is disputed, the reason on one line (no NUL or other control
-/// character, white space collapsed) and cut to
-/// [`MAX_DISPUTE_BYTES`]; any other is fixed: one it left out, one it
-/// disputes with no reason, and every one when its block does not read.
-/// An answer that never read names nothing to rule on, so it is never
-/// disputed. When the block names a Blocker more than once, the last
-/// counts.
+/// What the fix handed back, `text`, says of each Blocker of `round` its
+/// block names, numbered from 1 as its brief numbers them. A Blocker it
+/// disputes with a reason is disputed, the reason on one line (no NUL or
+/// other control character, white space collapsed) and cut to
+/// [`MAX_DISPUTE_BYTES`]; any other it names is fixed, as one it disputes
+/// with no reason. A Blocker the block leaves out, and every one when the
+/// block does not read, gets no answer: it stays unanswered and blocks
+/// again. An answer that never read names nothing to rule on, so it is
+/// never disputed. When the block names a Blocker more than once, the
+/// last counts.
 pub fn fix_answers(round: &ReviewRound, text: &str) -> Vec<FixAnswer> {
     let said = said_of(text);
     round
         .blockers()
         .enumerate()
-        .map(|(index, blocker)| {
-            let reason = said
-                .iter()
-                .rev()
-                .find(|(number, _)| *number == index + 1)
-                .and_then(|(_, reason)| reason.as_deref())
-                .filter(|_| disputable(blocker));
-            match reason {
+        .filter_map(|(index, blocker)| {
+            let (_, reason) = said.iter().rev().find(|(number, _)| *number == index + 1)?;
+            let reason = reason.as_deref().filter(|_| disputable(blocker));
+            Some(match reason {
                 Some(reason) => FixAnswer {
                     seq: blocker.seq,
                     place: blocker.place,
@@ -46,7 +43,7 @@ pub fn fix_answers(round: &ReviewRound, text: &str) -> Vec<FixAnswer> {
                     status: FixStatus::Fixed,
                     dispute: None,
                 },
-            }
+            })
         })
         .collect()
 }

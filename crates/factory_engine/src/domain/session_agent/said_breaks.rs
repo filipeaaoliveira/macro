@@ -2,7 +2,9 @@
 //! A write or fix Step's checks round reads breaks only from what the Step
 //! handed back ([`crate::domain::breaks`]), and agents often put them in
 //! the reply that ends their turn instead: each readable one the hand back
-//! lacks is added to it, so no break is lost.
+//! lacks is added to it, so no break is lost. A fix's answer of its
+//! Blockers ([`crate::domain::review_rounds::fix_answers`]) is taken from
+//! the reply the same way, when the hand back holds none.
 
 use agent_runtime_protocol::domain::action::AgentActionId;
 use agent_session::domain::routines::{RoutineSessionAction, RoutineSessions};
@@ -13,6 +15,7 @@ use factory_records::domain::session_usage::SessionUsageRepository;
 use super::SessionAgent;
 use crate::domain::breaks::{Reported, read_line, reported};
 use crate::domain::models::AgentAnswer;
+use crate::domain::review_rounds::json_blocks;
 
 /// What heads the break lines added from the agent's reply.
 pub(super) const FROM_REPLY: &str = "Breaks the agent wrote in its reply:";
@@ -63,8 +66,26 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
                 added.join("\n")
             );
         }
+        if let Some(block) = missing_fix_answer(&answer.text, &said) {
+            answer.text = format!("{}\n\n{block}", answer.text.trim_end());
+        }
         answer
     }
+}
+
+/// The last fenced `json` block of `said` that answers a fix's Blockers,
+/// when `handed` holds none: fenced again, to be added at the end of
+/// `handed`, where the fix's answer is read.
+pub(super) fn missing_fix_answer(handed: &str, said: &str) -> Option<String> {
+    const KEY: &str = "blockers";
+    if json_blocks(handed).iter().any(|block| block.names(KEY)) {
+        return None;
+    }
+    let block = json_blocks(said)
+        .into_iter()
+        .rev()
+        .find(|block| block.names(KEY))?;
+    Some(format!("```json\n{}\n```", block.value))
 }
 
 /// The readable break lines of `said` whose test `handed` names no break
