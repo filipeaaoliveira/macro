@@ -15,5 +15,3 @@
 
 pub mod domain;
 pub mod outbound;
-
-// Fork CI on hosted runners: a change here selects the factory packages (warm run 2).
