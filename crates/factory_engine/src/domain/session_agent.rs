@@ -31,6 +31,7 @@ use factory_records::domain::models::{
     AgentName, HandedBack, Outcome, PassedOver, Role, RunId, StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::session_usage::{SessionUsage, SessionUsageRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 use trigger_context::TriggerOrigin;
 use uuid::Uuid;
@@ -305,7 +306,9 @@ impl std::fmt::Debug for Notices {
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
+    SessionAgent<S, R>
+{
     /// The Agents of `agents`, reached through `sessions`, with their
     /// sessions recorded in `repo`.
     pub fn new(sessions: S, repo: R, agents: AgentDefinition) -> Self {
@@ -639,8 +642,40 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
     /// with it. A delete that fails leaves a hidden session, so it is logged,
     /// not raised.
     async fn delete(&self, action: &RoutineSessionAction) {
+        self.keep_usage(action).await;
         if let Err(error) = self.sessions.delete(action.clone()).await {
             tracing::warn!(?error, "a factory step's agent session was not deleted");
+        }
+    }
+
+    /// Keep what the session of `action` reported its model calls used,
+    /// read from its log, which goes with the session once it is deleted.
+    /// Kept as each turn ends, so a session that dies keeps what it used
+    /// until then, and again before the session is deleted. A read or a
+    /// write that fails is logged, and the Step goes on: its usage is for
+    /// Insights, which then read the session as unmeasured.
+    async fn keep_usage(&self, action: &RoutineSessionAction) {
+        let usage = match self.sessions.usage(action.clone()).await {
+            Ok(Some(usage)) => usage,
+            Ok(None) => return,
+            Err(error) => {
+                tracing::warn!(?error, "a factory step's agent session usage was not read");
+                return;
+            }
+        };
+        let kept = SessionUsage {
+            session_id: action.session_id.as_uuid(),
+            user_id: action.owner.clone(),
+            bot_id: action.bot_id.as_uuid(),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
+            cost_usd: usage.cost_usd,
+            model: usage.model,
+        };
+        if let Err(error) = self.repo.record_session_usage(&kept).await {
+            tracing::warn!(?error, "a factory step's agent session usage was not kept");
         }
     }
 
@@ -783,6 +818,7 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
             };
 
             if let Some(ended) = ended {
+                self.keep_usage(&watched).await;
                 match steering.prompt {
                     // The owner sent a note or a resume after this turn: the
                     // Step goes on with its turn.
@@ -833,7 +869,9 @@ pub(super) struct Waited {
     pub(super) deadline: tokio::time::Instant,
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
+    SessionAgent<S, R>
+{
     /// Wait on the turn of the Step `task`'s own prompt `action` ([`Self::wait_turn`]),
     /// unless an earlier attempt already took the Step on to a later prompt
     /// (its reminder): that turn ended, and the steering the Step takes is
@@ -860,7 +898,9 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
+    SessionAgent<S, R>
+{
     /// Open the Step's `session` and prompt it, as the session's Agent, and
     /// the action to wait on. An Agent whose quota is used up refuses either
     /// before any work starts: its session, if it opened, is deleted, and
@@ -946,7 +986,9 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
+    SessionAgent<S, R>
+{
     /// Run the repository's `setup` in the Step's new session `session`,
     /// through its bot (`action`), before its first prompt: each command not
     /// yet recorded passed in this session, in order, from the checkout's
@@ -1060,7 +1102,9 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
+    SessionAgent<S, R>
+{
     /// Do the Step `task`, which goes on from the question of the Step at
     /// `asked`, in that Step's session: the agent has the Step's
     /// instructions and its work so far there. The Step claims the session
@@ -1439,7 +1483,9 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> StepAgent for SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository> StepAgent
+    for SessionAgent<S, R>
+{
     type Err = SessionAgentError;
 
     #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step, role = %task.role))]
@@ -1651,7 +1697,11 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> StepAgent for 
         // delete. A delete answers a missing session as deleted, yet one no
         // attempt saw open, whose prepare was sent lately, may open after it:
         // the stop is tried again until it opens and is deleted, or no
-        // prepare can open it any more.
+        // prepare can open it any more. What the session used is kept
+        // first: its log goes with it.
+        if seen || stopping.opened {
+            self.keep_usage(&action).await;
+        }
         match self.sessions.delete(action).await {
             Ok(()) if !seen && !stopping.opened && stopping.may_still_open => {
                 Err(SessionAgentError::MayStillOpen)

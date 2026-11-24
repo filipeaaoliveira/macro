@@ -115,9 +115,9 @@ async fn a_step_keeps_the_session_it_lost_with_the_one_it_went_on_in(pool: PgPoo
         .expect("the run is read");
     let quality_sessions: Vec<Uuid> = run.sessions.iter().map(|session| session.id).collect();
     assert_eq!(quality_sessions, both);
-    // The Step keeps only its current bot: the session it left reads with
-    // none, not as the new Agent's, so a spend it did not record reads as
-    // unknown rather than as nothing.
+    // Each session reads with the bot that ran it: the one the Step left
+    // keeps its own, not the new Agent's, so its runtime's records say
+    // whether it spent anything.
     let bot_of = |id: Uuid| {
         run.sessions
             .iter()
@@ -125,7 +125,9 @@ async fn a_step_keeps_the_session_it_lost_with_the_one_it_went_on_in(pool: PgPoo
             .expect("the session is read")
             .bot
     };
-    assert_eq!(bot_of(first.session_id), None);
+    assert!(first.bot.is_some());
+    assert_ne!(first.bot, second.bot);
+    assert_eq!(bot_of(first.session_id), first.bot);
     assert_eq!(bot_of(second.session_id), second.bot);
     // A Benchmark trial's tokens read the same sessions.
     let subject = repo

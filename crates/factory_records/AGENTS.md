@@ -52,6 +52,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/automations.rs` and
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.
+- `src/domain/session_usage.rs` and
+  `src/outbound/pg_run_repository/session_usage.rs`: `SessionUsageRepository`,
+  what each Step's agent session's runtime reported its model calls used
+  (`factory_session_usage`): tokens, the cost in US dollars when reported,
+  the model, who the session ran as and its bot. A write never lowers what
+  was kept. `factory_step_used_session.bot_id` keeps the bot of each session
+  a Step worked in, those it left included.
 - `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
   `RunBoardRepository`, the board's read of Runs across tasks, and of the
   Runs that opened some pull requests.
@@ -143,7 +150,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261123130000_factory_break_record.sql`,
   `20261123221318_factory_run_scored.sql`,
   `20261123221322_factory_split_task.sql`,
-  `20261124120000_factory_ci_quarantine_by_hand.sql`), `factory_break_record`,
+  `20261124120000_factory_ci_quarantine_by_hand.sql`,
+  `20261124140000_factory_step_runtime.sql`,
+  `20261124200000_factory_session_usage.sql`), `factory_break_record`,
   `factory_split_task`,
   `factory_step_steer`,
   `factory_run_score`, `factory_scorer_label`, `factory_run_arm`, `factory_run_agent_rule`,
@@ -152,8 +161,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
   `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait`,
-  `factory_ci_job`, `factory_ci_retry`, `factory_ci_quarantine`, `factory_ci_release` and
-  `factory_step_used_session`.
+  `factory_ci_job`, `factory_ci_retry`, `factory_ci_quarantine`, `factory_ci_release`,
+  `factory_step_used_session` and `factory_session_usage`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries

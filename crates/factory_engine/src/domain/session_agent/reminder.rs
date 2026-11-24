@@ -8,6 +8,7 @@ use agent_session::domain::routines::{
 };
 use factory_records::domain::evaluation::EvaluationRepository;
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::session_usage::SessionUsageRepository;
 use uuid::Uuid;
 
 use super::{SessionAgent, SessionAgentError, Waited, prompt};
@@ -28,7 +29,9 @@ pub(super) const SAID_NOTHING: &str = "The agent said nothing before it stopped.
 /// last message could not be read.
 const UNREAD_LAST_WORDS: &str = "The agent's last message could not be read.";
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
+    SessionAgent<S, R>
+{
     /// What the agent handed back for the Step `task`'s prompt `action`,
     /// whose turn ended, or the turn of the owner's prompt the Step followed
     /// after it (`waited`); when nothing, what it hands back once reminded,

@@ -10,6 +10,7 @@ mod gate_replies;
 mod main_hold;
 mod merge_queue;
 pub(crate) mod self_improvement;
+mod session_usage;
 mod standing_acts;
 mod steering;
 mod task_thread;
@@ -275,6 +276,9 @@ pub(crate) struct FakeRepo {
     pub(crate) firings: Arc<Mutex<BTreeMap<FiringKey, Option<FiringEnd>>>>,
     /// Experiment arms, Scorers' judgments and Benchmark suites.
     pub(crate) evaluation: Arc<Mutex<FakeEvaluation>>,
+    /// What each agent session's runtime reported it used, by session.
+    pub(crate) session_usage:
+        Arc<Mutex<BTreeMap<Uuid, factory_records::domain::session_usage::SessionUsage>>>,
 }
 
 /// A firing: its Automation and its key.

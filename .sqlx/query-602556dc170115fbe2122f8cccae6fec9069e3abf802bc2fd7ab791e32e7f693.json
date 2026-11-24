@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_step_used_session (run_id, seq, session_id, bot_id)\n            SELECT $1, u.seq, u.session_id, u.bot_id\n            FROM factory_step_used_session u\n            JOIN factory_step s ON s.run_id = $1 AND s.seq = u.seq\n            WHERE u.run_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "602556dc170115fbe2122f8cccae6fec9069e3abf802bc2fd7ab791e32e7f693"
+}

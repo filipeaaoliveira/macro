@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_session_usage (\n                session_id, user_id, bot_id, input_tokens, output_tokens,\n                cache_read_tokens, cache_write_tokens, cost_usd, model\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n            ON CONFLICT (session_id) DO UPDATE SET\n                input_tokens = GREATEST(factory_session_usage.input_tokens, EXCLUDED.input_tokens),\n                output_tokens = GREATEST(factory_session_usage.output_tokens, EXCLUDED.output_tokens),\n                cache_read_tokens = GREATEST(\n                    factory_session_usage.cache_read_tokens, EXCLUDED.cache_read_tokens\n                ),\n                cache_write_tokens = GREATEST(\n                    factory_session_usage.cache_write_tokens, EXCLUDED.cache_write_tokens\n                ),\n                cost_usd = GREATEST(factory_session_usage.cost_usd, EXCLUDED.cost_usd),\n                model = COALESCE(EXCLUDED.model, factory_session_usage.model),\n                recorded_at = now()\n            WHERE factory_session_usage.user_id = EXCLUDED.user_id\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1bf98dd5e2e030744ac0eb358cdcd8d9ef1d1b922798eef77c9b793cde9baeba"
+}

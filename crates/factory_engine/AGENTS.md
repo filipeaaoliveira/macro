@@ -458,11 +458,10 @@ used of it, or that the use could not be read; the inbox reads it as
 stopped, not waiting, and nothing waits on it), unless the Run's
 definition is quiet.
 
-The budget applies only to measured runtimes: what an agent's model calls
-recorded in the usage log with its session's id. An agent that records
-none (a local or self-hosted runtime, as Codex or Claude Code through
-macrod on its owner's own login) reads as 0 used, and its Run is never
-stopped; a Run whose Steps ran on both counts only the measured ones' use
+The budget applies only to measured runtimes: what an agent's runtime
+reported (below), or its model calls recorded in the usage log with its
+session's id. An agent that reports and records none reads as 0 used,
+and its Run is never stopped; a Run whose Steps ran on both counts only the measured ones' use
 against its budget. When a Run has Step sessions and none recorded any usage,
 the Run API says so (`tokenBudget.measured` false) and the Run view shows
 the budget as not measured. Usage the factory spends outside the Run's
@@ -480,6 +479,26 @@ with a budget, which only a service with this code starts; a worker from
 before it ignores `RunStart::token_budget` and walks such a Run
 unchecked, and a newer worker replays that history without the marker.
 
+What a Step's agent session used comes through one `SessionUsageReader`,
+`domain/agent_usage.rs`'s `AgentUsageReader`, which the token budget,
+Insights, quality, Scorers and Benchmarks all read. A session whose
+runtime reported its usage reads as reported, kept in
+`factory_session_usage` (`factory_records`'s `SessionUsageRepository`);
+any other session is read from the usage log (`ai_usage`), so none counts
+twice. A runtime that calls its model directly, as Claude Code does through
+claude-agent-acp on macrod, records nothing in the usage log, but its
+prompt responses report each turn's tokens and its usage updates the
+session's cost so far: `SessionAgent` reads them
+(`RoutineSessions::usage`, the harness's
+`/internal/routine-sessions/usage`, over the session's whole log) and
+keeps them as each turn ends, and again before it deletes the session
+(`release`, `stop`, and a session it leaves), since the log goes with the
+session. A read or a write that fails is logged and the Step goes on. A
+session that reported tokens but no cost (or a cost in another currency)
+reads as one call with no price, so no money figure is given for what it
+is part of; one that reported nothing keeps nothing and reads as
+unmeasured.
+
 `GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,
 `domain/insights.rs`) sums up how the caller's own Runs went over a period of
 at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step
@@ -488,8 +507,7 @@ waits and answers, the entries that failed or were revisited with their
 newest Runs, and the tokens each agent Step's sessions used, with what an
 entry's calls cost when every one was priced (`entries[].costUsd`)
 (its current one and those it left for a new one, the same sessions the
-token budget counts), read from the usage log by session id
-(`ai_usage`'s `SessionUsageReader`). A Step counts once in the agent and
+token budget counts), read by session id through `AgentUsageReader`. A Step counts once in the agent and
 measured Steps however many sessions it worked in (`StepSessionRef::seq`),
 and is measured when any of them recorded usage; a session counts its
 tokens once for its entry in its Run, however many Steps shared it. It
@@ -544,9 +562,9 @@ to, as Codex or Claude Code through macrod), whose spend is unknown, not
 nothing. A session that recorded none, of a bot another session of the
 period recorded usage for (its Step's `bot_id`), made no model call, as
 one that failed before its first: it cost nothing and does not withhold
-the figure. A session a Step left for a new one has no known bot (the Step
-keeps only its current Agent's), so one that recorded none withholds the
-figure. A repository that names none is 400.
+the figure. A session a Step left for a new one keeps the bot that ran it
+(`factory_step_used_session.bot_id`); one left before sessions kept their
+bot has none, so one of those that recorded none withholds the figure. A repository that names none is 400.
 
 `POST /insights/ci-quarantines` and `POST /insights/ci-quarantines/release`
 (`inbound/http/ci_quarantine.rs`, `domain/service/quarantine.rs`), with
