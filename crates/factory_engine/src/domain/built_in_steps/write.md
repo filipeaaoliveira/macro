@@ -8,7 +8,9 @@ on the run's branch, as its section below says.
 
 For each test you add, prove it fails when the code it covers breaks: edit
 that code so the behaviour breaks, run the test and watch it fail, then undo
-the edit. Commit no break. Report each break as one line of your text:
+the edit. Commit no break. Report each break as one line in the `text` you
+hand back with `macro.factory.handBack`, not only in your chat reply; the
+factory reads breaks from that text:
 
     BREAK <test>: <file> "<old text>" -> "<new text>" run `<command>`
 

@@ -35,6 +35,7 @@ impl AgentFailure for FakeError {}
 #[derive(Clone)]
 struct FakeAgent {
     outcome: &'static str,
+    text: String,
     tasks: Arc<Mutex<Vec<AgentTask>>>,
 }
 
@@ -42,8 +43,15 @@ impl FakeAgent {
     fn ending_with(outcome: &'static str) -> Self {
         Self {
             outcome,
+            text: "The agent's work".to_string(),
             tasks: Arc::default(),
         }
+    }
+
+    /// Hands back `text` rather than its usual words.
+    fn saying(mut self, text: &str) -> Self {
+        self.text = text.to_string();
+        self
     }
 }
 
@@ -84,7 +92,7 @@ impl StepAgent for FakeAgent {
         self.tasks.lock().expect("tasks").push(task);
         Ok(AgentAnswer {
             outcome: Outcome::try_from(self.outcome.to_string()).expect("valid"),
-            text: "The agent's work".to_string(),
+            text: self.text.clone(),
         })
     }
 }
@@ -813,6 +821,54 @@ async fn a_fix_that_left_the_branch_where_the_round_reviewed_it_fails() {
                 report.output
             );
         }
+    }
+}
+
+/// A fix that left the Run's branch where the round reviewed it goes on
+/// when the only Blocker it fixed asks for a test's break record and it
+/// reported a break: the next round reads the record on the same commit.
+/// Without a reported break, or with a Blocker that needs code, it fails.
+#[tokio::test]
+async fn a_fix_that_only_reports_breaks_needs_no_commit() {
+    const BREAK: &str = "BREAK list_handles_empty: src/list.rs \"if empty\" -> \"if full\" run `cargo test list_handles_empty`";
+    let break_blocker = "`list_handles_empty` has no break record";
+    let cases = [
+        (break_blocker, BREAK, Outcome::done()),
+        (break_blocker, "Nothing to change.", Outcome::failed()),
+        ("src/list.rs skips the empty case", BREAK, Outcome::failed()),
+    ];
+    for (problem, said, expected) in cases {
+        let agent = FakeAgent::ending_with("done").saying(said);
+        let repo = FakeRepo::default();
+        let github = FakeGithub::default();
+        github.state().head = Some("bbb".to_string());
+        let steps = BuiltInSteps::new(
+            agent.clone(),
+            PullRequestSteps::new(github, repo.clone(), FakeWatches::default()),
+        );
+        let repository = Repository {
+            url: "https://github.com/macro/app".to_string(),
+            base_branch: "trunk".to_string(),
+        };
+        let mut ended_round = round(2, "bbb", "aaa", true);
+        ended_round.findings[0].problem = problem.to_string();
+        let mut fixing = input(&[]);
+        fixing.repository = Some(&repository);
+        fixing.review = Some(&ended_round);
+        repo.review_rounds
+            .lock()
+            .expect("rounds")
+            .push((fixing.key.run_id, ended_round.clone()));
+        let entry = EntryId::try_from("fix".to_string()).expect("valid");
+        repo.start_step(fixing.key, &entry, 1).await.expect("start");
+
+        let report = steps.run(&step("fix"), fixing).await.expect("fix");
+
+        assert_eq!(
+            report.outcome, expected,
+            "{problem} / {said}: {}",
+            report.output
+        );
     }
 }
 

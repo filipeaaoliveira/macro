@@ -21,7 +21,6 @@ import {
   Show,
   useContext,
 } from 'solid-js';
-import { FactoryBoardView } from './board-view';
 import {
   PullRequestRunMark,
   pullRequestMergeNote,
@@ -29,12 +28,16 @@ import {
 import { BoardProvider } from './context/board-context';
 import { InsightsProvider } from './context/insights-context';
 import { RunsProvider } from './context/runs-context';
+import { insightsParams } from './core/insights';
 import { type PullRequestRun, pullRequestMerge } from './core/pull-request-run';
+import { FactoryDashboard } from './dashboard-view';
 import { RunInsightsView } from './insights-view';
 import { createAppBoardContext } from './queries/board';
+import { useDefinitionQuery } from './queries/definition';
 import { createAppInsightsContext } from './queries/insights';
 import { usePullRequestRuns } from './queries/pull-request-runs';
 import { createAppRunsContext } from './queries/runs';
+import { useStepActivity } from './queries/step-activity';
 import { RunPageView, RunView } from './run-view';
 import { AutomationsSettings } from './views/automations-settings';
 import { ControlFilesSettings } from './views/control-files-settings';
@@ -45,7 +48,11 @@ import { TaskRunsSection } from './views/task-runs-section';
 
 /** The Runs context on the factory service, for the signed-in person. */
 function appRunsContext() {
-  return { ...createAppRunsContext(queryClient), viewerId: useUserId() };
+  return {
+    ...createAppRunsContext(queryClient),
+    viewerId: useUserId(),
+    stepActivity: useStepActivity,
+  };
 }
 
 /**
@@ -175,13 +182,29 @@ function useShowRunHere(): ((runId: string) => void) | undefined {
     );
 }
 
+/** The entries of the team's Definition's Flows, by name, once read. */
+function useFlowEntries() {
+  const definition = useDefinitionQuery();
+  // Reading `data` while pending would suspend the whole page until the
+  // Definition answers, which can take seconds.
+  return (flow: string) =>
+    (definition.isPending ? undefined : definition.data)?.contents?.flows.find(
+      (listed) => listed.name === flow
+    )?.entries;
+}
+
 /** One Run as a page of its own, as the board and a Run's link open it. */
 export function FactoryRun(props: { runId: string }) {
   const showRunHere = useShowRunHere();
+  const flowEntries = useFlowEntries();
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
       <RunsProvider value={appRunsContext()}>
-        <RunPageView runId={props.runId} onOpenRun={showRunHere} />
+        <RunPageView
+          runId={props.runId}
+          onOpenRun={showRunHere}
+          flowEntries={flowEntries}
+        />
       </RunsProvider>
     </ShowFeatureFlag>
   );
@@ -193,12 +216,27 @@ export function FactoryRun(props: { runId: string }) {
  */
 export function FactoryBoard() {
   const openRun = useOpenRun();
+  const openInsights = useOpenInsights();
+  const flowEntries = useFlowEntries();
+  // The last week's delivery, for the dashboard's autonomy and cost.
+  const week = insightsParams(
+    7,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    undefined,
+    new Date()
+  );
+  const quality = createAppInsightsContext(queryClient).quality(() => week);
 
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
       <RunsProvider value={appRunsContext()}>
         <BoardProvider value={createAppBoardContext(queryClient)}>
-          <FactoryBoardView onOpenRun={openRun} />
+          <FactoryDashboard
+            onOpenRun={openRun}
+            onOpenInsights={openInsights}
+            flowEntries={flowEntries}
+            delivery={() => quality.data()?.delivery}
+          />
         </BoardProvider>
       </RunsProvider>
     </ShowFeatureFlag>

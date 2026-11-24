@@ -1,30 +1,17 @@
 import { ListSkeleton } from '@app/components/view-shell/ListSkeleton';
-import { EventOutcomesChart } from '@app/features/scheduling/components/event-outcomes-chart';
-import {
-  InsightSection,
-  Metric,
-  RankedList,
-} from '@app/features/scheduling/components/insights-panel';
-import { formatLocale, t } from '@app/lib/i18n';
+import { RankedList } from '@app/features/scheduling/components/insights-panel';
+import { t } from '@app/lib/i18n';
 import { Button } from '@ui';
 import { Index, type JSX, Match, Show, Switch } from 'solid-js';
 import { EntryList } from '../../components/entry-list';
+import { formatInsightDay } from '../../components/insight-day';
 import { durationFigure } from '../../components/insight-format';
-import {
-  INSIGHT_OUTCOME_COLORS,
-  insightOutcomeLabel,
-} from '../../components/insight-outcomes';
 import { OutcomeKinds } from '../../components/outcome-kinds';
-import {
-  formatInsightDay,
-  RunsByDayChart,
-} from '../../components/runs-by-day-chart';
 import { TroubleList } from '../../components/trouble-list';
 import { UsageSummary } from '../../components/usage-summary';
 import type { RunsSource } from '../../context/runs-context';
 import { flowWordLabel } from '../../core/flow-words';
 import {
-  INSIGHT_OUTCOMES,
   type RunInsights,
   runCount,
   successRate,
@@ -61,82 +48,19 @@ function InsightsSections(props: {
   onOpenRun: (runId: string) => void;
 }) {
   const totals = () => props.insights.totals;
-  const rate = () => successRate(totals());
-  const median = () =>
+  const _rate = () => successRate(totals());
+  const _median = () =>
     durationFigure(props.insights.runDuration?.medianSeconds);
-  const slowest = () => durationFigure(props.insights.runDuration?.p90Seconds);
+  const _slowest = () => durationFigure(props.insights.runDuration?.p90Seconds);
 
   return (
     <div class="grid min-w-0 grid-cols-1 items-start gap-5 @min-[1000px]/insights:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div class="@container/insight-main flex min-w-0 flex-col gap-5">
-        <InsightSection title={t('factoryInsights.runs')}>
-          <EventOutcomesChart
-            rows={INSIGHT_OUTCOMES.map((outcome) => ({
-              key: outcome,
-              label: insightOutcomeLabel(outcome),
-              count: totals()[outcome],
-            }))}
-            colors={INSIGHT_OUTCOME_COLORS}
-            totalLabel={t('factoryInsights.totalRuns')}
-            chartLabel={t('factoryInsights.outcomesChart')}
-            listLabel={t('factoryInsights.outcomes')}
-            emptyText={t('factoryInsights.noRunsInPeriod')}
-            hintText={t('factoryInsights.oneStatePerRun')}
-            showCountsLabel={t('factoryInsights.showCounts')}
-            showPercentagesLabel={t('factoryInsights.showPercentages')}
-            locale={formatLocale()}
-            describe={(row, count, share) =>
-              t('factoryInsights.outcomeShare', {
-                outcome: row.label,
-                count,
-                share,
-              })
-            }
-          />
-          {/* Retried Runs are already counted by how they ended: a subset,
-              never a state of its own. */}
-          <Show when={totals().retried > 0}>
-            <p data-retried-runs class="px-4 pb-2 text-xs text-ink-muted">
-              {t('factoryInsights.retriedRuns', { count: totals().retried })}
-            </p>
-          </Show>
-          <div class="grid grid-cols-1 divide-y divide-edge-muted @sm/insight-main:grid-cols-2 @3xl/insight-main:grid-cols-4 @3xl/insight-main:divide-x @3xl/insight-main:divide-y-0">
-            <Metric
-              label={t('factoryInsights.totalRuns')}
-              definition={t('factoryInsights.totalRunsDefinition')}
-              value={runCount(totals())}
-            />
-            <Metric
-              label={t('factoryInsights.successRate')}
-              definition={t('factoryInsights.successRateDefinition')}
-              value={
-                rate() === undefined
-                  ? undefined
-                  : Math.round((rate() ?? 0) * 100)
-              }
-              unit="%"
-            />
-            <Metric
-              label={t('factoryInsights.medianRunTime')}
-              definition={t('factoryInsights.medianRunTimeDefinition')}
-              value={median().value}
-              unit={median().unit}
-            />
-            <Metric
-              label={t('factoryInsights.slowRunTime')}
-              definition={t('factoryInsights.slowRunTimeDefinition')}
-              value={slowest().value}
-              unit={slowest().unit}
-              lowerIsBetter
-            />
-          </div>
-        </InsightSection>
         <Show when={runCount(totals()) === 0}>
           <p class="rounded-lg border border-dashed border-edge-muted px-5 py-4 text-sm text-ink-muted">
             {t('factoryInsights.empty')}
           </p>
         </Show>
-        <RunsByDayChart days={props.insights.days} />
         <EntryList entries={props.insights.entries} />
       </div>
       <div class="@container/insight-side flex min-w-0 flex-col gap-5">

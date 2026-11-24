@@ -9,7 +9,15 @@ import { t } from '@app/lib/i18n';
 import { HeaderActionGroup } from '@components/app/HeaderActionGroup';
 import { LoadingSpinner } from '@core/component/LoadingSpinner';
 import { Button, Tabs } from '@ui';
-import { createSignal, For, Match, onCleanup, Show, Switch } from 'solid-js';
+import {
+  createSignal,
+  For,
+  type JSX,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+} from 'solid-js';
 import { match } from 'ts-pattern';
 import { BoardRunRow } from '../components/board-row';
 import type { BoardProject, BoardSource } from '../context/board-context';
@@ -186,6 +194,8 @@ export function BoardView(props: {
   projects: BoardProject[];
   queue: RunsSource<{ held: number; waiting: number }>;
   queueLimit: RunsSource<number | null>;
+  /** Controls the header shows before its own, such as the view switch. */
+  headerStart?: JSX.Element;
 }) {
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
@@ -216,6 +226,7 @@ export function BoardView(props: {
           </ViewSidebar.Title>
         }
       >
+        {props.headerStart}
         <Tabs
           aria-label={t('factoryBoard.scope')}
           size="md"

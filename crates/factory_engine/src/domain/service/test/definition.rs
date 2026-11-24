@@ -234,6 +234,80 @@ async fn a_team_s_definition_names_the_flows_its_runs_start_of() {
     assert_eq!(flows[0].description, "Notes.");
 }
 
+/// The screens read the Definition at the head the person found lately,
+/// so a page that reads it on every load does not ask GitHub each time; a
+/// Run's start reads the head now, and the screens show what it found.
+#[tokio::test]
+async fn the_screens_read_the_head_found_lately_and_a_start_reads_it_now() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes, first.", None);
+    definition_files(&github, SECOND, "Notes, second.", None);
+    let service = code_service(&repo, &workflows, &github);
+
+    let before = service.list_flows(&teo()).await.expect("flows");
+    // A change merged since moves the head.
+    github.state().head = Some(SECOND.to_string());
+    let lately = service.list_flows(&teo()).await.expect("flows");
+    let run = service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    let after = service.list_flows(&teo()).await.expect("flows");
+
+    assert_eq!(before[0].description, "Notes, first.");
+    assert_eq!(lately[0].description, "Notes, first.");
+    assert_eq!(
+        run.run.definition.map(|definition| definition.commit),
+        Some(SECOND.to_string())
+    );
+    assert_eq!(after[0].description, "Notes, second.");
+}
+
+/// A Definition read at a commit, whose files never change, is read from
+/// GitHub once per person: again at the same commit, from what they read.
+/// Another person reads it as they reach it.
+#[tokio::test]
+async fn a_definition_is_read_from_github_once_per_person_and_commit() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    let service = code_service(&repo, &workflows, &github);
+
+    service.list_flows(&teo()).await.expect("flows");
+    let read_once = github.state().file_reads.len();
+    service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    service.definition(&teo()).await.expect("settings");
+    let read_again = github.state().file_reads.len();
+    service.list_flows(&julia()).await.expect("flows");
+    let read_by_another = github.state().file_reads.len();
+
+    assert!(read_once > 0);
+    assert_eq!(read_again, read_once);
+    assert_eq!(read_by_another, 2 * read_once);
+}
+
 /// A Definition that does not read at its head, or that the person cannot
 /// reach, starts no Run, and says why.
 #[tokio::test]

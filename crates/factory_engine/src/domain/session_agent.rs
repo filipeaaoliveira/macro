@@ -10,6 +10,7 @@ mod test;
 
 mod quota_memory;
 mod reminder;
+mod said_breaks;
 
 use quota_memory::{NO_QUOTA_LATELY, QuotaMemory};
 
@@ -1529,14 +1530,16 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> StepAgent for 
             })
             .await;
         self.prompt_once(&action, prompted).await?;
-        match self.finished(turn.key, &action, deadline).await {
+        let last = match self.finished(turn.key, &action, deadline).await {
             Err(SessionAgentError::TooSlow(_)) => return Err(SessionAgentError::Overdue),
-            finished => {
-                finished?;
-            }
-        }
+            finished => finished?.last,
+        };
 
-        self.handed_back(turn.key, turn.action_id).await
+        let answer = self.handed_back(turn.key, turn.action_id).await?;
+        // Break lines the agent wrote in its reply, not its hand back.
+        Ok(self
+            .with_said_breaks(answer, &action, &[action.action_id, last])
+            .await)
     }
 
     /// Runs in the session the Step works in now, through its bot, while

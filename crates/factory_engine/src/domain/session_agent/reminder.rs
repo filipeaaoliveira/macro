@@ -42,13 +42,20 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
         action: &RoutineSessionAction,
         waited: Waited,
     ) -> Result<AgentAnswer, SessionAgentError> {
-        match self.handed_back(task.key, action.action_id.as_uuid()).await {
+        let last = waited.last;
+        let answer = match self.handed_back(task.key, action.action_id.as_uuid()).await {
             Err(SessionAgentError::NothingHandedBack | SessionAgentError::Superseded) => {
                 self.remind(task, action, waited.last, waited.deadline)
                     .await
             }
             handed => handed,
-        }
+        }?;
+        // Break lines the agent wrote in its replies, not its hand back:
+        // its own prompt's, the owner's last note's, and the reminder's.
+        let reminder = AgentActionId::from_uuid(reminder_id(action.action_id.as_uuid()));
+        Ok(self
+            .with_said_breaks(answer, action, &[action.action_id, last, reminder])
+            .await)
     }
 
     /// Remind the agent, whose turn on `action` ended with nothing handed
