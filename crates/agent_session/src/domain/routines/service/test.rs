@@ -116,6 +116,10 @@ struct Controls {
     command_output: Arc<Mutex<Option<SessionCommandOutput>>>,
     fail: Arc<Mutex<bool>>,
     queued: Arc<Mutex<Vec<QueuedControl>>>,
+    /// The sessions deleted through the harness, and the store it deletes
+    /// their rows from.
+    deleted: Arc<Mutex<Vec<AgentSessionId>>>,
+    store: Arc<Mutex<Option<InMemoryAgentSessionRepo>>>,
 }
 
 impl AgentSessionNotificationRecipient for Controls {
@@ -152,8 +156,13 @@ impl AgentSessionNotificationRecipient for Controls {
     async fn delete_user_sessions(&self, _: MacroUserIdStr<'static>) -> SessionResult<()> {
         panic!("not a routine capability")
     }
-    async fn session_deleted(&self, _: AgentSessionId) -> SessionResult<()> {
-        panic!("not a routine capability")
+    async fn session_deleted(&self, id: AgentSessionId) -> SessionResult<()> {
+        self.deleted.lock().unwrap().push(id);
+        let store = self.store.lock().unwrap().clone();
+        match store {
+            Some(store) => crate::domain::ports::AgentSessionRepo::delete(&store, id).await,
+            None => Ok(()),
+        }
     }
     async fn purge_owned_session(
         &self,
@@ -261,6 +270,7 @@ impl Fixture {
         let openings = Openings::default();
         *openings.response.lock().unwrap() = Some(session.clone());
         let controls = Controls::default();
+        *controls.store.lock().unwrap() = Some(repo.clone());
         let apps = Apps::default();
         let service = RoutineSessionsService::new(
             directory.clone(),
@@ -1102,6 +1112,10 @@ async fn only_a_session_the_scheduler_opened_can_be_deleted() {
         RoutineSessionError::Forbidden
     );
 
+    assert!(
+        fx.controls.deleted.lock().unwrap().is_empty(),
+        "nothing refused reached the harness"
+    );
     for deleted in [&run, &draft] {
         fx.service.delete(action(deleted)).await.unwrap();
         assert!(
@@ -1117,6 +1131,8 @@ async fn only_a_session_the_scheduler_opened_can_be_deleted() {
                 .is_ok()
         );
     }
+    // Through the harness, which also ends each session on its runtime.
+    assert_eq!(*fx.controls.deleted.lock().unwrap(), [run.id, draft.id]);
 }
 
 fn log_frame(

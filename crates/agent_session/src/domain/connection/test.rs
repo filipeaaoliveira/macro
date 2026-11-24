@@ -730,3 +730,120 @@ async fn a_closed_connection_ends_the_listing() {
         Err(ListSessionsError::Closed)
     ));
 }
+
+/// Publish an `initialize` answer of `result` the way a session's actor
+/// publishes the handshake it ran.
+fn publish_initialize(handshake: &watch::Sender<HandshakeStatus>, result: serde_json::Value) {
+    let initialize = RawJsonRpcMessage::request(
+        "initialize".to_owned(),
+        serde_json::json!({"protocolVersion": 1}),
+        RequestId::Str("agent_session:0".to_owned()),
+    )
+    .expect("a serializable request");
+    handshake.send_replace(HandshakeStatus::ReadyWithContext {
+        restore: SessionRestoreSupport {
+            resume: false,
+            load: true,
+        },
+        context: Arc::new(InitializationContext {
+            request: ToRuntimeMessage::Acp(AcpMessage(initialize)),
+            response: response("agent_session:0", result),
+        }),
+    });
+}
+
+#[tokio::test]
+async fn an_agent_that_closes_sessions_is_asked_to_close_one() {
+    let (carrier, mut runtime) = Channel::duplex();
+    let connection = RuntimeConnection::connect(carrier);
+    publish_initialize(
+        &connection.handshake(),
+        serde_json::json!({
+            "protocolVersion": 1,
+            "agentCapabilities": {"sessionCapabilities": {"close": {}}},
+        }),
+    );
+    let closing = {
+        let connection = Arc::clone(&connection);
+        tokio::spawn(async move { connection.close_acp_session(SessionId::from("acp-1")).await })
+    };
+
+    let close = sent_request(runtime.rx.recv().await);
+    assert_eq!(close.method.as_ref(), "session/close");
+    assert_eq!(
+        serde_json::to_value(&close.params).unwrap()["sessionId"],
+        "acp-1"
+    );
+    runtime
+        .tx
+        .send(answer(&close, serde_json::json!({})))
+        .expect("close answer should send");
+
+    assert_eq!(
+        closing
+            .await
+            .expect("close task")
+            .expect("the agent closed it"),
+        SessionClose::Closed
+    );
+    assert!(runtime.rx.try_recv().is_err(), "exactly one frame was sent");
+}
+
+#[tokio::test]
+async fn an_agent_that_cannot_close_sessions_is_only_told_to_cancel() {
+    let (carrier, mut runtime) = Channel::duplex();
+    let connection = RuntimeConnection::connect(carrier);
+    publish_initialize(&connection.handshake(), listing_initialize());
+
+    assert_eq!(
+        connection
+            .close_acp_session(SessionId::from("acp-1"))
+            .await
+            .expect("a cancel is sent"),
+        SessionClose::Cancelled
+    );
+
+    let Some(ToRuntimeMessage::Acp(AcpMessage(RawJsonRpcMessage::Notification(cancel)))) =
+        runtime.rx.recv().await
+    else {
+        panic!("expected a notification");
+    };
+    assert_eq!(cancel.method.as_ref(), "session/cancel");
+    assert_eq!(
+        serde_json::to_value(&cancel.params).unwrap()["sessionId"],
+        "acp-1"
+    );
+    assert!(runtime.rx.try_recv().is_err(), "no session/close was sent");
+}
+
+#[tokio::test]
+async fn a_close_the_agent_refuses_is_an_error() {
+    let (carrier, mut runtime) = Channel::duplex();
+    let connection = RuntimeConnection::connect(carrier);
+    publish_initialize(
+        &connection.handshake(),
+        serde_json::json!({
+            "protocolVersion": 1,
+            "agentCapabilities": {"sessionCapabilities": {"close": {}}},
+        }),
+    );
+    let closing = {
+        let connection = Arc::clone(&connection);
+        tokio::spawn(async move { connection.close_acp_session(SessionId::from("acp-1")).await })
+    };
+    let close = sent_request(runtime.rx.recv().await);
+    runtime
+        .tx
+        .send(ToServerMessage::Acp(AcpMessage(
+            RawJsonRpcMessage::response(
+                close.id.clone(),
+                Err(agent_client_protocol::Error::invalid_params()),
+            ),
+        )))
+        .expect("refusal should send");
+
+    assert!(matches!(
+        closing.await.expect("close task"),
+        Err(CloseSessionError::Runtime(_))
+    ));
+}

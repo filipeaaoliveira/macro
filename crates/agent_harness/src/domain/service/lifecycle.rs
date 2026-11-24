@@ -516,10 +516,46 @@ where
     /// knows to reap.
     #[tracing::instrument(err, skip(self), fields(%session_id))]
     pub(super) async fn delete(&self, session_id: AgentSessionId) -> Result<()> {
+        // Before the actor stops, while the connection still routes the
+        // session's traffic.
+        self.close_runtime_session(session_id).await;
         self.sessions.close_session(session_id).await?;
         self.containers.teardown(session_id).await?;
         self.sessions.delete_session(session_id).await?;
         Ok(())
+    }
+
+    /// Ask an external runtime to end the session's ACP session.
+    ///
+    /// Stopping the actor only forgets the session on Macro's side. The
+    /// runtime's adapter keeps the session, and the agent process it runs
+    /// for it, until told to close it or until the adapter exits, so every
+    /// deleted session would leave a process behind until the runtime next
+    /// redials. Best effort: a session the runtime never opened, or a
+    /// runtime that is gone or does not answer, leaves nothing to free here,
+    /// and the delete goes on.
+    async fn close_runtime_session(&self, session_id: AgentSessionId) {
+        let session = match self.sessions.get_session(session_id).await {
+            Ok(session) => session,
+            Err(AgentSessionError::NotFound(_)) => return,
+            Err(error) => {
+                tracing::warn!(error = ?error, %session_id, "could not read a deleted session to close it on its runtime");
+                return;
+            }
+        };
+        if AgentKind::for_session(session.bot_id, &session.harness) != AgentKind::External {
+            return;
+        }
+        let Some(acp_session) = session.acp_session_id else {
+            return;
+        };
+        if let Err(error) = self
+            .runtimes
+            .close_acp_session(session.bot_id, acp_session)
+            .await
+        {
+            tracing::warn!(error = ?error, %session_id, "could not close a deleted session on its runtime");
+        }
     }
 
     /// Apply `size` to this session's sandbox and remember it as the owner's default.

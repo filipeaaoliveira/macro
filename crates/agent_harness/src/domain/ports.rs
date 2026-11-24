@@ -506,6 +506,16 @@ pub trait RuntimeConnections: Send + Sync + 'static {
         harness: HarnessId,
         acp_sessions: &[SessionId],
     ) -> impl Future<Output = anyhow::Result<ListedSessions>> + Send;
+
+    /// Ask the runtime serving `bot` to end `acp_session` and free what it
+    /// holds, such as the agent process an adapter keeps per session.
+    /// Nothing to do, and no error, for an unbound bot or a harness with no
+    /// live connection in this process.
+    fn close_acp_session(
+        &self,
+        bot: BotId,
+        acp_session: SessionId,
+    ) -> impl Future<Output = anyhow::Result<()>> + Send;
 }
 
 /// Mints the one secret a sandbox is given, and the config that points it at
