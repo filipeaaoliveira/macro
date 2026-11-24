@@ -1,10 +1,5 @@
 import { shiftReportDate } from '@app/features/scheduling/core/insights';
 import type { BlockerCount } from '@service-factory/generated/schemas';
-import type {
-  DeliveryInsightWithMergeTime,
-  EntryInsightWithCost,
-  InsightDayWithDuration,
-} from '@service-factory/pending';
 import type { SuiteInsight } from './evaluation';
 import { fellShort } from './flow-words';
 import {
@@ -25,9 +20,7 @@ import {
 
 /**
  * What the insights overview reads from the period's insights, its quality
- * and evaluation, and the same of the period before it. Fields the
- * generated client does not have yet are read through the hand-written
- * types of `@service-factory/pending`.
+ * and evaluation, and the same of the period before it.
  */
 
 /** The period of the same length just before `params`'. */
@@ -98,15 +91,13 @@ export type Kpi = {
 };
 
 /** A day's median run time; none when none of its Runs ended timed. */
-export function dayMedianRunSeconds(
-  day: InsightDayWithDuration
-): number | undefined {
+export function dayMedianRunSeconds(day: InsightDay): number | undefined {
   return day.runDuration?.medianSeconds ?? undefined;
 }
 
 /** The median time from a Run's start to its merge; none before a merge. */
 export function medianMergeSeconds(
-  delivery: DeliveryInsightWithMergeTime | undefined
+  delivery: DeliveryInsight | undefined
 ): number | undefined {
   return delivery?.timeToMerge?.medianSeconds ?? undefined;
 }
@@ -304,10 +295,10 @@ export type RoleInsight = {
 const NEUTRAL_OUTCOMES = new Set(['cancelled', 'no_result', 'not_needed']);
 
 export function roleInsights(
-  entries: EntryInsightWithCost[],
+  entries: EntryInsight[],
   reviewers: BlockerCount[] = []
 ): RoleInsight[] {
-  const byRole = new Map<string, EntryInsightWithCost[]>();
+  const byRole = new Map<string, EntryInsight[]>();
   for (const entry of entries) {
     const role = ENTRY_ROLES[entry.entry];
     if (!role) continue;

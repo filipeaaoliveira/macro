@@ -33,6 +33,8 @@ import {
   getNoteFactoryStepUrl,
   getPauseFactoryStepUrl,
   getProposeFactoryDefinitionChangeUrl,
+  getQuarantineFactoryCiJobUrl,
+  getReleaseFactoryCiJobUrl,
   getReplyToFactoryGateUrl,
   getResumeFactoryStepUrl,
   getRetryFactoryRunUrl,
@@ -50,6 +52,8 @@ import type {
   AutomationsSettings,
   BoardPage,
   CheckDefinitionChangeRequest,
+  CiJobRequest,
+  CiQuarantineChange,
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
@@ -81,12 +85,6 @@ import type {
   TaskRunsResponse,
   WaitingRunsResponse,
 } from './generated/schemas';
-import {
-  type CiJobRequest,
-  type CiQuarantineChange,
-  QUARANTINE_CI_JOB_URL,
-  RELEASE_CI_JOB_URL,
-} from './pending';
 
 const host = () => SERVER_HOSTS.factory;
 
@@ -728,7 +726,7 @@ export const factoryClient = {
    */
   quarantineCiJob(request: CiJobRequest) {
     return fetchWithToken<CiQuarantineChange>(
-      `${host()}${QUARANTINE_CI_JOB_URL}`,
+      `${host()}${getQuarantineFactoryCiJobUrl()}`,
       {
         method: 'POST',
         body: JSON.stringify(request),
@@ -743,7 +741,7 @@ export const factoryClient = {
    */
   releaseCiJob(request: CiJobRequest) {
     return fetchWithToken<CiQuarantineChange>(
-      `${host()}${RELEASE_CI_JOB_URL}`,
+      `${host()}${getReleaseFactoryCiJobUrl()}`,
       {
         method: 'POST',
         body: JSON.stringify(request),

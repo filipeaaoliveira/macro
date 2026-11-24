@@ -66,6 +66,7 @@ const found: PullRequestRuns = {
               entry: 'merge-gate',
               visit: 1,
               startedAt: '2026-11-18T09:30:00Z',
+              runtime: {},
               checks: [],
               passedOver: [],
               terminal: { betweenTurns: false, steers: [] },

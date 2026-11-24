@@ -54,6 +54,7 @@ const planning: RunDetail = {
       entry: 'plan',
       visit: 1,
       startedAt: '2026-11-16T09:00:00Z',
+      runtime: {},
       passedOver: [],
       end: null,
       gate: null,
@@ -85,6 +86,7 @@ const waiting: RunDetail = {
       entry: 'plan',
       visit: 1,
       startedAt: '2026-11-16T09:00:00Z',
+      runtime: {},
       passedOver: [],
       end: {
         outcome: 'done',

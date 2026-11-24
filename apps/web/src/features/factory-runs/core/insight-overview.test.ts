@@ -1,4 +1,4 @@
-import type { DeliveryInsightWithMergeTime } from '@service-factory/pending';
+import type { DeliveryInsight } from '@service-factory/generated/schemas';
 import { describe, expect, it } from 'vitest';
 import {
   dayMedianRunSeconds,
@@ -40,8 +40,8 @@ const entry = (
 });
 
 const delivery = (
-  timeToMerge: DeliveryInsightWithMergeTime['timeToMerge']
-): DeliveryInsightWithMergeTime => ({
+  timeToMerge: DeliveryInsight['timeToMerge']
+): DeliveryInsight => ({
   endedRuns: 2,
   merged: 2,
   autonomous: 2,

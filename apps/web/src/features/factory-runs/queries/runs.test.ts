@@ -47,6 +47,7 @@ const started: RunDetail = {
       entry: 'plan',
       visit: 1,
       startedAt: '2026-11-16T09:00:01Z',
+      runtime: {},
       passedOver: [{ agent: 'backup', reason: 'ai_allowance_exhausted' }],
       role: 'planner',
       agent: 'primary',
@@ -160,6 +161,11 @@ describe('createAppRunsContext', () => {
           startedAt: '2026-11-16T09:00:01Z',
           role: 'planner',
           agent: 'primary',
+          runtime: {
+            model: undefined,
+            machine: undefined,
+            agentName: undefined,
+          },
           passedOver: [{ agent: 'backup', reason: 'ai_allowance_exhausted' }],
           end: undefined,
           gate: undefined,
@@ -233,6 +239,7 @@ describe('createAppRunsContext', () => {
           entry: 'plan',
           visit: 1,
           startedAt: '2026-11-16T09:00:01Z',
+          runtime: {},
           passedOver: [],
           checks: [],
           gate: {
@@ -275,6 +282,7 @@ describe('createAppRunsContext', () => {
         entry: 'plan',
         visit: seq,
         startedAt: '2026-11-16T09:00:01Z',
+        runtime: {},
         passedOver: [],
         checks: [],
         gate: {
@@ -731,8 +739,7 @@ describe('createAppRunsContext', () => {
     const client = new QueryClient();
     const [step] = started.steps;
     if (!step) throw new Error('No Step');
-    // Hand-written until the client is regenerated (service-factory/pending.ts).
-    const detail = {
+    const detail: RunDetail = {
       ...started,
       run: { ...started.run, mergedAt: '2026-11-16T10:00:00Z' },
       steps: [
@@ -740,10 +747,12 @@ describe('createAppRunsContext', () => {
           ...step,
           runtime: { model: 'claude-opus-4-5', machine: 'm4', agentName: null },
         },
-        { ...step, seq: 2, runtime: null },
-        { ...step, seq: 3 },
+        { ...step, seq: 2, runtime: {} },
       ],
-    } as RunDetail;
+    };
+    // A service older than runtimes sends none.
+    const { runtime: _, ...older } = step;
+    detail.steps.push({ ...older, seq: 3 } as typeof step);
     vi.mocked(factoryClient.getRun).mockResolvedValue(ok(detail));
 
     const run = await client.fetchQuery(runOptions('run-2'));
@@ -751,7 +760,7 @@ describe('createAppRunsContext', () => {
     expect(run.mergedAt).toBe('2026-11-16T10:00:00Z');
     expect(run.steps.map((read) => read.runtime)).toEqual([
       { model: 'claude-opus-4-5', machine: 'm4', agentName: undefined },
-      undefined,
+      { model: undefined, machine: undefined, agentName: undefined },
       undefined,
     ]);
 
@@ -838,6 +847,7 @@ describe('createAppRunsContext', () => {
             entry: 'plan',
             visit: 1,
             startedAt: '2026-11-16T09:00:01Z',
+            runtime: {},
             passedOver: [],
             end: {
               outcome: 'done',
