@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, agent_session_id, user_id AS \"user_id: MacroUserIdStr\",\n                   direction, content, created_at\n            FROM agent_session_log\n            WHERE agent_session_id = $1\n              AND direction = 'to_server'\n              AND (\n                  content->'result' ? 'usage'\n                  OR content->'params'->'update'->>'sessionUpdate' = 'usage_update'\n              )\n            ORDER BY created_at, id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "agent_session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id: MacroUserIdStr",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "direction",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "content",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "45bec90774c13b53dba7ac222cb1e8cded3465bf3c011c4c835d322e1ce4dfe8"
+}

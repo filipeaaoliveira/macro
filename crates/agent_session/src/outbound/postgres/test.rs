@@ -2022,6 +2022,79 @@ async fn cursor_checkpoint_advances_atomically_under_the_session_fence(pool: PgP
     );
 }
 
+fn runtime_frame(id: AgentSessionId, content: serde_json::Value) -> AgentSessionLog {
+    AgentSessionLog {
+        agent_session_id: id,
+        user_id: None,
+        content: serde_json::from_value(serde_json::json!({
+            "direction": "to_server",
+            "content": content,
+        }))
+        .expect("a runtime frame"),
+        logged_at: None,
+    }
+}
+
+/// The usage frames span the whole log: a turn from before a load's
+/// boundary still used its tokens. Only prompt responses with usage and
+/// usage updates are read.
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn usage_frames_span_the_whole_log(pool: PgPool) {
+    use serde_json::json;
+    let repo = test_repo(&pool);
+    let bot = create_test_bot(&pool).await;
+    let session = create_session(&repo, new_session(bot, None, None)).await;
+    let claim = claimed(repo.claim(session.id, ReplicaId::mint()).await.unwrap());
+    let turn = |id: &str, output: u64| {
+        runtime_frame(
+            session.id,
+            json!({"type": "acp", "jsonrpc": "2.0", "id": id, "result": {
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 1, "outputTokens": output, "totalTokens": output + 1},
+            }}),
+        )
+    };
+    let cost = runtime_frame(
+        session.id,
+        json!({"type": "acp", "jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "s",
+            "update": {"sessionUpdate": "usage_update", "used": 1, "size": 10,
+                "cost": {"amount": 0.2, "currency": "USD"}},
+        }}),
+    );
+    let before = repo.create_fenced(turn("a", 10), &claim).await.unwrap();
+    repo.create_fenced(fenced_log(session.id), &claim)
+        .await
+        .unwrap();
+    let init = repo
+        .create_fenced(fenced_log(session.id), &claim)
+        .await
+        .unwrap();
+    repo.create_fenced_with_boundary(
+        fenced_log(session.id),
+        &claim,
+        Some(crate::domain::model::HistoryBoundary {
+            initialization_log_id: init.id,
+        }),
+    )
+    .await
+    .unwrap();
+    let after = repo.create_fenced(turn("b", 20), &claim).await.unwrap();
+    let costed = repo.create_fenced(cost, &claim).await.unwrap();
+
+    let history = AgentSessionLogRepo::list_by_session(&repo, session.id)
+        .await
+        .unwrap();
+    assert!(history.iter().all(|row| row.id != before.id));
+    let frames: Vec<Uuid> = AgentSessionLogRepo::list_usage_frames(&repo, session.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(frames, vec![before.id, after.id, costed.id]);
+}
+
 /// Exercise the generic boundary contract without asking persistence to inspect ACP JSON.
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
 async fn history_boundary_selects_initialization_and_keeps_raw_audit(pool: PgPool) {

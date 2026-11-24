@@ -3,6 +3,7 @@
 pub mod models;
 mod service;
 mod status;
+mod usage;
 
 pub use models::*;
 
@@ -92,6 +93,17 @@ pub trait RoutineSessions: Send + Sync + 'static {
         &self,
         command: RoutineSessionAction,
     ) -> impl Future<Output = Result<Option<String>, RoutineSessionError>> + Send {
+        let _ = command;
+        async { Err(RoutineSessionError::OperationFailed) }
+    }
+
+    /// What the session's runtime reported its model calls used, over its
+    /// whole log: none when it reported nothing. Read it before
+    /// [`Self::delete`], which takes the log with the session.
+    fn usage(
+        &self,
+        command: RoutineSessionAction,
+    ) -> impl Future<Output = Result<Option<RoutineUsage>, RoutineSessionError>> + Send {
         let _ = command;
         async { Err(RoutineSessionError::OperationFailed) }
     }

@@ -198,7 +198,13 @@ skips the turn before any model call; unset or unreadable, summaries run.
   `activity` returns content-free counts (tool calls, turns); `reply`
   returns the last text of the agent's reply to one prompt, its end at most
   `MAX_REPLY_BYTES`, for the session's owner (the software factory shows it
-  when an agent stops without handing back a result); `follow_up`
+  when an agent stops without handing back a result); `usage` returns what
+  the session's runtime reported its model calls used over its whole log,
+  turns before a resume included (`domain/routines/usage.rs`: each prompt
+  response's token counts, once per request id, and the usage updates'
+  running cost in US dollars, a total lower than the one before starting a
+  new count), or none when it reported nothing, for its owner (the software
+  factory keeps it before the session is deleted); `follow_up`
   sends a later prompt to a session that took its first, under its own
   action id, which `status` then reads (the software factory's checks
   rounds). `status` reads a failed turn whose notice is

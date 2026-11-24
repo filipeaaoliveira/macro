@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 const OWNER: &str = "macro|owner@example.com";
 const INTERNAL_KEY: &str = "routine-test-internal";
-const OPERATIONS: [&str; 10] = [
+const OPERATIONS: [&str; 11] = [
     "validate",
     "prepare",
     "prompt",
@@ -30,6 +30,7 @@ const OPERATIONS: [&str; 10] = [
     "delete",
     "activity",
     "reply",
+    "usage",
 ];
 
 #[derive(Clone)]
@@ -211,6 +212,21 @@ impl RoutineSessions for ServiceSpy {
         self.record("reply", command)?;
         Ok(Some("I stopped before the tests.".to_string()))
     }
+
+    async fn usage(
+        &self,
+        command: RoutineSessionAction,
+    ) -> Result<Option<crate::domain::routines::RoutineUsage>, RoutineSessionError> {
+        self.record("usage", command)?;
+        Ok(Some(crate::domain::routines::RoutineUsage {
+            input_tokens: 6,
+            output_tokens: 1165,
+            cache_read_tokens: 89_953,
+            cache_write_tokens: 2845,
+            cost_usd: Some(0.27),
+            model: Some("claude-sonnet-5-5".to_string()),
+        }))
+    }
 }
 
 fn app(service: Arc<ServiceSpy>) -> Router {
@@ -331,6 +347,15 @@ async fn forwards_explicit_owner_and_complete_command_without_rewriting() {
             );
         } else if operation == "reply" {
             assert_eq!(body(response).await, json!("I stopped before the tests."));
+        } else if operation == "usage" {
+            assert_eq!(
+                body(response).await,
+                json!({
+                    "input_tokens": 6, "output_tokens": 1165,
+                    "cache_read_tokens": 89_953, "cache_write_tokens": 2845,
+                    "cost_usd": 0.27, "model": "claude-sonnet-5-5",
+                })
+            );
         }
     }
 }

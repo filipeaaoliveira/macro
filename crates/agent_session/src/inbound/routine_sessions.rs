@@ -25,7 +25,8 @@ use serde::Serialize;
 use crate::domain::routines::{
     ExecRoutineSession, PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession,
     RoutineActionStatus, RoutineActivity, RoutinePromptAccepted, RoutineSessionAction,
-    RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
+    RoutineSessionError, RoutineSessions, RoutineUsage, ValidateRoutineSession,
+    ValidatedRoutineSession,
 };
 use crate::domain::session_command::{MAX_COMMAND_TIMEOUT, SessionCommandOutput};
 
@@ -86,6 +87,7 @@ pub fn routine_sessions_router<Service: RoutineSessions, Auth: MacroAuthorizatio
             .route("/delete", post(delete::<Service, Auth>))
             .route("/activity", post(activity::<Service, Auth>))
             .route("/reply", post(reply::<Service, Auth>))
+            .route("/usage", post(usage::<Service, Auth>))
             .layer(DefaultBodyLimit::max(MAX_COMMAND_BYTES))
             .layer(middleware::from_fn(bound_request))
             .with_state(state),
@@ -258,4 +260,12 @@ async fn reply<Service: RoutineSessions, Auth: MacroAuthorizationService>(
     command: Result<Json<RoutineSessionAction>, JsonRejection>,
 ) -> Result<Json<Option<String>>, ApiError> {
     Ok(Json(state.service.reply(command?.0).await?))
+}
+
+async fn usage<Service: RoutineSessions, Auth: MacroAuthorizationService>(
+    State(state): State<RoutineSessionsState<Service, Auth>>,
+    _internal: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    command: Result<Json<RoutineSessionAction>, JsonRejection>,
+) -> Result<Json<Option<RoutineUsage>>, ApiError> {
+    Ok(Json(state.service.usage(command?.0).await?))
 }
