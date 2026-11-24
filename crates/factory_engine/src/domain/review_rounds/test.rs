@@ -92,6 +92,16 @@ fn finding(path: &str, lines: Option<(u32, u32)>) -> Finding {
     }
 }
 
+/// A diff that changes only a file no finding of these tests is on, so
+/// each finding is outside it.
+fn elsewhere() -> Vec<ChangedFile> {
+    vec![ChangedFile::from_patch(
+        "src/elsewhere.rs".to_string(),
+        None,
+        None,
+    )]
+}
+
 fn opening(run_id: RunId, seq: u16, round: u16) -> ReviewRoundOpening {
     ReviewRoundOpening {
         run_id,
@@ -273,6 +283,103 @@ async fn a_round_that_cannot_open_says_why() {
         round.end.map(|end| end.outcome),
         Some(ReviewRoundOutcome::Failed)
     );
+}
+
+/// A branch whose head is its base changes nothing: its round has nothing
+/// to review, so it fails and says why, as one that cannot open.
+#[tokio::test]
+async fn a_round_of_a_branch_that_changes_nothing_fails() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    github
+        .state()
+        .diffs
+        .insert(("main".to_string(), "aaa".to_string()), Vec::new());
+    let rounds = rounds(&repo, &github);
+
+    let opened = rounds.open_round(opening(run_id, 3, 1)).await;
+
+    assert!(matches!(opened, Ok(false)), "{opened:?}");
+    let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
+    assert_eq!(
+        round.failure.as_deref(),
+        Some("The run's branch changes nothing against its base.")
+    );
+    assert_eq!(
+        round.end.map(|end| end.outcome),
+        Some(ReviewRoundOutcome::Failed)
+    );
+}
+
+/// A fix round on a head that did not move reviews the whole change, and
+/// opens while that change holds something: the guard against an empty
+/// branch reads the whole change, never the empty fix diff.
+#[tokio::test]
+async fn a_fix_round_on_an_unchanged_head_reviews_the_whole_change() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    github.state().diffs.insert(
+        ("main".to_string(), "aaa".to_string()),
+        vec![ChangedFile::from_patch(
+            "src/save.rs".to_string(),
+            None,
+            None,
+        )],
+    );
+    github
+        .state()
+        .diffs
+        .insert(("aaa".to_string(), "aaa".to_string()), Vec::new());
+    let rounds = rounds(&repo, &github);
+
+    let first = rounds.open_round(opening(run_id, 3, 1)).await;
+    let second = rounds.open_round(opening(run_id, 6, 2)).await;
+
+    assert!(matches!(first, Ok(true)), "{first:?}");
+    assert!(matches!(second, Ok(true)), "{second:?}");
+    let recorded = repo.review_rounds(run_id).await.expect("rounds");
+    assert_eq!(
+        (recorded[1].diff_base.as_deref(), recorded[1].fix_diff),
+        (Some("main"), false)
+    );
+}
+
+/// A diff GitHub lists empty holds nothing a finding could be outside of:
+/// each finding blocks, and the round does not pass.
+#[tokio::test]
+async fn an_empty_diff_lets_no_finding_go() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    let rounds = rounds(&repo, &github);
+    rounds
+        .open_round(opening(run_id, 3, 1))
+        .await
+        .expect("open");
+    github
+        .state()
+        .diffs
+        .insert(("main".to_string(), "aaa".to_string()), Vec::new());
+    start_reviewers(&repo, run_id, 3, &["tests-reviewer"]).await;
+    repo.record_findings(
+        StepKey { run_id, seq: 3 },
+        3,
+        &[finding("docs/old.md", None)],
+    )
+    .await
+    .expect("record");
+
+    let routed = rounds.close_round(closing(run_id, 3)).await.expect("close");
+
+    assert_eq!(routed, outcome("changes"));
+    let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
+    assert_eq!(round.findings[0].kind, Some(FindingKind::Blocker));
+    assert!(repo.follow_ups.lock().expect("follow ups").is_empty());
 }
 
 /// A finding in the diff the round reviewed blocks, and one outside it
@@ -958,7 +1065,7 @@ async fn a_retried_close_makes_each_follow_up_task_once() {
     github
         .state()
         .diffs
-        .insert(("main".to_string(), "aaa".to_string()), Vec::new());
+        .insert(("main".to_string(), "aaa".to_string()), elsewhere());
     let rounds = rounds(&repo, &github);
     rounds
         .open_round(opening(run_id, 3, 1))
@@ -1000,7 +1107,7 @@ async fn reviewers_reporting_one_problem_make_one_follow_up_task() {
     github
         .state()
         .diffs
-        .insert(("main".to_string(), "aaa".to_string()), Vec::new());
+        .insert(("main".to_string(), "aaa".to_string()), elsewhere());
     let rounds = rounds(&repo, &github);
     rounds
         .open_round(opening(run_id, 3, 1))
@@ -1139,7 +1246,7 @@ async fn a_problem_reported_again_in_a_later_round_joins_its_follow_up_task() {
         github
             .state()
             .diffs
-            .insert((base.to_string(), head.to_string()), Vec::new());
+            .insert((base.to_string(), head.to_string()), elsewhere());
     }
     let rounds = rounds(&repo, &github);
 
@@ -1241,7 +1348,7 @@ async fn a_problem_reported_again_after_a_revise_joins_its_follow_up_task() {
         github
             .state()
             .diffs
-            .insert((base.to_string(), head.to_string()), Vec::new());
+            .insert((base.to_string(), head.to_string()), elsewhere());
     }
     let rounds = rounds(&repo, &github);
 
@@ -1296,7 +1403,7 @@ async fn a_retried_close_comments_on_a_joined_follow_up_task_once() {
         github
             .state()
             .diffs
-            .insert((base.to_string(), head.to_string()), Vec::new());
+            .insert((base.to_string(), head.to_string()), elsewhere());
     }
     let rounds = rounds(&repo, &github);
     review(
@@ -1362,7 +1469,7 @@ async fn reported_once(
         github
             .state()
             .diffs
-            .insert((base.to_string(), head.to_string()), Vec::new());
+            .insert((base.to_string(), head.to_string()), elsewhere());
     }
     let rounds = rounds(repo, github);
     review(
@@ -1422,7 +1529,7 @@ async fn a_problem_whose_task_was_refused_makes_a_follow_up_task_later() {
         github
             .state()
             .diffs
-            .insert((base.to_string(), head.to_string()), Vec::new());
+            .insert((base.to_string(), head.to_string()), elsewhere());
     }
     let rounds = rounds(&repo, &github);
     review(
@@ -1569,7 +1676,7 @@ async fn a_retried_close_does_not_join_a_task_its_own_round_made() {
     github
         .state()
         .diffs
-        .insert(("main".to_string(), "aaa".to_string()), Vec::new());
+        .insert(("main".to_string(), "aaa".to_string()), elsewhere());
     let rounds = rounds(&repo, &github);
     repo.fail_once_after("create_follow_up", 1);
 

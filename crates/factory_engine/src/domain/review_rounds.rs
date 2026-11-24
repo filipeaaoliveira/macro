@@ -425,8 +425,9 @@ where
     }
 
     /// Tell each finding of `round` not yet told whether it is in the diff
-    /// the round reviewed. When GitHub cannot list that diff in full, each
-    /// is a Blocker: a finding is never let go for lack of a diff.
+    /// the round reviewed. When GitHub cannot list that diff in full, or
+    /// lists it empty, each is a Blocker: a finding is never let go for lack
+    /// of a diff.
     async fn classify(
         &self,
         run_id: RunId,
@@ -444,7 +445,9 @@ where
             )
             .await
         {
-            Ok(files) => files,
+            // An empty diff holds nothing a finding could be outside of:
+            // read as one GitHub could not list, every finding blocks.
+            Ok(files) => files.filter(|files| !files.is_empty()),
             Err(error) if error.retryable() => return Err(github_failure(error)),
             Err(error) => {
                 tracing::warn!(
@@ -550,6 +553,22 @@ where
             Some(before) if opening.round > 1 && before != head => (before.to_string(), true),
             _ => (base_branch, false),
         };
+        // A whole-change round of a branch that changes nothing has nothing
+        // to review: it fails, as one that cannot open, so no finding is let
+        // go as outside an empty diff.
+        if !fix_diff && self.changes_nothing(&run, &diff_base, &head).await? {
+            let failure = ReviewRoundFailure {
+                seq: opening.seq,
+                round: opening.round,
+                reviewers: opening.reviewers,
+                failure: "The run's branch changes nothing against its base.".to_string(),
+            };
+            self.repo
+                .fail_review_round(run_id, &failure)
+                .await
+                .map_err(internal)?;
+            return Ok(false);
+        }
         let start = ReviewRoundStart {
             seq: opening.seq,
             round: opening.round,
@@ -623,6 +642,32 @@ where
             Err(_) => Ok(Err(
                 "GitHub refused to show the run's branch to the run's owner.",
             )),
+        }
+    }
+
+    /// Whether GitHub lists no file `head` of `run`'s repository changes
+    /// against `base`. A diff GitHub cannot list is not taken as empty.
+    async fn changes_nothing(
+        &self,
+        run: &factory_records::domain::models::Run,
+        base: &str,
+        head: &str,
+    ) -> Result<bool, StepError> {
+        let Some(code) = run
+            .repository
+            .as_ref()
+            .and_then(|repository| CodeRepository::parse(&repository.url))
+        else {
+            return Ok(false);
+        };
+        match self
+            .github
+            .changed_files(&run.user_id, &code, base, head)
+            .await
+        {
+            Ok(files) => Ok(files.is_some_and(|files| files.is_empty())),
+            Err(error) if error.retryable() => Err(github_failure(error)),
+            Err(_) => Ok(false),
         }
     }
 

@@ -5,7 +5,7 @@ use super::{FakeSessions, agent, plan_task};
 use crate::domain::breaks::{Reported, reported};
 use crate::domain::fakes::FakeRepo;
 use crate::domain::ports::StepAgent;
-use crate::domain::session_agent::said_breaks::{FROM_REPLY, missing_breaks};
+use crate::domain::session_agent::said_breaks::{FROM_REPLY, missing_breaks, missing_fix_answer};
 
 const SAVES: &str = "BREAK toggle_saves: src/toggle.rs \"saved = true\" -> \"saved = false\" run `cargo test toggle_saves`";
 const KEEPS: &str =
@@ -53,4 +53,30 @@ fn a_reply_adds_only_readable_breaks_the_hand_back_lacks() {
     assert_eq!(missing_breaks(SAVES, &said), [newer]);
     assert!(missing_breaks(&format!("{SAVES}\n{KEEPS}"), &said).is_empty());
     assert!(missing_breaks("", "Nothing to add.").is_empty());
+}
+
+/// A fix that wrote its answer of the Blockers in its reply, not its hand
+/// back, has the reply's last such block added; a hand back that holds
+/// one keeps it, and a reply's block of anything else is not taken.
+#[test]
+fn a_reply_adds_the_fix_answer_the_hand_back_lacks() {
+    let older = "```json\n{\"blockers\": [{\"number\": 1, \"status\": \"fixed\"}]}\n```";
+    let newer = "```json\n{\"blockers\": [{\"number\": 1, \"status\": \"disputed\", \
+        \"reason\": \"It is generated\"}]}\n```";
+    let said = format!("First:\n{older}\nThen:\n{newer}\nOther:\n```json\n{{\"x\": 1}}\n```");
+
+    let added = missing_fix_answer("Fixed blocker 2; I dispute blocker 1.", &said).expect("added");
+    let value: serde_json::Value = serde_json::from_str(
+        added
+            .strip_prefix("```json\n")
+            .and_then(|rest| rest.strip_suffix("\n```"))
+            .expect("fenced"),
+    )
+    .expect("json");
+    assert_eq!(value["blockers"][0]["status"], "disputed");
+    assert_eq!(missing_fix_answer(older, &said), None);
+    assert_eq!(
+        missing_fix_answer("Done.", "```json\n{\"x\": 1}\n```"),
+        None
+    );
 }
