@@ -7,9 +7,16 @@
 import type { RunScore } from './runScore';
 
 /**
- * The live Scorers' judgments of one Run.
+ * The live Scorers' judgments of one Run, and those still to come.
  */
 export interface RunScores {
+  /** The Scorers that will still judge it, by name: each of the Scorers
+it is scored with whose sample takes it (by its Flow and a hash of
+its id) and that has not judged it. Empty once none will: its
+scoring finished, an hour passed since it ended, or no Scorer judges
+it (it was cancelled or lost to infrastructure, or is a Benchmark
+trial). While it goes, the Scorers that will judge it once it ends. */
+  pending: string[];
   /** One for each Scorer that judged it, by Scorer. */
   scores: RunScore[];
 }

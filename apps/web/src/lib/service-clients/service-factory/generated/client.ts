@@ -11,9 +11,12 @@ import type {
   AutomationsSettings,
   BoardPage,
   CallFactoryAutomationWebhookBody,
+  CheckDefinitionChangeRequest,
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionChangeCheck,
+  DefinitionFile,
   DefinitionPullRequest,
   DefinitionSettings,
   DismissalUndoneResponse,
@@ -22,6 +25,7 @@ import type {
   FiringResult,
   FlawRunRequest,
   FlowsResponse,
+  GetFactoryDefinitionFileParams,
   GetFactoryEvaluationParams,
   GetFactoryInsightsParams,
   GetFactoryQualityParams,
@@ -1644,8 +1648,9 @@ commit, on the same branch, that keeps the Steps the Run took before the
 entry it stopped at, with their outputs, and starts there; its
 `retry.retriedFrom` names the Run it retries. A Run is retried once: a
 second retry, a running Run, a Run that ended otherwise, a Benchmark
-trial and a self-improvement Run are refused (409), as is a retry past
-the caller's Queue limit (`queueFull`). An agent acting for the owner
+trial and a self-improvement Run are refused (409 `notRetriable`, and
+`alreadyRetried` for a second retry), as is a retry past the caller's
+Queue limit (`queueFull`). An agent acting for the owner
 needs a Standing Role that allows `start`, as a new Run does.
  */
 export type retryFactoryRunResponse201 = {
@@ -3062,6 +3067,182 @@ export const proposeFactoryDefinitionChange = async (
     status: res.status,
     headers: res.headers,
   } as proposeFactoryDefinitionChangeResponse;
+};
+
+/**
+ * @summary Check a change to the caller's team's Factory Definition as `POST
+/settings/definition/changes` would, without proposing it: nothing is
+written to GitHub. It is refused with the same statuses and codes (403
+for someone who does not administer the team, in person; 409
+`noDefinition`; 400 `noPushAccess`, `unreachableDefinition`,
+`invalidDefinition` or `invalidDefinitionChange`), and answers the
+commit it was checked against. A pull request sent later is checked
+again, against the head it is sent at.
+ */
+export type checkFactoryDefinitionChangeResponse200 = {
+  data: DefinitionChangeCheck;
+  status: 200;
+};
+
+export type checkFactoryDefinitionChangeResponse400 = {
+  data: RunErrorResponse;
+  status: 400;
+};
+
+export type checkFactoryDefinitionChangeResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type checkFactoryDefinitionChangeResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type checkFactoryDefinitionChangeResponse409 = {
+  data: RunErrorResponse;
+  status: 409;
+};
+
+export type checkFactoryDefinitionChangeResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type checkFactoryDefinitionChangeResponseSuccess =
+  checkFactoryDefinitionChangeResponse200 & {
+    headers: Headers;
+  };
+export type checkFactoryDefinitionChangeResponseError = (
+  | checkFactoryDefinitionChangeResponse400
+  | checkFactoryDefinitionChangeResponse401
+  | checkFactoryDefinitionChangeResponse403
+  | checkFactoryDefinitionChangeResponse409
+  | checkFactoryDefinitionChangeResponse500
+) & {
+  headers: Headers;
+};
+
+export type checkFactoryDefinitionChangeResponse =
+  | checkFactoryDefinitionChangeResponseSuccess
+  | checkFactoryDefinitionChangeResponseError;
+
+export const getCheckFactoryDefinitionChangeUrl = () => {
+  return `/settings/definition/changes/check`;
+};
+
+export const checkFactoryDefinitionChange = async (
+  checkDefinitionChangeRequest: CheckDefinitionChangeRequest,
+  options?: RequestInit
+): Promise<checkFactoryDefinitionChangeResponse> => {
+  const res = await fetch(getCheckFactoryDefinitionChangeUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(checkDefinitionChangeRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: checkFactoryDefinitionChangeResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as checkFactoryDefinitionChangeResponse;
+};
+
+/**
+ * @summary The whole text of one file of the caller's team's Factory Definition, as
+it is at its default branch's head, the commit a change proposed now
+goes on top of, read as the caller reaches it on GitHub. A file not
+there yet, as a Flow being added, answers no text. A path that names no
+Definition file is 400 `notADefinitionFile`; a repository the caller
+does not reach is 400 `unreachableDefinition`; a file GitHub will not
+give (too large) is 400 `invalidDefinition`; a team that names no
+Definition is 409 `noDefinition`.
+ */
+export type getFactoryDefinitionFileResponse200 = {
+  data: DefinitionFile;
+  status: 200;
+};
+
+export type getFactoryDefinitionFileResponse400 = {
+  data: RunErrorResponse;
+  status: 400;
+};
+
+export type getFactoryDefinitionFileResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryDefinitionFileResponse409 = {
+  data: RunErrorResponse;
+  status: 409;
+};
+
+export type getFactoryDefinitionFileResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryDefinitionFileResponseSuccess =
+  getFactoryDefinitionFileResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryDefinitionFileResponseError = (
+  | getFactoryDefinitionFileResponse400
+  | getFactoryDefinitionFileResponse401
+  | getFactoryDefinitionFileResponse409
+  | getFactoryDefinitionFileResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryDefinitionFileResponse =
+  | getFactoryDefinitionFileResponseSuccess
+  | getFactoryDefinitionFileResponseError;
+
+export const getGetFactoryDefinitionFileUrl = (
+  params: GetFactoryDefinitionFileParams
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/settings/definition/file?${stringifiedParams}`
+    : `/settings/definition/file`;
+};
+
+export const getFactoryDefinitionFile = async (
+  params: GetFactoryDefinitionFileParams,
+  options?: RequestInit
+): Promise<getFactoryDefinitionFileResponse> => {
+  const res = await fetch(getGetFactoryDefinitionFileUrl(params), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryDefinitionFileResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryDefinitionFileResponse;
 };
 
 /**

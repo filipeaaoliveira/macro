@@ -7,12 +7,15 @@
 
 import type { BlockerResolutions } from './blockerResolutions';
 import type { BreakRecord } from './breakRecord';
+import type { CiQuarantined } from './ciQuarantined';
+import type { CiRerun } from './ciRerun';
 import type { ReviewRound } from './reviewRound';
 import type { Run } from './run';
 import type { RunAgentRule } from './runAgentRule';
 import type { RunDetailBaseRequiredChecks } from './runDetailBaseRequiredChecks';
 import type { RunDetailMainHold } from './runDetailMainHold';
 import type { RunDetailTokenBudget } from './runDetailTokenBudget';
+import type { SplitTask } from './splitTask';
 import type { StandingActRecord } from './standingActRecord';
 import type { Step } from './step';
 
@@ -33,11 +36,22 @@ dropped. */
 added, by Step, each with how the factory's run of it went: in a
 Run's own read (`GET /runs/{id}`) only, empty in a list of Runs. */
   breakRecords: BreakRecord[];
+  /** The failures its passed reruns quarantined in its repository: in a
+Run's own read only, empty in a list of Runs. */
+  ciQuarantines: CiQuarantined[];
+  /** The failed CI jobs its `ci` Steps reran under the `rerun_flaky_ci`
+rule, by Step then job, each with how it ended: in a Run's own read
+only, empty in a list of Runs. */
+  ciReruns: CiRerun[];
   mainHold?: RunDetailMainHold;
   /** Its review rounds, in order, each with what its reviewers found. */
   reviewRounds: ReviewRound[];
   /** The Run. */
   run: Run;
+  /** The child tasks its `split` Steps filed, by Step then place, with
+their ids and names: in a Run's own read only, empty in a list of
+Runs. */
+  splitTasks: SplitTask[];
   /** What agents did to it under its Factory Definition's Standing
 Roles, in order: who started, cancelled or linked it, and answered
 its Gates. */

@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FindPullRequestRunsData, FindPullRequestRunsErrors, FindPullRequestRunsResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, FlawFactoryRunData, FlawFactoryRunErrors, FlawFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryDefinitionData, GetFactoryDefinitionErrors, GetFactoryDefinitionResponses, GetFactoryEvaluationData, GetFactoryEvaluationErrors, GetFactoryEvaluationResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryQualityData, GetFactoryQualityErrors, GetFactoryQualityResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryRunScoresData, GetFactoryRunScoresErrors, GetFactoryRunScoresResponses, GetFactorySessionStepData, GetFactorySessionStepErrors, GetFactorySessionStepResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LabelFactoryRunScoreData, LabelFactoryRunScoreErrors, LabelFactoryRunScoreResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryBoardData, ListFactoryBoardErrors, ListFactoryBoardResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ProposeFactoryDefinitionChangeData, ProposeFactoryDefinitionChangeErrors, ProposeFactoryDefinitionChangeResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, RetryFactoryRunData, RetryFactoryRunErrors, RetryFactoryRunResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryDefinitionData, SetFactoryDefinitionErrors, SetFactoryDefinitionResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StartFactoryBenchmarkSuiteData, StartFactoryBenchmarkSuiteErrors, StartFactoryBenchmarkSuiteResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses, UndoFactoryImprovementDismissalData, UndoFactoryImprovementDismissalErrors, UndoFactoryImprovementDismissalResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CheckFactoryDefinitionChangeData, CheckFactoryDefinitionChangeErrors, CheckFactoryDefinitionChangeResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FindPullRequestRunsData, FindPullRequestRunsErrors, FindPullRequestRunsResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, FlawFactoryRunData, FlawFactoryRunErrors, FlawFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryDefinitionData, GetFactoryDefinitionErrors, GetFactoryDefinitionFileData, GetFactoryDefinitionFileErrors, GetFactoryDefinitionFileResponses, GetFactoryDefinitionResponses, GetFactoryEvaluationData, GetFactoryEvaluationErrors, GetFactoryEvaluationResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryQualityData, GetFactoryQualityErrors, GetFactoryQualityResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryRunScoresData, GetFactoryRunScoresErrors, GetFactoryRunScoresResponses, GetFactorySessionStepData, GetFactorySessionStepErrors, GetFactorySessionStepResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LabelFactoryRunScoreData, LabelFactoryRunScoreErrors, LabelFactoryRunScoreResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryBoardData, ListFactoryBoardErrors, ListFactoryBoardResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ProposeFactoryDefinitionChangeData, ProposeFactoryDefinitionChangeErrors, ProposeFactoryDefinitionChangeResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, RetryFactoryRunData, RetryFactoryRunErrors, RetryFactoryRunResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryDefinitionData, SetFactoryDefinitionErrors, SetFactoryDefinitionResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StartFactoryBenchmarkSuiteData, StartFactoryBenchmarkSuiteErrors, StartFactoryBenchmarkSuiteResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses, UndoFactoryImprovementDismissalData, UndoFactoryImprovementDismissalErrors, UndoFactoryImprovementDismissalResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -342,8 +342,9 @@ export class Sdk extends HeyApiClient {
      * entry it stopped at, with their outputs, and starts there; its
      * `retry.retriedFrom` names the Run it retries. A Run is retried once: a
      * second retry, a running Run, a Run that ended otherwise, a Benchmark
-     * trial and a self-improvement Run are refused (409), as is a retry past
-     * the caller's Queue limit (`queueFull`). An agent acting for the owner
+     * trial and a self-improvement Run are refused (409 `notRetriable`, and
+     * `alreadyRetried` for a second retry), as is a retry past the caller's
+     * Queue limit (`queueFull`). An agent acting for the owner
      * needs a Standing Role that allows `start`, as a new Run does.
      */
     public retryFactoryRun<ThrowOnError extends boolean = false>(options: Options<RetryFactoryRunData, ThrowOnError>): RequestResult<RetryFactoryRunResponses, RetryFactoryRunErrors, ThrowOnError> {
@@ -613,6 +614,41 @@ export class Sdk extends HeyApiClient {
                 ...options.headers
             }
         });
+    }
+
+    /**
+     * Check a change to the caller's team's Factory Definition as `POST
+     * /settings/definition/changes` would, without proposing it: nothing is
+     * written to GitHub. It is refused with the same statuses and codes (403
+     * for someone who does not administer the team, in person; 409
+     * `noDefinition`; 400 `noPushAccess`, `unreachableDefinition`,
+     * `invalidDefinition` or `invalidDefinitionChange`), and answers the
+     * commit it was checked against. A pull request sent later is checked
+     * again, against the head it is sent at.
+     */
+    public checkFactoryDefinitionChange<ThrowOnError extends boolean = false>(options: Options<CheckFactoryDefinitionChangeData, ThrowOnError>): RequestResult<CheckFactoryDefinitionChangeResponses, CheckFactoryDefinitionChangeErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<CheckFactoryDefinitionChangeResponses, CheckFactoryDefinitionChangeErrors, ThrowOnError>({
+            url: '/settings/definition/changes/check',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * The whole text of one file of the caller's team's Factory Definition, as
+     * it is at its default branch's head, the commit a change proposed now
+     * goes on top of, read as the caller reaches it on GitHub. A file not
+     * there yet, as a Flow being added, answers no text. A path that names no
+     * Definition file is 400 `notADefinitionFile`; a repository the caller
+     * does not reach is 400 `unreachableDefinition`; a file GitHub will not
+     * give (too large) is 400 `invalidDefinition`; a team that names no
+     * Definition is 409 `noDefinition`.
+     */
+    public getFactoryDefinitionFile<ThrowOnError extends boolean = false>(options: Options<GetFactoryDefinitionFileData, ThrowOnError>): RequestResult<GetFactoryDefinitionFileResponses, GetFactoryDefinitionFileErrors, ThrowOnError> {
+        return (options.client ?? this.client).get<GetFactoryDefinitionFileResponses, GetFactoryDefinitionFileErrors, ThrowOnError>({ url: '/settings/definition/file', ...options });
     }
 
     /**

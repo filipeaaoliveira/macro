@@ -16,6 +16,8 @@ export const RunErrorCode = {
   noPushAccess: 'noPushAccess',
   controlFilesNotApproved: 'controlFilesNotApproved',
   queueFull: 'queueFull',
+  notRetriable: 'notRetriable',
+  alreadyRetried: 'alreadyRetried',
   reservedForAPerson: 'reservedForAPerson',
   notInStandingRole: 'notInStandingRole',
   unreachableDefinition: 'unreachableDefinition',
@@ -25,4 +27,5 @@ export const RunErrorCode = {
   invalidDefinitionChange: 'invalidDefinitionChange',
   definitionChangeNotOpened: 'definitionChangeNotOpened',
   definitionChangeClosed: 'definitionChangeClosed',
+  notADefinitionFile: 'notADefinitionFile',
 } as const;
