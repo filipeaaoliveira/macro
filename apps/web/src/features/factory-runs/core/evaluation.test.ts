@@ -309,4 +309,11 @@ describe('scoresRefetchInterval', () => {
     expect(scoresRefetchInterval(undefined, at(0))).toBe(false);
     expect(scoresRefetchInterval('not a time', at(0))).toBe(false);
   });
+
+  it('reads them again while a Scorer will still judge the run, and stops once none will', () => {
+    expect(scoresRefetchInterval(ended, at(0), [])).toBe(false);
+    expect(scoresRefetchInterval(ended, at(0), ['clear docs'])).toBe(15_000);
+    expect(scoresRefetchInterval(ended, at(30), ['clear docs'])).toBe(15_000);
+    expect(scoresRefetchInterval(undefined, at(0), ['clear docs'])).toBe(false);
+  });
 });

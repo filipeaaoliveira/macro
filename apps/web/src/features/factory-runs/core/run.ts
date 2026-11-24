@@ -543,8 +543,15 @@ export type Run = {
    * read carries them, a list of Runs none.
    */
   breakRecords?: BreakRecord[];
+  /**
+   * The child tasks its `split` Steps filed, by Step; only a Run's own read
+   * carries them, a list of Runs none.
+   */
+  splitTasks?: SplitTask[];
   /** The Run it retries, for a retry; none for a Run started afresh. */
   retry?: RunRetry;
+  /** Its retry, by id; none while it has none. */
+  retriedBy?: string;
 };
 
 /** A Flow a person can start a Run of. */
@@ -717,10 +724,15 @@ const RETRIABLE_OUTCOMES: ReadonlySet<RunOutcome> = new Set([
 const UNRETRIED_FLOWS: ReadonlySet<string> = new Set(['benchmark', 'improve']);
 
 /**
- * The retry of `run` among `runs` (its task's), if one is listed: the Run
- * whose `retry.retriedFrom` names it. A Run is retried at most once.
+ * The retry of `run`: the one it names (`retriedBy`), else the Run among
+ * `runs` (its task's) whose `retry.retriedFrom` names it. A Run is retried
+ * at most once.
  */
-export function retryOf(run: Pick<Run, 'id'>, runs: Run[]): Run | undefined {
+export function retryOf(
+  run: Pick<Run, 'id' | 'retriedBy'>,
+  runs: Run[]
+): Pick<Run, 'id'> | undefined {
+  if (run.retriedBy) return { id: run.retriedBy };
   return runs.find((other) => other.retry?.retriedFrom === run.id);
 }
 
@@ -740,6 +752,12 @@ export const SPLIT_ENTRY = 'split';
 
 /** A task a Run filed, by its id and name. */
 export type FiledTask = { id: string; name: string };
+
+/** A child task a `split` Step filed, as the factory recorded it. */
+export type SplitTask = FiledTask & {
+  /** The `split` Step that filed it. */
+  seq: number;
+};
 
 /**
  * What ends the header the engine's split writes above the list of the
@@ -774,15 +792,21 @@ function filedTask(json: string): FiledTask | undefined {
 }
 
 /**
- * The child tasks a `split` Step filed: the list under the header its
- * output opens with, one task mention a line, in order. A task the plan's
- * reasons mention, in the header, is not one it filed. None for another
- * Step, or one that filed none.
+ * The child tasks a `split` Step filed: those the factory recorded for it
+ * (`splitTasks`), in order, else the list under the header its output
+ * opens with, one task mention a line, in order, for a Run from before
+ * they were recorded. A task the plan's reasons mention, in the header, is
+ * not one it filed. None for another Step, or one that filed none.
  */
 export function splitChildTasks(
-  step: Pick<RunStep, 'entry' | 'end'>
+  step: Pick<RunStep, 'seq' | 'entry' | 'end'>,
+  splitTasks: SplitTask[] = []
 ): FiledTask[] {
   if (step.entry !== SPLIT_ENTRY || !step.end) return [];
+  const recorded = splitTasks.filter((task) => task.seq === step.seq);
+  if (recorded.length > 0) {
+    return recorded.map((task) => ({ id: task.id, name: task.name }));
+  }
   const output = step.end.output;
   const header = output.indexOf(FILED_HEADER);
   if (header < 0) return [];

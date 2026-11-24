@@ -184,14 +184,18 @@ const SCORES_POLL_MS = 15_000;
 const SCORES_POLL_WINDOW_MS = 5 * 60_000;
 
 /**
- * When to read an ended Run's scores again: every `SCORES_POLL_MS` for
- * `SCORES_POLL_WINDOW_MS` after it ended, then no more.
+ * When to read an ended Run's scores again: every `SCORES_POLL_MS` while a
+ * Scorer will still judge it (`pending`, as last read), and no more once
+ * none will. Before the scores were read, every `SCORES_POLL_MS` for
+ * `SCORES_POLL_WINDOW_MS` after it ended.
  */
 export function scoresRefetchInterval(
   endedAt: string | undefined,
-  now: number
+  now: number,
+  pending?: readonly string[]
 ): number | false {
   if (!endedAt) return false;
+  if (pending) return pending.length > 0 ? SCORES_POLL_MS : false;
   const ended = Date.parse(endedAt);
   if (Number.isNaN(ended)) return false;
   return now - ended < SCORES_POLL_WINDOW_MS ? SCORES_POLL_MS : false;

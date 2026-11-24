@@ -8,12 +8,14 @@ import { statusError } from '@core/util/safeFetch';
 import {
   getAnswerFactoryGateUrl,
   getCancelFactoryRunUrl,
+  getCheckFactoryDefinitionChangeUrl,
   getCreateFactoryAutomationUrl,
   getCreateFactoryRunUrl,
   getDeleteFactoryAutomationUrl,
   getFindPullRequestRunsUrl,
   getFlawFactoryRunUrl,
   getGetFactoryControlFilesUrl,
+  getGetFactoryDefinitionFileUrl,
   getGetFactoryDefinitionUrl,
   getGetFactoryEvaluationUrl,
   getGetFactoryInsightsUrl,
@@ -47,9 +49,12 @@ import type {
   AutomationRequest,
   AutomationsSettings,
   BoardPage,
+  CheckDefinitionChangeRequest,
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionChangeCheck,
+  DefinitionFile,
   DefinitionPullRequest,
   DefinitionSettings,
   DismissalUndoneResponse,
@@ -79,31 +84,11 @@ import type {
 
 const host = () => SERVER_HOSTS.factory;
 
-/**
- * One file of the team's Factory Definition at its default branch's head,
- * the commit a change proposed now goes on top of: `GET
- * /settings/definition/file`. Written by hand until the generated client
- * is regenerated with it.
- */
-export type DefinitionFile = {
-  path: string;
-  commit: string;
-  /** Its whole text; absent or `null` when the repository holds no file there yet. */
-  text?: string | null;
+export type {
+  CheckDefinitionChangeRequest,
+  DefinitionChangeCheck,
+  DefinitionFile,
 };
-
-/**
- * A change to check without proposing it: `POST
- * /settings/definition/changes/check` takes a proposal without its id.
- * Written by hand until the generated client is regenerated with it.
- */
-export type CheckDefinitionChangeRequest = Omit<
-  ProposeDefinitionChangeRequest,
-  'changeId'
->;
-
-/** The commit a checked change was checked against. */
-export type DefinitionChangeCheck = { commit: string };
 
 /** Why a Run wasn't started, when the service names the cause. */
 export type StartRunErrorCode =
@@ -127,8 +112,9 @@ type StartRunRefusal = Exclude<
   | 'invalidDefinitionChange'
   | 'definitionChangeNotOpened'
   | 'definitionChangeClosed'
-  // Not in the generated codes until the client is regenerated.
   | 'notADefinitionFile'
+  | 'notRetriable'
+  | 'alreadyRetried'
 >;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
@@ -182,13 +168,17 @@ async function refusal(
 export type RetryRunErrorCode =
   | 'QUEUE_FULL'
   | 'NOT_IN_STANDING_ROLE'
-  | 'DEFINITION_UNREADABLE';
+  | 'DEFINITION_UNREADABLE'
+  | 'ALREADY_RETRIED'
+  | 'NOT_RETRIABLE';
 
 const RETRY_RUN_ERROR_CODES = {
   queueFull: 'QUEUE_FULL',
   notInStandingRole: 'NOT_IN_STANDING_ROLE',
   unreachableDefinition: 'DEFINITION_UNREADABLE',
   invalidDefinition: 'DEFINITION_UNREADABLE',
+  alreadyRetried: 'ALREADY_RETRIED',
+  notRetriable: 'NOT_RETRIABLE',
 } as const satisfies Partial<Record<RunErrorCode, RetryRunErrorCode>>;
 
 function isRetryRefusal(
@@ -199,9 +189,9 @@ function isRetryRefusal(
 
 /**
  * A refused retry: the cause the service names (a full Queue, no Standing
- * Role that allows a start, a Definition that doesn't read), else the
- * status's error (a Run retried already, or that can't be retried, is a
- * `CONFLICT`), with the service's message either way.
+ * Role that allows a start, a Definition that doesn't read, a Run retried
+ * already or one that can't be retried), else the status's error, with the
+ * service's message either way.
  */
 async function retryRunError(
   response: Response
@@ -240,11 +230,7 @@ const DEFINITION_CHANGE_ERROR_CODES = {
   definitionChangeClosed: 'DEFINITION_CHANGE_CLOSED',
   noPushAccess: 'NO_PUSH_ACCESS',
   notADefinitionFile: 'NOT_A_DEFINITION_FILE',
-} as const satisfies Partial<
-  // `notADefinitionFile` is in the generated codes once the client is
-  // regenerated with `GET /settings/definition/file`.
-  Record<RunErrorCode | 'notADefinitionFile', DefinitionChangeErrorCode>
->;
+} as const satisfies Partial<Record<RunErrorCode, DefinitionChangeErrorCode>>;
 
 function isDefinitionChangeRefusal(
   code: unknown
@@ -335,13 +321,14 @@ export const factoryClient = {
   /**
    * The live Scorers' judgments of one of the caller's Runs, each with
    * their label of it and how far the Scorer's judge agrees with their
-   * labels. Only the Run's owner reads them (`NOT_FOUND` otherwise).
+   * labels, and the Scorers that will still judge it (`pending`). Only the
+   * Run's owner reads them (`NOT_FOUND` otherwise).
    */
   getRunScores(runId: string, signal?: AbortSignal) {
     return fetchWithToken<RunScores>(
       `${host()}${getGetFactoryRunScoresUrl(encodeURIComponent(runId))}`,
       { method: 'GET', signal }
-    ).then((result) => result.map((data) => data.scores));
+    );
   },
 
   /**
@@ -578,7 +565,7 @@ export const factoryClient = {
    */
   getDefinitionFile(path: string, signal?: AbortSignal) {
     return fetchWithToken<DefinitionFile, DefinitionChangeErrorCode>(
-      `${host()}/settings/definition/file?${new URLSearchParams({ path })}`,
+      `${host()}${getGetFactoryDefinitionFileUrl({ path })}`,
       { method: 'GET', signal, errorResponseHandler: definitionChangeError }
     );
   },
@@ -590,7 +577,7 @@ export const factoryClient = {
    */
   checkDefinitionChange(request: CheckDefinitionChangeRequest) {
     return fetchWithToken<DefinitionChangeCheck, DefinitionChangeErrorCode>(
-      `${host()}/settings/definition/changes/check`,
+      `${host()}${getCheckFactoryDefinitionChangeUrl()}`,
       {
         method: 'POST',
         body: JSON.stringify(request),

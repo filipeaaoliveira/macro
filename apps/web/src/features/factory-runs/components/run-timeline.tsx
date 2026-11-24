@@ -26,6 +26,7 @@ import {
   type RunStep,
   reviewsAfresh,
   roundStartingAt,
+  type SplitTask,
   type Steer,
   type SteerAction,
   splitChildTasks,
@@ -67,6 +68,8 @@ export function RunTimeline(props: {
   reviewRounds?: ReviewRound[];
   /** The breaks its write and fix Steps reported, each under its Step. */
   breakRecords?: BreakRecord[];
+  /** The child tasks its `split` Steps filed, each under its Step. */
+  splitTasks?: SplitTask[];
   /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
   outputOpen: (step: RunStep) => boolean;
   time: (value: string) => string;
@@ -81,6 +84,7 @@ export function RunTimeline(props: {
             step={step}
             reviewRounds={props.reviewRounds ?? []}
             breakRecords={props.breakRecords ?? []}
+            splitTasks={props.splitTasks ?? []}
             steps={props.steps}
             first={index() === 0}
             latest={index() === props.steps.length - 1}
@@ -107,6 +111,7 @@ function TimelineStep(props: {
   step: RunStep;
   reviewRounds: ReviewRound[];
   breakRecords: BreakRecord[];
+  splitTasks: SplitTask[];
   steps: RunStep[];
   first: boolean;
   latest: boolean;
@@ -122,6 +127,7 @@ function TimelineStep(props: {
   const [toggled, setToggled] = createSignal<boolean>();
   const open = () => toggled() ?? props.defaultOpen;
   const output = () => props.step.end?.output.trim() ?? '';
+  const childTasks = () => splitChildTasks(props.step, props.splitTasks);
   const answer = () => props.step.gate?.answer;
   const rounds = () => props.step.checks ?? [];
   const reports = () => rounds().filter((round) => round.end?.report.trim());
@@ -357,8 +363,8 @@ function TimelineStep(props: {
           </StepNote>
         )}
       </Show>
-      <Show when={splitChildTasks(props.step).length > 0}>
-        <ChildTasksNote tasks={splitChildTasks(props.step)} />
+      <Show when={childTasks().length > 0}>
+        <ChildTasksNote tasks={childTasks()} />
       </Show>
       <For each={props.step.terminal?.steers}>
         {(steer) => <SteerNote steer={steer} />}

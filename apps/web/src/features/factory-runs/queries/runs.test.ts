@@ -1,5 +1,5 @@
 import { factoryClient } from '@service-factory/client';
-import type { RunDetail } from '@service-factory/generated/schemas';
+import type { RunDetail, RunScores } from '@service-factory/generated/schemas';
 import { QueryClient, QueryObserver } from '@tanstack/solid-query';
 import { err, ok } from 'neverthrow';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -75,6 +75,9 @@ const started: RunDetail = {
     dismissed: 0,
   },
   breakRecords: [],
+  ciReruns: [],
+  ciQuarantines: [],
+  splitTasks: [],
   reviewRounds: [
     {
       round: 1,
@@ -133,6 +136,7 @@ describe('createAppRunsContext', () => {
     const run: Run = {
       id: 'run-2',
       breakRecords: [],
+      splitTasks: [],
       standingActs: [],
       agentRules: [],
       taskTagsUnread: false,
@@ -522,6 +526,20 @@ describe('createAppRunsContext', () => {
       reason: 'conflict',
     });
     vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'ALREADY_RETRIED', message: 'the run was retried already' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'conflict',
+    });
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
+      err([{ code: 'NOT_RETRIABLE', message: 'no flow kept' }])
+    );
+    expect(await context.retryRun('run-1')).toEqual({
+      ok: false,
+      reason: 'conflict',
+    });
+    vi.mocked(factoryClient.retryRun).mockResolvedValueOnce(
       err([{ code: 'NOT_IN_STANDING_ROLE', message: 'no role starts' }])
     );
     expect(await context.retryRun('run-1')).toEqual({
@@ -588,7 +606,10 @@ describe('createAppRunsContext', () => {
       label: null,
     });
     const key = factoryRunKeys.runScores('run-2').queryKey;
-    client.setQueryData(key, [score('clear'), score('correct')]);
+    client.setQueryData(key, {
+      scores: [score('clear'), score('correct')],
+      pending: [],
+    });
     const invalidate = vi.spyOn(client, 'invalidateQueries');
     const label = { passed: true, labelledAt: '2026-11-17T10:00:00Z' };
     vi.mocked(factoryClient.labelRunScore).mockResolvedValue(ok(label));
@@ -607,7 +628,7 @@ describe('createAppRunsContext', () => {
       true
     );
     expect(
-      client.getQueryData<RunScore[]>(key)?.map((read) => read.label)
+      client.getQueryData<RunScores>(key)?.scores.map((read) => read.label)
     ).toEqual([label, null]);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: key });
     expect(invalidate).toHaveBeenCalledWith({

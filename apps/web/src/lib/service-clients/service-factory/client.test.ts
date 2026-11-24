@@ -268,7 +268,13 @@ describe('factoryClient routes', () => {
     expect(
       await refused({ message: 'bad flow', code: 'invalidDefinition' })
     ).toEqual({ code: 'DEFINITION_UNREADABLE', message: 'bad flow' });
-    // A Run retried already, or one that can't be, carries no code.
+    expect(
+      await refused({ message: 'retried already', code: 'alreadyRetried' })
+    ).toEqual({ code: 'ALREADY_RETRIED', message: 'retried already' });
+    expect(
+      await refused({ message: 'no flow kept', code: 'notRetriable' })
+    ).toEqual({ code: 'NOT_RETRIABLE', message: 'no flow kept' });
+    // A refusal from a service older than these codes carries none.
     expect(await refused({ message: 'the run was retried already' })).toEqual({
       code: 'CONFLICT',
       message: 'the run was retried already',

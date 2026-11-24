@@ -233,7 +233,7 @@ export function createRunController(
   const retriedBy = createMemo(() => {
     const run = source.data();
     const runs = taskRuns.data();
-    return run && runs ? retryOf(run, runs) : undefined;
+    return run ? retryOf(run, runs ?? []) : undefined;
   });
 
   const retriable = () => {
@@ -328,7 +328,7 @@ export function createRunController(
     /** Whether a retry is on the wire. */
     retrying,
     retry,
-    /** The Run's retry, when its task's Runs list it. */
+    /** The Run's retry, when it names one or its task's Runs list it. */
     retriedBy,
     /** Shows another Run in this one's place, with none of this one's state. */
     openRun: open,

@@ -111,6 +111,7 @@ export function RunContent(props: {
             baseBranch={props.run.repository?.baseBranch}
             reviewRounds={props.run.reviewRounds}
             breakRecords={props.run.breakRecords}
+            splitTasks={props.run.splitTasks}
             status={status()}
             time={props.controller.stepTime}
             onWatch={
