@@ -266,6 +266,7 @@ async fn a_failed_opening_a_re_ask_and_a_follow_up_key_keep_their_first_record(p
     );
 
     let key = StepKey { run_id: id, seq: 3 };
+    assert_eq!(repo.reask_kept(key).await.expect("none yet"), None);
     let first = Uuid::now_v7();
     assert_eq!(repo.reask_action(key, 3, first).await.expect("ask"), first);
     assert_eq!(
@@ -274,6 +275,7 @@ async fn a_failed_opening_a_re_ask_and_a_follow_up_key_keep_their_first_record(p
             .expect("again"),
         first
     );
+    assert_eq!(repo.reask_kept(key).await.expect("kept"), Some(first));
 
     let found = [finding("src/a.rs", None), finding("docs/b.md", None)];
     repo.record_findings(key, 3, &found).await.expect("record");

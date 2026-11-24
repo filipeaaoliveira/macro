@@ -530,6 +530,22 @@ impl ReviewRoundRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
+    async fn reask_kept(&self, key: StepKey) -> Result<Option<Uuid>, Self::Err> {
+        let kept = sqlx::query_scalar!(
+            r#"
+            SELECT reask_action_id
+            FROM factory_reviewer_answer
+            WHERE run_id = $1 AND seq = $2
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(kept.flatten())
+    }
+
+    #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
     async fn follow_up_key(
         &self,
         key: StepKey,

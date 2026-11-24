@@ -159,6 +159,7 @@ pub(super) fn lost(why: &str) -> BuiltInStepError {
         retryable: false,
         out_of_quota: false,
         overdue: false,
+        superseded: false,
     }
 }
 
@@ -1114,6 +1115,7 @@ fn retry(why: String) -> BuiltInStepError {
         retryable: true,
         out_of_quota: false,
         overdue: false,
+        superseded: false,
     }
 }
 

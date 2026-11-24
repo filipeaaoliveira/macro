@@ -28,7 +28,7 @@ use super::checks_round::{lost, records};
 use super::{BuiltInStepError, BuiltInSteps, REVIEW_FOCUS, REVIEW_PANEL_INSTRUCTIONS, outcomes};
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentTurn, StepInput, StepReport};
-use crate::domain::ports::{ChildTasks, MainWatches, PullRequests, StepAgent};
+use crate::domain::ports::{AgentFailure, ChildTasks, MainWatches, PullRequests, StepAgent};
 use crate::domain::review_rounds::{
     ReviewerAnswer, ReviewerAnswerError, breaks_brief, carried_blockers, dropped_in_visit,
     findings_block, fit_findings, places_meet,
@@ -109,23 +109,43 @@ where
             instructions.push('\n');
             instructions.push_str(&breaks_brief(&breaks));
         }
-        let report = self
+        let asked = self
             .ask_agent_in_repository(step, &instructions, review_outcomes(), input)
-            .await?;
-        // A reviewer that asks the Run's owner reviewed nothing yet: its
-        // round waits for the answer, and its Role goes on with it in a
-        // Step of its own, whose findings the round records.
-        if report.outcome == Outcome::question() {
-            return Ok(report);
-        }
-
-        let read =
-            ReviewerAnswer::read_ruling(&report.outcome, &report.output, carried.len(), &rules);
-        let (outcome, answer) = match read {
-            Ok(answer) => (report.outcome, answer),
-            Err(error) => {
-                self.ask_again(round, input, carried.len(), &rules, &error)
+            .await;
+        // An attempt asked the reviewer again, and so took its session on
+        // past the first prompt and its reminder: a retry waits on that
+        // prompt, under the id kept, rather than on the first, which no
+        // longer answers.
+        let (outcome, answer) = match asked {
+            Err(error) if error.superseded() => {
+                if repo.reask_kept(input.key).await.map_err(records)?.is_none() {
+                    return Err(error);
+                }
+                self.ask_again(round, input, carried.len(), &rules, None)
                     .await?
+            }
+            asked => {
+                let report = asked?;
+                // A reviewer that asks the Run's owner reviewed nothing
+                // yet: its round waits for the answer, and its Role goes on
+                // with it in a Step of its own, whose findings the round
+                // records.
+                if report.outcome == Outcome::question() {
+                    return Ok(report);
+                }
+                let read = ReviewerAnswer::read_ruling(
+                    &report.outcome,
+                    &report.output,
+                    carried.len(),
+                    &rules,
+                );
+                match read {
+                    Ok(answer) => (report.outcome, answer),
+                    Err(error) => {
+                        self.ask_again(round, input, carried.len(), &rules, Some(&error))
+                            .await?
+                    }
+                }
             }
         };
         let answers_for = AnswersFor {
@@ -154,14 +174,16 @@ where
     /// Ask the reviewer of `input` once more, in its session, for an answer
     /// that reads, saying why the first did not; one that still does not
     /// read is one Blocker on the whole change. The prompt is kept before it
-    /// is sent, so a retry asks in the same one.
+    /// is sent, so a retry asks in the same one, which the session refuses
+    /// as one it holds, and waits on its turn: such a retry need not say
+    /// why (`error`), since its prompt went out already.
     async fn ask_again(
         &self,
         round: &ReviewRound,
         input: StepInput<'_>,
         carried: usize,
         rules: &[usize],
-        error: &ReviewerAnswerError,
+        error: Option<&ReviewerAnswerError>,
     ) -> Result<(Outcome, ReviewerAnswer), BuiltInStepError> {
         let repo = self.pull_requests.records();
         let action_id = repo
@@ -317,10 +339,12 @@ pub(crate) fn review_outcomes() -> Vec<Outcome> {
     outcomes(&["pass", "changes"])
 }
 
-/// What a reviewer whose answer did not read is asked.
-fn reask_prompt(error: &ReviewerAnswerError) -> String {
+/// What a reviewer whose answer did not read, for `error` when known, is
+/// asked.
+fn reask_prompt(error: Option<&ReviewerAnswerError>) -> String {
+    let why = error.map_or_else(String::new, |error| format!(": {error}"));
     format!(
-        "Your review did not read: {error}. Hand it back again with \
+        "Your review did not read{why}. Hand it back again with \
          `macro.factory.handBack({{ outcome, text }})`, `pass` or `changes`, its text ending \
          with one fenced `json` block, `{{\"blockers\": [...]}}`, as your first prompt says: \
          each blocker with its `file`, optional `startLine` and `endLine`, `problem` and `why`, \

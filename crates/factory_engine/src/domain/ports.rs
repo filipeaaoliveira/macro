@@ -123,6 +123,13 @@ pub trait AgentFailure: Retryable {
         false
     }
 
+    /// Whether another attempt took the Step on to a later prompt of its
+    /// session, so this attempt's prompt is no longer the one the agent
+    /// answers.
+    fn superseded(&self) -> bool {
+        false
+    }
+
     /// The agent's last message, when it stopped without handing back a
     /// result even once reminded: the Step then waits for its Run's owner.
     fn stopped_without_result(&self) -> Option<&str> {

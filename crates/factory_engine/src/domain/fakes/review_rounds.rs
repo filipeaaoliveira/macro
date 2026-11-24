@@ -260,6 +260,16 @@ impl ReviewRoundRepository for FakeRepo {
         Ok(candidate)
     }
 
+    async fn reask_kept(&self, key: StepKey) -> Result<Option<Uuid>, FakeError> {
+        Ok(self
+            .reasks
+            .lock()
+            .expect("reasks")
+            .iter()
+            .find(|(asked, _)| *asked == key)
+            .map(|(_, kept)| *kept))
+    }
+
     async fn follow_up_key(
         &self,
         key: StepKey,

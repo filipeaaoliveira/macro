@@ -264,6 +264,10 @@ impl AgentFailure for SessionAgentError {
         matches!(self, SessionAgentError::Overdue)
     }
 
+    fn superseded(&self) -> bool {
+        matches!(self, SessionAgentError::Superseded)
+    }
+
     fn stopped_without_result(&self) -> Option<&str> {
         match self {
             SessionAgentError::StoppedWithoutResult(last_words) => Some(last_words),
