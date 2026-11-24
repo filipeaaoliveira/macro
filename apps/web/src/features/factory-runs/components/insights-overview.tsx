@@ -268,23 +268,17 @@ export function KpiStrip(props: { kpis: Kpis; retried?: number }) {
           />
         )}
       </Show>
-      {/* Time to merge where a Run merged; else, as for plans and replies,
-          how long Runs took to end. */}
-      <Show
-        when={props.kpis.timeToMergeSeconds}
-        fallback={
-          <Show when={props.kpis.medianRunSeconds}>
-            {(kpi) => (
-              <KpiTile
-                label={t('factoryInsights.medianRunTime')}
-                kpi={kpi()}
-                format={formatInsightDuration}
-                lowerIsBetter
-              />
-            )}
-          </Show>
-        }
-      >
+      <Show when={props.kpis.medianRunSeconds}>
+        {(kpi) => (
+          <KpiTile
+            label={t('factoryInsights.medianRunTime')}
+            kpi={kpi()}
+            format={formatInsightDuration}
+            lowerIsBetter
+          />
+        )}
+      </Show>
+      <Show when={props.kpis.timeToMergeSeconds}>
         {(kpi) => (
           <KpiTile
             label={t('factoryInsights.timeToMerge')}

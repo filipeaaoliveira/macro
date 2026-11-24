@@ -268,6 +268,7 @@ export function InsightsOverviewPanel(props: {
   const quality = context.quality(props.params);
   const previousQuality = context.quality(before);
   const evaluation = context.evaluation(props.params);
+  const isTeamAdmin = context.isTeamAdmin();
   const points = (read: EvaluationInsights) =>
     paretoPoints(read.suites, suiteStandings(read.suites));
 
@@ -299,18 +300,22 @@ export function InsightsOverviewPanel(props: {
                 {(read) => (
                   <FlakyCiTable
                     ci={read().ci}
-                    onQuarantine={async (job, quarantine) => {
-                      const result = await context.setCiQuarantine(
-                        job,
-                        quarantine
-                      );
-                      if (!result.ok) {
-                        toast.failure(
-                          result.message ??
-                            t('factoryInsights.ciQuarantineFailed')
-                        );
-                      }
-                    }}
+                    onQuarantine={
+                      isTeamAdmin()
+                        ? async (job, quarantine) => {
+                            const result = await context.setCiQuarantine(
+                              job,
+                              quarantine
+                            );
+                            if (!result.ok) {
+                              toast.failure(
+                                result.message ??
+                                  t('factoryInsights.ciQuarantineFailed')
+                              );
+                            }
+                          }
+                        : undefined
+                    }
                   />
                 )}
               </Show>

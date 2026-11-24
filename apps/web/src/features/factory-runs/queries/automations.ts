@@ -13,7 +13,7 @@ import { factoryRunKeys } from './keys';
  * The read of the team's Automations, built at module scope so the cached
  * query keeps no view alive.
  */
-function automationsOptions() {
+export function automationsOptions() {
   return queryOptions({
     queryKey: factoryRunKeys.automations.queryKey,
     queryFn: ({ signal }) =>

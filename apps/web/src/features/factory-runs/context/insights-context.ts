@@ -43,6 +43,11 @@ export type InsightsContext = {
    * message when it gave one: the person does not own or administer their
    * team, or may not push to the repository.
    */
+  /**
+   * Whether the person owns or administers their team, so may quarantine
+   * and release CI jobs (the service also asks for push access).
+   */
+  isTeamAdmin: () => Accessor<boolean>;
   setCiQuarantine: (
     job: { repository: string; job: string },
     quarantine: boolean

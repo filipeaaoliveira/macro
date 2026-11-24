@@ -321,6 +321,7 @@ function mount(options: {
       retry: vi.fn(),
     }),
     undoDismissal: options.undoDismissal ?? vi.fn(),
+    isTeamAdmin: () => () => false,
     setCiQuarantine:
       options.setCiQuarantine ?? vi.fn(async () => ({ ok: true as const })),
   };
