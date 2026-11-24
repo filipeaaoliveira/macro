@@ -780,7 +780,10 @@ async fn an_agent_that_closes_sessions_is_asked_to_close_one() {
         .expect("close answer should send");
 
     assert_eq!(
-        closing.await.expect("close task").expect("the agent closed it"),
+        closing
+            .await
+            .expect("close task")
+            .expect("the agent closed it"),
         SessionClose::Closed
     );
     assert!(runtime.rx.try_recv().is_err(), "exactly one frame was sent");
@@ -831,10 +834,12 @@ async fn a_close_the_agent_refuses_is_an_error() {
     let close = sent_request(runtime.rx.recv().await);
     runtime
         .tx
-        .send(ToServerMessage::Acp(AcpMessage(RawJsonRpcMessage::response(
-            close.id.clone(),
-            Err(agent_client_protocol::Error::invalid_params()),
-        ))))
+        .send(ToServerMessage::Acp(AcpMessage(
+            RawJsonRpcMessage::response(
+                close.id.clone(),
+                Err(agent_client_protocol::Error::invalid_params()),
+            ),
+        )))
         .expect("refusal should send");
 
     assert!(matches!(
