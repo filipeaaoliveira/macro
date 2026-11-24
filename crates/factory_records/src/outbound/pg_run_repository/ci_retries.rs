@@ -74,9 +74,13 @@ pub(super) async fn ci_flakes(
     .await?
     .flatten()
     .unwrap_or_default();
-    let quarantined = sqlx::query!(
+    // A quarantine made by hand covers its whole job; one its reruns made,
+    // only its own failure.
+    let mut quarantined = Vec::new();
+    let mut quarantined_jobs = Vec::new();
+    let rows = sqlx::query!(
         r#"
-        SELECT name, failed_step, failure
+        SELECT name, failed_step, failure, quarantined_by IS NOT NULL AS "by_hand!"
         FROM factory_ci_quarantine
         WHERE repo_url = $1 AND last_passed_at >= $2
         ORDER BY name, failed_step, failure
@@ -87,14 +91,18 @@ pub(super) async fn ci_flakes(
         QUARANTINES_READ,
     )
     .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|row| CiFailureIdentity {
-        name: row.name,
-        failed_step: row.failed_step,
-        failure: row.failure,
-    })
-    .collect();
+    .await?;
+    for row in rows {
+        if row.by_hand {
+            quarantined_jobs.push(row.name);
+        } else {
+            quarantined.push(CiFailureIdentity {
+                name: row.name,
+                failed_step: row.failed_step,
+                failure: row.failure,
+            });
+        }
+    }
     // The failures other pull requests of the repository proved flaky: a
     // rerun of the job passed, or the same Run saw the same head green
     // after the red, with no new commit. Each counts once per pull
@@ -119,6 +127,10 @@ pub(super) async fn ci_flakes(
               AND lower(r.pull_request_url) IS DISTINCT FROM lower($4)
               AND j.result IN ('failed', 'setup')
               AND NOT j.replaced
+              AND NOT EXISTS (
+                  SELECT 1 FROM factory_ci_release x
+                  WHERE x.repo_url = $1 AND x.name = j.name AND x.released_at >= w.recorded_at
+              )
               AND EXISTS (
                   SELECT 1
                   FROM factory_ci_wait g
@@ -135,6 +147,10 @@ pub(super) async fn ci_flakes(
             WHERE t.result = 'passed'
               AND t.settled_at >= $3
               AND lower(r.repo_url) = $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM factory_ci_release x
+                  WHERE x.repo_url = $1 AND x.name = t.name AND x.released_at >= t.settled_at
+              )
               AND r.id <> $2
               AND lower(r.pull_request_url) IS DISTINCT FROM lower($4)
         ) proved
@@ -161,6 +177,7 @@ pub(super) async fn ci_flakes(
     Ok(CiFlakes {
         known,
         quarantined,
+        quarantined_jobs,
         failures,
     })
 }
@@ -363,11 +380,21 @@ pub(super) async fn quarantine_ci_jobs(
         jobs.iter().map(|job| job.failure.failure.clone()).collect();
     let task_ids: Vec<Uuid> = jobs.iter().map(|job| job.task_id).collect();
     // Each failure's passed reruns on the repository since `since`, by any
-    // Run. One quarantined already keeps its task and Run; the count and
-    // the last pass move on, so it lapses only once its reruns stop
-    // passing. `xmax` is 0 only on a row this statement inserted.
+    // Run, and since the job was last released: a release drops the
+    // evidence before it. One quarantined already keeps its task and Run;
+    // the count and the last pass move on, so it lapses only once its
+    // reruns stop passing. A job quarantined whole by hand is extended
+    // instead (`extended`), and no narrower failure of it is quarantined
+    // beside it, so it files no task. `xmax` is 0 only on a row this
+    // statement inserted.
     let made = sqlx::query!(
         r#"
+        WITH extended AS (
+            UPDATE factory_ci_quarantine
+            SET passed_retries = passed_retries + 1, last_passed_at = now()
+            WHERE repo_url = $2 AND name = ANY($3) AND quarantined_by IS NOT NULL
+            RETURNING name
+        )
         INSERT INTO factory_ci_quarantine
             (task_id, repo_url, name, failed_step, failure, run_id, passed_retries)
         SELECT job.task_id, $2, job.name, job.failed_step, job.failure, $1, passed.retries
@@ -383,8 +410,13 @@ pub(super) async fn quarantine_ci_jobs(
               AND t.failed_step IS NOT DISTINCT FROM job.failed_step
               AND t.failure IS NOT DISTINCT FROM job.failure
               AND lower(r.repo_url) = $2
+              AND NOT EXISTS (
+                  SELECT 1 FROM factory_ci_release x
+                  WHERE x.repo_url = $2 AND x.name = job.name AND x.released_at >= t.settled_at
+              )
         ) passed
         WHERE passed.retries >= $8
+          AND job.name NOT IN (SELECT name FROM extended)
         ON CONFLICT (repo_url, name, coalesce(failed_step, ''), coalesce(failure, ''))
         DO UPDATE SET passed_retries = EXCLUDED.passed_retries, last_passed_at = now()
         RETURNING name AS "name!", (xmax = 0) AS "inserted!"
@@ -482,19 +514,25 @@ pub(super) async fn quarantine_ci_job(
     id: Uuid,
     since: DateTime<Utc>,
 ) -> Result<bool, PgRunRepositoryErr> {
-    // A quarantine by hand names no step and no test, so it covers every
-    // failure of the job. One kept already is left as it is while it holds;
-    // one that lapsed starts over, as made now. A row is returned only when
-    // the statement inserted or revived one.
+    // A quarantine by hand covers the whole job, and keeps who made it. It
+    // shares its key with a quarantine its reruns made of a failure that
+    // named no step and no test: that one becomes the hand's, covering the
+    // whole job from then on. One by hand already is left as it is while it
+    // holds; one that lapsed starts over, as made now. A row is returned
+    // only when the statement inserted, revived or took one over.
     let made = sqlx::query_scalar!(
         r#"
         INSERT INTO factory_ci_quarantine
             (task_id, repo_url, name, passed_retries, quarantined_by)
         VALUES ($1, $2, $3, 0, $4)
         ON CONFLICT (repo_url, name, coalesce(failed_step, ''), coalesce(failure, ''))
-        DO UPDATE SET last_passed_at = now(),
-            quarantined_by = coalesce(factory_ci_quarantine.quarantined_by, EXCLUDED.quarantined_by)
-        WHERE factory_ci_quarantine.last_passed_at < $5
+        DO UPDATE SET
+            quarantined_by = coalesce(factory_ci_quarantine.quarantined_by, EXCLUDED.quarantined_by),
+            quarantined_at = CASE WHEN factory_ci_quarantine.last_passed_at < $5
+                THEN now() ELSE factory_ci_quarantine.quarantined_at END,
+            last_passed_at = greatest(factory_ci_quarantine.last_passed_at, now())
+        WHERE factory_ci_quarantine.quarantined_by IS NULL
+            OR factory_ci_quarantine.last_passed_at < $5
         RETURNING task_id
         "#,
         id,
@@ -512,16 +550,33 @@ pub(super) async fn lift_ci_job_quarantines(
     pool: &PgPool,
     repository: &str,
     name: &str,
+    by: &MacroUserIdStr<'static>,
 ) -> Result<u32, PgRunRepositoryErr> {
-    // Through `factory_ci_quarantine_failure_idx`, by its repository and job.
-    let lifted = sqlx::query!(
-        "DELETE FROM factory_ci_quarantine WHERE repo_url = $1 AND name = $2",
+    // The release is kept, so the evidence before it no longer counts, and
+    // the quarantines are deleted through `factory_ci_quarantine_failure_idx`,
+    // in one statement.
+    let lifted = sqlx::query_scalar!(
+        r#"
+        WITH released AS (
+            INSERT INTO factory_ci_release (repo_url, name, released_by)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (repo_url, name)
+            DO UPDATE SET released_at = now(), released_by = EXCLUDED.released_by
+        ),
+        lifted AS (
+            DELETE FROM factory_ci_quarantine
+            WHERE repo_url = $1 AND name = $2
+            RETURNING 1
+        )
+        SELECT count(*) AS "lifted!" FROM lifted
+        "#,
         repository,
         name,
+        by.as_ref(),
     )
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
-    Ok(u32::try_from(lifted.rows_affected()).unwrap_or(u32::MAX))
+    Ok(u32::try_from(lifted).unwrap_or(u32::MAX))
 }
 
 /// The quarantines of `repositories` (their URLs in lower case) whose

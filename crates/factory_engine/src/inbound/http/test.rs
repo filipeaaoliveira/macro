@@ -37,6 +37,8 @@ use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
 mod board;
+mod ci_quarantine;
+mod ci_release;
 mod control_files;
 mod definition_changes;
 mod flaws;

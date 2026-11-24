@@ -432,6 +432,7 @@ fn proved(step: &str, pull_requests: u32) -> CiFlakes {
     CiFlakes {
         known: Vec::new(),
         quarantined: Vec::new(),
+        quarantined_jobs: Vec::new(),
         failures: vec![FlakyCiFailure {
             name: "test".to_string(),
             failed_step: Some(step.to_string()),
@@ -480,6 +481,7 @@ fn may_be_flaky_matches_quarantines_by_their_failure() {
             failed_step: Some(step.to_string()),
             failure: None,
         }],
+        quarantined_jobs: Vec::new(),
         failures: Vec::new(),
     };
     let red = [job(failed(), Some("Run tests"), Some(FAILED_RUN))];
@@ -495,22 +497,27 @@ fn may_be_flaky_matches_quarantines_by_their_failure() {
     assert!(!may_be_flaky(&green, &known));
 }
 
-/// A quarantine that names no step and no test, as one made by hand,
-/// covers its job however it fails, and no other job.
+/// A job quarantined whole by hand covers its job however it fails, and no
+/// other job. A quarantine its reruns made of a failure that named no step
+/// and no test covers only that failure, not one in a named step.
 #[test]
-fn a_quarantine_of_the_whole_job_covers_each_of_its_failures() {
-    let whole_job = |name: &str| CiFlakes {
-        known: Vec::new(),
+fn only_a_hand_quarantine_covers_the_whole_job() {
+    let by_hand = |name: &str| CiFlakes {
+        quarantined_jobs: vec![name.to_string()],
+        ..CiFlakes::default()
+    };
+    let unnamed = CiFlakes {
         quarantined: vec![CiFailureIdentity {
-            name: name.to_string(),
+            name: "test".to_string(),
             failed_step: None,
             failure: None,
         }],
-        failures: Vec::new(),
+        ..CiFlakes::default()
     };
     let red = [job(failed(), Some("Run tests"), Some(FAILED_RUN))];
 
-    let retries = flaky_retries(&red, &whole_job("test")).expect("flaky");
+    let retries = flaky_retries(&red, &by_hand("test")).expect("flaky");
     assert_eq!(retries[0].matched, CiRetryMatch::Quarantined);
-    assert_eq!(flaky_retries(&red, &whole_job("lint")), None);
+    assert_eq!(flaky_retries(&red, &by_hand("lint")), None);
+    assert_eq!(flaky_retries(&red, &unnamed), None);
 }

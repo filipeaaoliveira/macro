@@ -1281,13 +1281,9 @@ pub enum FactoryError {
     /// The repository is not named by a `https://github.com/owner/name` URL.
     #[error("the repository must be named by a https://github.com/owner/name URL")]
     InvalidRepository,
-    /// A CI job to quarantine or release is named by no name, or by one
-    /// longer than a job's name is kept to.
-    #[error("a ci job is named by 1 to {max} bytes")]
-    InvalidCiJob {
-        /// The most bytes a CI job's name is kept to.
-        max: usize,
-    },
+    /// A CI job to quarantine or release is named by no name.
+    #[error("name the ci job to quarantine or release")]
+    InvalidCiJob,
     /// The Run's owner cannot reach the repository with their GitHub
     /// account, has not connected one, or the repository has no branch yet.
     #[error(

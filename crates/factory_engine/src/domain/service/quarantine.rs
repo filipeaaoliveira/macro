@@ -6,8 +6,10 @@
 //!
 //! A person quarantines a CI job by hand, or releases it, from Insights: a
 //! team's owner or admin, in their own signed-in session, in a repository
-//! they may push to. A quarantine by hand covers every failure of the job
-//! and files no task.
+//! they may push to. Quarantines are per repository, so the change reaches
+//! every team's Runs there. A quarantine by hand covers the whole job and
+//! files no task; the job's passed reruns extend it. A release lifts every
+//! quarantine of the job and drops the evidence before it.
 
 use chrono::Utc;
 use factory_records::domain::automations::AutomationRepository;
@@ -17,7 +19,7 @@ use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::Run;
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::quality::{CI_NAME_BYTES, CiQuarantine, FLAKY_PERIOD};
+use factory_records::domain::quality::{CiQuarantine, FLAKY_PERIOD};
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use factory_records::domain::self_improvement::SelfImprovementRepository;
 use factory_records::domain::standing_acts::StandingActRepository;
@@ -31,6 +33,7 @@ use crate::domain::ports::{
     FollowUpMade, FollowUpTask, PullRequests, QuarantineTasks, RunWorkflows, StepExecutor,
     TaskDirectory, UserDirectory,
 };
+use crate::domain::quality::kept_name;
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
 where
@@ -50,21 +53,26 @@ where
     T: TaskDirectory,
     G: PullRequests,
 {
-    /// The repository `repo_url` names, by its URL in lower case, once
-    /// `actor` may change its quarantines: they own or administer their
-    /// team, and may push to the repository. `job` must name a CI job.
-    async fn quarantine_scope(
+    /// The repository `repo_url` names, by its URL in lower case, and the
+    /// job `job` names, as CI health keeps it: trimmed, then cut to
+    /// [`factory_records::domain::quality::CI_NAME_BYTES`]. Only once
+    /// `actor` may change its quarantines: they own or administer a team,
+    /// from an account that is not an agent's, and may push to the
+    /// repository. Quarantines are per repository: a change reaches every
+    /// team's Runs on it, which push access bounds.
+    async fn quarantine_scope<'a>(
         &self,
         actor: &MacroUserIdStr<'static>,
         repo_url: &str,
-        job: &str,
-    ) -> Result<String, FactoryError> {
-        if job.is_empty() || job.len() > CI_NAME_BYTES {
-            return Err(FactoryError::InvalidCiJob { max: CI_NAME_BYTES });
+        job: &'a str,
+    ) -> Result<(String, &'a str), FactoryError> {
+        let job = kept_name(job.trim());
+        if job.is_empty() {
+            return Err(FactoryError::InvalidCiJob);
         }
         self.administered_team(actor).await?;
         let repository = self.reachable_repository(actor, repo_url).await?;
-        Ok(repository.url.to_lowercase())
+        Ok((repository.url.to_lowercase(), job))
     }
 
     /// Quarantine `job` in `repo_url` by hand, as
@@ -76,7 +84,7 @@ where
         repo_url: &str,
         job: &str,
     ) -> Result<CiQuarantineChange, FactoryError> {
-        let repository = self.quarantine_scope(actor, repo_url, job).await?;
+        let (repository, job) = self.quarantine_scope(actor, repo_url, job).await?;
         let changed = self
             .repo
             .quarantine_ci_job(
@@ -104,10 +112,10 @@ where
         repo_url: &str,
         job: &str,
     ) -> Result<CiQuarantineChange, FactoryError> {
-        let repository = self.quarantine_scope(actor, repo_url, job).await?;
+        let (repository, job) = self.quarantine_scope(actor, repo_url, job).await?;
         let lifted = self
             .repo
-            .lift_ci_job_quarantines(&repository, job)
+            .lift_ci_job_quarantines(&repository, job, actor)
             .await
             .map_err(internal)?;
         Ok(CiQuarantineChange {

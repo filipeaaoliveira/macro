@@ -540,13 +540,19 @@ figure. A repository that names none is 400.
 `POST /insights/ci-quarantines` and `POST /insights/ci-quarantines/release`
 (`inbound/http/ci_quarantine.rs`, `domain/service/quarantine.rs`), with
 `{repository, job}`, quarantine a CI job by hand or release it. Only an
-owner or admin of the caller's team, not an agent's account, in their own
-signed-in session (403), who may push to the repository (400). A quarantine
-by hand names no step and no test, so it covers every failure of the job
-(`flaky_ci.rs`'s `covers`); it files no task and lapses as any does, 30
-days after it was made or a rerun of it last passed. A release lifts every
-quarantine of the job, by hand or by its reruns. Each answers whether it
-changed anything.
+owner or admin of a team, not an agent's account, in their own signed-in
+session (403), who may push to the repository (400). Quarantines are per
+repository, not per team: one admin's change reaches every team's Runs on
+the repository, which push access bounds. The job's name is trimmed and cut
+as CI health keeps names. A quarantine by hand is marked so
+(`quarantined_by`) and covers the whole job (`CiFlakes::quarantined_jobs`);
+one its reruns made covers only its own failure, even one that named no
+step and no test. A hand quarantine files no task: each passed rerun of the
+job extends it instead of quarantining a narrower failure beside it, and it
+lapses 30 days after it was made or a rerun last passed. A release lifts
+every quarantine of the job and keeps when (`factory_ci_release`): the
+reruns and greens before it no longer prove the job flaky, so only new
+evidence quarantines it again. Each answers whether it changed anything.
 
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
 `evaluation/insights.rs`, `inbound/evaluation.rs`): an

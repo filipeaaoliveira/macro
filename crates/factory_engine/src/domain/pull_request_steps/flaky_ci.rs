@@ -6,8 +6,7 @@
 //! A job is a known flake when the Run's Factory Definition names it in
 //! `knownFlakes`; when the same failure (its job, step and test, as CI
 //! health tells failures apart) is quarantined in the Run's repository, or
-//! the job is, by a quarantine that names no step and no test, as one made
-//! by hand in Insights; or
+//! the whole job is, by a person in Insights; or
 //! when that failure proved flaky on [`FLAKY_OTHER_PULL_REQUESTS`] other
 //! pull requests of the repository within [`FLAKY_PERIOD`], a rerun of it
 //! passing or the same head going green after it. Only GitHub Actions jobs
@@ -182,19 +181,9 @@ fn named_in(names: &BTreeSet<String>, flakes: &CiFlakes) -> bool {
                 .quarantined
                 .iter()
                 .any(|quarantined| quarantined.name == *name)
+            || flakes.quarantined_jobs.contains(name)
             || flakes.failures.iter().any(|failure| failure.name == *name)
     })
-}
-
-/// Whether the quarantine of `quarantined` covers `failure`: the same
-/// failure, or any of its job's when it names no step and no test.
-fn covers(quarantined: &CiFailureIdentity, failure: &CiFailureIdentity) -> bool {
-    let whole_job = quarantined.failed_step.is_none() && quarantined.failure.is_none();
-    if whole_job {
-        quarantined.name == failure.name
-    } else {
-        quarantined == failure
-    }
 }
 
 /// Whether the red `jobs`, read with their steps and tests, are all known
@@ -228,10 +217,8 @@ pub(crate) fn flaky_retries(
         };
         let matched = if flakes.known.contains(&kept.name) {
             CiRetryMatch::Known
-        } else if flakes
-            .quarantined
-            .iter()
-            .any(|quarantined| covers(quarantined, &failure))
+        } else if flakes.quarantined.contains(&failure)
+            || flakes.quarantined_jobs.contains(&kept.name)
         {
             CiRetryMatch::Quarantined
         } else {

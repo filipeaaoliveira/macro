@@ -1258,7 +1258,7 @@ impl FactoryError {
             | FactoryError::RepositoryRequired
             | FactoryError::RepositoryNotUsed
             | FactoryError::InvalidRepository
-            | FactoryError::InvalidCiJob { .. }
+            | FactoryError::InvalidCiJob
             | FactoryError::UnreachableRepository
             | FactoryError::NoPushAccess
             | FactoryError::UnreachableDefinition

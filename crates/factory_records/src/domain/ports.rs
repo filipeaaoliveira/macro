@@ -582,10 +582,11 @@ pub trait RunRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Quarantine the CI job `name` in the repository `repository` (its URL
-    /// in lower case) by hand, for `by`: every failure of the job, under the
-    /// id `id`, with no task to file. A job quarantined so already is left
-    /// as it is, unless it lapsed before `since`: then it starts over.
-    /// Whether it is quarantined now and was not before.
+    /// in lower case) by hand, for `by`: the whole job, every failure of
+    /// it, under the id `id`, with no task to file. One by hand already is
+    /// left as it is, unless it lapsed before `since`: then it starts over.
+    /// One its reruns made of a failure with no step and no test becomes
+    /// the hand's. Whether it is quarantined whole now and was not before.
     fn quarantine_ci_job(
         &self,
         repository: &str,
@@ -595,14 +596,15 @@ pub trait RunRepository: Send + Sync + 'static {
         since: chrono::DateTime<chrono::Utc>,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
-    /// Lift every quarantine of the CI job `name` in the repository
-    /// `repository` (its URL in lower case), by hand or by its reruns: its
-    /// failures are no known flakes from then on, until a person or its
-    /// reruns quarantine it again. How many were lifted.
+    /// Release the CI job `name` in the repository `repository` (its URL in
+    /// lower case), for `by`: lift every quarantine of it, by hand or by its
+    /// reruns, and keep the release, so the evidence before it no longer
+    /// proves the job flaky. How many quarantines were lifted.
     fn lift_ci_job_quarantines(
         &self,
         repository: &str,
         name: &str,
+        by: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<u32, Self::Err>> + Send;
 
     /// Keep the Control Files the Run's branch changed, as last read,

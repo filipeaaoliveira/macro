@@ -1291,13 +1291,14 @@ impl RunRepository for PgRunRepository {
         ci_retries::quarantine_ci_job(&self.pool, repository, name, by, id, since).await
     }
 
-    #[tracing::instrument(err, skip(self))]
+    #[tracing::instrument(err, skip(self, by))]
     async fn lift_ci_job_quarantines(
         &self,
         repository: &str,
         name: &str,
+        by: &MacroUserIdStr<'static>,
     ) -> Result<u32, Self::Err> {
-        ci_retries::lift_ci_job_quarantines(&self.pool, repository, name).await
+        ci_retries::lift_ci_job_quarantines(&self.pool, repository, name, by).await
     }
 
     #[tracing::instrument(err, skip(self, changes))]

@@ -305,8 +305,12 @@ pub struct FlakyCiFailure {
 pub struct CiFlakes {
     /// The jobs the Run's Factory Definition names as known flakes.
     pub known: Vec<String>,
-    /// The failures quarantined in the Run's repository, not lapsed.
+    /// The failures quarantined in the Run's repository by their reruns,
+    /// not lapsed: each covers its own failure only.
     pub quarantined: Vec<CiFailureIdentity>,
+    /// The jobs quarantined whole in the Run's repository by hand, not
+    /// lapsed: each covers every failure of its job.
+    pub quarantined_jobs: Vec<String>,
     /// The failures proved flaky on other pull requests of the repository
     /// over the period read, the most widespread first.
     pub failures: Vec<FlakyCiFailure>,

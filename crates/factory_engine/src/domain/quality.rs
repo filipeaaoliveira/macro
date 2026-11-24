@@ -138,7 +138,7 @@ const GENERIC_STEP_WORDS: [&str; 15] = [
 const ACTIONS_ANNOTATION_PATH: &str = ".github";
 
 /// `text` cut to at most [`CI_NAME_BYTES`], on a character's boundary.
-fn kept_name(text: &str) -> &str {
+pub(crate) fn kept_name(text: &str) -> &str {
     cut(text, CI_NAME_BYTES)
 }
 
