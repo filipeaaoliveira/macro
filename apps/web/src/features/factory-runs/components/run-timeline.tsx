@@ -6,7 +6,9 @@ import CaretDownIcon from '@icon/system/regular/caret-down.svg';
 import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
+import { Dynamic } from 'solid-js/web';
 import { flowWordLabel, flowWordText, outcomeTone } from '../core/flow-words';
+import { elapsedMs, formatElapsed } from '../core/live';
 import {
   type BaseRequiredChecks,
   type BreakRecord,
@@ -33,6 +35,7 @@ import {
   WHOLE_CHANGE,
 } from '../core/run';
 import { RULE_NAMES } from '../core/standing-rules';
+import { stageIcon } from './live-pipeline';
 
 /** The classes of a Step's outcome badge, by its tone. */
 const OUTCOME_TONES = {
@@ -130,7 +133,7 @@ function TimelineStep(props: {
   return (
     // Rail and dot sit where the agent activity timeline puts them
     // (`ActivityStep`), centred on the 28px heading row (36px on touch).
-    <li class="relative pl-8" data-factory-run-step={props.step.seq}>
+    <li class="relative pl-9" data-factory-run-step={props.step.seq}>
       <span
         aria-hidden="true"
         class={cn(
@@ -144,12 +147,23 @@ function TimelineStep(props: {
       <span
         aria-hidden="true"
         class={cn(
-          'absolute top-3.5 left-[12.5px] size-[7px] -translate-y-1/2 rounded-full border-[1.5px] touch:top-4.5',
-          props.step.end
-            ? 'border-ink-subtle bg-ink-subtle'
-            : 'border-accent bg-accent motion-safe:animate-pulse'
+          'absolute top-3.5 left-[5px] flex size-[22px] -translate-y-1/2 items-center justify-center rounded-full ring-4 ring-surface touch:top-4.5',
+          !props.step.end && 'bg-accent text-accent-contrast',
+          props.step.end &&
+            outcomeTone(props.step.end.outcome, answer()?.answer) === 'short' &&
+            'bg-failure-bg text-failure',
+          props.step.end &&
+            outcomeTone(props.step.end.outcome, answer()?.answer) ===
+              'sentBack' &&
+            'bg-warning-bg text-warning',
+          props.step.end &&
+            outcomeTone(props.step.end.outcome, answer()?.answer) ===
+              undefined &&
+            'bg-surface-2 text-ink-muted'
         )}
-      />
+      >
+        <Dynamic component={stageIcon(props.step.entry)} class="size-3" />
+      </span>
       <div class="flex min-h-7 min-w-0 items-center gap-2 text-sm touch:min-h-9">
         <span class="min-w-0 truncate font-medium text-ink">
           {stepLabel(props.step)}
@@ -188,8 +202,15 @@ function TimelineStep(props: {
             </Badge>
           )}
         </Show>
-        <span class="ml-auto shrink-0 text-xs tabular-nums text-ink-subtle">
-          {props.time(props.step.end?.endedAt ?? props.step.startedAt)}
+        <span
+          class="ml-auto shrink-0 text-xs tabular-nums text-ink-subtle"
+          title={props.time(props.step.end?.endedAt ?? props.step.startedAt)}
+        >
+          {props.step.end
+            ? formatElapsed(
+                elapsedMs(props.step.startedAt, props.step.end.endedAt)
+              )
+            : props.time(props.step.startedAt)}
         </span>
         <Show when={props.onWatch && steerableSession(props.step)}>
           <Button
@@ -239,10 +260,14 @@ function TimelineStep(props: {
               ? t('factoryRuns.stepNoAgent', {
                   role: flowWordLabel(props.step.role ?? ''),
                 })
-              : t('factoryRuns.stepAgent', {
-                  role: flowWordLabel(props.step.role ?? ''),
-                  agent: agent(),
-                })}
+              : props.step.passedOver?.length
+                ? t('factoryRuns.stepAgent', {
+                    role: flowWordLabel(props.step.role ?? ''),
+                    agent: agent(),
+                  })
+                : // The Agent's name is the Definition's own (`primary`):
+                  // the Role says who worked, unless another was passed over.
+                  flowWordLabel(props.step.role ?? agent())}
             <For each={props.step.passedOver}>
               {(passed) => (
                 <span class="block text-ink-muted">
@@ -498,39 +523,65 @@ const BREAK_STATUSES = {
  * the test is left unproven), and the edit the break makes.
  */
 function BreakRecordsNote(props: { records: BreakRecord[] }) {
+  // Closed until asked: a Step's breaks are proof, read when in doubt.
+  const [open, setOpen] = createSignal(false);
   return (
     <section data-break-records aria-label={t('factoryRuns.breakRecords')}>
-      <StepNote>{t('factoryRuns.breakRecords')}</StepNote>
-      <For each={props.records}>
-        {(record) => (
-          <StepNote>
-            <span class="flex min-w-0 items-center gap-2">
-              <Badge
-                variant="outline"
-                size="xs"
-                data-break-status={record.status}
-                data-break-tone={
-                  isBlockingBreak(record.status) ? 'warning' : undefined
-                }
-                class={cn(
-                  'shrink-0',
-                  isBlockingBreak(record.status) && OUTCOME_TONES.sentBack
-                )}
-              >
-                {t(BREAK_STATUSES[record.status])}
-              </Badge>
-              <span class="min-w-0 truncate font-mono">{record.test}</span>
-            </span>
-            <span class="block font-mono text-ink-muted">{record.file}</span>
-            <span class="block whitespace-pre-wrap font-mono text-ink-muted">
-              {t('factoryRuns.breakOldText', { text: record.oldText })}
-            </span>
-            <span class="block whitespace-pre-wrap font-mono text-ink-muted">
-              {t('factoryRuns.breakNewText', { text: record.newText })}
-            </span>
-          </StepNote>
-        )}
-      </For>
+      <StepNote>
+        <button
+          type="button"
+          aria-expanded={open()}
+          class="inline-flex items-center gap-1.5 rounded-md text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          onClick={() => setOpen(!open())}
+        >
+          <CaretDownIcon
+            class={cn(
+              'size-3 transition-transform duration-150 motion-reduce:transition-none',
+              !open() && '-rotate-90'
+            )}
+          />
+          <span>{t('factoryRuns.breakRecords')}</span>
+          <span class="rounded-full bg-surface-2 px-1.5 text-[11px] tabular-nums">
+            {props.records.length}
+          </span>
+        </button>
+      </StepNote>
+      <div hidden={!open()} class="flex flex-col gap-2 pt-1">
+        <For each={props.records}>
+          {(record) => (
+            <StepNote>
+              <span class="flex min-w-0 items-center gap-2">
+                <Badge
+                  variant="outline"
+                  size="xs"
+                  data-break-status={record.status}
+                  data-break-tone={
+                    isBlockingBreak(record.status) ? 'warning' : undefined
+                  }
+                  class={cn(
+                    'shrink-0',
+                    isBlockingBreak(record.status) && OUTCOME_TONES.sentBack
+                  )}
+                >
+                  {t(BREAK_STATUSES[record.status])}
+                </Badge>
+                <span class="min-w-0 truncate text-ink">{record.test}</span>
+              </span>
+              <span class="mt-1.5 block overflow-hidden rounded-lg border border-edge-muted font-mono text-[11.5px] leading-5">
+                <span class="block border-b border-edge-muted bg-surface-1 px-2.5 py-1 text-ink-muted">
+                  {record.file}
+                </span>
+                <span class="block whitespace-pre-wrap bg-failure-bg/60 px-2.5 text-failure-ink">
+                  {t('factoryRuns.breakOldText', { text: record.oldText })}
+                </span>
+                <span class="block whitespace-pre-wrap bg-success-bg/60 px-2.5 text-success-ink">
+                  {t('factoryRuns.breakNewText', { text: record.newText })}
+                </span>
+              </span>
+            </StepNote>
+          )}
+        </For>
+      </div>
     </section>
   );
 }

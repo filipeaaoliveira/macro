@@ -45,6 +45,8 @@ export function RunView(props: { runId: string; onClose: () => void }) {
 export function RunPageView(props: {
   runId: string;
   onOpenRun?: (runId: string) => void;
+  /** The entries of the team's Definition's Flow, by its name. */
+  flowEntries?: (flow: string) => readonly string[] | undefined;
 }) {
   const [opened, setOpened] = createSignal<string>();
   const controller = createRunController(
@@ -55,7 +57,7 @@ export function RunPageView(props: {
 
   return (
     <StaticMarkdownContext>
-      <RunPane controller={controller} />
+      <RunPane controller={controller} flowEntries={props.flowEntries} />
       <Show when={controller.terminalStep()}>
         {(step) => <StepTerminalDialog controller={controller} step={step()} />}
       </Show>

@@ -73,28 +73,37 @@ export function RunContent(props: {
   run: Run;
   time: (value: string) => string;
   statusRef: (element: HTMLElement) => void;
+  /**
+   * The Steps before the Run's facts, as its page shows them under its
+   * pipeline; the facts go under a heading of their own.
+   */
+  stepsFirst?: boolean;
 }) {
   return (
     <Show when={props.controller.status()}>
-      {(status) => (
-        <>
-          <RunSummary
-            run={props.run}
-            status={status()}
-            time={props.time}
-            statusRef={props.statusRef}
-            retriedBy={props.controller.retriedBy()?.id}
-            onOpenRun={props.controller.openRun}
-          />
-          <Show when={props.run.end?.flaw}>
-            {(flaw) => <RunFlawNote flaw={flaw()} time={props.time} />}
-          </Show>
-          {/* Only the Run's owner reads and labels its Scorers' judgments. */}
-          <Show when={props.controller.owned() && props.run.end}>
-            {(end) => (
-              <RunScores runId={props.run.id} endedAt={end().endedAt} />
-            )}
-          </Show>
+      {(status) => {
+        const summary = () => (
+          <>
+            <RunSummary
+              run={props.run}
+              status={status()}
+              time={props.time}
+              statusRef={props.statusRef}
+              retriedBy={props.controller.retriedBy()?.id}
+              onOpenRun={props.controller.openRun}
+            />
+            <Show when={props.run.end?.flaw}>
+              {(flaw) => <RunFlawNote flaw={flaw()} time={props.time} />}
+            </Show>
+            {/* Only the Run's owner reads and labels its Scorers' judgments. */}
+            <Show when={props.controller.owned() && props.run.end}>
+              {(end) => (
+                <RunScores runId={props.run.id} endedAt={end().endedAt} />
+              )}
+            </Show>
+          </>
+        );
+        const steps = () => (
           <RunSteps
             steps={props.run.steps}
             mainHold={props.run.mainHold}
@@ -105,13 +114,31 @@ export function RunContent(props: {
             status={status()}
             time={props.controller.stepTime}
             onWatch={
-              props.controller.owned()
+              // The page's pipeline watches its running Steps.
+              props.controller.owned() && !props.stepsFirst
                 ? props.controller.openTerminal
                 : undefined
             }
           />
-        </>
-      )}
+        );
+        return (
+          <Show
+            when={props.stepsFirst}
+            fallback={
+              <>
+                {summary()}
+                {steps()}
+              </>
+            }
+          >
+            {steps()}
+            <h2 class="mt-4 border-t border-edge-divider pt-5 text-[13px] font-semibold text-ink">
+              {t('factoryDashboard.runDetails')}
+            </h2>
+            {summary()}
+          </Show>
+        );
+      }}
     </Show>
   );
 }
