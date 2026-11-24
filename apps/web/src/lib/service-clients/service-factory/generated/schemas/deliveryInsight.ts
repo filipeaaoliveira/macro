@@ -6,6 +6,7 @@
  */
 import type { DeliveryInsightAutonomyRate } from './deliveryInsightAutonomyRate';
 import type { DeliveryInsightCostPerMergedUsd } from './deliveryInsightCostPerMergedUsd';
+import type { DeliveryInsightTimeToMerge } from './deliveryInsightTimeToMerge';
 import type { DeliveryInsightTokensPerMerged } from './deliveryInsightTokensPerMerged';
 import type { TokenCounts } from './tokenCounts';
 
@@ -61,6 +62,7 @@ call was priced. */
    * @minimum 0
    */
   steered: number;
+  timeToMerge?: DeliveryInsightTimeToMerge;
   /** The tokens every Run's agents used. */
   tokens: TokenCounts;
   /**

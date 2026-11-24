@@ -12,6 +12,7 @@ import type { StepAgent } from './stepAgent';
 import type { StepEndProperty } from './stepEndProperty';
 import type { StepGate } from './stepGate';
 import type { StepRole } from './stepRole';
+import type { StepRuntime } from './stepRuntime';
 import type { StepTerminal } from './stepTerminal';
 
 /**
@@ -30,6 +31,8 @@ Step that runs no checks. */
 why. */
   passedOver: PassedOver[];
   role?: StepRole;
+  /** Where its agent's session ran, and as which agent. */
+  runtime: StepRuntime;
   /**
    * The Step's place among the Run's Steps, from 1.
    * @minimum 0
