@@ -1,5 +1,5 @@
--- Two of Julia's agents: Writer, bound to her Machine `m4`, and Cloud, on a
--- runtime Macro runs, bound to no Machine. Needs `people`.
+-- Two of Julia's agents: Writer, bound to her Machine `m4`, and Cloud, on an
+-- in-memory runtime, bound to no Machine. Needs `people`.
 INSERT INTO harnesses (id, name, owner_user_id, created_by) VALUES
     ('00000000-0000-7000-8000-0000000000a1', 'm4', 'macro|julia@example.com', 'macro|julia@example.com'),
     ('00000000-0000-7000-8000-0000000000a2', 'm3', 'macro|julia@example.com', 'macro|julia@example.com');

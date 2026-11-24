@@ -1492,7 +1492,10 @@ where
             run = self.owned_run(actor, id).await?;
         }
         let review_rounds = self.repo.review_rounds(id).await.map_err(internal)?;
-        self.detail(run, steps, review_rounds).await
+        Ok(self
+            .detail(run, steps, review_rounds)
+            .await?
+            .as_seen_by(actor))
     }
 
     #[tracing::instrument(skip(self, actor))]

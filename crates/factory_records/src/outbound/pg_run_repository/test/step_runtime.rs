@@ -12,7 +12,8 @@ use super::{entry, insert, julia, key, outcome, planner};
 use crate::domain::board::{BoardQuery, RunBoardRepository as _};
 use crate::domain::main_hold::MainHoldRepository as _;
 use crate::domain::models::{
-    AgentName, NewRun, PassedOver, Repository, RunId, RunInsert, StepRuntime, StepSession,
+    AgentName, NewRetry, NewRun, PassedOver, QueueHold, Repository, RetryInsert, RunId, RunInsert,
+    RunOutcome, StepRuntime, StepSession,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::RunRules;
@@ -20,7 +21,7 @@ use crate::outbound::pg_run_repository::PgRunRepository;
 
 /// Julia's agent bound to her Machine `m4` (`fixtures/agents.sql`).
 const WRITER: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00b1);
-/// Julia's agent on a runtime Macro runs, bound to no Machine.
+/// Julia's agent on an in-memory runtime, bound to no Machine.
 const CLOUD: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00b2);
 /// Her Machine `m3`.
 const M3: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00a2);
@@ -127,7 +128,7 @@ async fn a_step_keeps_where_its_session_opened(pool: PgPool) {
 }
 
 /// A Step that goes on in a new session forgets where the one it left ran,
-/// and reads where the new one opens: a runtime Macro runs is on no Machine.
+/// and reads where the new one opens: an in-memory runtime is on no Machine.
 /// A Step no agent does reads none.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
@@ -269,4 +270,62 @@ async fn a_run_reads_when_its_pull_request_was_merged(pool: PgPool) {
         let expected = (listed.run.id == merged).then_some(merged_at);
         assert_eq!(listed.run.merged_at, expected);
     }
+}
+
+/// A retry keeps where the Steps before its own ran, with the Steps.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "agents"))
+)]
+async fn a_retry_keeps_where_its_kept_steps_ran(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the export").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let session = session_on("primary", WRITER);
+    repo.claim_session(key(id, 1), session.clone(), &planner(), &[outcome("done")])
+        .await
+        .expect("claim");
+    open_session(&pool, &session, "claude-opus-4-5").await;
+    repo.record_open(key(id, 1), session.session_id)
+        .await
+        .expect("open");
+    repo.end_step(key(id, 1), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+    repo.start_step(key(id, 2), &entry("write"), 1)
+        .await
+        .expect("start");
+    repo.end_step(key(id, 2), &outcome("failed"), "Lost")
+        .await
+        .expect("end");
+    repo.end_run(id, RunOutcome::Failed).await.expect("end run");
+
+    let retry = RunId::generate();
+    let RetryInsert::Inserted(_) = repo
+        .retry_run(
+            NewRetry {
+                id: retry,
+                retried: id,
+                first_seq: 2,
+                created_in_person: false,
+            },
+            QueueHold::UNLIMITED,
+        )
+        .await
+        .expect("retry")
+    else {
+        panic!("an ended run is retried");
+    };
+
+    assert_eq!(
+        runtime(&repo, retry, 1).await,
+        StepRuntime {
+            model: Some("claude-opus-4-5".to_string()),
+            machine: Some("m4".to_string()),
+            agent_name: Some("Writer".to_string()),
+        }
+    );
 }

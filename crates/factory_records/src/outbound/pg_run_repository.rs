@@ -2231,8 +2231,11 @@ impl RunRepository for PgRunRepository {
     async fn record_open(&self, key: StepKey, session_id: Uuid) -> Result<(), Self::Err> {
         // The session is deleted once the Step is done with it, and its bot
         // may be bound to another Machine later, so where it runs is kept
-        // now: the model it opened on, and the macrod harness its bot is
-        // bound to. A session on no harness has no Machine.
+        // when it first opens: the model it opened on, and the Machine it
+        // first opened on, the harness its bot is bound to then (a macrod
+        // machine or a Macro computer). An in-memory runtime, and a harness
+        // since removed, have none. A later open of the same session keeps
+        // what the first recorded.
         sqlx::query!(
             r#"
             UPDATE factory_step
@@ -2246,7 +2249,7 @@ impl RunRepository for PgRunRepository {
                     SELECT NULLIF(left(h.name, 255), '')
                     FROM agent_session a
                     JOIN agent_configs c ON c.bot_id = a.bot_id
-                    JOIN harnesses h ON h.id = c.harness_id
+                    JOIN harnesses h ON h.id = c.harness_id AND h.deleted_at IS NULL
                     WHERE a.id = $3
                 )
             WHERE run_id = $1 AND seq = $2

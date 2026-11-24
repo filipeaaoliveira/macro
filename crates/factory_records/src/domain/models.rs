@@ -947,12 +947,14 @@ pub struct StepRuntime {
     /// The model the session ran on, as the session recorded it when the
     /// Step first saw it open.
     pub model: Option<String>,
-    /// The Machine the session ran on: the name of the macrod harness its
-    /// bot was bound to when the Step first saw it open. None for a session
-    /// a runtime Macro runs.
+    /// The Machine the session first opened on: the name of the harness its
+    /// bot was bound to when the Step first saw it open, a macrod machine
+    /// or a Macro computer. None for an in-memory runtime. Only the Run's
+    /// owner reads it: a harness is private to whoever paired it.
     pub machine: Option<String>,
-    /// The display name of the Macro agent (bot) whose session it is; none
-    /// for a first-party bot, which has no row of its own.
+    /// The display name of the Macro agent (bot) whose session it is, read
+    /// live, so renaming the agent renames it on old Runs too; none for a
+    /// first-party bot, which has no row of its own.
     pub agent_name: Option<String>,
 }
 
