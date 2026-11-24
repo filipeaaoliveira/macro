@@ -2004,6 +2004,24 @@ where
     }
 
     #[tracing::instrument(skip(self, actor))]
+    async fn definition_file(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        path: String,
+    ) -> Result<crate::domain::models::DefinitionFile, FactoryError> {
+        self.read_definition_file(actor, path).await
+    }
+
+    #[tracing::instrument(skip(self, actor, change))]
+    async fn check_definition_change(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        change: crate::domain::definition::ProposedChange,
+    ) -> Result<crate::domain::models::DefinitionChangeCheck, FactoryError> {
+        self.check_change(actor, change).await
+    }
+
+    #[tracing::instrument(skip(self, actor))]
     async fn standing_rules(
         &self,
         actor: &MacroUserIdStr<'static>,

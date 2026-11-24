@@ -17,7 +17,7 @@ import {
 /**
  * The team's Factory Definition: the repository whose files its Runs take
  * their Flows, Agents and rules from, whether it reads at its head (and why
- * not), what it holds at the commit the newest Run read, and the pull
+ * not), what it holds there, which commit the newest Run read, and the pull
  * requests open on it. Its admins name one or stop using it, and propose
  * changes to its files as pull requests; other members read it.
  */
@@ -129,6 +129,7 @@ export function DefinitionSettings() {
                     <>
                       <DefinitionContents
                         repoUrl={repoUrl()}
+                        head={settings().commit}
                         newestRun={settings().newestRun}
                         contents={settings().contents}
                       />

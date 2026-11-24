@@ -122,6 +122,55 @@ describe('factoryClient routes', () => {
     });
   });
 
+  it('reads a Definition file by its path and checks a change without its id', async () => {
+    await factoryClient.getDefinitionFile('flows/code.json');
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/settings/definition/file?path=flows%2Fcode.json',
+      method: 'GET',
+      body: undefined,
+    });
+
+    const request = {
+      title: 'Add a docs flow',
+      description: null,
+      files: { 'agents.json': '{}' },
+    };
+    await factoryClient.checkDefinitionChange(request);
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/settings/definition/changes/check',
+      method: 'POST',
+      body: request,
+    });
+    const handler = vi
+      .mocked(fetchWithToken)
+      .mock.calls.at(-1)?.[1]?.errorResponseHandler;
+    if (!handler) throw new Error('No error response handler');
+    expect(
+      await handler(
+        new Response(
+          JSON.stringify({ code: 'invalidDefinitionChange', message: 'bad' }),
+          { status: 400 }
+        )
+      )
+    ).toEqual({ code: 'INVALID_DEFINITION_CHANGE', message: 'bad' });
+  });
+
+  it('names a path that is no Definition file', async () => {
+    await factoryClient.getDefinitionFile('README.md');
+    const handler = vi
+      .mocked(fetchWithToken)
+      .mock.calls.at(-1)?.[1]?.errorResponseHandler;
+    if (!handler) throw new Error('No error response handler');
+    expect(
+      await handler(
+        new Response(
+          JSON.stringify({ code: 'notADefinitionFile', message: 'no' }),
+          { status: 400 }
+        )
+      )
+    ).toEqual({ code: 'NOT_A_DEFINITION_FILE', message: 'no' });
+  });
+
   it('starts a Run from a Flow’s name on a task', async () => {
     await factoryClient.startRun({
       flow: 'plan',

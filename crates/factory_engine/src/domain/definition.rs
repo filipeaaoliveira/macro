@@ -592,6 +592,17 @@ pub fn flow_path(name: &str) -> String {
     format!("flows/{name}.json")
 }
 
+/// Whether `path` names a file a Definition may hold: `factory.json`,
+/// `agents.json`, `rules.json`, `scorers.json`, or the file of a Flow
+/// whose name a Run may keep.
+pub fn is_definition_file(path: &str) -> bool {
+    [MANIFEST_FILE, AGENTS_FILE, RULES_FILE, SCORERS_FILE].contains(&path)
+        || path
+            .strip_prefix("flows/")
+            .and_then(|file| file.strip_suffix(".json"))
+            .is_some_and(is_name)
+}
+
 /// `agents.json`'s Agents' names, in the order it lists them.
 #[derive(Deserialize)]
 struct ListedAgents {

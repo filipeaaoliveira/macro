@@ -2,6 +2,7 @@
 //! under its rules, and keep the commit they read it at.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use factory_records::domain::evaluation::{AgentChoices, BENCHMARK_FLOW};
 use factory_records::domain::models::{
@@ -614,11 +615,12 @@ fn fix_pull_request() -> DefinitionPullRequest {
     }
 }
 
-/// The setting shows the Definition as the newest Run read it: that
-/// commit, its Flows, Roles, Standing Rules and Scorers, though its head
-/// moved on since; and the open pull requests changing it.
+/// The setting shows what the Definition holds at the commit it names, its
+/// head: its Flows, Roles, Standing Rules and Scorers; and the open pull
+/// requests changing it. Once a change merges, the contents move with the
+/// head, though the newest Run read the commit before it.
 #[tokio::test]
-async fn the_settings_show_the_definition_the_newest_run_read() {
+async fn the_settings_show_the_definition_at_the_commit_they_name() {
     let repo = team_repo();
     let workflows = FakeWorkflows::default();
     let github = github_at(FIRST);
@@ -634,7 +636,9 @@ async fn the_settings_show_the_definition_the_newest_run_read() {
             .to_string(),
     );
     github.state().open_pull_requests = vec![fix_pull_request()];
-    let service = code_service(&repo, &workflows, &github);
+    // The head moves between two reads: nothing read of it is kept.
+    let service =
+        code_service(&repo, &workflows, &github).with_definition_reads_kept(Duration::ZERO);
 
     let before = service.definition(&teo()).await.expect("settings");
     service
@@ -649,23 +653,15 @@ async fn the_settings_show_the_definition_the_newest_run_read() {
         )
         .await
         .expect("a run of the definition's flow");
+    let read = service.definition(&julia()).await.expect("settings");
     // A change merged since moves the head; no Run read it yet.
     definition_files(&github, SECOND, "Notes, second.", None);
     github.state().head = Some(SECOND.to_string());
     let after = service.definition(&julia()).await.expect("settings");
 
-    // Before any Run, the setting shows the Definition at its head.
     assert_eq!(before.newest_run, None);
-    assert_eq!(
-        before.contents.map(|contents| contents.commit),
-        Some(FIRST.to_string())
-    );
-    assert_eq!(after.commit.as_deref(), Some(SECOND));
-    assert_eq!(
-        after.newest_run.map(|read| read.commit),
-        Some(FIRST.to_string())
-    );
-    let contents = after.contents.expect("the definition's contents");
+    assert_eq!(before.commit.as_deref(), Some(FIRST));
+    let contents = before.contents.expect("the definition's contents");
     assert_eq!(contents.commit, FIRST);
     assert_eq!(
         contents.flows,
@@ -686,7 +682,163 @@ async fn the_settings_show_the_definition_the_newest_run_read() {
     assert_eq!(contents.scorers.len(), 1);
     assert_eq!(contents.scorers[0].name, "clear");
     assert_eq!(contents.scorers[0].sample_percent, 25);
-    assert_eq!(after.open_pull_requests, Some(vec![fix_pull_request()]));
+    assert_eq!(before.open_pull_requests, Some(vec![fix_pull_request()]));
+
+    assert_eq!(
+        read.contents.map(|contents| contents.commit),
+        Some(FIRST.to_string())
+    );
+
+    assert_eq!(after.commit.as_deref(), Some(SECOND));
+    assert_eq!(
+        after.newest_run.map(|read| read.commit),
+        Some(FIRST.to_string())
+    );
+    let contents = after.contents.expect("the definition's contents");
+    assert_eq!(contents.commit, SECOND);
+    assert_eq!(contents.flows[0].description, "Notes, second.");
+    assert_eq!(contents.standing_rules, None);
+    assert!(contents.scorers.is_empty());
+}
+
+/// A Definition whose head no longer reads, as after a push that broke
+/// it, shows what it holds at the commit the newest Run read, which the
+/// setting names apart from its head.
+#[tokio::test]
+async fn the_settings_show_the_newest_run_s_commit_when_the_head_does_not_read() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes, first.", None);
+    let service = code_service(&repo, &workflows, &github);
+    service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    definition_files(&github, SECOND, "Notes, second.", None);
+    github
+        .state()
+        .files
+        .remove(&(SECOND.to_string(), "agents.json".to_string()));
+    github.state().head = Some(SECOND.to_string());
+
+    let settings = service.definition(&julia()).await.expect("settings");
+
+    assert_eq!(settings.commit, None);
+    assert!(settings.problem.is_some());
+    let contents = settings.contents.expect("the definition's contents");
+    assert_eq!(contents.commit, FIRST);
+    assert_eq!(contents.flows[0].description, "Notes, first.");
+}
+
+/// A file of the Definition reads as it is at its default branch's head,
+/// with that commit, for any member of the team; one not there yet, as a
+/// Flow being added, has no text.
+#[tokio::test]
+async fn a_definition_file_reads_at_the_head() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes, first.", None);
+    definition_files(&github, SECOND, "Notes, second.", None);
+    github.state().head = Some(SECOND.to_string());
+    let service = code_service(&repo, &workflows, &github);
+
+    let manifest = service
+        .definition_file(&teo(), "factory.json".to_string())
+        .await
+        .expect("the manifest");
+    let flow = service
+        .definition_file(&julia(), "flows/notes.json".to_string())
+        .await
+        .expect("the flow");
+    let missing = service
+        .definition_file(&julia(), "flows/new.json".to_string())
+        .await
+        .expect("a file not there yet");
+
+    assert_eq!(manifest.path, "factory.json");
+    assert_eq!(manifest.commit, SECOND);
+    assert_eq!(
+        manifest.text.as_deref(),
+        Some(r#"{ "version": 1, "flows": ["notes"] }"#)
+    );
+    assert!(
+        flow.text.expect("its text").contains("Notes, second."),
+        "the head's flow"
+    );
+    assert_eq!(missing.path, "flows/new.json");
+    assert_eq!(missing.commit, SECOND);
+    assert_eq!(missing.text, None);
+}
+
+/// A file is read only from a Definition the team names, by a path a
+/// Definition holds, from a repository the person reaches; a file GitHub
+/// will not give is the Definition's problem, and GitHub failing is the
+/// factory's.
+#[tokio::test]
+async fn a_definition_file_is_refused_when_it_cannot_be_read() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    let service = code_service(&repo, &workflows, &github);
+
+    let other = service
+        .definition_file(&julia(), "README.md".to_string())
+        .await;
+    let reads_before = github.state().file_reads.len();
+    github.state().unreachable = true;
+    let unreachable = service
+        .definition_file(&julia(), "factory.json".to_string())
+        .await;
+    github.state().unreachable = false;
+    github
+        .state()
+        .refused_files
+        .insert("agents.json".to_string());
+    let too_large = service
+        .definition_file(&julia(), "agents.json".to_string())
+        .await;
+    github.state().file_reads_fail_at = Some(FIRST.to_string());
+    let down = service
+        .definition_file(&julia(), "factory.json".to_string())
+        .await;
+    github.state().file_reads_fail_at = None;
+    repo.team_definitions.lock().expect("definitions").clear();
+    let unnamed = service
+        .definition_file(&julia(), "factory.json".to_string())
+        .await;
+
+    assert!(
+        matches!(&other, Err(FactoryError::NotADefinitionFile(path)) if path == "README.md"),
+        "{other:?}"
+    );
+    assert_eq!(reads_before, 0, "nothing is read for another path");
+    assert!(
+        matches!(unreachable, Err(FactoryError::UnreachableDefinition)),
+        "{unreachable:?}"
+    );
+    assert!(
+        matches!(
+            &too_large,
+            Err(FactoryError::InvalidDefinition(DefinitionError::TooLarge(path))) if path == "agents.json"
+        ),
+        "{too_large:?}"
+    );
+    assert!(matches!(down, Err(FactoryError::Internal(_))), "{down:?}");
+    assert!(
+        matches!(unnamed, Err(FactoryError::NoDefinition)),
+        "{unnamed:?}"
+    );
 }
 
 /// A Definition that does not read says why, and still lists the pull

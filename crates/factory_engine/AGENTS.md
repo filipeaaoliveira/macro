@@ -2301,12 +2301,13 @@ does not read (400 `invalidDefinition`, naming the file and the problem, or
 why it does not read (`problem`). It also names the commit the newest Run of
 the team's members started under it read (`newestRun`,
 `RunRepository::newest_definition_read`), shows read-only what the
-Definition holds at that commit, or at its head when no Run read it yet or
-that commit does not read as the caller reaches it, for any reason (not
-linked to GitHub, the commit gone, GitHub down or limiting them: logged,
-never the setting's failure; none when the head does not read either)
-(`contents`: Flows with their entries, Roles with their Agents, Standing
-Rules and Scorers), and lists the repository's
+Definition holds at its head, the commit it names (`commit`), so the two
+never disagree once a change merged and no Run read it yet; when the head
+does not read, at the newest Run's commit, if that reads as the caller
+reaches it (not linked to GitHub, the commit gone, GitHub down or limiting
+them: logged, never the setting's failure; none then), its own `commit`
+saying which (`contents`: Flows with their entries, Roles with their
+Agents, Standing Rules and Scorers), and lists the repository's
 open pull requests (`openPullRequests`, at most
 `DEFINITION_PULL_REQUESTS_LISTED`; null when GitHub fails to list them,
 which does not fail the setting). While a team names one, `POST /runs`, `GET
@@ -2350,8 +2351,10 @@ for 10 s. The screens that read the Definition on every load (`GET
 Benchmarks that Insights, a Run's scores and self-improvement read,
 `FactoryService::team_evaluation`) take the head found in the last 10 s,
 so a change merged on GitHub shows there within that time; `POST /runs`, a
-retry, an Automation's check and naming a Definition read the head now. Only the default
-branch is read, so a change reaches Runs once its pull request merges, and a
+retry, an Automation's check, naming a Definition, and the change editor's
+`GET /settings/definition/file`, `POST /settings/definition/changes/check`
+and `POST /settings/definition/changes` (`definition_head`) read the head
+now. Only the default branch is read, so a change reaches Runs once its pull request merges, and a
 Run started already, or a Run's own branch, never changes the rules it runs
 under. The team's Control Files and Standing Rules settings are refused
 meanwhile (409 `definitionNamed`) and read as not editable. A team that names
@@ -2364,6 +2367,20 @@ replaced: `read_definition` refuses a placeholder bot id, all zeros but its
 last two digits (`is_placeholder_bot`), so the template as shipped does not
 read; a person merges), which a test reads with its bots replaced; `factory_definition_check`
 (`services/factory_service`) checks one in a folder.
+
+`GET /settings/definition/file?path=` answers one file of the team's
+Definition, as the caller reaches it at its default branch's head, the
+commit a change proposed now goes on top of (`DefinitionFile`: `path`,
+`commit`, and its whole `text`, null for a file not there yet, as a Flow
+being added), so the change editor starts from it. Only a path a
+Definition holds is read (`is_definition_file`: `factory.json`,
+`agents.json`, `rules.json`, `scorers.json`, or `flows/{name}.json` with a
+name a Run keeps; 400 `notADefinitionFile` otherwise, before GitHub is
+asked); a repository the caller does not reach is 400
+`unreachableDefinition`, a file GitHub will not give 400
+`invalidDefinition`, and a team that names none 409 `noDefinition`. Any
+member of the team reads it, as they read the setting: GitHub decides what
+they reach.
 
 An admin of the team changes the Definition from the factory's settings
 with `POST /settings/definition/changes` (`{"changeId", "title",
@@ -2407,6 +2424,15 @@ pull requests that each read may not read once both merge (one adds a
 Flow, the other drops the Role it names). Run `factory_definition_check`
 in the Definition repository's CI, and require it on its default branch,
 so the merged result is checked too.
+
+`POST /settings/definition/changes/check` (`{"title", "description"?,
+"files"}`, the change without its id) checks a change as proposing it
+would and writes nothing to GitHub (`check_change`): the same admin in
+person, `noDefinition`, push access, change and Definition checks, with
+the same statuses and codes, answering the commit it was checked against
+(`DefinitionChangeCheck`). It looks up no pull request, as a check has no
+change id, and a change sent later is checked again at the head it is
+sent at. The web editor checks a draft with it before it sends it.
 
 Self-improvement (`src/domain/self_improvement.rs`): a team's Definition
 learns from the Runs that failed under it. A failure is a live Scorer's

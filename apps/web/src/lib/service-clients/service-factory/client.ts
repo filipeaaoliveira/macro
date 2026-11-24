@@ -79,6 +79,32 @@ import type {
 
 const host = () => SERVER_HOSTS.factory;
 
+/**
+ * One file of the team's Factory Definition at its default branch's head,
+ * the commit a change proposed now goes on top of: `GET
+ * /settings/definition/file`. Written by hand until the generated client
+ * is regenerated with it.
+ */
+export type DefinitionFile = {
+  path: string;
+  commit: string;
+  /** Its whole text; absent or `null` when the repository holds no file there yet. */
+  text?: string | null;
+};
+
+/**
+ * A change to check without proposing it: `POST
+ * /settings/definition/changes/check` takes a proposal without its id.
+ * Written by hand until the generated client is regenerated with it.
+ */
+export type CheckDefinitionChangeRequest = Omit<
+  ProposeDefinitionChangeRequest,
+  'changeId'
+>;
+
+/** The commit a checked change was checked against. */
+export type DefinitionChangeCheck = { commit: string };
+
 /** Why a Run wasn't started, when the service names the cause. */
 export type StartRunErrorCode =
   | 'UNREACHABLE_REPOSITORY'
@@ -101,6 +127,8 @@ type StartRunRefusal = Exclude<
   | 'invalidDefinitionChange'
   | 'definitionChangeNotOpened'
   | 'definitionChangeClosed'
+  // Not in the generated codes until the client is regenerated.
+  | 'notADefinitionFile'
 >;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
@@ -200,7 +228,8 @@ export type DefinitionChangeErrorCode =
   | 'INVALID_DEFINITION_CHANGE'
   | 'DEFINITION_CHANGE_NOT_OPENED'
   | 'DEFINITION_CHANGE_CLOSED'
-  | 'NO_PUSH_ACCESS';
+  | 'NO_PUSH_ACCESS'
+  | 'NOT_A_DEFINITION_FILE';
 
 const DEFINITION_CHANGE_ERROR_CODES = {
   noDefinition: 'NO_DEFINITION',
@@ -210,7 +239,12 @@ const DEFINITION_CHANGE_ERROR_CODES = {
   definitionChangeNotOpened: 'DEFINITION_CHANGE_NOT_OPENED',
   definitionChangeClosed: 'DEFINITION_CHANGE_CLOSED',
   noPushAccess: 'NO_PUSH_ACCESS',
-} as const satisfies Partial<Record<RunErrorCode, DefinitionChangeErrorCode>>;
+  notADefinitionFile: 'NOT_A_DEFINITION_FILE',
+} as const satisfies Partial<
+  // `notADefinitionFile` is in the generated codes once the client is
+  // regenerated with `GET /settings/definition/file`.
+  Record<RunErrorCode | 'notADefinitionFile', DefinitionChangeErrorCode>
+>;
 
 function isDefinitionChangeRefusal(
   code: unknown
@@ -527,6 +561,36 @@ export const factoryClient = {
   proposeDefinitionChange(request: ProposeDefinitionChangeRequest) {
     return fetchWithToken<DefinitionPullRequest, DefinitionChangeErrorCode>(
       `${host()}${getProposeFactoryDefinitionChangeUrl()}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+        errorResponseHandler: definitionChangeError,
+      }
+    );
+  },
+
+  /**
+   * One file of the team's Factory Definition as it is at its default
+   * branch's head, to start a change from. A path the Definition doesn't
+   * hold fails `NOT_A_DEFINITION_FILE`; a team that names none fails
+   * `NO_DEFINITION`, and a repository the person doesn't reach
+   * `DEFINITION_UNREACHABLE`, each with the service's message.
+   */
+  getDefinitionFile(path: string, signal?: AbortSignal) {
+    return fetchWithToken<DefinitionFile, DefinitionChangeErrorCode>(
+      `${host()}/settings/definition/file?${new URLSearchParams({ path })}`,
+      { method: 'GET', signal, errorResponseHandler: definitionChangeError }
+    );
+  },
+
+  /**
+   * Checks a change to the team's Factory Definition as proposing it
+   * would, writing nothing to GitHub, and answers the commit it was
+   * checked against. It is refused with the codes a proposal is.
+   */
+  checkDefinitionChange(request: CheckDefinitionChangeRequest) {
+    return fetchWithToken<DefinitionChangeCheck, DefinitionChangeErrorCode>(
+      `${host()}/settings/definition/changes/check`,
       {
         method: 'POST',
         body: JSON.stringify(request),

@@ -1,5 +1,8 @@
 import { throwOnErr } from '@core/util/result';
-import { factoryClient } from '@service-factory/client';
+import {
+  type CheckDefinitionChangeRequest,
+  factoryClient,
+} from '@service-factory/client';
 import type {
   DefinitionSettings,
   ProposeDefinitionChangeRequest,
@@ -61,5 +64,31 @@ export function useProposeDefinitionChangeMutation() {
       client.invalidateQueries({
         queryKey: factoryRunKeys.definition.queryKey,
       }),
+  }));
+}
+
+/**
+ * Reads one file of the team's Factory Definition at its default branch's
+ * head, each time it is asked: a change starts from the file as it is now.
+ */
+export function useDefinitionFileReader() {
+  const client = useQueryClient();
+  return (path: string) =>
+    client.fetchQuery({
+      queryKey: factoryRunKeys.definitionFile(path).queryKey,
+      queryFn: ({ signal }) =>
+        throwOnErr(() => factoryClient.getDefinitionFile(path, signal)),
+      staleTime: 0,
+    });
+}
+
+/**
+ * Checks a change to the team's Factory Definition as proposing it would,
+ * without opening a pull request.
+ */
+export function useCheckDefinitionChangeMutation() {
+  return useMutation(() => ({
+    mutationFn: (request: CheckDefinitionChangeRequest) =>
+      throwOnErr(() => factoryClient.checkDefinitionChange(request)),
   }));
 }

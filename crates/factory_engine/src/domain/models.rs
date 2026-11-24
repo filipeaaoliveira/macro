@@ -923,13 +923,38 @@ pub struct DefinitionSettings {
     /// The commit the newest Run of the team's members started under it
     /// read, and when that Run started; none when none has.
     pub newest_run: Option<DefinitionRead>,
-    /// What it holds at the commit the newest Run read, or at its head when
-    /// no Run read it yet or that commit does not read as the person
-    /// reaches it; none when it reads at neither.
+    /// What it holds at `commit`, its head, as a Run started now reads it;
+    /// at the commit the newest Run read when the head does not read as
+    /// the person reaches it; none when it reads at neither. Its own
+    /// `commit` says which.
     pub contents: Option<DefinitionContents>,
     /// Its repository's open pull requests, the most recently updated first,
     /// at most 20; none when GitHub could not list them for the person.
     pub open_pull_requests: Option<Vec<DefinitionPullRequest>>,
+}
+
+/// One file of a Factory Definition, as it is at its default branch's head:
+/// the text a change to it starts from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionFile {
+    /// Its path from the repository's root.
+    pub path: String,
+    /// The commit of the default branch it was read at: the one a change
+    /// proposed now goes on top of.
+    pub commit: String,
+    /// Its whole text; none when the repository holds no file there yet,
+    /// as for a Flow being added.
+    pub text: Option<String>,
+}
+
+/// A change to a Factory Definition that passed every check proposing it
+/// makes, without proposing it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionChangeCheck {
+    /// The commit of the default branch it was checked against.
+    pub commit: String,
 }
 
 /// The most open pull requests of a Factory Definition's repository its
@@ -1257,6 +1282,11 @@ pub enum FactoryError {
     /// The team names no Factory Definition, so there is none to change.
     #[error("the team names no factory definition: name its repository first")]
     NoDefinition,
+    /// A path that names no file a Factory Definition holds.
+    #[error(
+        "{0} is not a definition file: name factory.json, agents.json, rules.json, scorers.json or flows/{{name}}.json"
+    )]
+    NotADefinitionFile(String),
     /// A change to the team's Factory Definition is refused: the
     /// Definition does not read with it, or the change itself is wrong.
     #[error(transparent)]
