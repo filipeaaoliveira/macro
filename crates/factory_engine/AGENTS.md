@@ -2351,8 +2351,10 @@ for 10 s. The screens that read the Definition on every load (`GET
 Benchmarks that Insights, a Run's scores and self-improvement read,
 `FactoryService::team_evaluation`) take the head found in the last 10 s,
 so a change merged on GitHub shows there within that time; `POST /runs`, a
-retry, an Automation's check and naming a Definition read the head now. Only the default
-branch is read, so a change reaches Runs once its pull request merges, and a
+retry, an Automation's check, naming a Definition, and the change editor's
+`GET /settings/definition/file`, `POST /settings/definition/changes/check`
+and `POST /settings/definition/changes` (`definition_head`) read the head
+now. Only the default branch is read, so a change reaches Runs once its pull request merges, and a
 Run started already, or a Run's own branch, never changes the rules it runs
 under. The team's Control Files and Standing Rules settings are refused
 meanwhile (409 `definitionNamed`) and read as not editable. A team that names
@@ -2374,11 +2376,11 @@ being added), so the change editor starts from it. Only a path a
 Definition holds is read (`is_definition_file`: `factory.json`,
 `agents.json`, `rules.json`, `scorers.json`, or `flows/{name}.json` with a
 name a Run keeps; 400 `notADefinitionFile` otherwise, before GitHub is
-asked); a repository
-the caller does not reach is 400 `unreachableDefinition`, a file GitHub
-will not give 400 `invalidDefinition`, and a team that names none 409
-`noDefinition`. Any member of the team reads it, as they read the
-setting: GitHub decides what they reach.
+asked); a repository the caller does not reach is 400
+`unreachableDefinition`, a file GitHub will not give 400
+`invalidDefinition`, and a team that names none 409 `noDefinition`. Any
+member of the team reads it, as they read the setting: GitHub decides what
+they reach.
 
 An admin of the team changes the Definition from the factory's settings
 with `POST /settings/definition/changes` (`{"changeId", "title",

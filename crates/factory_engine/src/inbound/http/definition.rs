@@ -187,10 +187,10 @@ pub struct DefinitionFileParams {
 /// it is at its default branch's head, the commit a change proposed now
 /// goes on top of, read as the caller reaches it on GitHub. A file not
 /// there yet, as a Flow being added, answers no text. A path that names no
-/// Definition file is 400 `notADefinitionFile`; a repository the caller does not reach is 400
-/// `unreachableDefinition`; a file GitHub will not give (too large) is 400
-/// `invalidDefinition`; a team that names no Definition is 409
-/// `noDefinition`.
+/// Definition file is 400 `notADefinitionFile`; a repository the caller
+/// does not reach is 400 `unreachableDefinition`; a file GitHub will not
+/// give (too large) is 400 `invalidDefinition`; a team that names no
+/// Definition is 409 `noDefinition`.
 #[utoipa::path(
     get,
     tag = "factory",
