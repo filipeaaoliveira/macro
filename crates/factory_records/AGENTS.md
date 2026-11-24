@@ -197,7 +197,18 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   it replaces; with none, an Agent already recorded last is not recorded
   again. `record_prepare`, `record_open` and `holds_session` name the
   session too, so none acts on one the Step no longer works in. A session
-  claimed before the Agent was recorded reads with none. The agent's latest
+  claimed before the Agent was recorded reads with none. `record_open` also
+  keeps where the session runs (`model`, from `agent_session`, and
+  `machine`, the Machine the session first opened on: the name of the
+  live `harnesses` row its bot's `agent_configs` binds, a macrod machine or
+  a Macro computer, none for an in-memory runtime;
+  `20261124140000_factory_step_runtime.sql`), since the session is deleted
+  once the Step is done with it and the bot may move; a new session from
+  `pass_session` clears both until it opens, and a retry copies them. A
+  Step reads them as `runtime`, with its bot's display name (`bots.name`,
+  read live, so a rename shows on old Runs; none for a first-party bot,
+  which has no row). The engine blanks `machine` for a reader who is not
+  the Run's owner. The agent's latest
   hand back is kept on the Step while it runs (`hand_back`), and read when its
   turn ends (`handed_back`).
   A later prompt of the session (`begin_turn`) records its action in

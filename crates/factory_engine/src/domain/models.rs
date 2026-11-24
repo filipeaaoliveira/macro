@@ -887,6 +887,20 @@ pub struct RunDetail {
     pub split_tasks: Vec<SplitTask>,
 }
 
+impl RunDetail {
+    /// The Run as `viewer` reads it. The names of the Machines its Steps ran
+    /// on are its owner's: a harness is private to the person or team that
+    /// paired it, so a team member reading someone else's Run sees none.
+    pub fn as_seen_by(mut self, viewer: &MacroUserIdStr<'_>) -> Self {
+        if self.run.user_id.as_ref() != viewer.as_ref() {
+            for step in &mut self.steps {
+                step.runtime.machine = None;
+            }
+        }
+        self
+    }
+}
+
 /// The Control File patterns a person's Runs are checked against: their
 /// team's, or the factory's default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]

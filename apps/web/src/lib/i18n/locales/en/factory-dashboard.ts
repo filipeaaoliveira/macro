@@ -48,6 +48,9 @@ export default {
   onStep: 'on {{step}}',
   onStepFor: 'for',
   agentNamed: 'Agent {{agent}}',
+  // Where a Step ran.
+  runtimeModel: 'Model {{model}}',
+  runtimeMachine: 'Machine {{machine}}',
   panelOf: {
     one: 'with {{count}} reviewer',
     other: 'with {{count}} reviewers',

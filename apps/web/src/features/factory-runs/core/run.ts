@@ -207,6 +207,28 @@ export type RunStep = {
   checks?: CheckRound[];
   /** Its Step Terminal; none for a Step read before Steps had one. */
   terminal?: StepTerminal;
+  /**
+   * Where its agent's session ran, and as which agent; none for a Step no
+   * agent does, and for one from before Steps kept it.
+   */
+  runtime?: RunStepRuntime;
+};
+
+/**
+ * Where an agent Step's session ran: the model, the Machine, and the
+ * display name of the Macro agent whose session it is. Each is unset when
+ * the API doesn't know it.
+ */
+export type RunStepRuntime = {
+  /** The model the session ran on, such as `claude-opus-4-5`. */
+  model?: string;
+  /**
+   * The Machine the session first opened on, by its name; only the Run's
+   * owner reads it.
+   */
+  machine?: string;
+  /** The agent's display name, as it is now; the Definition names it `agent`. */
+  agentName?: string;
 };
 
 /**
@@ -552,6 +574,8 @@ export type Run = {
   retry?: RunRetry;
   /** Its retry, by id; none while it has none. */
   retriedBy?: string;
+  /** When its pull request was merged; none for a Run that merged none. */
+  mergedAt?: string;
 };
 
 /** A Flow a person can start a Run of. */

@@ -21,7 +21,7 @@ use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
     AskedBack, ControlFileChanges, DefinitionRead, EntryId, FlawMarker, Gate, GateAnswer,
     GateModelReading, HandBack, Outcome, Run, RunDefinition, RunEnd, RunFlaw, RunId, RunOutcome,
-    RunRetry, StandInAnswer, Steer, SteerAction, Step, StepEnd, StepTerminal,
+    RunRetry, StandInAnswer, Steer, SteerAction, Step, StepEnd, StepRuntime, StepTerminal,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -1483,6 +1483,7 @@ impl IntoResponse for FactoryError {
         Step,
         StepEnd,
         StepTerminal,
+        StepRuntime,
         Steer,
         SteerAction,
         Gate,

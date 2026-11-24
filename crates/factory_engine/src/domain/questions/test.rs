@@ -45,6 +45,7 @@ fn asked(seq: u16, role: &str, question: &str, answer: Option<&str>) -> Step {
         }),
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 

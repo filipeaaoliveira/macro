@@ -53,6 +53,7 @@ fn run(quiet_gates: bool) -> Run {
         budget_stop: None,
         retry: None,
         retried_by: None,
+        merged_at: None,
     }
 }
 
@@ -99,6 +100,7 @@ fn gated(seq: u16, kind: GateKind, opened_at: u32, answer: Option<&str>) -> Step
         passed_over: Vec::new(),
         checks: Vec::new(),
         terminal: Default::default(),
+        runtime: Default::default(),
     }
 }
 
