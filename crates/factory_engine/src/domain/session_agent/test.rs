@@ -26,7 +26,7 @@ use crate::domain::agents::AgentDefinition;
 use crate::domain::fakes::FakeRepo;
 use crate::domain::flow::StepName;
 use crate::domain::models::AgentTask;
-use crate::domain::ports::{Retryable, StepAgent};
+use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
 
 mod agent_rules;
 mod follow_up;
@@ -41,7 +41,7 @@ mod usage_limit;
 
 /// What happens to one call: it works, or fails with this error. A call
 /// that fails ambiguously may still take effect (`lands`).
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Reply {
     error: Option<RoutineSessionError>,
     lands: bool,
@@ -193,17 +193,17 @@ impl FakeSessions {
     }
 
     fn preparing(self, replies: &[Reply]) -> Self {
-        self.prepares.lock().expect("prepares").extend(replies);
+        self.prepares.lock().expect("prepares").extend(replies.iter().cloned());
         self
     }
 
     fn prompting(self, replies: &[Reply]) -> Self {
-        self.prompts.lock().expect("prompts").extend(replies);
+        self.prompts.lock().expect("prompts").extend(replies.iter().cloned());
         self
     }
 
     fn following_up(self, replies: &[Reply]) -> Self {
-        self.follow_ups.lock().expect("follow-ups").extend(replies);
+        self.follow_ups.lock().expect("follow-ups").extend(replies.iter().cloned());
         self
     }
 
@@ -848,6 +848,37 @@ async fn prompts_whose_delivery_stays_unknown_fail_the_step_for_good() {
     assert_eq!(sessions.prompts(), 1);
 }
 
+/// A machine that will not open the Step's session says why: the Step fails
+/// for good at once with that reason, and is neither tried again nor
+/// passed on to the Role's next Agent.
+#[tokio::test(start_paused = true)]
+async fn a_session_its_machine_refused_fails_the_step_for_good_with_why() {
+    let reason = "this machine does not manage repositories; choose a Herdr agent in macrod";
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[Reply {
+            error: Some(RoutineSessionError::Refused(reason.to_string())),
+            lands: false,
+        }]);
+    let started = tokio::time::Instant::now();
+
+    let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
+
+    let Err(error) = failed else {
+        panic!("the refused session opened");
+    };
+    assert!(
+        matches!(&error, SessionAgentError::Refused(said) if said == reason),
+        "{error:?}"
+    );
+    assert!(!error.retryable());
+    assert!(!error.out_of_quota());
+    assert_eq!(error.refused(), Some(reason));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert_eq!(sessions.prepares(), 1);
+    assert_eq!(sessions.prompts(), 0);
+}
+
 /// Time spent opening and prompting the session counts too, so the Step
 /// gives up on its session before Temporal times the attempt out.
 #[tokio::test(start_paused = true)]
@@ -1250,7 +1281,7 @@ async fn a_refused_or_mismatched_session_fails_the_step_for_good() {
         let repo = FakeRepo::default();
         let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
             .preparing(&[Reply {
-                error: Some(refusal),
+                error: Some(refusal.clone()),
                 lands: false,
             }]);
 
@@ -1275,7 +1306,7 @@ async fn a_prompt_the_harness_was_down_for_is_tried_again() {
         let repo = FakeRepo::default();
         let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
             .prompting(&[Reply {
-                error: Some(outage),
+                error: Some(outage.clone()),
                 lands: false,
             }]);
 
@@ -1605,7 +1636,7 @@ async fn other_refusals_keep_the_step_with_its_agent() {
         let repo = FakeRepo::default();
         let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
             .preparing(&[Reply {
-                error: Some(refusal),
+                error: Some(refusal.clone()),
                 lands: false,
             }]);
         let task = plan_task(&repo).await;

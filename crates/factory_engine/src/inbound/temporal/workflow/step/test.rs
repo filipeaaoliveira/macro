@@ -26,8 +26,9 @@ struct Failed;
 #[derive(Default)]
 struct Script {
     /// What the Step at a place ends with, when not `done`: `question`,
-    /// `fail` for work that fails for good, or `broke` for work that fails
-    /// for good for infrastructure.
+    /// `fail` for work that fails for good, `broke` for work that fails
+    /// for good for infrastructure, or `refused` for a session its agent's
+    /// machine refused.
     ends: BTreeMap<u16, &'static str>,
     cancelled: bool,
     /// Asking a Gate fails, other than by the Run's cancellation.
@@ -44,6 +45,8 @@ struct Script {
     /// them.
     rules: Option<OrchestratorDefinition>,
     asked: RefCell<Vec<String>>,
+    /// The output each Step ended with, in order.
+    outputs: RefCell<Vec<String>>,
     requests: RefCell<Vec<StepRequest>>,
     /// The Run used its token budget: every check before an agent Step
     /// stops it. A Run within it is not noted, as one without a budget.
@@ -93,6 +96,7 @@ impl Work for Script {
         match self.ends.get(&request.key.seq).copied() {
             Some("fail") => Err(WorkFailure::Work),
             Some("broke") => Err(WorkFailure::Infrastructure),
+            Some("refused") => Err(WorkFailure::Refused(REFUSAL.to_string())),
             Some("question") => Ok(StepReport {
                 outcome: Outcome::question(),
                 output: format!("Question of step {}?", request.key.seq),
@@ -118,6 +122,7 @@ impl Work for Script {
 
     async fn end(&self, ending: StepEnding) -> Result<(), Failed> {
         self.note(format!("end {} {}", ending.key.seq, ending.report.outcome));
+        self.outputs.borrow_mut().push(ending.report.output);
         Ok(())
     }
 
@@ -969,6 +974,38 @@ async fn work_that_failed_for_infrastructure_is_routed_as_such() {
         Ok(Round::Routed(
             Outcome::try_from("again".to_string()).expect("valid")
         ))
+    );
+}
+
+/// What the Step whose session its machine refused shows its owner.
+const REFUSAL: &str = "The agent's machine refused the step's session: this machine does not manage repositories";
+
+/// A Step whose session its agent's machine refused fails for
+/// infrastructure, and shows its owner the machine's reason, where other
+/// failed work shows a fixed text.
+#[tokio::test]
+async fn a_step_its_machine_refused_shows_why() {
+    let refused = Script {
+        ends: [(1, "refused")].into(),
+        ..Script::default()
+    };
+    let (walked, _) = walk(&refused, &plan(true), asking(0), 10).await;
+    assert_eq!(walked, Ok(Round::FailedForInfrastructure));
+    assert_eq!(
+        refused.asked(),
+        ["start 1", "run 1", "end 1 failed", "stop 1"]
+    );
+    assert_eq!(*refused.outputs.borrow(), [REFUSAL]);
+
+    let broke = Script {
+        ends: [(1, "broke")].into(),
+        ..Script::default()
+    };
+    let (walked, _) = walk(&broke, &plan(true), asking(0), 10).await;
+    assert_eq!(walked, Ok(Round::FailedForInfrastructure));
+    assert_eq!(
+        *broke.outputs.borrow(),
+        [crate::inbound::temporal::workflow::FAILED_STEP_OUTPUT]
     );
 }
 

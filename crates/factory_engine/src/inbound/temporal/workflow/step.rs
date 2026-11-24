@@ -18,7 +18,7 @@ use factory_records::domain::standing_rules::RuleGateKind;
 
 use super::review_round::Round;
 use super::work::{Work, WorkFailure};
-use super::{Asking, FAILED_STEP_OUTPUT, Questions};
+use super::{Asking, Questions};
 use crate::domain::flow::Entry;
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
@@ -59,9 +59,9 @@ pub(super) async fn walk_step<W: Work>(
         // stopped by cancelling the Run ends the Run.
         *held = asking.clone();
         held.push(request.clone());
-        let failure = || StepReport {
+        let failure = |why: &WorkFailure| StepReport {
             outcome: Outcome::failed(),
-            output: FAILED_STEP_OUTPUT.to_string(),
+            output: why.output(),
         };
         let (report, failed) = match work.run(&request).await {
             // An agent that stopped without a result waits for the Run's
@@ -73,15 +73,16 @@ pub(super) async fn walk_step<W: Work>(
                 if report.outcome == Outcome::no_result()
                     && (!work.asks_on_no_result() || !questions.owner_answers) =>
             {
-                (failure(), Some(WorkFailure::Work))
+                (failure(&WorkFailure::Work), Some(WorkFailure::Work))
             }
             Ok(report) => (report, None),
             Err(_) if work.cancelled() => return Ok(Round::Ended(RunOutcome::Cancelled)),
             // The owner reads the output; why the work failed is internal
-            // detail, which the worker logged.
-            Err(why) => (failure(), Some(why)),
+            // detail, which the worker logged, but for a machine's refusal
+            // of the Step's session, which the owner can act on.
+            Err(why) => (failure(&why), Some(why)),
         };
-        let infrastructure = failed == Some(WorkFailure::Infrastructure);
+        let infrastructure = failed.as_ref().is_some_and(WorkFailure::infrastructure);
         let stopped = report.outcome == Outcome::no_result();
         let reported = report.outcome.clone();
         let question = questions.asked(&request, &report);

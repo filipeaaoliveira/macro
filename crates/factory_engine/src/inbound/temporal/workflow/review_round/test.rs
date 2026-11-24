@@ -106,7 +106,7 @@ impl Work for Script {
             .map(|(index, request)| {
                 let ends = self.ends.get(&request.key.seq).copied();
                 match (self.worked.get(index), ends) {
-                    (Some(Err(failure)), _) => Err(*failure),
+                    (Some(Err(failure)), _) => Err(failure.clone()),
                     (_, Some("fail")) => Err(WorkFailure::Work),
                     (_, Some("no_result")) => Ok(StepReport {
                         outcome: Outcome::no_result(),

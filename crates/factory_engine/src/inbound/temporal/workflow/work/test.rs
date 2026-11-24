@@ -12,7 +12,9 @@ use temporalio_common::protos::temporal::api::failure::v1::{
 };
 
 use super::{WorkFailure, work_failure};
-use crate::inbound::temporal::activities::{AGENT_OVERDUE_FAILURE, INFRASTRUCTURE_FAILURE};
+use crate::inbound::temporal::activities::{
+    AGENT_OVERDUE_FAILURE, INFRASTRUCTURE_FAILURE, REFUSED_FAILURE,
+};
 
 /// An application failure of `kind`, if any, as an activity raised it.
 fn application(kind: Option<&str>, non_retryable: bool) -> Failure {
@@ -100,4 +102,21 @@ fn only_what_is_surely_the_factory_s_counts_as_infrastructure() {
     assert_eq!(work_failure(&out_of_retries), WorkFailure::Work);
     assert_eq!(work_failure(&agent_too_slow), WorkFailure::Work);
     assert_eq!(work_failure(&bad_outcome), WorkFailure::Work);
+}
+
+/// A session its agent's machine refused is infrastructure's, and the
+/// refusal, the failure's message, is kept for the Step's output, however
+/// the attempts ended.
+#[test]
+fn a_refused_session_is_infrastructure_s_and_keeps_its_refusal() {
+    let refused = activity(application(Some(REFUSED_FAILURE), true));
+    let refused_at_the_end = activity(timed_out(application(Some(REFUSED_FAILURE), true)));
+
+    for failure in [refused, refused_at_the_end] {
+        let read = work_failure(&failure);
+        assert_eq!(read, WorkFailure::Refused("the step's work failed".to_string()));
+        assert!(read.infrastructure());
+        assert_eq!(read.output(), "the step's work failed");
+    }
+    assert!(!WorkFailure::Work.infrastructure());
 }

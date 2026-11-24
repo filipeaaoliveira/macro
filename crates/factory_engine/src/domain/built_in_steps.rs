@@ -256,6 +256,9 @@ pub enum BuiltInStepError {
         /// Whether another attempt took the Step on to a later prompt.
         superseded: bool,
     },
+    /// The agent's machine refused the Step's session, and said why.
+    #[error("the agent's machine refused the session: {0}")]
+    Refused(String),
     /// The agent ended the Step with an outcome the Step does not have.
     #[error("the agent ended step {step} with {outcome}, which it does not end with")]
     UnexpectedOutcome {
@@ -286,6 +289,9 @@ pub enum BuiltInStepError {
 
 impl BuiltInStepError {
     fn agent(error: impl std::error::Error + AgentFailure + Send + Sync + 'static) -> Self {
+        if let Some(reason) = error.refused() {
+            return BuiltInStepError::Refused(reason.to_owned());
+        }
         BuiltInStepError::Agent {
             retryable: error.retryable(),
             out_of_quota: error.out_of_quota(),
@@ -308,7 +314,8 @@ impl Retryable for BuiltInStepError {
             | BuiltInStepError::UnexpectedOutcome { .. }
             | BuiltInStepError::Unanswered(_)
             | BuiltInStepError::ChildTaskElsewhere(_)
-            | BuiltInStepError::Setup(_) => false,
+            | BuiltInStepError::Setup(_)
+            | BuiltInStepError::Refused(_) => false,
         }
     }
 }
@@ -325,7 +332,8 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::Unanswered(_)
             | BuiltInStepError::ChildTask(_)
             | BuiltInStepError::ChildTaskElsewhere(_)
-            | BuiltInStepError::Setup(_) => false,
+            | BuiltInStepError::Setup(_)
+            | BuiltInStepError::Refused(_) => false,
         }
     }
 
@@ -340,7 +348,15 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::Unanswered(_)
             | BuiltInStepError::ChildTask(_)
             | BuiltInStepError::ChildTaskElsewhere(_)
-            | BuiltInStepError::Setup(_) => false,
+            | BuiltInStepError::Setup(_)
+            | BuiltInStepError::Refused(_) => false,
+        }
+    }
+
+    fn refused(&self) -> Option<&str> {
+        match self {
+            BuiltInStepError::Refused(reason) => Some(reason),
+            _ => None,
         }
     }
 
@@ -355,7 +371,8 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::Unanswered(_)
             | BuiltInStepError::ChildTask(_)
             | BuiltInStepError::ChildTaskElsewhere(_)
-            | BuiltInStepError::Setup(_) => false,
+            | BuiltInStepError::Setup(_)
+            | BuiltInStepError::Refused(_) => false,
         }
     }
 }

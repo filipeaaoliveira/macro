@@ -146,6 +146,12 @@ impl FactoryActivities {
 /// replay.
 pub(crate) const INFRASTRUCTURE_FAILURE: &str = "FactoryInfrastructure";
 
+/// The type a Step's work failure carries when the agent's machine refused
+/// the Step's session: not retried, the Run ends `infrastructure`, and its
+/// message, the refusal and the machine's reason, is the Step's output.
+/// Renaming it changes how the Runs that failed so before replay.
+pub(crate) const REFUSED_FAILURE: &str = "FactoryRefused";
+
 /// The type a Step's work failure carries when its agent was still at work
 /// when the wait for it ended: retried, and should the Step's time run out
 /// on it, the work's failure, never infrastructure's. Renaming it changes
@@ -158,6 +164,11 @@ pub(super) fn failure(error: StepError) -> ActivityError {
     match error {
         StepError::OutOfQuota(_) => ApplicationFailure::builder(error)
             .type_name(INFRASTRUCTURE_FAILURE.to_string())
+            .non_retryable(true)
+            .build()
+            .into(),
+        StepError::Refused(_) => ApplicationFailure::builder(error)
+            .type_name(REFUSED_FAILURE.to_string())
             .non_retryable(true)
             .build()
             .into(),
