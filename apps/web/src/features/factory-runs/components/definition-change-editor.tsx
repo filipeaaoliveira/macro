@@ -425,7 +425,7 @@ export function DefinitionChangeEditor(props: {
                         href={definitionFileUrl(
                           props.repoUrl,
                           path(),
-                          props.commit
+                          file().start?.commit ?? props.commit
                         )}
                       >
                         {t('factoryRuns.definitionChangeCurrentFile')}
