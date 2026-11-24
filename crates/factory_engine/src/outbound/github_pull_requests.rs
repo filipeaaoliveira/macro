@@ -5,6 +5,10 @@
 #[cfg(test)]
 mod test;
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
 use authentication_service_client::AuthServiceClient;
 use factory_records::domain::models::RunId;
 use github::domain::models::{
@@ -94,11 +98,23 @@ impl OwnerTokens for AuthServiceClient {
     }
 }
 
+/// How long an owner's GitHub token is kept once read. Reading one asks
+/// the authentication service, which asks GitHub whether it still works:
+/// as long again as the call it is for. A relinked or unlinked account
+/// shows within this time.
+const TOKEN_KEPT: Duration = Duration::from_secs(30);
+
+/// The most owners whose tokens are kept; past it the expired ones are
+/// dropped, and if none has, all of them.
+const TOKENS_KEPT: usize = 1_000;
+
 /// GitHub, as each Run's owner.
 #[derive(Clone)]
 pub struct GithubPullRequests<T> {
     tokens: T,
     github: GithubOauthImpl,
+    /// Each owner's token, with when it was read.
+    kept: Arc<Mutex<HashMap<String, (String, Instant)>>>,
 }
 
 impl<T: OwnerTokens> GithubPullRequests<T> {
@@ -107,6 +123,7 @@ impl<T: OwnerTokens> GithubPullRequests<T> {
         Self {
             tokens,
             github: GithubOauthImpl::default(),
+            kept: Arc::default(),
         }
     }
 
@@ -114,20 +131,56 @@ impl<T: OwnerTokens> GithubPullRequests<T> {
     /// `tokens`: a stand-in's, in tests.
     #[cfg(test)]
     pub fn with_client(tokens: T, github: GithubOauthImpl) -> Self {
-        Self { tokens, github }
+        Self {
+            tokens,
+            github,
+            kept: Arc::default(),
+        }
     }
 
-    /// The owner's GitHub token, read on every call so a relinked account
-    /// shows at once.
+    /// The owner's GitHub token, read again once it was kept for
+    /// [`TOKEN_KEPT`]. An owner with none is asked again on every call, so
+    /// a link they make shows at once.
     async fn token(
         &self,
         owner: &MacroUserIdStr<'static>,
     ) -> Result<String, GithubPullRequestsErr> {
-        self.tokens
+        if let Some(token) = self.kept_token(owner) {
+            return Ok(token);
+        }
+
+        let token = self
+            .tokens
             .token(owner)
             .await
             .map_err(GithubPullRequestsErr::Token)?
-            .ok_or(GithubPullRequestsErr::NotLinked)
+            .ok_or(GithubPullRequestsErr::NotLinked)?;
+        self.keep_token(owner, &token);
+        Ok(token)
+    }
+
+    /// The owner's token, if it was read less than [`TOKEN_KEPT`] ago.
+    fn kept_token(&self, owner: &MacroUserIdStr<'static>) -> Option<String> {
+        let kept = self.kept.lock().ok()?;
+        let (token, at) = kept.get(owner.as_ref())?;
+        (at.elapsed() < TOKEN_KEPT).then(|| token.clone())
+    }
+
+    /// Keep the owner's token, read now.
+    fn keep_token(&self, owner: &MacroUserIdStr<'static>, token: &str) {
+        let Ok(mut kept) = self.kept.lock() else {
+            return;
+        };
+        if kept.len() >= TOKENS_KEPT {
+            kept.retain(|_, (_, at)| at.elapsed() < TOKEN_KEPT);
+        }
+        if kept.len() >= TOKENS_KEPT {
+            kept.clear();
+        }
+        kept.insert(
+            owner.as_ref().to_string(),
+            (token.to_string(), Instant::now()),
+        );
     }
 
     /// The pull request from `branch`, with `token`.
