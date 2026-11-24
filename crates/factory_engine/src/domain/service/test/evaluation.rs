@@ -521,7 +521,8 @@ async fn a_label_of_a_badly_named_scorer_is_refused() {
 
 /// The live Scorers that will still judge a Run: those whose sample takes
 /// it and that have not judged it, never one sampled out; none once its
-/// scoring finished, an hour after it ended, nor for a cancelled Run.
+/// scoring finished, an hour after it ended, for a Benchmark trial, nor
+/// for a Run cancelled or ended on infrastructure.
 #[tokio::test]
 async fn the_scores_say_which_scorers_will_still_judge_a_run() {
     let repo = FakeRepo::default();
@@ -591,6 +592,14 @@ async fn the_scores_say_which_scorers_will_still_judge_a_run() {
         judged: Vec::new(),
         ..state
     };
+    let trial = ScoringState {
+        trial: true,
+        ..just_ended.clone()
+    };
+    let infrastructure = ScoringState {
+        outcome: Some(RunOutcome::Infrastructure),
+        ..just_ended.clone()
+    };
 
     assert_eq!(going, ["correctness", "tidiness"]);
     assert_eq!(judging, ["tidiness"]);
@@ -601,4 +610,6 @@ async fn the_scores_say_which_scorers_will_still_judge_a_run() {
         pending_scorers(&definition, run_id, &just_ended, Utc::now()),
         ["correctness", "tidiness"]
     );
+    assert!(pending_scorers(&definition, run_id, &trial, Utc::now()).is_empty());
+    assert!(pending_scorers(&definition, run_id, &infrastructure, Utc::now()).is_empty());
 }
