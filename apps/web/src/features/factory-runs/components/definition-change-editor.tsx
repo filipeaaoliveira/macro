@@ -237,6 +237,17 @@ export function DefinitionChangeEditor(props: {
     return !known;
   };
 
+  // The head the factory checks against now, for a change sent again
+  // unchanged: its refusals are dropped, since one that merged meanwhile
+  // changes nothing and is answered by its pull request.
+  const headNow = async (): Promise<string | undefined> => {
+    try {
+      return (await checking.mutateAsync(checkRequest(draft()))).commit;
+    } catch {
+      return undefined;
+    }
+  };
+
   const check = async () => {
     setChecked(true);
     setRefused(undefined);
@@ -250,12 +261,17 @@ export function DefinitionChangeEditor(props: {
     setChecked(true);
     setRefused(undefined);
     if (!checkDraft(draft()).ready || busy()) return;
-    // A change sent again unchanged, as after a lost answer, goes as it is:
-    // the factory answers its pull request, though it may since have
-    // merged, which a check would refuse as changing nothing. Any other
-    // draft is checked first, so one that doesn't read never takes a
-    // change id, and one written from an older head is said to be.
-    if (!sentUnchanged(sent(), draft())) {
+    // A change sent again unchanged, as after a lost answer, goes even if
+    // a check refuses it: the factory answers its pull request, though it
+    // may since have merged, which a check refuses as changing nothing. Its
+    // pull request may never have opened, though, so the head it would go
+    // on is still checked, to say if it moved since a file was read. Any
+    // other draft is checked first, so one that doesn't read never takes
+    // a change id, and one written from an older head is said to be.
+    if (sentUnchanged(sent(), draft())) {
+      const head = await headNow();
+      if (head && warnMoved(head)) return;
+    } else {
       const passing = await checkWithFactory();
       if (!passing || warnMoved(passing.commit)) return;
     }

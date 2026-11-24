@@ -545,7 +545,7 @@ describe('DefinitionSettings', () => {
       expect(factoryClient.proposeDefinitionChange).not.toHaveBeenCalled();
     });
 
-    it('sends a change again unchanged without checking it, so a merged one answers its pull request', async () => {
+    it('sends a change again unchanged though a check refuses it, so a merged one answers its pull request', async () => {
       vi.mocked(factoryClient.proposeDefinitionChange)
         .mockResolvedValueOnce(
           err([{ code: 'SERVER_ERROR', message: 'Internal server error' }])
@@ -580,7 +580,7 @@ describe('DefinitionSettings', () => {
       await screen.findByRole('link', {
         name: '#12 Add a review step (opens in a new tab)',
       });
-      expect(factoryClient.checkDefinitionChange).toHaveBeenCalledTimes(1);
+      expect(factoryClient.checkDefinitionChange).toHaveBeenCalledTimes(2);
       const ids = vi
         .mocked(factoryClient.proposeDefinitionChange)
         .mock.calls.map(([request]) => request.changeId);
@@ -632,6 +632,65 @@ describe('DefinitionSettings', () => {
       await screen.findByRole('link', {
         name: '#13 Add a review step (opens in a new tab)',
       });
+    });
+
+    it('says when the head moved before a change is sent again unchanged', async () => {
+      vi.mocked(factoryClient.getDefinitionFile).mockResolvedValueOnce(
+        ok({
+          path: 'flows/notes.json',
+          commit: READ,
+          text: '{"entries": ["reply"]}',
+        })
+      );
+      // The first send fails before its branch is there.
+      vi.mocked(factoryClient.proposeDefinitionChange)
+        .mockResolvedValueOnce(
+          err([{ code: 'SERVER_ERROR', message: 'Internal server error' }])
+        )
+        .mockResolvedValueOnce(
+          ok({
+            number: 14,
+            title: 'Add a review step',
+            url: `${REPO}/pull/14`,
+            draft: false,
+          })
+        );
+      // A change merged meanwhile moves the head.
+      vi.mocked(factoryClient.checkDefinitionChange)
+        .mockResolvedValueOnce(ok({ commit: READ }))
+        .mockResolvedValue(ok({ commit: HEAD }));
+      mount(admin);
+      await pick('flows/notes.json');
+      await waitFor(() => expect(fileText()).toBe('{"entries": ["reply"]}'));
+      fireEvent.input(
+        screen.getByRole('textbox', { name: 'What it changes' }),
+        { target: { value: 'Add a review step' } }
+      );
+      fireEvent.input(
+        screen.getByRole('textbox', { name: 'File 1’s new text' }),
+        { target: { value: '{"entries": ["review"]}' } }
+      );
+      send();
+      await screen.findByText(
+        'The change couldn’t be sent. Send it again: if its pull request was opened, you’ll get it back.'
+      );
+      send();
+
+      expect(
+        await screen.findByText(
+          'The definition moved to bbbbbbb since you read flows/notes.json: sending overwrites what merged since. Empty a file and pick its path again to start from it as it is now, or send again to go ahead.'
+        )
+      ).toBeTruthy();
+      await new Promise((settle) => setTimeout(settle, 20));
+      expect(factoryClient.proposeDefinitionChange).toHaveBeenCalledTimes(1);
+      send();
+      await screen.findByRole('link', {
+        name: '#14 Add a review step (opens in a new tab)',
+      });
+      const ids = vi
+        .mocked(factoryClient.proposeDefinitionChange)
+        .mock.calls.map(([request]) => request.changeId);
+      expect(ids).toEqual([ids[0], ids[0]]);
     });
 
     it('shows a file is being read until its last read ends', async () => {
