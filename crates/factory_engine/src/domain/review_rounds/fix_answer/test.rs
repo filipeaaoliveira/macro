@@ -60,8 +60,8 @@ fn said(round: &ReviewRound, text: &str) -> Vec<(u16, FixStatus, Option<String>)
 }
 
 /// The fix says per Blocker, by its number in the brief, whether it fixed
-/// it or disputes it with why; one it leaves out is fixed, and the last
-/// word on a number counts.
+/// it or disputes it with why; one it leaves out gets no answer, and the
+/// last word on a number counts.
 #[test]
 fn a_fix_says_per_blocker_fixed_or_disputed() {
     let text = "Done.\n```JSON\n{\"blockers\": [\
@@ -75,33 +75,48 @@ fn a_fix_says_per_blocker_fixed_or_disputed() {
         said(&round(), text),
         [
             (1, FixStatus::Fixed, None),
-            (3, FixStatus::Fixed, None),
             (4, FixStatus::Disputed, Some("It is generated".to_string())),
         ]
     );
 }
 
-/// A dispute needs a reason; a block that does not read, or none, fixes
-/// every Blocker; and an answer that never read cannot be disputed.
+/// A dispute needs a reason, and an answer that never read cannot be
+/// disputed: each is fixed.
 #[test]
-fn a_dispute_without_a_reason_or_a_block_is_a_fix() {
+fn a_dispute_without_a_reason_is_a_fix() {
     let no_reason = "```json\n{\"blockers\": [{\"number\": 2, \"status\": \"disputed\", \
         \"reason\": \" \"}]}\n```";
-    let broken = "```json\n{\"blockers\": [{\"number\": 2, \"status\": \"disputed\"\n```";
-    let fixed = |round: &ReviewRound, text: &str| {
-        fix_answers(round, text)
-            .iter()
-            .all(|answer| answer.status == FixStatus::Fixed && answer.dispute.is_none())
-    };
-
-    assert!(fixed(&round(), no_reason));
-    assert!(fixed(&round(), broken));
-    assert!(fixed(&round(), "Fixed them all."));
     let mut unreadable = round();
     unreadable.findings[0].path = WHOLE_CHANGE.to_string();
     let disputes_it = "```json\n{\"blockers\": [{\"number\": 1, \"status\": \"disputed\", \
         \"reason\": \"The reviewer was confused\"}]}\n```";
-    assert!(fixed(&unreadable, disputes_it));
+
+    assert_eq!(said(&round(), no_reason), [(3, FixStatus::Fixed, None)]);
+    assert_eq!(
+        said(&unreadable, disputes_it),
+        [(1, FixStatus::Fixed, None)]
+    );
+}
+
+/// A fix that answers in prose, or with a block that does not read,
+/// answers no Blocker: a dispute it wrote out of the block is never taken
+/// for a fix, and each Blocker blocks again.
+#[test]
+fn prose_or_a_broken_block_answers_no_blocker() {
+    let prose = "I dispute blocker 2: the file is generated, so it must not be edited.";
+    let broken = "```json\n{\"blockers\": [{\"number\": 2, \"status\": \"disputed\"\n```";
+
+    assert!(said(&round(), prose).is_empty());
+    assert!(said(&round(), broken).is_empty());
+    assert!(said(&round(), "Fixed them all.").is_empty());
+}
+
+/// A block that names some Blockers answers only those.
+#[test]
+fn a_partial_block_answers_only_the_blockers_it_names() {
+    let text = "Done.\n```json\n{\"blockers\": [{\"number\": 2, \"status\": \"fixed\"}]}\n```";
+
+    assert_eq!(said(&round(), text), [(3, FixStatus::Fixed, None)]);
 }
 
 /// A reason is cut to its bound, between two characters.
