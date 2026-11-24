@@ -23,7 +23,8 @@ use crate::domain::fakes::{FakeGithub, FakeJudge, FakeRepo, FakeWatches};
 use crate::domain::flow::StepName;
 use crate::domain::insights::fakes::FakeUsage;
 use crate::domain::models::{
-    DefinitionFlow, DefinitionPullRequest, DefinitionRole, FactoryError, StepRequest,
+    DefinitionFlow, DefinitionPullRequest, DefinitionRole, FactoryError, PullRequestRequirement,
+    StepRequest,
 };
 use crate::domain::ports::{FactoryService, ScoringService, StepService};
 use crate::domain::pull_request_steps::PullRequestSteps;
@@ -593,17 +594,49 @@ async fn the_settings_say_what_the_definition_decides() {
     definition_files(&github, FIRST, "Notes.", None);
     let service = code_service(&repo, &workflows, &github);
 
-    github.state().requires_pull_request = Some(false);
+    github.state().requires_pull_request = PullRequestRequirement::NotRequired;
     let unprotected = service.definition(&julia()).await.expect("settings");
-    github.state().requires_pull_request = Some(true);
+    github.state().requires_pull_request = PullRequestRequirement::Required;
     let protected = service.definition(&julia()).await.expect("settings");
     let control_files = service.control_files(&julia()).await.expect("settings");
     let rules = service.standing_rules(&julia()).await.expect("settings");
 
     assert_eq!(unprotected.requires_pull_request, Some(false));
     assert_eq!(protected.requires_pull_request, Some(true));
+    assert_eq!(protected.requires_pull_request_unknown_reason, None);
     assert!(control_files.definition_named && !control_files.can_edit);
     assert!(rules.definition_named && !rules.can_edit);
+}
+
+/// When GitHub refuses to show the Definition branch's protection, the
+/// settings say it cannot be told, with GitHub's reason, as a plan that
+/// offers no protection on a private repository.
+#[tokio::test]
+async fn the_settings_say_why_the_definitions_protection_cannot_be_told() {
+    const UPGRADE: &str =
+        "Upgrade to GitHub Pro or make this repository public to enable this feature.";
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    let service = code_service(&repo, &workflows, &github);
+
+    github.state().requires_pull_request = PullRequestRequirement::Unknown {
+        github_message: Some(UPGRADE.to_string()),
+    };
+    let refused = service.definition(&julia()).await.expect("settings");
+    github.state().requires_pull_request = PullRequestRequirement::Unknown {
+        github_message: None,
+    };
+    let silent = service.definition(&julia()).await.expect("settings");
+
+    assert_eq!(refused.requires_pull_request, None);
+    assert_eq!(
+        refused.requires_pull_request_unknown_reason.as_deref(),
+        Some(UPGRADE)
+    );
+    assert_eq!(silent.requires_pull_request, None);
+    assert_eq!(silent.requires_pull_request_unknown_reason, None);
 }
 
 fn fix_pull_request() -> DefinitionPullRequest {

@@ -5218,7 +5218,11 @@
           },
           "requiresPullRequest": {
             "type": ["boolean", "null"],
-            "description": "Whether a ruleset or the branch protection of its default branch\nasks for a pull request; none when that cannot be told, as when the\nperson does not administer it. Without one, a push changes the\nfactory's rules unreviewed. With one, whoever may bypass the rules\n(a ruleset's bypass list, admins when protection does not include\nthem) still can: GitHub does not tell the factory who."
+            "description": "Whether a ruleset or the branch protection of its default branch\nasks for a pull request; none when that cannot be told, as when the\nperson does not administer it, or its plan offers no protection on a\nprivate repository. Without one, a push changes the factory's rules\nunreviewed. With one, whoever may bypass the rules (a ruleset's\nbypass list, admins when protection does not include them) still\ncan: GitHub does not tell the factory who."
+          },
+          "requiresPullRequestUnknownReason": {
+            "type": ["string", "null"],
+            "description": "Why it cannot be told whether the default branch asks for a pull\nrequest, in GitHub's words, when GitHub refused to show the rules or\nthe protection with a message, as \"Upgrade to GitHub Pro or make\nthis repository public to enable this feature.\""
           },
           "teamId": {
             "type": ["string", "null"],

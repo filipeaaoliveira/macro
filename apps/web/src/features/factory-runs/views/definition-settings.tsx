@@ -15,6 +15,15 @@ import {
 } from '../queries/definition';
 
 /**
+ * GitHub's reason the branch's protection could not be read, without the
+ * full stop the sentence around it adds; none when GitHub gave none.
+ */
+function unknownReason(reason: string | null | undefined) {
+  const trimmed = reason?.trim().replace(/\.+$/, '');
+  return trimmed || undefined;
+}
+
+/**
  * The team's Factory Definition: the repository whose files its Runs take
  * their Flows, Agents and rules from, whether it reads at its head (and why
  * not), what it holds there, which commit the newest Run read, and the pull
@@ -118,7 +127,18 @@ export function DefinitionSettings() {
                   }
                 >
                   <p class="text-xs text-ink-muted">
-                    {t('factoryRuns.definitionPullRequestUnknown')}
+                    <Show
+                      when={unknownReason(
+                        settings().requiresPullRequestUnknownReason
+                      )}
+                      fallback={t('factoryRuns.definitionPullRequestUnknown')}
+                    >
+                      {(reason) =>
+                        t('factoryRuns.definitionPullRequestUnknownReason', {
+                          reason: reason(),
+                        })
+                      }
+                    </Show>
                   </p>
                 </Show>
                 <p class="text-xs text-ink-muted">

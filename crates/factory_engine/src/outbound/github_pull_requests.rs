@@ -17,7 +17,7 @@ use github::domain::models::{
 };
 use github::domain::ports::GithubOauth;
 use github::outbound::github_oauth_client::{
-    FileTooLarge, GithubBranchUpdate, GithubJobRerun, GithubOauthImpl,
+    FileTooLarge, GithubBranchUpdate, GithubJobRerun, GithubOauthImpl, GithubPullRequestRequirement,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 
@@ -25,8 +25,9 @@ use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
     CommitStatus, DefinitionPullRequest, FailureAnnotation, FinishedJob, HeadChecks, JobRerun,
-    Merging, OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestState,
-    PullRequestText, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch, workflow_run_of,
+    Merging, OpenPullRequest, Opening, PullRequest, PullRequestComment, PullRequestRequirement,
+    PullRequestState, PullRequestText, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
+    workflow_run_of,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -671,12 +672,19 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         branch: &str,
-    ) -> Result<Option<bool>, GithubPullRequestsErr> {
+    ) -> Result<PullRequestRequirement, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
-        Ok(self
+        let requirement = self
             .github
             .get_requires_pull_request(&token, repository.owner(), repository.name(), branch)
-            .await?)
+            .await?;
+        Ok(match requirement {
+            GithubPullRequestRequirement::Required => PullRequestRequirement::Required,
+            GithubPullRequestRequirement::NotRequired => PullRequestRequirement::NotRequired,
+            GithubPullRequestRequirement::Unknown { github_message } => {
+                PullRequestRequirement::Unknown { github_message }
+            }
+        })
     }
 
     #[tracing::instrument(err, skip(self, owner))]

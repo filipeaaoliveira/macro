@@ -2411,7 +2411,10 @@ so a person approves it; `rules.json` lists at most
 `MAX_DEFINITION_CONTROL_FILES` (195) patterns to leave them room. `GET
 /settings/definition` says whether the default branch takes changes only by
 pull request (`requiresPullRequest`, from its rulesets or, for its admins,
-its branch protection), and the Control Files and Standing Rules settings
+its branch protection); when GitHub refuses to show them, it is null and
+`requiresPullRequestUnknownReason` carries GitHub's message, such as a plan
+that offers no protection on a private repository, so the screen does not
+guess the reason. The Control Files and Standing Rules settings
 say a Definition is named (`definitionNamed`). The service keeps what it
 read per person (`service/definition/kept.rs`): a Definition read at a
 commit for 10 minutes, since a commit's files never change, and the head

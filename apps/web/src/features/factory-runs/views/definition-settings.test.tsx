@@ -201,6 +201,37 @@ describe('DefinitionSettings', () => {
     ).toBeTruthy();
   });
 
+  it('says GitHub’s reason when the branch’s protection couldn’t be read', async () => {
+    mount({
+      ...named,
+      requiresPullRequest: null,
+      requiresPullRequestUnknownReason:
+        'Upgrade to GitHub Pro or make this repository public to enable this feature.',
+    });
+
+    expect(
+      await screen.findByText(
+        'Couldn’t read whether its default branch requires a pull request: Upgrade to GitHub Pro or make this repository public to enable this feature. Make sure it does.'
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(/admins can read/i)).toBeNull();
+  });
+
+  it('blames nothing when GitHub gave no reason', async () => {
+    mount({
+      ...named,
+      requiresPullRequest: null,
+      requiresPullRequestUnknownReason: null,
+    });
+
+    expect(
+      await screen.findByText(
+        'Couldn’t read whether its default branch requires a pull request. Make sure it does.'
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(/admins can read/i)).toBeNull();
+  });
+
   describe('a change to the definition', () => {
     const admin: Settings = { ...named, canEdit: true };
 

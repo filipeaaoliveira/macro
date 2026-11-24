@@ -1,6 +1,6 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
-use super::GithubBranchUpdate;
+use super::{GithubBranchUpdate, GithubPullRequestRequirement};
 use crate::domain::models::{
     GithubBranchDeletion, GithubError, GithubOpenPullRequest, GithubOpenPullRequestItem,
     GithubOpenPullRequestOutcome, GithubRepositoryAccess, GithubRequiredCheck,
@@ -727,7 +727,8 @@ async fn pull_requests_onto_a_branch_refuse_an_owner_or_repository_github_would_
 
 /// A branch a ruleset asks a pull request for, or whose protection asks
 /// for reviews, takes changes only through one; neither, and it takes
-/// pushes; a protection refused to the caller says nothing.
+/// pushes; a protection refused to the caller is unknown, with GitHub's
+/// reason.
 #[tokio::test]
 async fn a_branch_requires_a_pull_request_by_ruleset_or_protection() {
     let by_ruleset = MockServer::start_many(vec![MockResponse {
@@ -794,13 +795,73 @@ async fn a_branch_requires_a_pull_request_by_ruleset_or_protection() {
         .unwrap();
     refused.finish_all();
 
-    assert_eq!(ruleset, Some(true));
-    assert_eq!(protection, Some(true));
+    assert_eq!(ruleset, GithubPullRequestRequirement::Required);
+    assert_eq!(protection, GithubPullRequestRequirement::Required);
     assert!(requests[1].starts_with(
         "GET /repos/macro/definition/branches/main/protection/required_pull_request_reviews "
     ));
-    assert_eq!(unprotected, Some(false));
-    assert_eq!(unknown, None);
+    assert_eq!(unprotected, GithubPullRequestRequirement::NotRequired);
+    assert_eq!(
+        unknown,
+        GithubPullRequestRequirement::Unknown {
+            github_message: Some("Must have admin rights to Repository.".to_string()),
+        }
+    );
+}
+
+/// A private repository whose plan offers no branch protection is refused
+/// with GitHub's reason, and that reason comes back, whether the rulesets
+/// or the protection are refused.
+#[tokio::test]
+async fn a_protection_refused_for_the_plan_keeps_githubs_reason() {
+    const UPGRADE: &str =
+        "Upgrade to GitHub Pro or make this repository public to enable this feature.";
+    let body = format!(
+        r#"{{"message":"{UPGRADE}","documentation_url":"https://docs.github.com/rest/branches/branch-protection","status":"403"}}"#
+    );
+
+    let protection_refused = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: "[]".to_string(),
+        },
+        MockResponse {
+            status: "403 Forbidden",
+            body: body.clone(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(protection_refused.base_url.clone());
+    let protection = client
+        .get_requires_pull_request("token", "macro", "definition", "main")
+        .await
+        .unwrap();
+    protection_refused.finish_all();
+
+    let (rules_refused, client) = answering("403 Forbidden", &body);
+    let rules = client
+        .get_requires_pull_request("token", "macro", "definition", "main")
+        .await
+        .unwrap();
+    rules_refused.finish();
+
+    let (unreadable, client) = answering("403 Forbidden", "<html>Forbidden</html>");
+    let without_message = client
+        .get_requires_pull_request("token", "macro", "definition", "main")
+        .await
+        .unwrap();
+    unreadable.finish();
+
+    let upgrade = GithubPullRequestRequirement::Unknown {
+        github_message: Some(UPGRADE.to_string()),
+    };
+    assert_eq!(protection, upgrade);
+    assert_eq!(rules, upgrade);
+    assert_eq!(
+        without_message,
+        GithubPullRequestRequirement::Unknown {
+            github_message: None
+        }
+    );
 }
 
 /// CI health reads each check run's id, app and output, and an Actions
