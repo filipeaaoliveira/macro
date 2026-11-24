@@ -26,6 +26,7 @@ import {
 } from '../core/run';
 import {
   ActivityTail,
+  ReviewerPills,
   RoleAvatar,
   RuntimeChips,
   reviewerName,
@@ -236,6 +237,12 @@ export function RunLiveHero(props: {
     const last = props.run.steps.at(-1);
     return !props.run.end && last?.gate && !last.gate.answer ? [last] : [];
   };
+  // A panel's reviewers that finished shrink to chips beside the heading.
+  const finished = () =>
+    working().length > 1
+      ? working().filter((step) => step.end && !step.gate)
+      : [];
+  const active = () => working().filter((step) => !finished().includes(step));
   const state = (): 'working' | 'waiting' | 'merged' | 'ended' => {
     if (props.run.end) {
       return props.run.end.outcome === 'success' ? 'merged' : 'ended';
@@ -250,7 +257,10 @@ export function RunLiveHero(props: {
       aria-label={t('factoryDashboard.pipeline')}
     >
       <div class="flex flex-wrap items-start gap-x-6 gap-y-3">
-        <h1 class="min-w-0 flex-1 basis-80 pt-0.5 text-[22px] leading-7 font-semibold tracking-tight text-balance text-ink">
+        <h1
+          class="line-clamp-2 min-w-0 flex-1 basis-80 pt-0.5 text-[22px] leading-7 font-semibold tracking-tight text-balance text-ink"
+          title={runTitle(props.run)}
+        >
           {runTitle(props.run)}
         </h1>
         <Show when={props.run.end}>
@@ -286,7 +296,9 @@ export function RunLiveHero(props: {
             ? t('factoryDashboard.stageCurrent')
             : state() === 'waiting'
               ? t('factoryDashboard.waitingOnYou')
-              : runOutcomeLabel(props.run.end?.outcome ?? 'success')}
+              : state() === 'merged' && props.run.pullRequestUrl
+                ? t('factoryDashboard.merged')
+                : runOutcomeLabel(props.run.end?.outcome ?? 'success')}
         </span>
         <Show when={props.run.repository}>
           {(repo) => <span class="text-ink">{repositoryName(repo().url)}</span>}
@@ -324,19 +336,24 @@ export function RunLiveHero(props: {
       </div>
       <Show when={working().length > 0}>
         <div class="flex flex-col gap-2.5">
-          <h2 class="flex items-center gap-2 text-[13px] font-semibold text-ink">
-            <span class="size-2 rounded-full bg-accent" />
-            {t('factoryDashboard.now')}
-          </h2>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h2 class="flex items-center gap-2 text-[13px] font-semibold text-ink">
+              <span class="size-2 rounded-full bg-accent" />
+              {t('factoryDashboard.now')}
+            </h2>
+            <Show when={finished().length > 0}>
+              <ReviewerPills steps={finished()} />
+            </Show>
+          </div>
           <ul
             class={cn(
               'grid gap-2.5',
-              working().length > 1
-                ? 'grid-cols-1 md:grid-cols-3'
-                : 'grid-cols-1 md:max-w-xl'
+              active().length > 2 && 'grid-cols-1 md:grid-cols-3',
+              active().length === 2 && 'grid-cols-1 md:grid-cols-2',
+              active().length === 1 && 'grid-cols-1 md:max-w-2xl'
             )}
           >
-            <For each={working()}>
+            <For each={active()}>
               {(step) => (
                 <AgentNow
                   step={step}

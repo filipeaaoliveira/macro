@@ -94,7 +94,7 @@ const LABEL: Record<StageState, string> = {
   waiting: 'font-semibold text-warning',
   failed: 'font-semibold text-failure',
   stopped: 'text-ink-muted',
-  skipped: 'text-ink-extra-muted line-through decoration-edge-muted',
+  skipped: 'text-ink-extra-muted',
   pending: 'text-ink-extra-muted',
 };
 

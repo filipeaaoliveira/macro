@@ -139,6 +139,7 @@ export function FactoryDashboard(props: {
             {modeTabs()}
             <Tabs
               aria-label={t('factoryBoard.scope')}
+              class="max-sm:hidden"
               size="md"
               options={[
                 { value: 'mine' as const, label: t('factoryBoard.scopeMine') },
@@ -156,7 +157,9 @@ export function FactoryDashboard(props: {
                     onClick={() => openInsights()()}
                   >
                     <ChartBarIcon class="size-4" />
-                    {t('factoryDashboard.insights')}
+                    <span class="max-sm:sr-only">
+                      {t('factoryDashboard.insights')}
+                    </span>
                   </Button>
                 </HeaderActionGroup>
               )}

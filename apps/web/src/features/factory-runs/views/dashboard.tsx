@@ -649,18 +649,25 @@ function RecentPanel(props: {
                     <span class="truncate text-[11px] leading-4 text-ink-subtle">
                       {[
                         listed.run.end
-                          ? runOutcomeLabel(listed.run.end.outcome)
+                          ? listed.run.end.outcome === 'success' &&
+                            listed.run.pullRequestUrl
+                            ? t('factoryDashboard.merged')
+                            : runOutcomeLabel(listed.run.end.outcome)
                           : undefined,
                         listed.run.end
-                          ? props.age(listed.run.end.endedAt)
+                          ? t('factoryDashboard.agoShort', {
+                              time: props.age(listed.run.end.endedAt),
+                            })
                           : undefined,
                         listed.run.end
-                          ? formatElapsed(
-                              elapsedMs(
-                                listed.run.createdAt,
-                                listed.run.end.endedAt
-                              )
-                            )
+                          ? t('factoryDashboard.tookShort', {
+                              time: formatElapsed(
+                                elapsedMs(
+                                  listed.run.createdAt,
+                                  listed.run.end.endedAt
+                                )
+                              ),
+                            })
                           : undefined,
                       ]
                         .filter(Boolean)

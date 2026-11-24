@@ -4,7 +4,6 @@ import { t } from '@app/lib/i18n';
 import { LoadingSpinner } from '@core/component/LoadingSpinner';
 import { Match, Show, Switch } from 'solid-js';
 import { RunLiveHero } from '../components/run-live-hero';
-import { runTitle } from '../core/run';
 import { createFocusRescue } from '../primitives/focus-rescue';
 import type { RunController } from '../primitives/run-controller';
 import { RunGate } from './run-dialog';
@@ -34,10 +33,6 @@ export function RunPane(props: {
     () => content,
     () => status
   );
-  const title = () => {
-    const run = source.data();
-    return run ? runTitle(run) : t('factoryRuns.runDetails');
-  };
 
   return (
     <div
@@ -47,7 +42,11 @@ export function RunPane(props: {
       class="flex size-full min-h-0 flex-col"
     >
       <ListHeader
-        title={<ViewSidebar.Title caret={false}>{title()}</ViewSidebar.Title>}
+        title={
+          <ViewSidebar.Title caret={false}>
+            {t('factoryDashboard.runCrumb')}
+          </ViewSidebar.Title>
+        }
       />
       <Switch>
         <Match when={source.state() === 'pending'}>

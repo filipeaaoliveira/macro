@@ -114,7 +114,8 @@ export function RunContent(props: {
             status={status()}
             time={props.controller.stepTime}
             onWatch={
-              props.controller.owned()
+              // The page's pipeline watches its running Steps.
+              props.controller.owned() && !props.stepsFirst
                 ? props.controller.openTerminal
                 : undefined
             }
