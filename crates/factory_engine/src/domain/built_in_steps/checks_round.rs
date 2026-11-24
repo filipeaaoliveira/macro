@@ -1408,7 +1408,7 @@ fn needs_commit(round: &ReviewRound, work_output: &str) -> bool {
                 && answer.place == blocker.place
                 && answer.status == FixStatus::Disputed
         });
-        !disputed && !(reported_break && asks_for_break(blocker))
+        !(disputed || (reported_break && asks_for_break(blocker)))
     })
 }
 
