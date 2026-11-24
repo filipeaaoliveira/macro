@@ -137,6 +137,13 @@ pub trait AgentFailure: Retryable {
         None
     }
 
+    /// Why the agent's machine refused the Step's session, when it did:
+    /// trying again is refused the same way, and the Step fails for
+    /// infrastructure, showing the Run's owner why.
+    fn refused(&self) -> Option<&str> {
+        None
+    }
+
     /// What the Run's owner is shown when the repository's setup failed, or
     /// could not run, in a new session before its first prompt: the Step
     /// then ends `failed` with it.

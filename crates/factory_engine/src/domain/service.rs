@@ -2588,6 +2588,9 @@ where
             .run(&request.step, input)
             .await
             .map_err(|error| {
+                if let Some(reason) = error.refused() {
+                    return StepError::Refused(reason.to_owned());
+                }
                 let out_of_quota = error.out_of_quota();
                 let overdue = error.overdue();
                 let final_failure = !error.retryable();

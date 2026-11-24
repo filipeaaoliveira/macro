@@ -79,6 +79,18 @@ impl Runtime {
         }
     }
 
+    /// A runtime that never connects, for tests of what runs before a
+    /// connection is needed.
+    #[cfg(test)]
+    pub(crate) fn never_connected() -> Self {
+        let (_connected, connected) = watch::channel(false);
+        Self {
+            connected,
+            agents_changed: Arc::default(),
+            _task: AbortOnDropHandle::new(tokio::spawn(std::future::pending())),
+        }
+    }
+
     /// Follows whether the runtime connection is currently up.
     pub fn connection_state(&self) -> watch::Receiver<bool> {
         self.connected.clone()

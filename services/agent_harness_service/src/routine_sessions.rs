@@ -15,13 +15,19 @@ use macro_user_id::user_id::MacroUserIdStr;
 use pipedream_mcp::domain::ports::ConnectionStore;
 
 use crate::external_session_requests::BrokerExternalSessionRequests;
+use crate::external_session_requests::refusals::SessionRefusals;
 
 /// Reuse live harness/session instances and the existing external-request adapter.
-pub fn router<Bots, Harness, Sessions, Broker, Repo, Connections, Auth>(
+pub fn router<Bots, Harness, Sessions, Broker, Repo, Refusals, Connections, Auth>(
     bots: Bots,
     harness: Harness,
     sessions: Sessions,
-    external_requests: BrokerExternalSessionRequests<Broker, Repo>,
+    external_requests: BrokerExternalSessionRequests<
+        Broker,
+        Repo,
+        harnesses::outbound::pg_harness_repo::PgHarnessRepo,
+        Refusals,
+    >,
     connections: Connections,
     authorization: MacroAuthorizationState<Auth>,
 ) -> Router
@@ -31,6 +37,7 @@ where
     Sessions: AgentSessionService,
     Broker: MacroEventBroker,
     Repo: AgentSessionRepo + Clone,
+    Refusals: SessionRefusals + Clone,
     Connections: ConnectionStore,
     Auth: MacroAuthorizationService,
 {

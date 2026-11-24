@@ -45,7 +45,7 @@ impl RoutineSessions for Sessions {
     ) -> Result<PreparedRoutineSession, RoutineSessionError> {
         let session_id = command.session_id;
         self.prepared.lock().unwrap().push(command);
-        if let Some(error) = *self.prepare_failure.lock().unwrap() {
+        if let Some(error) = self.prepare_failure.lock().unwrap().clone() {
             return Err(error);
         }
         Ok(PreparedRoutineSession {
@@ -63,7 +63,7 @@ impl RoutineSessions for Sessions {
     ) -> Result<RoutinePromptAccepted, RoutineSessionError> {
         let action_id = command.action.action_id;
         self.prompted.lock().unwrap().push(command);
-        if let Some(error) = *self.prompt_failure.lock().unwrap() {
+        if let Some(error) = self.prompt_failure.lock().unwrap().clone() {
             return Err(error);
         }
         Ok(RoutinePromptAccepted {
