@@ -1,4 +1,4 @@
-import { Show } from 'solid-js';
+import { type JSX, Show } from 'solid-js';
 import { useBoardContext } from './context/board-context';
 import { useRunsContext } from './context/runs-context';
 import { createBoardState } from './primitives/board-state';
@@ -15,6 +15,8 @@ export function FactoryBoardView(props: {
    * split router, the Run opens over the board.
    */
   onOpenRun?: (runId: string) => void;
+  /** Controls the header shows before its own, such as the view switch. */
+  headerStart?: JSX.Element;
 }) {
   const board = useBoardContext();
   const runs = useRunsContext();
@@ -65,6 +67,7 @@ export function FactoryBoardView(props: {
         projects={projects.data() ?? []}
         queue={queue}
         queueLimit={queueLimit}
+        headerStart={props.headerStart}
       />
       <Show when={state.openRunId()} keyed>
         {(runId) => (
