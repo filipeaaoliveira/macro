@@ -132,5 +132,21 @@ export function createAppInsightsContext(client: QueryClient): InsightsContext {
       await reads.catch(() => undefined);
       return { ok: true, value: undefined };
     },
+
+    async setCiQuarantine(job, quarantine) {
+      const result = quarantine
+        ? await factoryClient.quarantineCiJob(job)
+        : await factoryClient.releaseCiJob(job);
+      // Either way, quality shows where the job stands now.
+      const reads = client.invalidateQueries({
+        queryKey: factoryRunKeys.quality._def,
+      });
+      if (result.isErr()) {
+        fireAndForget(reads, 'factory-runs');
+        return { ok: false, message: result.error[0]?.message };
+      }
+      await reads.catch(() => undefined);
+      return { ok: true };
+    },
   };
 }

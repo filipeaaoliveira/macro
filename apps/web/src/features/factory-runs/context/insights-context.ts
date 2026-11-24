@@ -37,7 +37,20 @@ export type InsightsContext = {
    * person may no longer undo it (no longer an admin of the team, say).
    */
   undoDismissal: (improvementId: string) => Promise<UndoDismissalResult>;
+  /**
+   * Quarantines the CI job `job` of `repository` when `quarantine`, or
+   * releases it, then reads quality again. A refusal carries the service's
+   * message when it gave one: the person does not own or administer their
+   * team, or may not push to the repository.
+   */
+  setCiQuarantine: (
+    job: { repository: string; job: string },
+    quarantine: boolean
+  ) => Promise<CiQuarantineResult>;
 };
+
+/** How quarantining or releasing a CI job went. */
+export type CiQuarantineResult = { ok: true } | { ok: false; message?: string };
 
 /** How undoing a rejection's dismissal went. */
 export type UndoDismissalResult =
