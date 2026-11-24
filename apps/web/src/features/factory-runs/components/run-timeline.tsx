@@ -260,10 +260,14 @@ function TimelineStep(props: {
               ? t('factoryRuns.stepNoAgent', {
                   role: flowWordLabel(props.step.role ?? ''),
                 })
-              : t('factoryRuns.stepAgent', {
-                  role: flowWordLabel(props.step.role ?? ''),
-                  agent: agent(),
-                })}
+              : props.step.passedOver?.length
+                ? t('factoryRuns.stepAgent', {
+                    role: flowWordLabel(props.step.role ?? ''),
+                    agent: agent(),
+                  })
+                : // The Agent's name is the Definition's own (`primary`):
+                  // the Role says who worked, unless another was passed over.
+                  flowWordLabel(props.step.role ?? agent())}
             <For each={props.step.passedOver}>
               {(passed) => (
                 <span class="block text-ink-muted">
@@ -519,39 +523,65 @@ const BREAK_STATUSES = {
  * the test is left unproven), and the edit the break makes.
  */
 function BreakRecordsNote(props: { records: BreakRecord[] }) {
+  // Closed until asked: a Step's breaks are proof, read when in doubt.
+  const [open, setOpen] = createSignal(false);
   return (
     <section data-break-records aria-label={t('factoryRuns.breakRecords')}>
-      <StepNote>{t('factoryRuns.breakRecords')}</StepNote>
-      <For each={props.records}>
-        {(record) => (
-          <StepNote>
-            <span class="flex min-w-0 items-center gap-2">
-              <Badge
-                variant="outline"
-                size="xs"
-                data-break-status={record.status}
-                data-break-tone={
-                  isBlockingBreak(record.status) ? 'warning' : undefined
-                }
-                class={cn(
-                  'shrink-0',
-                  isBlockingBreak(record.status) && OUTCOME_TONES.sentBack
-                )}
-              >
-                {t(BREAK_STATUSES[record.status])}
-              </Badge>
-              <span class="min-w-0 truncate font-mono">{record.test}</span>
-            </span>
-            <span class="block font-mono text-ink-muted">{record.file}</span>
-            <span class="block whitespace-pre-wrap font-mono text-ink-muted">
-              {t('factoryRuns.breakOldText', { text: record.oldText })}
-            </span>
-            <span class="block whitespace-pre-wrap font-mono text-ink-muted">
-              {t('factoryRuns.breakNewText', { text: record.newText })}
-            </span>
-          </StepNote>
-        )}
-      </For>
+      <StepNote>
+        <button
+          type="button"
+          aria-expanded={open()}
+          class="inline-flex items-center gap-1.5 rounded-md text-ink-muted outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          onClick={() => setOpen(!open())}
+        >
+          <CaretDownIcon
+            class={cn(
+              'size-3 transition-transform duration-150 motion-reduce:transition-none',
+              !open() && '-rotate-90'
+            )}
+          />
+          <span>{t('factoryRuns.breakRecords')}</span>
+          <span class="rounded-full bg-surface-2 px-1.5 text-[11px] tabular-nums">
+            {props.records.length}
+          </span>
+        </button>
+      </StepNote>
+      <div hidden={!open()} class="flex flex-col gap-2 pt-1">
+        <For each={props.records}>
+          {(record) => (
+            <StepNote>
+              <span class="flex min-w-0 items-center gap-2">
+                <Badge
+                  variant="outline"
+                  size="xs"
+                  data-break-status={record.status}
+                  data-break-tone={
+                    isBlockingBreak(record.status) ? 'warning' : undefined
+                  }
+                  class={cn(
+                    'shrink-0',
+                    isBlockingBreak(record.status) && OUTCOME_TONES.sentBack
+                  )}
+                >
+                  {t(BREAK_STATUSES[record.status])}
+                </Badge>
+                <span class="min-w-0 truncate text-ink">{record.test}</span>
+              </span>
+              <span class="mt-1.5 block overflow-hidden rounded-lg border border-edge-muted font-mono text-[11.5px] leading-5">
+                <span class="block border-b border-edge-muted bg-surface-1 px-2.5 py-1 text-ink-muted">
+                  {record.file}
+                </span>
+                <span class="block whitespace-pre-wrap bg-failure-bg/60 px-2.5 text-failure-ink">
+                  {t('factoryRuns.breakOldText', { text: record.oldText })}
+                </span>
+                <span class="block whitespace-pre-wrap bg-success-bg/60 px-2.5 text-success-ink">
+                  {t('factoryRuns.breakNewText', { text: record.newText })}
+                </span>
+              </span>
+            </StepNote>
+          )}
+        </For>
+      </div>
     </section>
   );
 }
