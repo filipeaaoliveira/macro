@@ -35,8 +35,11 @@ use crate::domain::review_rounds::{
 };
 
 /// The place of the prompt that asks a reviewer again among its Step's
-/// later prompts: a reviewer's Step runs no checks, so it is the first.
-const REASK_PLACE: u16 = 1;
+/// later prompts. A reviewer's Step runs no checks, so it comes just after
+/// the reminder of a reviewer that handed nothing back, at place 1: a
+/// reviewer reminded first, whose answer then does not read, is still asked
+/// again.
+const REASK_PLACE: u16 = 2;
 
 /// The review panel's Role that reads the break records.
 pub(super) const TESTS_REVIEWER: &str = "tests-reviewer";

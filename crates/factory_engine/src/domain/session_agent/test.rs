@@ -58,8 +58,18 @@ const WORKS: Reply = Reply {
 /// lands the status says `AwaitingPrompt`, or `Disconnected` for a session
 /// whose runtime went away. Each call takes its next reply, else works. A
 /// deleted session is gone: a later prepare opens a new one under its id.
+/// A later prompt's turn, as the fake scripts it: the agent hands back
+/// `handed` once the prompt lands, and the call then answers with `error`,
+/// if any, as one whose delivery the harness reported failed though it
+/// landed.
 #[derive(Clone)]
-struct FakeSessions {
+pub(crate) struct LaterTurn {
+    pub(crate) handed: HandBack,
+    pub(crate) error: Option<RoutineSessionError>,
+}
+
+#[derive(Clone)]
+pub(crate) struct FakeSessions {
     repo: FakeRepo,
     handed: Option<HandBack>,
     ending: RoutineActionStatus,
@@ -95,6 +105,9 @@ struct FakeSessions {
     ignored_stops: usize,
     /// What the agent hands back for a follow-up, once it lands.
     follow_up_handed: Option<HandBack>,
+    /// How each later prompt that lands goes, in order, before
+    /// `follow_up_handed` answers the rest.
+    later_turns: Arc<Mutex<VecDeque<LaterTurn>>>,
     follow_up_calls: Arc<Mutex<Vec<PromptRoutineSession>>>,
     /// How a command run in the session ends: none for a runtime that runs
     /// no command.
@@ -129,7 +142,11 @@ struct FakeSessions {
 }
 
 impl FakeSessions {
-    fn new(repo: &FakeRepo, handed: Option<HandBack>, ending: RoutineActionStatus) -> Self {
+    pub(crate) fn new(
+        repo: &FakeRepo,
+        handed: Option<HandBack>,
+        ending: RoutineActionStatus,
+    ) -> Self {
         Self {
             repo: repo.clone(),
             handed,
@@ -152,6 +169,7 @@ impl FakeSessions {
             deleted: Arc::default(),
             ignored_stops: 0,
             follow_up_handed: None,
+            later_turns: Arc::default(),
             follow_up_calls: Arc::default(),
             command_output: None,
             exec_replies: Arc::default(),
@@ -187,6 +205,20 @@ impl FakeSessions {
     fn following_up(self, replies: &[Reply]) -> Self {
         self.follow_ups.lock().expect("follow-ups").extend(replies);
         self
+    }
+
+    /// Each later prompt that lands goes as the next of `turns`.
+    pub(crate) fn later(self, turns: &[LaterTurn]) -> Self {
+        self.later_turns
+            .lock()
+            .expect("later turns")
+            .extend(turns.iter().cloned());
+        self
+    }
+
+    /// The later prompts sent, in order, refused ones included.
+    pub(crate) fn later_prompts(&self) -> Vec<PromptRoutineSession> {
+        self.follow_up_calls.lock().expect("follow-ups").clone()
     }
 
     fn prepares(&self) -> usize {
@@ -355,7 +387,16 @@ impl RoutineSessions for FakeSessions {
                 queued: false,
             });
         }
-        if let Some(handed) = &self.follow_up_handed {
+        let later = self.later_turns.lock().expect("later turns").pop_front();
+        if let Some(later) = later {
+            self.repo
+                .hand_back(session_id, &later.handed)
+                .await
+                .expect("hand back");
+            if let Some(error) = later.error {
+                return Err(error);
+            }
+        } else if let Some(handed) = &self.follow_up_handed {
             self.repo
                 .hand_back(session_id, handed)
                 .await

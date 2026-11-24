@@ -1,6 +1,7 @@
 //! A reviewer's Step of a review round, with an agent the test scripts.
 
 mod dispute;
+mod session;
 
 use factory_records::domain::standing_rules::RunRules;
 use std::sync::{Arc, LazyLock, Mutex};

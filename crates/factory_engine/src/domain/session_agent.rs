@@ -6,10 +6,10 @@
 //! takes the Step.
 
 #[cfg(test)]
-mod test;
+pub(crate) mod test;
 
 mod quota_memory;
-mod reminder;
+pub(crate) mod reminder;
 mod said_breaks;
 
 use quota_memory::{NO_QUOTA_LATELY, QuotaMemory};
