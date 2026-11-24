@@ -13,9 +13,8 @@ use temporalio_sdk::{
 
 use super::{
     Asking, CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FAILED_STEP_OUTPUT, FlowWorkflow,
-    NO_RESULT_PATCH,
-    NOTIFY_ONLY_PATCH, OPEN_ROUND_TIMEOUT, STEP_HEARTBEAT_TIMEOUT, ask, is_cancelled,
-    notify_options, stop, within_budget,
+    NO_RESULT_PATCH, NOTIFY_ONLY_PATCH, OPEN_ROUND_TIMEOUT, STEP_HEARTBEAT_TIMEOUT, ask,
+    is_cancelled, notify_options, stop, within_budget,
 };
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};

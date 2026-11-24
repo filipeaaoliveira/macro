@@ -978,7 +978,8 @@ async fn work_that_failed_for_infrastructure_is_routed_as_such() {
 }
 
 /// What the Step whose session its machine refused shows its owner.
-const REFUSAL: &str = "The agent's machine refused the step's session: this machine does not manage repositories";
+const REFUSAL: &str =
+    "The agent's machine refused the step's session: this machine does not manage repositories";
 
 /// A Step whose session its agent's machine refused fails for
 /// infrastructure, and shows its owner the machine's reason, where other

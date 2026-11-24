@@ -114,7 +114,10 @@ fn a_refused_session_is_infrastructure_s_and_keeps_its_refusal() {
 
     for failure in [refused, refused_at_the_end] {
         let read = work_failure(&failure);
-        assert_eq!(read, WorkFailure::Refused("the step's work failed".to_string()));
+        assert_eq!(
+            read,
+            WorkFailure::Refused("the step's work failed".to_string())
+        );
         assert!(read.infrastructure());
         assert_eq!(read.output(), "the step's work failed");
     }

@@ -193,17 +193,26 @@ impl FakeSessions {
     }
 
     fn preparing(self, replies: &[Reply]) -> Self {
-        self.prepares.lock().expect("prepares").extend(replies.iter().cloned());
+        self.prepares
+            .lock()
+            .expect("prepares")
+            .extend(replies.iter().cloned());
         self
     }
 
     fn prompting(self, replies: &[Reply]) -> Self {
-        self.prompts.lock().expect("prompts").extend(replies.iter().cloned());
+        self.prompts
+            .lock()
+            .expect("prompts")
+            .extend(replies.iter().cloned());
         self
     }
 
     fn following_up(self, replies: &[Reply]) -> Self {
-        self.follow_ups.lock().expect("follow-ups").extend(replies.iter().cloned());
+        self.follow_ups
+            .lock()
+            .expect("follow-ups")
+            .extend(replies.iter().cloned());
         self
     }
 

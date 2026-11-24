@@ -5,8 +5,8 @@
 use agent_runtime_protocol::domain::action::{AgentAction, AgentActionId};
 use agent_session::domain::model::AgentSessionId;
 use agent_session::inbound::axum_router::{
-    ControlRequest, CreateAgentSessionRequest, CreateAgentSessionResponse,
-    RuntimeRefusalRequest, ThreadSessionExistsResponse,
+    ControlRequest, CreateAgentSessionRequest, CreateAgentSessionResponse, RuntimeRefusalRequest,
+    ThreadSessionExistsResponse,
 };
 use bot_id::BotId;
 use macro_user_id::user_id::MacroUserIdStr;
