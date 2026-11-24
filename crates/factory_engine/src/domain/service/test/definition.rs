@@ -2,6 +2,7 @@
 //! under its rules, and keep the commit they read it at.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use factory_records::domain::evaluation::{AgentChoices, BENCHMARK_FLOW};
 use factory_records::domain::models::{
@@ -635,7 +636,9 @@ async fn the_settings_show_the_definition_at_the_commit_they_name() {
             .to_string(),
     );
     github.state().open_pull_requests = vec![fix_pull_request()];
-    let service = code_service(&repo, &workflows, &github);
+    // The head moves between two reads: nothing read of it is kept.
+    let service =
+        code_service(&repo, &workflows, &github).with_definition_reads_kept(Duration::ZERO);
 
     let before = service.definition(&teo()).await.expect("settings");
     service
