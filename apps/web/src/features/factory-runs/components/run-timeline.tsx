@@ -586,11 +586,53 @@ function BreakRecordsNote(props: { records: BreakRecord[] }) {
                   {t('factoryRuns.breakNewText', { text: record.newText })}
                 </span>
               </span>
+              <Show when={record.output.trim()}>
+                {(output) => <BreakOutput output={output()} />}
+              </Show>
             </StepNote>
           )}
         </For>
       </div>
     </section>
+  );
+}
+
+/** How many of a break's last output lines show until asked for all. */
+const BREAK_OUTPUT_LINES = 6;
+
+/**
+ * What a break's test printed, or why it did not run: its last lines, the
+ * ones that say why it hung or could not be read, and the rest on asking.
+ */
+function BreakOutput(props: { output: string }) {
+  const [all, setAll] = createSignal(false);
+  const lines = () => props.output.split('\n');
+  const long = () => lines().length > BREAK_OUTPUT_LINES;
+  const shown = () =>
+    all() || !long()
+      ? props.output
+      : lines().slice(-BREAK_OUTPUT_LINES).join('\n');
+  return (
+    <span class="mt-1.5 block" data-break-output>
+      <span class="flex items-center gap-2 text-ink-muted">
+        {t('factoryRuns.breakOutput')}
+        <Show when={long()}>
+          <button
+            type="button"
+            aria-expanded={all()}
+            class="rounded-md underline outline-none hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            onClick={() => setAll(!all())}
+          >
+            {all()
+              ? t('factoryRuns.breakOutputLess')
+              : t('factoryRuns.breakOutputAll', { count: lines().length })}
+          </button>
+        </Show>
+      </span>
+      <span class="mt-1 block max-h-64 overflow-y-auto rounded-lg border border-edge-muted bg-surface-1 px-2.5 py-1 font-mono text-[11.5px] leading-5 whitespace-pre-wrap text-ink-muted">
+        {shown()}
+      </span>
+    </span>
   );
 }
 

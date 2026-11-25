@@ -1940,4 +1940,74 @@ describe('RunView break records', () => {
     const unproven = fixed.getByText('Passed with the break');
     expect(unproven.getAttribute('data-break-tone')).toBe('warning');
   });
+
+  it('shows what a break’s test printed in monospace, its last lines until asked for all', async () => {
+    const { setRun } = mount({});
+    const printed = Array.from({ length: 9 }, (_, n) => `line ${n + 1}`);
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'blocked', endedAt: '2026-11-16T10:00:00Z' },
+      steps: [
+        {
+          seq: 1,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:00:00Z',
+          end: {
+            outcome: 'done',
+            output: '',
+            endedAt: '2026-11-16T09:01:00Z',
+          },
+        },
+      ],
+      breakRecords: [
+        {
+          seq: 1,
+          test: 'waits for the queue',
+          file: 'src/queue.ts',
+          oldText: 'resolve();',
+          newText: '',
+          status: 'hung',
+          checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+          output: printed.join('\n'),
+        },
+        {
+          seq: 1,
+          test: 'reads the config',
+          file: 'src/config.ts',
+          oldText: 'parse(text)',
+          newText: 'parse(',
+          status: 'unreadable',
+          output: 'the break leaves src/config.ts unparsable',
+        },
+      ],
+    });
+
+    const outputs = () =>
+      Array.from(
+        document.querySelectorAll(
+          '[data-factory-run-step="1"] [data-break-output]'
+        )
+      ) as HTMLElement[];
+    await waitFor(() => expect(outputs()).toHaveLength(2));
+    const [hung, unreadable] = outputs() as [HTMLElement, HTMLElement];
+    // Closed until asked, as a Step's break records start.
+    fireEvent.click(screen.getByRole('button', { name: /Break records/ }));
+
+    const text = (output: HTMLElement) =>
+      output.querySelector('.font-mono')?.textContent ?? '';
+    expect(text(unreadable)).toBe('the break leaves src/config.ts unparsable');
+    expect(within(unreadable).queryByRole('button')).toBeNull();
+
+    expect(text(hung)).toBe(printed.slice(-6).join('\n'));
+    const all = within(hung).getByRole('button', {
+      name: 'Show all 9 lines',
+    });
+    fireEvent.click(all);
+    expect(text(hung)).toBe(printed.join('\n'));
+    fireEvent.click(
+      within(hung).getByRole('button', { name: 'Show the last lines' })
+    );
+    expect(text(hung)).toBe(printed.slice(-6).join('\n'));
+  });
 });
