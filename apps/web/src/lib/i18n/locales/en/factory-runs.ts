@@ -99,7 +99,10 @@ export default {
   breakOldText: '− {{text}}',
   breakNewText: '+ {{text}}',
   breakOutput: 'Output',
-  breakOutputAll: 'Show all {{count}} lines',
+  breakOutputAll: {
+    one: 'Show all {{count}} line',
+    other: 'Show all {{count}} lines',
+  },
   breakOutputLess: 'Show the last lines',
   mainHold: 'Main hold',
   mainHoldBody:
