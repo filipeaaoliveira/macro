@@ -172,6 +172,30 @@ describe('rows', () => {
     ).toEqual([[31, 'rose', 6]]);
   });
 
+  it('pairs with the nearer base function of its name when an earlier one was removed', () => {
+    // The first `handler` (lines 1-10) was removed; the second grew.
+    const diff: FileDiff & { path: string } = {
+      path: PATH,
+      basePath: PATH,
+      hunks: [
+        { baseStart: 1, baseCount: 10, start: 0, count: 0 },
+        { baseStart: 25, baseCount: 1, start: 15, count: 1 },
+      ],
+    };
+    const result = rows({
+      touched: [touched([fn('handler', 11, 20, 8)], undefined, diff)],
+      base: new Map([
+        [PATH, [fn('handler', 1, 10, 2), fn('handler', 21, 30, 6)]],
+      ]),
+      threshold: 30,
+      testsFailed: false,
+    });
+
+    expect(result.map((row) => [row.change, row.base_complexity])).toEqual([
+      ['rose', 6],
+    ]);
+  });
+
   it('pairs a function in a renamed file under its earlier path', () => {
     const diff = { ...CHANGED_IN_PLACE, basePath: 'apps/web/src/old.ts' };
     const result = rows({
