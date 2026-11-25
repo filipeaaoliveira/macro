@@ -33,8 +33,10 @@ import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   escapeGlob,
+  inPackage,
   isGenerated,
   isScored,
+  packageFolder,
   readListing,
   testFilters,
 } from './src/changed';
@@ -98,7 +100,7 @@ async function check(): Promise<number> {
   const root = realpathSync(
     git(process.cwd(), ['rev-parse', '--show-toplevel']).trim()
   );
-  const packageDir = values.package.replace(/\/+$/, '');
+  const packageDir = packageFolder(values.package);
   const threshold = positiveNumber('--threshold', values.threshold);
   const vitestTimeout = positiveNumber(
     '--vitest-timeout',
@@ -235,7 +237,8 @@ function changedFiles(root: string, options: Options): FileDiff[] {
   const pathspec = listing
     ? listing.filter((path) => isScored(path, options.packageDir))
     : SOURCE_EXTENSIONS.map(
-        (extension) => `:(glob)${options.packageDir}/**/*.${extension}`
+        (extension) =>
+          `:(glob)${inPackage(options.packageDir, `**/*.${extension}`)}`
       );
   if (pathspec.length === 0) {
     return [];
@@ -341,6 +344,13 @@ async function testCoverage(
         '--coverage.provider=v8',
         '--coverage.reporter=json',
         '--coverage.reportOnFailure',
+        // A package's own coverage thresholds would fail the run with no
+        // failed test; only failed tests count here.
+        '--coverage.thresholds.100=false',
+        '--coverage.thresholds.lines=0',
+        '--coverage.thresholds.functions=0',
+        '--coverage.thresholds.branches=0',
+        '--coverage.thresholds.statements=0',
         `--coverage.reportsDirectory=${reports}`,
         ...files.map((file) => `--coverage.include=${escapeGlob(file)}`),
       ],
@@ -386,12 +396,27 @@ function runVitest(
       reject(new NotRun(`vitest did not finish in ${timeout} seconds`));
     }, timeout * 1000);
 
-    child.on('error', (error) => {
+    // vitest runs in a group of its own, so stopping the check's group (a
+    // round's timeout, a cancel, Ctrl-C) would leave it running.
+    const stopped = (signal: NodeJS.Signals) => {
+      stopGroup(child.pid);
+      console.error(`${NAME}: stopped by ${signal}`);
+      process.exit(NOT_RUN);
+    };
+    process.on('SIGTERM', stopped);
+    process.on('SIGINT', stopped);
+    const done = () => {
       clearTimeout(timer);
+      process.off('SIGTERM', stopped);
+      process.off('SIGINT', stopped);
+    };
+
+    child.on('error', (error) => {
+      done();
       reject(new NotRun(`could not run vitest: ${error.message}`));
     });
     child.on('exit', (code, signal) => {
-      clearTimeout(timer);
+      done();
       // Workers it left behind would hold the machine after the check.
       stopGroup(child.pid);
       resolve({ code, signal });

@@ -11,7 +11,7 @@
  *   CRAP_TS_TEST_NODE_MODULES=<folder>/node_modules bun test tooling/crap-ts
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -31,6 +31,15 @@ const NODE_MODULES =
 const HAS_PROVIDER = existsSync(
   join(NODE_MODULES, '@vitest', 'coverage-v8', 'package.json')
 );
+/** The Solid component test also needs these. */
+const HAS_SOLID = ['vite-plugin-solid', 'solid-js', 'jsdom'].every((name) =>
+  existsSync(join(NODE_MODULES, name, 'package.json'))
+);
+if (HAS_PROVIDER && !HAS_SOLID) {
+  console.warn(
+    `crap-ts: skipping the Solid component test: vite-plugin-solid, solid-js or jsdom is not in ${NODE_MODULES}`
+  );
+}
 if (!HAS_PROVIDER) {
   console.warn(
     `crap-ts: skipping the tests that run vitest: @vitest/coverage-v8 is not in ${NODE_MODULES}; set CRAP_TS_TEST_NODE_MODULES to a node_modules that has it (see this file's header)`
@@ -97,7 +106,7 @@ afterEach(() => {
  * A repository whose first commit holds `files` in a package `pkg`, its
  * `node_modules` linked to the test tools unless `files` brings its own.
  */
-function repository(files: Record<string, string>) {
+function repository(files: Record<string, string>, packageDir = 'pkg') {
   const root = mkdtempSync(join(tmpdir(), 'crap-ts-test-'));
   repositories.push(root);
   git(root, 'init', '-q', '-b', 'main');
@@ -105,11 +114,11 @@ function repository(files: Record<string, string>) {
   git(root, 'config', 'user.name', 'Test');
   write(root, {
     '.gitignore': 'node_modules\n',
-    'pkg/package.json': '{"name":"pkg","type":"module"}',
+    [join(packageDir, 'package.json')]: '{"name":"pkg","type":"module"}',
     ...files,
   });
-  if (!existsSync(join(root, 'pkg', 'node_modules'))) {
-    symlinkSync(NODE_MODULES, join(root, 'pkg', 'node_modules'));
+  if (!existsSync(join(root, packageDir, 'node_modules'))) {
+    symlinkSync(NODE_MODULES, join(root, packageDir, 'node_modules'));
   }
 
   return { root, base: commit(root) };
@@ -252,7 +261,7 @@ it('imports', () => {
     TIMEOUT
   );
 
-  it(
+  it.skipIf(!HAS_SOLID)(
     "does not count a Solid component's templates as running it",
     () => {
       const { root, base } = repository({
@@ -444,7 +453,123 @@ it('waits', async () => {
     },
     TIMEOUT
   );
+  it(
+    "ignores a package's own coverage thresholds",
+    () => {
+      const { root, base } = repository({
+        'pkg/vitest.config.ts': `import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: { coverage: { thresholds: { 100: true } } },
 });
+`,
+        'pkg/src/label.ts': LABEL,
+      });
+      write(root, {
+        'pkg/src/grade.ts': GRADE,
+        'pkg/src/grade.test.ts': `import { expect, it } from 'vitest';
+import { grade } from './grade';
+
+it('grades some', () => {
+  expect([95, 85, 75, 65].map(grade)).toEqual(['a', 'b', 'c', 'd']);
+});
+`,
+      });
+      commit(root);
+
+      const result = check(root, ['--base', base]);
+
+      expect(result.stderr).not.toContain('could not');
+      expect(result.status).toBe(0);
+      expect(result.rows.at(-1)).toMatchObject({ name: 'grade', fails: false });
+      expect(result.rows.at(-1)?.coverage).toBeLessThan(100);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'scores a package at the repository root',
+    () => {
+      const { root, base } = repository({ 'src/label.ts': LABEL }, '.');
+      write(root, {
+        'src/grade.ts': GRADE,
+        'src/grade.test.ts': gradeTest('./grade'),
+      });
+      commit(root);
+
+      const result = check(root, ['--base', base, '--package', '.']);
+
+      expect(result.status).toBe(0);
+      expect(result.rows).toEqual([
+        expect.objectContaining({
+          path: 'src/grade.ts',
+          coverage: 100,
+          fails: false,
+        }),
+      ]);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'stops vitest and its workers when the check is stopped',
+    async () => {
+      const { root, base } = repository({ 'pkg/src/label.ts': LABEL });
+      write(root, {
+        'pkg/src/grade.ts': GRADE,
+        'pkg/src/grade.test.ts': `import { it } from 'vitest';
+import './grade';
+
+it('waits', async () => {
+  console.error(\`worker \${process.pid} ready\`);
+  await new Promise((resolve) => setTimeout(resolve, 30_000));
+}, 40_000);
+`,
+      });
+      commit(root);
+
+      const child = spawn(
+        process.execPath,
+        [SCRIPT, '--package', 'pkg', '--base', base],
+        { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }
+      );
+      let stderr = '';
+      const worker = await new Promise<number>((resolve) => {
+        child.stderr.on('data', (chunk: Buffer) => {
+          stderr += chunk.toString();
+          const ready = /worker (\d+) ready/.exec(stderr);
+          if (ready) {
+            resolve(Number(ready[1]));
+          }
+        });
+      });
+      const ended = new Promise<number | null>((resolve) =>
+        child.on('exit', (code) => resolve(code))
+      );
+
+      child.kill('SIGTERM');
+
+      expect(await ended).toBe(2);
+      expect(stderr).toContain('crap-ts: stopped by SIGTERM');
+      expect(isRunning(worker)).toBe(false);
+    },
+    TIMEOUT
+  );
+});
+
+/** Whether a process is still there, a moment after it was killed. */
+function isRunning(pid: number): boolean {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return false;
+    }
+    Bun.sleepSync(100);
+  }
+
+  return true;
+}
 
 describe('crap-ts before vitest', () => {
   it('keeps to the listed paths when the listing is complete', () => {

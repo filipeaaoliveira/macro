@@ -6,6 +6,7 @@
  * after it is one path from the repository's root. Only a complete list
  * narrows the diff; otherwise the check diffs everything against the base.
  */
+import { posix } from 'node:path';
 
 /** Every path the change touched, or null when the diff against the base decides. */
 export function readListing(text: string): string[] | null {
@@ -36,13 +37,28 @@ const SKIPPED_FOLDERS = new Set([
 ]);
 
 /**
+ * The package folder `--package` names, from the repository's root, with
+ * no `./` or trailing slash: empty for the root itself (`.`).
+ */
+export function packageFolder(name: string): string {
+  const normalized = posix.normalize(name.replace(/\/+$/, ''));
+  return normalized === '.' ? '' : normalized.replace(/^\.\//, '');
+}
+
+/** `path` inside the package folder, from the repository's root. */
+export function inPackage(packageDir: string, path: string): string {
+  return packageDir === '' ? path : `${packageDir}/${path}`;
+}
+
+/**
  * Whether the check scores the file at `path`, from the repository's root:
  * TypeScript source in `packageDir`'s `src/`, no tests, declarations,
  * configs or generated code. Files outside `src/` (`vite.config.ts`,
  * `codegen.ts`) set the package up and have no tests of their own.
  */
 export function isScored(path: string, packageDir: string): boolean {
-  if (!path.startsWith(`${packageDir}/src/`)) {
+  const source = inPackage(packageDir, 'src/');
+  if (!path.startsWith(source)) {
     return false;
   }
 
@@ -50,10 +66,7 @@ export function isScored(path: string, packageDir: string): boolean {
     return false;
   }
 
-  const folders = path
-    .slice(packageDir.length + 1)
-    .split('/')
-    .slice(0, -1);
+  const folders = path.slice(source.length).split('/').slice(0, -1);
   return !folders.some((folder) => SKIPPED_FOLDERS.has(folder));
 }
 

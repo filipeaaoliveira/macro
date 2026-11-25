@@ -3,6 +3,7 @@ import {
   escapeGlob,
   isGenerated,
   isScored,
+  packageFolder,
   readListing,
   testFilters,
 } from './changed';
@@ -90,5 +91,20 @@ describe('escapeGlob', () => {
     expect(escapeGlob('src/(group)/[id]/page+{a}.tsx')).toBe(
       'src/\\(group\\)/\\[id\\]/page\\+\\{a\\}.tsx'
     );
+  });
+});
+
+describe('packageFolder', () => {
+  it('names the package folder from the root, empty for the root itself', () => {
+    expect(packageFolder('./apps/web/')).toBe('apps/web');
+    expect(packageFolder('apps/web')).toBe('apps/web');
+    expect(packageFolder('.')).toBe('');
+    expect(packageFolder('./')).toBe('');
+  });
+
+  it('scores the source of a package at the root', () => {
+    expect(isScored('src/a.ts', '')).toBe(true);
+    expect(isScored('vite.config.ts', '')).toBe(false);
+    expect(isScored('apps/web/src/a.ts', '')).toBe(false);
   });
 });
