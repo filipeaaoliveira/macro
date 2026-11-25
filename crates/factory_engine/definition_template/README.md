@@ -285,6 +285,19 @@ that first line is `complete` (which also says the base commit is in the
 checkout), or when the variable is unset, as it is where
 the agent runs the checks.
 
+A repository can run the TypeScript CRAP check, which fails a change that
+adds or makes more complex a function scoring above 30 against the tests in
+its folder: copy `tooling/crap-ts/` from the factory's repository, add
+`@vitest/coverage-v8` at vitest's version to the package, and declare it,
+`--package` naming the folder that holds the vitest config:
+
+```json
+{ "name": "crap-ts", "run": "bun tooling/crap-ts/crap-ts.ts --package apps/web", "paths": ["apps/web", "tooling/crap-ts"], "timeout": 300 }
+```
+
+`docs/development/factory-crap.md` says what it needs installed, what it
+prints and how it pairs functions with the base.
+
 Secrets never go here: no field takes an API key or a token, and a file that
 holds something shaped like one does not read.
 
