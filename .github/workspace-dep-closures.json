@@ -17852,8 +17852,7 @@
       "tooling/xtask"
     ],
     "xtask_crap": [
-      "tooling/xtask/crates/xtask_crap",
-      "tooling/xtask/crates/xtask_paths"
+      "tooling/xtask/crates/xtask_crap"
     ],
     "xtask_deps": [
       "tooling/xtask/crates/xtask_deps",

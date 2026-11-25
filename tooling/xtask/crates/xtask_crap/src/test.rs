@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use tempfile::TempDir;
 use xtask_crap::diff::Hunk;
 
@@ -59,9 +57,10 @@ fn write(root: &Path, path: &str, text: &str) {
     fs::write(file, text).unwrap();
 }
 
-/// A repository whose base commit holds `crates/a/src/lib.rs`, and whose
-/// head changes `changed`, adds `crates/a/src/added.rs`, a test file and a
-/// generated file, and removes `crates/a/src/gone.rs`.
+/// A repository whose base commit holds `crates/a/src/lib.rs` and
+/// `crates/a/src/gone.rs`, and whose head changes `changed`, adds
+/// `crates/a/src/added.rs`, a test file, a generated file and a file that
+/// does not parse, and removes `gone.rs`.
 fn repository() -> (TempDir, String) {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
@@ -78,6 +77,7 @@ fn repository() -> (TempDir, String) {
         "crates/a/src/schema.rs",
         "// @generated\nfn schema() {}\n",
     );
+    write(root, "crates/a/src/broken.rs", "fn broken( {\n");
     fs::remove_file(root.join("crates/a/src/gone.rs")).unwrap();
     commit_all(root, "head");
     (dir, base)
@@ -87,32 +87,69 @@ fn repository() -> (TempDir, String) {
 fn without_a_complete_listing_every_changed_rust_source_file_is_touched() {
     let (dir, base) = repository();
 
-    let files = touched_files(dir.path(), &base, Listing::Incomplete).unwrap();
+    let touched = touched_files(dir.path(), &base, Listing::Incomplete).unwrap();
 
-    let touched: Vec<_> = files
+    let files: Vec<(FileDiff, Vec<(u32, u32)>)> = touched
+        .files
         .into_iter()
-        .map(|file| (file.diff, file.spans))
+        .map(|file| {
+            let lasts = file
+                .functions
+                .iter()
+                .map(|(first, function)| (*first, function.last));
+            (file.diff, lasts.collect())
+        })
         .collect();
     assert_eq!(
-        touched,
+        files,
         [
             (
                 FileDiff {
                     path: "crates/a/src/added.rs".to_owned(),
                     base_path: None,
-                    hunks: vec![Hunk { start: 1, count: 3 }],
+                    hunks: vec![Hunk {
+                        base_start: 0,
+                        base_count: 0,
+                        start: 1,
+                        count: 3
+                    }],
                 },
-                BTreeMap::from([(1, 3)]),
+                vec![(1, 3)],
             ),
             (
                 FileDiff {
                     path: "crates/a/src/lib.rs".to_owned(),
                     base_path: Some("crates/a/src/lib.rs".to_owned()),
-                    hunks: vec![Hunk { start: 6, count: 1 }],
+                    hunks: vec![Hunk {
+                        base_start: 6,
+                        base_count: 1,
+                        start: 6,
+                        count: 1
+                    }],
                 },
-                BTreeMap::from([(1, 3), (5, 7)]),
+                vec![(1, 3), (5, 7)],
             ),
         ]
+    );
+    assert_eq!(touched.removed, ["crates/a/src/gone.rs"]);
+}
+
+#[test]
+fn a_file_that_does_not_parse_is_warned_about_not_scored() {
+    let (dir, base) = repository();
+
+    let touched = touched_files(dir.path(), &base, Listing::Incomplete).unwrap();
+
+    let warned: Vec<&str> = touched
+        .warnings
+        .iter()
+        .map(|warning| warning.path.as_str())
+        .collect();
+    assert_eq!(warned, ["crates/a/src/broken.rs"]);
+    assert!(
+        touched.warnings[0]
+            .warning
+            .starts_with("not scored: it does not parse")
     );
 }
 
@@ -124,10 +161,15 @@ fn a_complete_listing_narrows_the_diff_to_its_paths() {
         "crates/a/src/gone.rs".to_owned(),
     ]);
 
-    let files = touched_files(dir.path(), &base, listing).unwrap();
+    let touched = touched_files(dir.path(), &base, listing).unwrap();
 
-    let paths: Vec<&str> = files.iter().map(|file| file.diff.path.as_str()).collect();
+    let paths: Vec<&str> = touched
+        .files
+        .iter()
+        .map(|file| file.diff.path.as_str())
+        .collect();
     assert_eq!(paths, ["crates/a/src/lib.rs"]);
+    assert_eq!(touched.removed, ["crates/a/src/gone.rs"]);
 }
 
 #[test]
@@ -135,9 +177,43 @@ fn a_complete_listing_without_rust_source_touches_nothing() {
     let (dir, base) = repository();
     let listing = Listing::Complete(vec!["README.md".to_owned()]);
 
-    assert!(
-        touched_files(dir.path(), &base, listing)
-            .unwrap()
-            .is_empty()
+    let touched = touched_files(dir.path(), &base, listing).unwrap();
+
+    assert!(touched.files.is_empty());
+    assert!(touched.removed.is_empty());
+}
+
+#[test]
+fn a_base_the_repository_holds_is_compared_with() {
+    let (dir, base) = repository();
+    let cli = Cli {
+        base: Some(base.clone()),
+    };
+
+    assert_eq!(base_commit(&cli, dir.path()), Some(base));
+}
+
+#[test]
+fn an_empty_or_unknown_base_skips_the_check() {
+    let (dir, _) = repository();
+    let empty = Cli {
+        base: Some(String::new()),
+    };
+    let unknown = Cli {
+        base: Some("0123456789abcdef0123456789abcdef01234567".to_owned()),
+    };
+
+    assert_eq!(base_commit(&empty, dir.path()), None);
+    assert_eq!(base_commit(&unknown, dir.path()), None);
+}
+
+#[test]
+fn the_summary_names_the_first_failed_tests() {
+    let failed = ["a t::one", "a t::two", "a t::three", "a t::four"].map(str::to_owned);
+
+    assert_eq!(failures(&[]), "");
+    assert_eq!(
+        failures(&failed),
+        "; 4 tests failed (a t::one, a t::two, a t::three), so coverage may be low"
     );
 }

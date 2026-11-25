@@ -42,3 +42,14 @@ fn each_file_belongs_to_the_package_whose_folder_holds_it_most_closely() {
         ])
     );
 }
+
+#[test]
+fn files_no_package_holds_are_outside() {
+    let metadata: Metadata = serde_json::from_str(METADATA).unwrap();
+    let files = [
+        "crates/factory_engine/src/lib.rs".to_owned(),
+        "apps/web/tauri/src/main.rs".to_owned(),
+    ];
+
+    assert_eq!(metadata.outside(&files), ["apps/web/tauri/src/main.rs"]);
+}

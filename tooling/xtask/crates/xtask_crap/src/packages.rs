@@ -38,6 +38,16 @@ impl Metadata {
         packages
     }
 
+    /// The `files` no package holds, such as those of another workspace in
+    /// the repository: their tests never run here, so they are not scored.
+    pub fn outside(&self, files: &[String]) -> Vec<String> {
+        files
+            .iter()
+            .filter(|file| self.package_of(Path::new(file)).is_none())
+            .cloned()
+            .collect()
+    }
+
     fn package_of(&self, file: &Path) -> Option<&str> {
         self.packages
             .iter()

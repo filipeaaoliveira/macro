@@ -1,11 +1,12 @@
 //! The rows the check prints: one per touched function, joined from
 //! `cargo crap`'s scores at the change and its complexities at the base.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
 use crate::diff::FileDiff;
+use crate::spans::Function;
 
 #[cfg(test)]
 mod test;
@@ -39,7 +40,7 @@ pub struct Entry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Change {
-    /// The base has no function of its name in its file.
+    /// The base has no function it pairs with.
     New,
     /// More complex than at the base.
     Rose,
@@ -71,87 +72,216 @@ pub struct Row {
     /// Whether it fails the check: new or more complex, and above the
     /// threshold.
     pub fails: bool,
+    /// Whether it would fail only because no test ran it while some tests
+    /// failed: its coverage is not known, so it does not fail.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unproven: bool,
+    /// Whether some tests failed, so its coverage may be lower than its
+    /// tests would give.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub coverage_uncertain: bool,
 }
 
 /// A change in complexity smaller than this is none: complexities with a
 /// fractional `?` weight are sums of floats.
 const SAME_COMPLEXITY: f64 = 0.01;
 
-/// A touched file: its diff and its functions' spans (last line by first).
+/// A touched file: its diff and its functions.
 #[derive(Debug, Clone)]
 pub struct TouchedFile {
     /// What the change did to it.
     pub diff: FileDiff,
-    /// Each function's last line, by its first.
-    pub spans: BTreeMap<u32, u32>,
+    /// Its functions, by first line.
+    pub functions: BTreeMap<u32, Function>,
+}
+
+/// A file's version at the base, changed or removed since.
+#[derive(Debug, Clone)]
+pub struct BaseFile {
+    /// Its path at the base.
+    pub path: String,
+    /// Its functions there, by first line.
+    pub functions: BTreeMap<u32, Function>,
+}
+
+/// What decides a row's verdict.
+#[derive(Debug, Clone, Copy)]
+pub struct Verdict {
+    /// The score a new or more complex function fails above.
+    pub threshold: f64,
+    /// Whether some tests failed while coverage was measured.
+    pub tests_failed: bool,
 }
 
 /// The rows of the functions the change touched, those that fail last and
 /// the worst last among them, so the end of the output, which the checks
 /// round keeps, holds what matters.
 ///
-/// `current` holds the scores at the change, `base` the complexities at the
-/// base, both with paths from the repository's root. A function is paired
-/// with the base's function of the same name in the file's base path, the
-/// n-th of a name with the n-th. Functions named `main` are left out: they
-/// wire a binary up, and only running it exercises them.
-pub fn rows(current: &[Entry], base: &[Entry], files: &[TouchedFile], threshold: f64) -> Vec<Row> {
-    let mut rows: Vec<Row> = files
+/// `current` holds the scores at the change, `base` the complexities of
+/// `base_files`, both with paths from the repository's root. A function
+/// pairs with the base's function of its name whose line the diff carries
+/// to its own; one left over pairs with one of its name left over in the
+/// same file, in order; one still left over pairs with a base function no
+/// function took, in any changed or removed file, whose body is the same:
+/// it moved or was renamed. Functions named `main` are left out: they wire
+/// a binary up, and only running it exercises them.
+pub fn rows(
+    current: &[Entry],
+    base: &[Entry],
+    files: &[TouchedFile],
+    base_files: &[BaseFile],
+    verdict: Verdict,
+) -> Vec<Row> {
+    let mut taken = vec![false; base.len()];
+    let paired: Vec<Vec<(&Entry, Option<usize>)>> = files
         .iter()
-        .flat_map(|file| file_rows(current, base, file, threshold))
+        .map(|file| pair_in_file(current, base, &file.diff, &mut taken))
         .collect();
+    let mut left_over = bodies_left_over(base, base_files, &taken);
 
-    rows.sort_by(|a, b| a.fails.cmp(&b.fails).then(a.score.total_cmp(&b.score)));
+    let mut rows = Vec::new();
+    for (file, pairs) in files.iter().zip(paired) {
+        for (entry, pair) in pairs {
+            let function = file.functions.get(&entry.line);
+            let pair = pair.or_else(|| moved_from(function, &mut left_over));
+            if is_touched(entry, &file.diff, function) {
+                rows.push(row(
+                    entry,
+                    pair.map(|index| base[index].cyclomatic),
+                    verdict,
+                ));
+            }
+        }
+    }
+
+    rows.sort_by(|a, b| {
+        (a.fails, a.unproven)
+            .cmp(&(b.fails, b.unproven))
+            .then(a.score.total_cmp(&b.score))
+    });
     rows
 }
 
-fn file_rows(current: &[Entry], base: &[Entry], file: &TouchedFile, threshold: f64) -> Vec<Row> {
-    let mut at_base = base_complexities(base, file.diff.base_path.as_deref());
+/// The file's functions with the index in `base` of each one's pair, by
+/// line. Every function takes its pair, touched or not, so each base
+/// function pairs once.
+fn pair_in_file<'a>(
+    current: &'a [Entry],
+    base: &[Entry],
+    diff: &FileDiff,
+    taken: &mut [bool],
+) -> Vec<(&'a Entry, Option<usize>)> {
     let mut entries: Vec<&Entry> = current
         .iter()
-        .filter(|entry| entry.file == file.diff.path)
+        .filter(|entry| entry.file == diff.path)
         .collect();
     entries.sort_by_key(|entry| entry.line);
+    let candidates: Vec<usize> = (0..base.len())
+        .filter(|&index| Some(base[index].file.as_str()) == diff.base_path.as_deref())
+        .collect();
 
-    // Every function takes its base pair, touched or not, so the n-th of a
-    // name meets the n-th.
-    entries
-        .into_iter()
-        .filter_map(|entry| {
-            let base_complexity = at_base
-                .get_mut(entry.function.as_str())
-                .and_then(VecDeque::pop_front);
-            let last = file.spans.get(&entry.line).copied().unwrap_or(entry.line);
-            let touched = file.diff.touches(entry.line, last) && entry.function != "main";
-            touched.then(|| row(entry, base_complexity, threshold))
-        })
-        .collect()
+    let mut pairs = pair_by_line(&entries, base, &candidates, diff, taken);
+    pair_in_order(&entries, base, &candidates, &mut pairs, taken);
+    entries.into_iter().zip(pairs).collect()
 }
 
-/// The base's complexities in `base_path`, by name, in line order.
-fn base_complexities<'a>(
-    base: &'a [Entry],
-    base_path: Option<&str>,
-) -> HashMap<&'a str, VecDeque<f64>> {
-    let mut entries: Vec<&Entry> = base
-        .iter()
-        .filter(|entry| Some(entry.file.as_str()) == base_path)
-        .collect();
-    entries.sort_by_key(|entry| entry.line);
+/// Pairs each base function with the function of its name the diff carries
+/// its line to.
+fn pair_by_line(
+    entries: &[&Entry],
+    base: &[Entry],
+    candidates: &[usize],
+    diff: &FileDiff,
+    taken: &mut [bool],
+) -> Vec<Option<usize>> {
+    let mut pairs = vec![None; entries.len()];
+    for &index in candidates {
+        let at_base = &base[index];
+        let Some(line) = diff.new_line(at_base.line) else {
+            continue;
+        };
 
-    let mut complexities: HashMap<&str, VecDeque<f64>> = HashMap::new();
-    for entry in entries {
-        complexities
-            .entry(entry.function.as_str())
-            .or_default()
-            .push_back(entry.cyclomatic);
+        let found = entries
+            .iter()
+            .position(|entry| entry.line == line && entry.function == at_base.function);
+        if let Some(position) = found.filter(|&position| pairs[position].is_none()) {
+            pairs[position] = Some(index);
+            taken[index] = true;
+        }
     }
-    complexities
+    pairs
 }
 
-fn row(entry: &Entry, base_complexity: Option<f64>, threshold: f64) -> Row {
+/// Pairs each function left over with the first base function of its name
+/// left over, in line order: one whose line the change rewrote.
+fn pair_in_order(
+    entries: &[&Entry],
+    base: &[Entry],
+    candidates: &[usize],
+    pairs: &mut [Option<usize>],
+    taken: &mut [bool],
+) {
+    for (entry, pair) in entries.iter().zip(pairs.iter_mut()) {
+        if pair.is_some() {
+            continue;
+        }
+
+        let found = candidates
+            .iter()
+            .copied()
+            .find(|&index| !taken[index] && base[index].function == entry.function);
+        if let Some(index) = found {
+            *pair = Some(index);
+            taken[index] = true;
+        }
+    }
+}
+
+/// The base functions no function took, by body, as indexes in `base`.
+fn bodies_left_over(
+    base: &[Entry],
+    base_files: &[BaseFile],
+    taken: &[bool],
+) -> HashMap<String, Vec<usize>> {
+    let mut bodies: HashMap<String, Vec<usize>> = HashMap::new();
+    for (index, entry) in base.iter().enumerate().filter(|(index, _)| !taken[*index]) {
+        let function = base_files
+            .iter()
+            .find(|file| file.path == entry.file)
+            .and_then(|file| file.functions.get(&entry.line));
+        if let Some(function) = function {
+            bodies.entry(function.body.clone()).or_default().push(index);
+        }
+    }
+    bodies
+}
+
+/// The base function left over with the same body as `function`, taken.
+fn moved_from(
+    function: Option<&Function>,
+    left_over: &mut HashMap<String, Vec<usize>>,
+) -> Option<usize> {
+    left_over.get_mut(&function?.body)?.pop()
+}
+
+/// Whether the change touched the function: a hunk meets its lines.
+fn is_touched(entry: &Entry, diff: &FileDiff, function: Option<&Function>) -> bool {
+    let last = function.map_or(entry.line, |function| function.last);
+    entry.function != "main" && diff.touches(entry.line, last)
+}
+
+fn row(entry: &Entry, base_complexity: Option<f64>, verdict: Verdict) -> Row {
     let change = change(entry.cyclomatic, base_complexity);
     let riskier = matches!(change, Change::New | Change::Rose);
+    let above = riskier && entry.crap > verdict.threshold;
+
+    // With tests failing, an uncovered function may be one only those
+    // tests run. It still fails when its complexity alone is above the
+    // threshold: no coverage brings that down.
+    let unproven = above
+        && verdict.tests_failed
+        && entry.coverage.unwrap_or(0.0) <= 0.0
+        && entry.cyclomatic <= verdict.threshold;
     Row {
         path: entry.file.clone(),
         name: entry.function.clone(),
@@ -161,7 +291,9 @@ fn row(entry: &Entry, base_complexity: Option<f64>, threshold: f64) -> Row {
         score: entry.crap,
         change,
         base_complexity,
-        fails: riskier && entry.crap > threshold,
+        fails: above && !unproven,
+        unproven,
+        coverage_uncertain: verdict.tests_failed,
     }
 }
 

@@ -25177,13 +25177,13 @@ dependencies = [
  "clap",
  "nom 8.0.0",
  "proc-macro2",
+ "quote",
  "rootcause",
  "serde",
  "serde_json",
  "syn 2.0.117",
  "tempfile",
  "toml 0.8.23",
- "xtask_paths",
 ]
 
 [[package]]

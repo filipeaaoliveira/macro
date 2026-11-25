@@ -11,11 +11,12 @@
 //!
 //! [`changed`] says which files to score, [`diff`] which of their lines
 //! changed, [`packages`] which packages hold them, [`spans`] where each
-//! function ends, and [`rows`] joins `cargo crap`'s scores into the rows the
-//! check prints.
+//! function ends, [`nextest`] which tests failed, and [`rows`] joins
+//! `cargo crap`'s scores into the rows the check prints.
 
 pub mod changed;
 pub mod diff;
+pub mod nextest;
 pub mod packages;
 pub mod rows;
 pub mod spans;
