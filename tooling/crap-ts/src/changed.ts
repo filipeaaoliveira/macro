@@ -37,11 +37,12 @@ const SKIPPED_FOLDERS = new Set([
 
 /**
  * Whether the check scores the file at `path`, from the repository's root:
- * TypeScript source inside `packageDir`, no tests, declarations, configs or
- * generated code.
+ * TypeScript source in `packageDir`'s `src/`, no tests, declarations,
+ * configs or generated code. Files outside `src/` (`vite.config.ts`,
+ * `codegen.ts`) set the package up and have no tests of their own.
  */
 export function isScored(path: string, packageDir: string): boolean {
-  if (!path.startsWith(`${packageDir}/`)) {
+  if (!path.startsWith(`${packageDir}/src/`)) {
     return false;
   }
 
@@ -69,32 +70,59 @@ export function isGenerated(source: string): boolean {
 /**
  * How many folders deep, from the package's root, the tests run for a
  * touched file are looked for: `src/features/runs/view/row.tsx` runs the
- * tests under `src/features/runs`.
+ * tests under `src/features/runs/`.
  */
 const TEST_FOLDER_DEPTH = 3;
 
+const TEST_FILE = /\.(test|spec)\.[mc]?[jt]sx?$/;
+
 /**
- * The folders whose tests run for the touched files, from the package's
- * root. Each file's folder, cut to `TEST_FOLDER_DEPTH`, stands for the
- * feature it belongs to. Vitest's own related-tests mode follows imports
+ * The filters naming the tests that run for the touched files, as paths
+ * from the package's root; empty when no test applies, never every test.
+ *
+ * A file at least `TEST_FOLDER_DEPTH` folders deep runs the tests under its
+ * folder cut to that depth, which stands for the feature it belongs to. A
+ * shallower file (`src/index.ts`) runs only the test files beside it, which
+ * `testFilesIn` lists for a folder: its folder's subtree would be most of
+ * the package. Vitest's own related-tests mode follows imports
  * transitively, and in an app whose tests import most of it, that runs most
- * of the suite for any change. Empty, every test runs: a touched file sits
- * at the package's root.
+ * of the suite for any change.
  */
-export function testFolders(files: string[]): string[] {
-  const folders = new Set(
-    files.map((file) =>
-      file.split('/').slice(0, -1).slice(0, TEST_FOLDER_DEPTH).join('/')
-    )
-  );
-  if (folders.has('')) {
-    return [];
+export function testFilters(
+  files: string[],
+  testFilesIn: (folder: string) => string[]
+): string[] {
+  const folders = new Set<string>();
+  const testFiles = new Set<string>();
+
+  for (const file of files) {
+    const parts = file.split('/').slice(0, -1);
+    if (parts.length >= TEST_FOLDER_DEPTH) {
+      folders.add(`${parts.slice(0, TEST_FOLDER_DEPTH).join('/')}/`);
+      continue;
+    }
+
+    const folder = parts.join('/');
+    for (const name of testFilesIn(folder)) {
+      if (TEST_FILE.test(name)) {
+        testFiles.add(folder === '' ? name : `${folder}/${name}`);
+      }
+    }
   }
 
-  // A folder inside another one listed adds no test.
-  return [...folders]
-    .filter(
-      (folder) => ![...folders].some((other) => folder.startsWith(`${other}/`))
-    )
-    .sort();
+  // A test inside a folder already listed adds nothing.
+  const inFolders = (path: string) =>
+    [...folders].some((folder) => path.startsWith(folder));
+  return [
+    ...folders,
+    ...[...testFiles].filter((path) => !inFolders(path)),
+  ].sort();
+}
+
+/**
+ * `path` with the characters a glob reads escaped, so a coverage include
+ * names that one file: `src/(group)/[id].tsx`.
+ */
+export function escapeGlob(path: string): string {
+  return path.replace(/[\\*?[\]{}()!+@]/g, '\\$&');
 }

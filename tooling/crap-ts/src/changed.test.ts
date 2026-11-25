@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { isGenerated, isScored, readListing, testFolders } from './changed';
+import {
+  escapeGlob,
+  isGenerated,
+  isScored,
+  readListing,
+  testFilters,
+} from './changed';
 
 describe('readListing', () => {
   it('lists the paths of a complete listing', () => {
@@ -29,11 +35,13 @@ describe('isScored', () => {
     expect(isScored('apps/web/src/a.spec.tsx', 'apps/web')).toBe(false);
     expect(isScored('apps/web/src/a.d.ts', 'apps/web')).toBe(false);
     expect(isScored('apps/web/vitest.config.ts', 'apps/web')).toBe(false);
+    expect(isScored('apps/web/codegen.ts', 'apps/web')).toBe(false);
+    expect(isScored('apps/web/scripts/build.ts', 'apps/web')).toBe(false);
   });
 
   it('leaves out test, generated and third-party folders', () => {
     expect(isScored('apps/web/src/__tests__/a.ts', 'apps/web')).toBe(false);
-    expect(isScored('apps/web/tests/e2e/a.ts', 'apps/web')).toBe(false);
+    expect(isScored('apps/web/src/tests/e2e/a.ts', 'apps/web')).toBe(false);
     expect(isScored('apps/web/src/x/browser-test/a.ts', 'apps/web')).toBe(
       false
     );
@@ -48,24 +56,39 @@ describe('isGenerated', () => {
   });
 });
 
-describe('testFolders', () => {
-  it('runs the tests of each touched file feature, three folders deep', () => {
+describe('testFilters', () => {
+  const beside: Record<string, string[]> = {
+    src: ['index.ts', 'index.test.tsx', 'util.spec.ts', 'README.md'],
+    'src/lib': ['a.ts', 'a.test.ts'],
+  };
+  const testFilesIn = (folder: string) => beside[folder] ?? [];
+
+  it('runs the tests of each deep file feature, three folders deep', () => {
     expect(
-      testFolders([
-        'src/features/runs/view/row.tsx',
-        'src/features/runs/run.ts',
-        'src/lib/a.ts',
-      ])
-    ).toEqual(['src/features/runs', 'src/lib']);
+      testFilters(
+        ['src/features/runs/view/row.tsx', 'src/features/runs/run.ts'],
+        testFilesIn
+      )
+    ).toEqual(['src/features/runs/']);
   });
 
-  it('leaves out a folder inside another one', () => {
-    expect(testFolders(['src/a.ts', 'src/features/runs/run.ts'])).toEqual([
-      'src',
+  it('runs only the test files beside a shallow file', () => {
+    expect(testFilters(['src/index.ts', 'src/lib/a.ts'], testFilesIn)).toEqual([
+      'src/index.test.tsx',
+      'src/lib/a.test.ts',
+      'src/util.spec.ts',
     ]);
   });
 
-  it('runs every test for a file at the package root', () => {
-    expect(testFolders(['index.ts', 'src/a.ts'])).toEqual([]);
+  it('runs no test, never every test, when none sits beside a shallow file', () => {
+    expect(testFilters(['src/other/x.ts'], testFilesIn)).toEqual([]);
+  });
+});
+
+describe('escapeGlob', () => {
+  it('escapes the characters a glob reads', () => {
+    expect(escapeGlob('src/(group)/[id]/page+{a}.tsx')).toBe(
+      'src/\\(group\\)/\\[id\\]/page\\+\\{a\\}.tsx'
+    );
   });
 });
