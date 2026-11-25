@@ -51545,6 +51545,19 @@
             },
             "description": "Teams it is a team machine for: their every member is a user of it."
           },
+          "step_slots": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "How many software factory Steps may run on it at once; none for no\nlimit. A Step that finds every Machine its Agents run on full waits.",
+            "minimum": 0
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its tags, lower case and sorted, such as `rust-build`, `gpu` or\n`arm64`: a Factory Definition's Agent may ask that the Machine its\nSteps run on has some."
+          },
           "team_agent_user_id": {
             "oneOf": [
               {
@@ -57375,6 +57388,19 @@
           "name": {
             "type": ["string", "null"],
             "description": "New display name."
+          },
+          "step_slots": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "How many software factory Steps may run on it at once, 1 to\n[`MAX_STEP_SLOTS`]. Omit to leave unchanged, or pass `null` for no\nlimit.",
+            "minimum": 0
+          },
+          "tags": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string"
+            },
+            "description": "Its tags, replacing the ones it has: at most [`MAX_TAGS`], each 1 to\n[`MAX_TAG_CHARS`] lower-case letters, digits, `-`, `_` or `.`,\nstarting with a letter or digit. Upper case is lowered, and a tag\ngiven twice is kept once."
           }
         }
       },

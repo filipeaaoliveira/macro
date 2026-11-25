@@ -13318,6 +13318,17 @@ export type Harness = {
      * Teams it is a team machine for: their every member is a user of it.
      */
     shared_team_ids?: Array<string>;
+    /**
+     * How many software factory Steps may run on it at once; none for no
+     * limit. A Step that finds every Machine its Agents run on full waits.
+     */
+    step_slots?: number | null;
+    /**
+     * Its tags, lower case and sorted, such as `rust-build`, `gpu` or
+     * `arm64`: a Factory Definition's Agent may ask that the Machine its
+     * Steps run on has some.
+     */
+    tags?: Array<string>;
     team_agent_user_id?: null | MacroUserIdStr;
     /**
      * Update timestamp.
@@ -17152,6 +17163,19 @@ export type PatchHarnessRequest = {
      * New display name.
      */
     name?: string | null;
+    /**
+     * How many software factory Steps may run on it at once, 1 to
+     * [`MAX_STEP_SLOTS`]. Omit to leave unchanged, or pass `null` for no
+     * limit.
+     */
+    step_slots?: number | null;
+    /**
+     * Its tags, replacing the ones it has: at most [`MAX_TAGS`], each 1 to
+     * [`MAX_TAG_CHARS`] lower-case letters, digits, `-`, `_` or `.`,
+     * starting with a letter or digit. Upper case is lowered, and a tag
+     * given twice is kept once.
+     */
+    tags?: Array<string> | null;
 };
 
 /**

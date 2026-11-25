@@ -49317,6 +49317,8 @@ export const approveHarnessPairingBody = zod
   })
   .describe('Request to approve a pairing and register the harness.');
 
+export const approveHarnessPairingResponseStepSlotsMin = 0;
+
 export const approveHarnessPairingResponse = zod
   .object({
     access: zod
@@ -49363,6 +49365,19 @@ export const approveHarnessPairingResponse = zod
       .describe(
         'Teams it is a team machine for: their every member is a user of it.'
       ),
+    step_slots: zod
+      .number()
+      .min(approveHarnessPairingResponseStepSlotsMin)
+      .nullish()
+      .describe(
+        'How many software factory Steps may run on it at once; none for no\nlimit. A Step that finds every Machine its Agents run on full waits.'
+      ),
+    tags: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Its tags, lower case and sorted, such as `rust-build`, `gpu` or\n`arm64`: a Factory Definition's Agent may ask that the Machine its\nSteps run on has some."
+      ),
     team_agent_user_id: zod.union([zod.null(), zod.string()]).optional(),
     updated_at: zod.iso.datetime({}).describe('Update timestamp.'),
   })
@@ -49389,6 +49404,8 @@ export const claimHarnessPairingBody = zod
   .describe(
     "Request to claim an approved pairing's credential.\n\nThe daemon serializes this, so both derives are used."
   );
+
+export const claimHarnessPairingResponseHarnessStepSlotsMin = 0;
 
 export const claimHarnessPairingResponse = zod
   .object({
@@ -49438,6 +49455,19 @@ export const claimHarnessPairingResponse = zod
           .describe(
             'Teams it is a team machine for: their every member is a user of it.'
           ),
+        step_slots: zod
+          .number()
+          .min(claimHarnessPairingResponseHarnessStepSlotsMin)
+          .nullish()
+          .describe(
+            'How many software factory Steps may run on it at once; none for no\nlimit. A Step that finds every Machine its Agents run on full waits.'
+          ),
+        tags: zod
+          .array(zod.string())
+          .optional()
+          .describe(
+            "Its tags, lower case and sorted, such as `rust-build`, `gpu` or\n`arm64`: a Factory Definition's Agent may ask that the Machine its\nSteps run on has some."
+          ),
         team_agent_user_id: zod.union([zod.null(), zod.string()]).optional(),
         updated_at: zod.iso.datetime({}).describe('Update timestamp.'),
       })
@@ -49455,6 +49485,8 @@ export const claimHarnessPairingResponse = zod
 /**
  * @summary Handler for `GET /harnesses`.
  */
+export const listHarnessesResponseStepSlotsMin = 0;
+
 export const listHarnessesResponseItem = zod
   .object({
     access: zod
@@ -49501,6 +49533,19 @@ export const listHarnessesResponseItem = zod
       .describe(
         'Teams it is a team machine for: their every member is a user of it.'
       ),
+    step_slots: zod
+      .number()
+      .min(listHarnessesResponseStepSlotsMin)
+      .nullish()
+      .describe(
+        'How many software factory Steps may run on it at once; none for no\nlimit. A Step that finds every Machine its Agents run on full waits.'
+      ),
+    tags: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Its tags, lower case and sorted, such as `rust-build`, `gpu` or\n`arm64`: a Factory Definition's Agent may ask that the Machine its\nSteps run on has some."
+      ),
     team_agent_user_id: zod.union([zod.null(), zod.string()]).optional(),
     updated_at: zod.iso.datetime({}).describe('Update timestamp.'),
   })
@@ -49512,6 +49557,8 @@ export const listHarnessesResponse = zod.array(listHarnessesResponseItem);
 /**
  * @summary Handler for `GET /harnesses/directory`.
  */
+export const listHarnessDirectoryResponseStepSlotsMin = 0;
+
 export const listHarnessDirectoryResponseItem = zod
   .object({
     access: zod
@@ -49558,6 +49605,19 @@ export const listHarnessDirectoryResponseItem = zod
       .describe(
         'Teams it is a team machine for: their every member is a user of it.'
       ),
+    step_slots: zod
+      .number()
+      .min(listHarnessDirectoryResponseStepSlotsMin)
+      .nullish()
+      .describe(
+        'How many software factory Steps may run on it at once; none for no\nlimit. A Step that finds every Machine its Agents run on full waits.'
+      ),
+    tags: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Its tags, lower case and sorted, such as `rust-build`, `gpu` or\n`arm64`: a Factory Definition's Agent may ask that the Machine its\nSteps run on has some."
+      ),
     team_agent_user_id: zod.union([zod.null(), zod.string()]).optional(),
     updated_at: zod.iso.datetime({}).describe('Update timestamp.'),
   })
@@ -49571,6 +49631,8 @@ export const listHarnessDirectoryResponse = zod.array(
 /**
  * @summary Handler for `GET /harnesses/me`.
  */
+export const getSelfHarnessResponseStepSlotsMin = 0;
+
 export const getSelfHarnessResponse = zod
   .object({
     access: zod
@@ -49616,6 +49678,19 @@ export const getSelfHarnessResponse = zod
       .optional()
       .describe(
         'Teams it is a team machine for: their every member is a user of it.'
+      ),
+    step_slots: zod
+      .number()
+      .min(getSelfHarnessResponseStepSlotsMin)
+      .nullish()
+      .describe(
+        'How many software factory Steps may run on it at once; none for no\nlimit. A Step that finds every Machine its Agents run on full waits.'
+      ),
+    tags: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Its tags, lower case and sorted, such as `rust-build`, `gpu` or\n`arm64`: a Factory Definition's Agent may ask that the Machine its\nSteps run on has some."
       ),
     team_agent_user_id: zod.union([zod.null(), zod.string()]).optional(),
     updated_at: zod.iso.datetime({}).describe('Update timestamp.'),
@@ -49677,6 +49752,8 @@ export const patchHarnessParams = zod.object({
   harness_id: zod.string().describe('Harness ID'),
 });
 
+export const patchHarnessBodyStepSlotsMin = 0;
+
 export const patchHarnessBody = zod
   .object({
     allow_permission_bypass: zod
@@ -49686,10 +49763,25 @@ export const patchHarnessBody = zod
         'Whether agents may bypass ACP permission requests on this harness.\nLive sessions pick the change up at their next turn.'
       ),
     name: zod.string().nullish().describe('New display name.'),
+    step_slots: zod
+      .number()
+      .min(patchHarnessBodyStepSlotsMin)
+      .nullish()
+      .describe(
+        'How many software factory Steps may run on it at once, 1 to\n[`MAX_STEP_SLOTS`]. Omit to leave unchanged, or pass `null` for no\nlimit.'
+      ),
+    tags: zod
+      .array(zod.string())
+      .nullish()
+      .describe(
+        'Its tags, replacing the ones it has: at most [`MAX_TAGS`], each 1 to\n[`MAX_TAG_CHARS`] lower-case letters, digits, `-`, `_` or `.`,\nstarting with a letter or digit. Upper case is lowered, and a tag\ngiven twice is kept once.'
+      ),
   })
   .describe(
     'Request to change a registered harness. Omitted fields stay as they are.'
   );
+
+export const patchHarnessResponseStepSlotsMin = 0;
 
 export const patchHarnessResponse = zod
   .object({
@@ -49736,6 +49828,19 @@ export const patchHarnessResponse = zod
       .optional()
       .describe(
         'Teams it is a team machine for: their every member is a user of it.'
+      ),
+    step_slots: zod
+      .number()
+      .min(patchHarnessResponseStepSlotsMin)
+      .nullish()
+      .describe(
+        'How many software factory Steps may run on it at once; none for no\nlimit. A Step that finds every Machine its Agents run on full waits.'
+      ),
+    tags: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Its tags, lower case and sorted, such as `rust-build`, `gpu` or\n`arm64`: a Factory Definition's Agent may ask that the Machine its\nSteps run on has some."
       ),
     team_agent_user_id: zod.union([zod.null(), zod.string()]).optional(),
     updated_at: zod.iso.datetime({}).describe('Update timestamp.'),

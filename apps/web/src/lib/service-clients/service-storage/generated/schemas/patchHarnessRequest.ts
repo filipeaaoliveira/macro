@@ -6,6 +6,8 @@
  */
 import type { PatchHarnessRequestAllowPermissionBypass } from './patchHarnessRequestAllowPermissionBypass';
 import type { PatchHarnessRequestName } from './patchHarnessRequestName';
+import type { PatchHarnessRequestStepSlots } from './patchHarnessRequestStepSlots';
+import type { PatchHarnessRequestTags } from './patchHarnessRequestTags';
 
 /**
  * Request to change a registered harness. Omitted fields stay as they are.
@@ -16,4 +18,16 @@ Live sessions pick the change up at their next turn. */
   allow_permission_bypass?: PatchHarnessRequestAllowPermissionBypass;
   /** New display name. */
   name?: PatchHarnessRequestName;
+  /**
+   * How many software factory Steps may run on it at once, 1 to
+[`MAX_STEP_SLOTS`]. Omit to leave unchanged, or pass `null` for no
+limit.
+   * @minimum 0
+   */
+  step_slots?: PatchHarnessRequestStepSlots;
+  /** Its tags, replacing the ones it has: at most [`MAX_TAGS`], each 1 to
+[`MAX_TAG_CHARS`] lower-case letters, digits, `-`, `_` or `.`,
+starting with a letter or digit. Upper case is lowered, and a tag
+given twice is kept once. */
+  tags?: PatchHarnessRequestTags;
 }

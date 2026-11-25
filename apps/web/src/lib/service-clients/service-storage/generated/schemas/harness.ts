@@ -11,6 +11,7 @@ import type { HarnessComputerId } from './harnessComputerId';
 import type { HarnessId } from './harnessId';
 import type { HarnessLastConnectedAt } from './harnessLastConnectedAt';
 import type { HarnessOwner } from './harnessOwner';
+import type { HarnessStepSlots } from './harnessStepSlots';
 import type { HarnessTeamAgentUserId } from './harnessTeamAgentUserId';
 
 /**
@@ -46,6 +47,16 @@ it has an active Claude login. Only meaningful for Macro computers. */
   owner: HarnessOwner;
   /** Teams it is a team machine for: their every member is a user of it. */
   shared_team_ids?: string[];
+  /**
+   * How many software factory Steps may run on it at once; none for no
+limit. A Step that finds every Machine its Agents run on full waits.
+   * @minimum 0
+   */
+  step_slots?: HarnessStepSlots;
+  /** Its tags, lower case and sorted, such as `rust-build`, `gpu` or
+`arm64`: a Factory Definition's Agent may ask that the Machine its
+Steps run on has some. */
+  tags?: string[];
   team_agent_user_id?: HarnessTeamAgentUserId;
   /** Update timestamp. */
   updated_at: string;

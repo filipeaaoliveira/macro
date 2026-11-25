@@ -47,7 +47,7 @@ const started: RunDetail = {
       entry: 'plan',
       visit: 1,
       startedAt: '2026-11-16T09:00:01Z',
-      runtime: {},
+      runtime: { waitingOnMachines: [] },
       passedOver: [{ agent: 'backup', reason: 'ai_allowance_exhausted' }],
       role: 'planner',
       agent: 'primary',
@@ -239,7 +239,7 @@ describe('createAppRunsContext', () => {
           entry: 'plan',
           visit: 1,
           startedAt: '2026-11-16T09:00:01Z',
-          runtime: {},
+          runtime: { waitingOnMachines: [] },
           passedOver: [],
           checks: [],
           gate: {
@@ -282,7 +282,7 @@ describe('createAppRunsContext', () => {
         entry: 'plan',
         visit: seq,
         startedAt: '2026-11-16T09:00:01Z',
-        runtime: {},
+        runtime: { waitingOnMachines: [] },
         passedOver: [],
         checks: [],
         gate: {
@@ -745,9 +745,14 @@ describe('createAppRunsContext', () => {
       steps: [
         {
           ...step,
-          runtime: { model: 'claude-opus-4-5', machine: 'm4', agentName: null },
+          runtime: {
+            model: 'claude-opus-4-5',
+            machine: 'm4',
+            agentName: null,
+            waitingOnMachines: [],
+          },
         },
-        { ...step, seq: 2, runtime: {} },
+        { ...step, seq: 2, runtime: { waitingOnMachines: [] } },
       ],
     };
     // A service older than runtimes sends none.
@@ -847,7 +852,7 @@ describe('createAppRunsContext', () => {
             entry: 'plan',
             visit: 1,
             startedAt: '2026-11-16T09:00:01Z',
-            runtime: {},
+            runtime: { waitingOnMachines: [] },
             passedOver: [],
             end: {
               outcome: 'done',
