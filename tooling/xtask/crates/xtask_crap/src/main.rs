@@ -71,11 +71,11 @@ const TOOLS: [&str; 3] = ["llvm-cov", "nextest", "crap"];
 const INSTALL_HINT: &str = "install them with `cargo install --locked cargo-llvm-cov cargo-nextest cargo-crap` and `rustup component add llvm-tools-preview`";
 /// The nextest profile the coverage run uses, from [`NEXTEST_CONFIG`]. It
 /// inherits the repository's default profile.
-const NEXTEST_PROFILE: &str = "default-crap-rust";
+const NEXTEST_PROFILE: &str = "crap-rust";
 /// A test still running after three minutes is ended, so one that hangs
 /// cannot take the round's time.
 const NEXTEST_CONFIG: &str = "\
-[profile.default-crap-rust]
+[profile.crap-rust]
 slow-timeout = { period = \"60s\", terminate-after = 3 }
 ";
 /// Where coverage builds go when neither `CARGO_LLVM_COV_TARGET_DIR` nor
