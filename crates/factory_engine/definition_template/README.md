@@ -285,6 +285,12 @@ that first line is `complete` (which also says the base commit is in the
 checkout), or when the variable is unset, as it is where
 the agent runs the checks.
 
+A product repository with Rust code can add the `crap-rust` check, which
+fails a change that adds a function, or makes one more complex, that its
+tests leave risky (a CRAP score above 30). It keeps to the change, and is
+skipped when no base commit is given. `docs/development/factory-crap.md` in
+the Macro repository has the entry to copy and the tools each machine needs.
+
 Secrets never go here: no field takes an API key or a token, and a file that
 holds something shaped like one does not read.
 

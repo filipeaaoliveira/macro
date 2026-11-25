@@ -2,46 +2,35 @@
 
 ## What it is
 
-`cargo x crap-rust [--base <commit>]`: the `crap-rust` check in
-`.macro/checks.json`. It scores the Rust functions a change touched with
-`cargo crap` and fails when one is new or more complex than at the base and
-scores above the threshold in `.cargo-crap.toml`.
-
-## How it works
-
-1. Changed paths: `MACRO_CHECK_CHANGED`'s list when its first line is
-   `complete`, else every `*.rs` path `git diff <base> HEAD` names. The base
-   is `--base`, else `MACRO_CHECK_BASE`; without one the check exits 2.
-2. Keeps Rust source only (`changed::is_scored`): no tests, generated code,
-   migrations, build scripts or `services/*/src/main.rs`.
-3. Maps the files to their packages (`cargo metadata`), runs
-   `cargo llvm-cov nextest -p <those> --lcov` and `cargo crap -p <those>`.
-   A failing test does not stop it: the tests' own check reports that.
-4. Scores the files' base versions (`git show`) for their complexity, and
-   pairs functions by file (the earlier name of a renamed one) and name.
-5. Keeps the functions whose span (`fn` keyword to closing brace) meets a
-   diff hunk and prints one JSON line each, failing rows last, then a
-   summary line. Exit code: 0 passed, 1 a function failed, 2 not run.
+The `crap-rust` check: `cargo x crap-rust` here, the installed `xtask_crap`
+binary in a product repository's `.macro/checks.json`. It scores the Rust
+functions a change touched with `cargo crap` and fails when one is new or
+more complex than at the base and scores above the threshold in
+`.cargo-crap.toml` (30 without one). This repository does not run it as a
+check; `docs/development/factory-crap.md` says why and how a product
+repository declares it.
 
 ## Start here
 
-- `src/rows.rs`: the row, its `change` (`new`, `rose`, `same`, `fell`) and
-  when it `fails`.
-- `src/main.rs`: the commands it runs, in order.
+- `src/main.rs`: the steps, in order: base (skipped without one), tools,
+  changed files, coverage, scores, base scores, rows.
+- `src/rows.rs`: pairing with the base, `change`, and when a row `fails`
+  or is `unproven`.
+- `src/diff.rs`: hunks, and where a base line lands in the new file.
 
 ## Checks
 
 - `cargo test -p xtask_crap`
-- A real run needs `cargo-llvm-cov` and `cargo-crap` installed (see
-  `docs/development/factory-crap.md`).
+- A real run needs `cargo-llvm-cov`, `cargo-nextest` and `cargo-crap`.
 
 ## Gotchas
 
+- A missing base exits 0: a Run's failed comparison never fails its round.
 - The checks round keeps only the end of a check's output (4 KiB), so rows
   print on stdout after every build log, failing and worst last.
+- It diffs the committed `HEAD` but reads the working tree: commit before
+  running it by hand.
 - Functions named `main` get no row: they wire a binary up.
-- It diffs and scores the committed `HEAD`, but reads spans from the working
-  tree: commit before running it by hand.
 
 ## Related
 

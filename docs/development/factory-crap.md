@@ -142,48 +142,123 @@ machine, so the checks should score changed packages only.
 
 ## The `crap-rust` check
 
-`.macro/checks.json` runs `cargo x crap-rust` (`tooling/xtask/crates/xtask_crap`)
-in a Run's checks round when the change reaches Rust code. It reads the base
-from `MACRO_CHECK_BASE` (or `--base`) and the changed paths from
-`MACRO_CHECK_CHANGED` when its first line is `complete`; otherwise it takes
-every `*.rs` path `git diff <base> HEAD` names. It leaves out tests, generated
-code, migrations, build scripts and `services/*/src/main.rs`, maps the rest to
-their packages, runs `cargo llvm-cov nextest -p <those>` and
-`cargo crap -p <those>`, and scores the files' base versions for their
-complexity.
+`tooling/xtask/crates/xtask_crap` scores the Rust functions a change
+touched. In this repository it runs by hand as `cargo x crap-rust`; a product
+repository runs the installed `xtask_crap` binary as a check in its Runs'
+checks round. This repository declares no such check: Runs do not develop
+it, and Benchmarks based on `feat/factory` would pay for the check without
+using it.
 
-It prints one JSON line per function whose span meets a diff hunk, then a
-summary line:
+### What it does
+
+1. Base: `--base`, else `MACRO_CHECK_BASE`. When neither names a commit the
+   repository holds (the agent runs the checks, GitHub's comparison failed,
+   or the base was not fetched), it prints
+   `crap-rust: skipped: no base commit to compare with` and exits 0: a
+   comparison that fails never fails the round.
+2. Tools: `cargo llvm-cov`, `cargo nextest` and `cargo crap` must answer
+   `--version`; otherwise it exits 2 at once with the install command.
+3. Changed files: those `MACRO_CHECK_CHANGED` lists when its first line is
+   `complete`, else every `*.rs` path `git diff <base> HEAD` names. Tests,
+   generated code, migrations, the SQLx cache, build scripts and
+   `services/*/src/main.rs` are left out.
+4. Coverage: the packages holding the files run their tests under
+   `cargo llvm-cov nextest --ignore-run-fail`. Each test is ended after
+   three minutes. The build goes to `CARGO_LLVM_COV_TARGET_DIR`, else
+   cargo-llvm-cov's folder in `CARGO_TARGET_DIR`, else
+   `${XDG_CACHE_HOME:-$HOME/.cache}/macro-check/crap-target`: outside the
+   round's worktree, so only the first round on a machine builds cold.
+   Rounds on one machine take turns on it.
+5. Scores: `cargo crap -p <those>`, and the base versions of the changed
+   and removed files for their complexity.
+6. Pairing: a function pairs with the base function of its name whose line
+   the diff carries to its own; one left over pairs with one of its name
+   left over in its file, in order; one still left over pairs with a base
+   function no function took, in any changed or removed file, whose body is
+   the same token for token: it moved or was renamed.
+
+### What it prints
+
+One JSON line per changed file it could not score, one per function whose
+span meets a diff hunk, then a summary line:
 
 ```json
+{"path":"tauri/src/lib.rs","warning":"not scored: no package of the workspace holds it"}
 {"path":"crates/a/src/lib.rs","name":"Thing::run","line":12,"complexity":7.0,"coverage":40.0,"score":17.9,"change":"rose","base_complexity":6.0,"fails":false}
+crap-rust: 1 touched functions; 0 new or more complex above 30 (failing); 0 unproven; 0 others above it
 ```
 
-`change` is `new`, `rose`, `same` or `fell` against the base. A row `fails`
-when the function is `new` or `rose` and scores above `threshold` in
-`.cargo-crap.toml` (30); the check then exits 1. Other touched functions above
-30 are listed without failing. Failing rows come last, the worst last, since
-the round keeps only the end of a check's output. Exit code 2 means the check
-could not run (no base, a tool missing, a build that failed).
+- `change` is `new`, `rose`, `same` or `fell` against the base.
+- A row `fails` when the function is `new` or `rose` and scores above
+  `threshold` in `.cargo-crap.toml` (30 without one); the check then exits 1.
+  Other touched functions above 30 are listed without failing.
+- When tests failed, the summary names how many and the first three, every
+  row has `"coverage_uncertain":true`, and a row that would fail only
+  because it is 0% covered has `"unproven":true` and does not fail. A
+  function whose complexity alone is above 30 still fails.
+- Failing rows come last, the worst last, since the round keeps only the
+  last 4 KiB of a check's output.
+- Exit code: 0 passed or skipped, 1 a row fails, 2 the check could not run.
 
-`.cargo-crap.toml` sets `try-weight = 0.0`: a `?` adds nothing to a function's
-complexity. Scored again at weight 0 with the coverage above, the three
-factory crates have 6 functions above 30 instead of 16, and 34 above 16
-instead of 61. At weight 1 any untested function with five `?` fails,
-though its branches are errors returned to the caller. The baselines above
-were scored at weight 1; `factory-crap.sh` now writes weight-0 scores.
+A file of another Cargo workspace in the repository, such as
+`apps/web/tauri`, gets a warning line: the check runs the root workspace's
+packages only.
 
-It needs the tools under [Needs](#needs) on the machine that runs the
-checks. A failing test does not stop it (`--ignore-run-fail`): the code only
-that test reaches counts as uncovered, and the tests' own check reports the
-failure. It scores the committed `HEAD`, so commit before running it by hand:
+### Declare it in a product repository
+
+Install the tools on each machine that runs the checks:
+
+```sh
+cargo install --locked cargo-llvm-cov cargo-nextest cargo-crap
+rustup component add llvm-tools-preview
+cargo install --locked --git https://github.com/filipeaaoliveira/macro --branch feat/factory xtask_crap
+```
+
+Then add the check to the repository's `.macro/checks.json`, with `paths`
+naming its Rust folders:
+
+```json
+{
+  "checks": [
+    {
+      "name": "crap-rust",
+      "run": "xtask_crap",
+      "paths": ["crates", "src", ".cargo-crap.toml"],
+      "timeout": 1200
+    }
+  ]
+}
+```
+
+It runs from the root of a repository whose Cargo workspace is at its root.
+An optional `.cargo-crap.toml` there sets `threshold` and `try-weight`.
+
+### Try-weight
+
+This repository's `.cargo-crap.toml` sets `try-weight = 0.0`: a `?` adds
+nothing to a function's complexity. Scored again at weight 0 with the
+coverage above, the three factory crates have 6 functions above 30 instead
+of 16, and 34 above 16 instead of 61. At weight 1 any untested function
+with five `?` fails, though its branches are errors returned to the caller.
+The baselines above were scored at weight 1; `factory-crap.sh` now writes
+weight-0 scores.
+
+### Run it by hand
+
+It scores the committed `HEAD`, so commit first:
 
 ```sh
 cargo x crap-rust --base "$(git merge-base origin/feat/factory HEAD)"
 ```
 
-Time on the M3 at two build jobs, lock waits left out: a change to
-`subsequence_match` alone took 5 s with its instrumented build warm; this
-check's own crate took under 2 minutes from cold. Changes to `factory_engine`
-or `factory_records` cost what the table under [Cost](#cost) shows for one
-crate, 4 to 5 minutes cold, inside the round's 20-minute limit.
+### Time
+
+On the M3 at two build jobs, lock waits left out: a change to
+`subsequence_match` alone took 5 s with its coverage build warm, and this
+check's own crate under 2 minutes cold. A cold first round pays the
+instrumented build of the touched packages: 4 to 5 minutes for
+`factory_engine` or `factory_records` (see [Cost](#cost)), about 9.5 for all
+three factory crates, inside the 1200-second timeout above, the most a check
+may take. Later rounds reuse the build and pay only for what changed and the
+tests. A first round that runs out of time leaves its build behind, so the
+next round starts warmer.
