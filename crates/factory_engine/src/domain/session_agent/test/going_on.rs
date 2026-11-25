@@ -184,3 +184,72 @@ async fn a_session_lost_with_nothing_to_go_on_afresh_with_fails_for_good() {
     assert!(matches!(error, SessionAgentError::SessionLost));
     assert!(!error.retryable());
 }
+
+/// A session lost after its question goes on afresh with the first Agent
+/// of the Role whose Machine has the tags it asks for: the Role's first
+/// Agent, whose Machine lost its `gpu` tag meanwhile, is passed over, and
+/// the Step holds a slot on the Machine its new session opens on.
+#[tokio::test(start_paused = true)]
+async fn a_lost_session_goes_on_afresh_with_an_agent_whose_machine_has_the_tags() {
+    use factory_records::domain::machines::StepMachine;
+    use uuid::Uuid;
+
+    use super::{BACKUP, PRIMARY};
+
+    let m3 = Uuid::from_u128(0x0a3);
+    let m5 = Uuid::from_u128(0x0a5);
+    let repo = FakeRepo::default();
+    let machine = |id: Uuid, name: &str, tags: &[&str]| StepMachine {
+        id,
+        name: name.to_string(),
+        step_slots: Some(1),
+        tags: tags.iter().map(ToString::to_string).collect(),
+    };
+    repo.machines
+        .lock()
+        .expect("machines")
+        .insert(PRIMARY.as_uuid(), machine(m3, "m3", &["gpu"]));
+    repo.machines
+        .lock()
+        .expect("machines")
+        .insert(BACKUP.as_uuid(), machine(m5, "m5", &["gpu"]));
+    let sessions = FakeSessions::new(&repo, Some(the_question()), RoutineActionStatus::Succeeded);
+    let (_, next) = asked(&repo, &sessions).await;
+    let kept = serde_json::json!({
+        "agents": {
+            "primary": { "bot": PRIMARY.as_uuid(), "machine_tags": ["gpu"] },
+            "backup": { "bot": BACKUP.as_uuid(), "machine_tags": ["gpu"] }
+        },
+        "roles": { "planner": ["primary", "backup"] }
+    });
+    repo.definition_agents
+        .lock()
+        .expect("definition agents")
+        .insert(next.key.run_id, kept);
+    repo.machines
+        .lock()
+        .expect("machines")
+        .insert(PRIMARY.as_uuid(), machine(m3, "m3", &["rust-build"]));
+    let mut losing = sessions.clone();
+    losing.follow_up_loses = true;
+    losing.handed = Some(the_plan());
+    let next = AgentTask {
+        afresh: Some("Plan the change, afresh".to_string()),
+        ..next
+    };
+
+    agent(&losing, &repo)
+        .answer(next.clone())
+        .await
+        .expect("go on afresh");
+
+    let prepared = losing.prepared_calls.lock().expect("prepared").clone();
+    assert_eq!(
+        prepared.last().expect("a fresh session").selection.bot_id,
+        BACKUP
+    );
+    assert_eq!(
+        repo.machine_slots.lock().expect("slots").get(&next.key),
+        Some(&m5)
+    );
+}

@@ -331,7 +331,10 @@ A Step's slot follows the Agent that opens its session: just before an
 Agent's session opens (`SessionAgent::hold_slot`, in `answer_in`), the Step
 takes a slot on that Agent's Machine (`MachineRepository::take_machine_slot`,
 under a lock per Machine), moving any slot it held, or lets go of it for an
-Agent on no Machine. It holds the slot until it or its Run ends, or for at
+Agent on no Machine. A Step whose current session already opened, as on a
+retry, takes no slot and keeps any it holds (`session_opened`): its session
+stays where it opened, whatever its Agent's tags or bot say now, and a Step
+running from before Machines had slots goes on without one. It holds the slot until it or its Run ends, or for at
 most `SLOT_HELD_AT_MOST` (125 minutes, past the two hours a Step's work has)
 after it started, so a Step whose Run's workflow is gone without recording
 its end frees its slot then. Before a Step claims its first session it is
@@ -343,15 +346,18 @@ recording why, and the next fitting Agent holds the slot. Every pass to
 another Agent (lack of quota, a usage limit, a session lost after a
 question) goes to the next fitting Agent (`next_fitting`).
 
-While every fitting Machine is full the Step waits, looking every 10 s, and
+While every fitting Machine is full the Step waits, having let go of any
+slot it held (so two Steps moving between two full Machines never hold
+each other's way), looking every 10 s, and
 records on which and since when (`wait_for_machine_slot`), which the Run API
 shows as `runtime.waitingForSlotSince` and `runtime.waitingOnMachines` (the
 names for the Run's owner only, as `machine`). An attempt out of time fails
 `WaitingForSlot`, retried (`StepError::WaitingForMachine`, type
-`FactoryWaitingForMachine`). A Step does not take a slot more than
-`TAKE_SLOT_WITHIN` (90 minutes) after it started, so one that takes a slot
-has at least half an hour left: past it a Step that holds none fails for
-good (`SlotTimeRanOut`, the same type, not retried). Either way a Step whose
+`FactoryWaitingForMachine`). A Step does not wait for a slot more than
+`TAKE_SLOT_WITHIN` (90 minutes) after it started, so one that waits and
+gets a slot has at least half an hour left: past it a free slot is still
+taken, but a Step that finds every fitting Machine full fails for good
+(`SlotTimeRanOut`, the same type, not retried). Either way a Step whose
 time runs out so ends its Run `infrastructure`. A Step whose Agents none
 fits fails at once as a refusal (`SessionAgentError::NoMachine`), its output
 naming the tags.

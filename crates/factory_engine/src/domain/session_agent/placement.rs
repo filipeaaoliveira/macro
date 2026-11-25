@@ -170,6 +170,9 @@ impl<
             .claimed_session(task.key)
             .await
             .map_err(Self::records)?;
+        // A Step that claimed its session goes on in it: `claim_session`
+        // hands that session back whatever Agent is named here, so the
+        // Role's first stands in, and no slot is taken.
         if claimed.is_some() {
             return Ok(listed[0].clone());
         }
@@ -188,6 +191,7 @@ impl<
 
             let last = fitting.len() - 1;
             let mut full = Vec::new();
+            let mut too_late = false;
             for (place, (name, fit)) in fitting.into_iter().enumerate() {
                 // The session's start passes over an Agent its owner's quota
                 // refused lately while a fitting Agent follows it, recording
@@ -211,13 +215,23 @@ impl<
                     SlotTake::Taken => return Ok(name.clone()),
                     SlotTake::Full => note_full(&mut full, machine),
                     SlotTake::TooLate => {
+                        too_late = true;
                         note_full(&mut full, machine);
-                        return Err(SessionAgentError::SlotTimeRanOut(
-                            full.into_iter().map(|(_, name)| name).collect(),
-                        ));
                     }
                 }
             }
+            // Every fitting Machine is full. A Step too late to take a slot
+            // stops waiting; any other waits, holding no slot meanwhile, so
+            // a slot it held from an earlier attempt blocks no other Step.
+            if too_late {
+                return Err(SessionAgentError::SlotTimeRanOut(
+                    full.into_iter().map(|(_, name)| name).collect(),
+                ));
+            }
+            self.repo
+                .release_machine_slot(task.key)
+                .await
+                .map_err(Self::records)?;
             self.wait_for_slot(task, &full, deadline).await?;
         }
     }
@@ -226,7 +240,14 @@ impl<
     /// whose session is about to open: the slot follows the Agent that
     /// opens it, so one the Step held on another Machine moves here, and a
     /// Step whose Agent runs on no Machine lets go of any. While the Machine
-    /// is full, the Step waits as placement does.
+    /// is full, the Step waits as placement does, having let go of the slot
+    /// it held elsewhere, so two Steps moving between two full Machines
+    /// never hold each other's way.
+    ///
+    /// A Step whose session already opened, as on a retry, keeps the slot
+    /// it holds, if any, and takes none: the session stays where it opened,
+    /// whatever its Agent's tags or bot say now, and a Step running from
+    /// before Machines had slots goes on without one.
     pub(super) async fn hold_slot(
         &self,
         agents: &AgentDefinition,
@@ -234,6 +255,14 @@ impl<
         name: &AgentName,
         deadline: tokio::time::Instant,
     ) -> Result<(), SessionAgentError> {
+        let opened = self
+            .repo
+            .session_opened(task.key)
+            .await
+            .map_err(Self::records)?;
+        if opened {
+            return Ok(());
+        }
         let machine = match self.fit(agents, name).await? {
             Fit::Unfit => {
                 return Err(SessionAgentError::NoMachine(no_machine(
@@ -257,6 +286,10 @@ impl<
                     return Err(SessionAgentError::SlotTimeRanOut(vec![machine.name]));
                 }
                 SlotTake::Full => {
+                    self.repo
+                        .release_machine_slot(task.key)
+                        .await
+                        .map_err(Self::records)?;
                     self.wait_for_slot(task, &[(machine.id, machine.name.clone())], deadline)
                         .await?;
                 }

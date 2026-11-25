@@ -274,7 +274,7 @@ async fn placement_books_no_slot_on_an_agent_the_quota_refused_lately() {
 async fn a_step_too_late_for_a_slot_fails_for_good() {
     let repo = FakeRepo::default();
     bind(&repo, PRIMARY, M4, "m4", Some(1), &[]);
-    bind(&repo, BACKUP, M3, "m3", None, &["gpu"]);
+    bind(&repo, BACKUP, M4, "m4", Some(1), &[]);
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let busy = plan_task(&repo).await.key;
     let taken = repo
@@ -303,4 +303,160 @@ async fn a_step_too_late_for_a_slot_fails_for_good() {
     assert!(!error.retryable());
     assert!(error.waits_for_machine());
     assert!(prepared_bots(&sessions).is_empty());
+}
+
+/// A Step past the time to wait for a slot still takes a free one, on a
+/// Machine with a slot left as on one with no limit: only a full Machine is
+/// too late.
+#[tokio::test]
+async fn a_late_step_takes_a_free_slot() {
+    for slots in [Some(2), None] {
+        let repo = FakeRepo::default();
+        bind(&repo, PRIMARY, M4, "m4", slots, &[]);
+        let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+        let busy = plan_task(&repo).await.key;
+        let taken = repo
+            .take_machine_slot(busy, M4, TAKE_SLOT_WITHIN)
+            .await
+            .expect("take");
+        assert_eq!(taken, SlotTake::Taken);
+        let task = plan_task(&repo).await;
+        let key = task.key;
+        repo.steps
+            .lock()
+            .expect("steps")
+            .iter_mut()
+            .filter(|(run, step)| *run == key.run_id && step.seq == key.seq)
+            .for_each(|(_, step)| step.started_at = Utc::now() - chrono::Duration::minutes(100));
+
+        agent(&sessions, &repo).answer(task).await.expect("answer");
+
+        assert_eq!(prepared_bots(&sessions), [PRIMARY]);
+        assert_eq!(
+            repo.machine_slots.lock().expect("slots").get(&key),
+            Some(&M4)
+        );
+    }
+}
+
+/// A Step whose Agent cannot start, passed on to an Agent whose Machine is
+/// full, waits there for a slot having let go of the one it held: two Steps
+/// moving between two full Machines never hold each other's way.
+#[tokio::test(start_paused = true)]
+async fn a_moving_step_lets_go_of_its_slot_while_it_waits_for_the_next() {
+    let repo = FakeRepo::default();
+    bind(&repo, PRIMARY, M3, "m3", Some(1), &[]);
+    bind(&repo, BACKUP, M4, "m4", Some(1), &[]);
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let busy = plan_task(&repo).await.key;
+    let taken = repo
+        .take_machine_slot(busy, M4, TAKE_SLOT_WITHIN)
+        .await
+        .expect("take");
+    assert_eq!(taken, SlotTake::Taken);
+    let mut task = plan_task(&repo).await;
+    task.answer_by = Some(Utc::now() + chrono::Duration::seconds(60));
+    let key = task.key;
+
+    let error = agent(&sessions, &repo)
+        .answer(task)
+        .await
+        .expect_err("m4 stays full");
+
+    assert!(
+        matches!(&error, SessionAgentError::WaitingForSlot(full) if full == &["m4"]),
+        "{error:?}"
+    );
+    assert_eq!(prepared_bots(&sessions), [PRIMARY]);
+    assert_eq!(repo.machine_slots.lock().expect("slots").get(&key), None);
+    assert_eq!(
+        repo.slot_waits.lock().expect("waits").get(&key),
+        Some(&vec!["m4".to_string()])
+    );
+}
+
+/// A retried Step whose session already opened takes no slot: its session
+/// stays where it opened, whatever its Machine's slots say now, as for a
+/// Step running from before Machines had slots.
+#[tokio::test(start_paused = true)]
+async fn a_retry_of_a_step_whose_session_opened_takes_no_slot() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let mut task = plan_task(&repo).await;
+    task.answer_by = Some(Utc::now() + chrono::Duration::seconds(60));
+    let key = task.key;
+    let planner = agent(&sessions, &repo);
+    planner.answer(task.clone()).await.expect("first");
+
+    bind(&repo, PRIMARY, M4, "m4", Some(1), &["gpu"]);
+    let busy = plan_task(&repo).await.key;
+    let taken = repo
+        .take_machine_slot(busy, M4, TAKE_SLOT_WITHIN)
+        .await
+        .expect("take");
+    assert_eq!(taken, SlotTake::Taken);
+    planner.answer(task).await.expect("the retry");
+
+    assert_eq!(repo.machine_slots.lock().expect("slots").get(&key), None);
+    assert_eq!(repo.slot_waits.lock().expect("waits").get(&key), None);
+}
+
+/// A first turn its usage limit ended passes the Step on to the next Agent
+/// whose Machine has the tags, past one whose Machine lacks them.
+#[tokio::test(start_paused = true)]
+async fn a_usage_limit_passes_the_step_to_an_agent_with_the_tags() {
+    let repo = FakeRepo::default();
+    bind(&repo, PRIMARY, M3, "m3", Some(1), &["gpu"]);
+    bind(&repo, BACKUP, M4, "m4", Some(1), &["rust-build"]);
+    bind(&repo, SPARE, M5, "m5", Some(1), &["gpu"]);
+    let sessions =
+        FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded).limiting(1);
+    let task = plan_task(&repo).await;
+    repo.definition_agents
+        .lock()
+        .expect("definition agents")
+        .insert(task.key.run_id, gpu_planners());
+    let key = task.key;
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    assert_eq!(prepared_bots(&sessions), [PRIMARY, SPARE]);
+    assert_eq!(recorded(&repo, key).1, Some(name("spare")));
+    assert_eq!(
+        repo.machine_slots.lock().expect("slots").get(&key),
+        Some(&M5)
+    );
+}
+
+/// A late Step that finds its first Agent's Machine full goes on to the
+/// next Agent whose Machine has a slot free, rather than stop at the first.
+#[tokio::test]
+async fn a_late_step_passes_a_full_machine_for_a_free_one() {
+    let repo = FakeRepo::default();
+    bind(&repo, PRIMARY, M4, "m4", Some(1), &[]);
+    bind(&repo, BACKUP, M3, "m3", Some(1), &[]);
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let busy = plan_task(&repo).await.key;
+    let taken = repo
+        .take_machine_slot(busy, M4, TAKE_SLOT_WITHIN)
+        .await
+        .expect("take");
+    assert_eq!(taken, SlotTake::Taken);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    repo.steps
+        .lock()
+        .expect("steps")
+        .iter_mut()
+        .filter(|(run, step)| *run == key.run_id && step.seq == key.seq)
+        .for_each(|(_, step)| step.started_at = Utc::now() - chrono::Duration::minutes(100));
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    assert_eq!(prepared_bots(&sessions), [BACKUP]);
+    assert_eq!(
+        repo.machine_slots.lock().expect("slots").get(&key),
+        Some(&M3)
+    );
 }

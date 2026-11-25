@@ -19,9 +19,10 @@ impl MachineRepository for FakeRepo {
         Ok(self.machines.lock().expect("machines").get(&bot).cloned())
     }
 
-    /// As the records keep it: a Step keeps the slot it holds; one that
-    /// started more than `take_within` ago takes none; the Steps that hold
-    /// a slot and have not ended count, this one left out.
+    /// As the records keep it: a Step keeps the slot it holds; the Steps
+    /// that hold a slot and have not ended count, this one left out; a full
+    /// Machine is `TooLate` for a Step that started more than
+    /// `take_within` ago.
     async fn take_machine_slot(
         &self,
         key: StepKey,
@@ -33,16 +34,6 @@ impl MachineRepository for FakeRepo {
             return Ok(SlotTake::Taken);
         }
         let steps = self.steps.lock().expect("steps");
-        let started = steps
-            .iter()
-            .find(|(run, step)| *run == key.run_id && step.seq == key.seq)
-            .map(|(_, step)| step.started_at);
-        let late = started.is_some_and(|started| {
-            (Utc::now() - started).to_std().unwrap_or_default() > take_within
-        });
-        if late {
-            return Ok(SlotTake::TooLate);
-        }
         let slots = self
             .machines
             .lock()
@@ -61,12 +52,31 @@ impl MachineRepository for FakeRepo {
                 })
                 .count();
             if running >= usize::from(slots) {
-                return Ok(SlotTake::Full);
+                let late = steps
+                    .iter()
+                    .find(|(run, step)| *run == key.run_id && step.seq == key.seq)
+                    .is_some_and(|(_, step)| {
+                        (Utc::now() - step.started_at).to_std().unwrap_or_default() > take_within
+                    });
+                return Ok(if late {
+                    SlotTake::TooLate
+                } else {
+                    SlotTake::Full
+                });
             }
         }
         held.insert(key, machine);
         self.slot_waits.lock().expect("waits").remove(&key);
         Ok(SlotTake::Taken)
+    }
+
+    /// Whether the Step's current session was seen open.
+    async fn session_opened(&self, key: StepKey) -> Result<bool, FakeError> {
+        let sessions = self.sessions.lock().expect("sessions");
+        Ok(sessions
+            .iter()
+            .find(|claimed| claimed.key == key)
+            .is_some_and(|claimed| claimed.opened))
     }
 
     async fn release_machine_slot(&self, key: StepKey) -> Result<(), FakeError> {
