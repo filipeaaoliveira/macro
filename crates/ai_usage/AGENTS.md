@@ -21,7 +21,9 @@ flexible admin query API.
 - `src/domain/session_usage.rs` + `src/outbound/pg_session_usage.rs`:
   `SessionUsageReader`, the tokens recorded for given agent sessions of one
   user (factory insights), and what each session's calls billed to an
-  agent's own API key cost (`ApiKeySpend`, by `agent_api_key_id`). Usage recorded with a session only as its
+  agent's own API key cost (`ApiKeySpend`, by `agent_api_key_id`). It
+  reads a session's turns only: Macro's own calls about it (`chat_rename`,
+  `agent_activity_summary`) are left out. Usage recorded with a session only as its
   `entity`, as the harness's model gateway records it, is not counted.
   Its read starts from the session ids and looks each up through
   `ai_usage_agent_session_id_idx`, the user check fenced out of the lookup

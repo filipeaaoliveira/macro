@@ -142,3 +142,39 @@ async fn a_sessions_calls_on_an_api_key_are_summed_by_the_key(pool: PgPool) {
     assert!((spend.cost_usd - 0.5).abs() < 1e-6);
     assert_eq!(spend.unpriced_calls, 0);
 }
+
+/// Macro's own calls about a session, its title and its activity summary,
+/// are not its turns: a session with only those reads as no usage, and one
+/// with turns too counts only its turns.
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_sessions_title_and_summary_calls_are_not_its_turns(pool: PgPool) {
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO ai_usage (id, feature, user_id, model, input_tokens, output_tokens,
+                              cache_read_input_tokens, cache_write_input_tokens,
+                              agent_session_id, total)
+        VALUES
+            ('00000000-0000-7000-8000-000000000421', 'chat_rename', 'macro|julia@example.com', 'm', 50, 5, 0, 0,
+             '00000000-0000-7000-8000-000000000306', 0.01),
+            ('00000000-0000-7000-8000-000000000422', 'agent_session', 'macro|julia@example.com', 'm', 10, 1, 0, 0,
+             '00000000-0000-7000-8000-000000000307', 0.2),
+            ('00000000-0000-7000-8000-000000000423', 'agent_activity_summary', 'macro|julia@example.com', 'm', 70, 7, 0, 0,
+             '00000000-0000-7000-8000-000000000307', 0.02);
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("fixtures");
+    let reader = PgSessionUsageReader::new(pool);
+    let titled_only = session("00000000-0000-7000-8000-000000000306");
+    let worked = session("00000000-0000-7000-8000-000000000307");
+
+    let read = reader
+        .session_tokens(&julia(), &[titled_only, worked])
+        .await
+        .expect("read");
+
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].session_id, worked);
+    assert_eq!((read[0].input, read[0].output), (10, 1));
+}

@@ -49,9 +49,11 @@ pub trait SessionUsageReader: Send + Sync + 'static {
     /// The error type returned by reads.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// The tokens recorded for each of `sessions` that ran as `user`. A
-    /// session with no usage recorded for `user` has no entry: one whose
-    /// model calls were not made through Macro, or one of someone else's.
+    /// The tokens recorded for each of `sessions` that ran as `user`, from
+    /// its turns' calls: Macro's own calls about the session (its title, its
+    /// activity summary) are left out. A session with no turn recorded for
+    /// `user` has no entry: one whose model calls were not made through
+    /// Macro, or one of someone else's.
     fn session_tokens(
         &self,
         user: &MacroUserIdStr<'static>,

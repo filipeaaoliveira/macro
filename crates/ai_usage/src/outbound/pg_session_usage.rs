@@ -7,6 +7,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use macro_uuid::Uuid;
 use sqlx::PgPool;
 
+use crate::domain::ports::AiFeature;
 use crate::domain::session_usage::{ApiKeySpend, SessionTokens, SessionUsageReader};
 
 /// The most sessions one read sums up. Callers read at most this many at a
@@ -67,6 +68,13 @@ impl SessionUsageReader for PgSessionUsageReader {
         // planner with stale statistics adds the user's own index to every
         // lookup and reads their whole history once per session. A session
         // makes one row per model call, so the timeout bounds a long one.
+        // Macro's own calls about a session (its title, its activity
+        // summary) are not the session's turns: a runtime that records none
+        // of its turns here still has them.
+        let housekeeping = [
+            AiFeature::ChatRename.to_string(),
+            AiFeature::AgentActivitySummary.to_string(),
+        ];
         let mut transaction = self.pool.begin().await?;
         sqlx::query!("SET LOCAL statement_timeout = '5s'")
             .execute(&mut *transaction)
@@ -96,6 +104,7 @@ impl SessionUsageReader for PgSessionUsageReader {
                        cache_write_input_tokens, total, agent_api_key_id
                 FROM ai_usage
                 WHERE agent_session_id = sessions.id
+                    AND feature <> ALL($3::text[])
                 OFFSET 0
             ) calls
             WHERE calls.user_id = $2
@@ -103,6 +112,7 @@ impl SessionUsageReader for PgSessionUsageReader {
             "#,
             sessions,
             user.as_ref(),
+            &housekeeping,
         )
         .fetch_all(&mut *transaction)
         .await?;
