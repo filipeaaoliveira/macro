@@ -139,3 +139,51 @@ machine, so the checks should score changed packages only.
 - Time out the Rust check at 30 minutes cold at two build jobs (about three
   times the measured 9.5), and the TypeScript check at 5 minutes. Leave at
   least 12 GB of free disk for the coverage target.
+
+## The `crap-rust` check
+
+`.macro/checks.json` runs `cargo x crap-rust` (`tooling/xtask/crates/xtask_crap`)
+in a Run's checks round when the change reaches Rust code. It reads the base
+from `MACRO_CHECK_BASE` (or `--base`) and the changed paths from
+`MACRO_CHECK_CHANGED` when its first line is `complete`; otherwise it takes
+every `*.rs` path `git diff <base> HEAD` names. It leaves out tests, generated
+code, migrations, build scripts and `services/*/src/main.rs`, maps the rest to
+their packages, runs `cargo llvm-cov nextest -p <those>` and
+`cargo crap -p <those>`, and scores the files' base versions for their
+complexity.
+
+It prints one JSON line per function whose span meets a diff hunk, then a
+summary line:
+
+```json
+{"path":"crates/a/src/lib.rs","name":"Thing::run","line":12,"complexity":7.0,"coverage":40.0,"score":17.9,"change":"rose","base_complexity":6.0,"fails":false}
+```
+
+`change` is `new`, `rose`, `same` or `fell` against the base. A row `fails`
+when the function is `new` or `rose` and scores above `threshold` in
+`.cargo-crap.toml` (30); the check then exits 1. Other touched functions above
+30 are listed without failing. Failing rows come last, the worst last, since
+the round keeps only the end of a check's output. Exit code 2 means the check
+could not run (no base, a tool missing, a build that failed).
+
+`.cargo-crap.toml` sets `try-weight = 0.0`: a `?` adds nothing to a function's
+complexity. Scored again at weight 0 with the coverage above, the three
+factory crates have 6 functions above 30 instead of 16, and 34 above 16
+instead of 61. At weight 1 any untested function with five `?` fails,
+though its branches are errors returned to the caller. The baselines above
+were scored at weight 1; `factory-crap.sh` now writes weight-0 scores.
+
+It needs the tools under [Needs](#needs) on the machine that runs the
+checks. A failing test does not stop it (`--ignore-run-fail`): the code only
+that test reaches counts as uncovered, and the tests' own check reports the
+failure. It scores the committed `HEAD`, so commit before running it by hand:
+
+```sh
+cargo x crap-rust --base "$(git merge-base origin/feat/factory HEAD)"
+```
+
+Time on the M3 at two build jobs, lock waits left out: a change to
+`subsequence_match` alone took 5 s with its instrumented build warm; this
+check's own crate took under 2 minutes from cold. Changes to `factory_engine`
+or `factory_records` cost what the table under [Cost](#cost) shows for one
+crate, 4 to 5 minutes cold, inside the round's 20-minute limit.

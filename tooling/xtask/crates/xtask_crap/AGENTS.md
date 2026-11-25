@@ -40,6 +40,8 @@ scores above the threshold in `.cargo-crap.toml`.
 - The checks round keeps only the end of a check's output (4 KiB), so rows
   print on stdout after every build log, failing and worst last.
 - Functions named `main` get no row: they wire a binary up.
+- It diffs and scores the committed `HEAD`, but reads spans from the working
+  tree: commit before running it by hand.
 
 ## Related
 
