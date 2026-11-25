@@ -968,10 +968,10 @@ pub struct StepRuntime {
     /// else's, or its owner has no Machine or key for the vendor its Agent
     /// names. Only the Run's owner reads it, as `machine`.
     pub waiting_reason: Option<String>,
-    /// The vendor of the API key its agent's own model calls are billed to
-    /// (`anthropic`, `openai`), read live: an agent with a key of its own.
-    /// None for an agent on a Machine's provider login or on Macro credits.
-    /// The key itself is never read here.
+    /// The vendor of the agent's own API key (`anthropic`, `openai`) its
+    /// session's model calls ran on, once one did. None for an agent on a
+    /// Machine's provider login or on Macro credits. The key itself is
+    /// never read here.
     pub api_key: Option<String>,
 }
 

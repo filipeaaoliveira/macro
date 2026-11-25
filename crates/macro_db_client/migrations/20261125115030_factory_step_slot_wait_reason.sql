@@ -7,10 +7,12 @@
 -- takes a slot or lets go of its wait. Null while it waits on full Machines,
 -- and for Steps from before this.
 --
--- Adding a nullable column rewrites no row; the check scans factory_step
--- under its ACCESS EXCLUSIVE lock, which a small table holds briefly. Give
--- up rather than queue behind a long transaction on it.
+-- Adding a nullable column rewrites no row. The check is added NOT VALID,
+-- and validated in 20261125124322_factory_step_slot_wait_reason_validate.sql.
+-- Give up rather than queue behind a long transaction on the Steps.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE factory_step
-    ADD COLUMN slot_wait_reason text CHECK (char_length(slot_wait_reason) <= 2000);
+    ADD COLUMN slot_wait_reason text,
+    ADD CONSTRAINT factory_step_slot_wait_reason_length
+        CHECK (char_length(slot_wait_reason) <= 2000) NOT VALID;

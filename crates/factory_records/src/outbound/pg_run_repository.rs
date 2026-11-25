@@ -1673,17 +1673,21 @@ impl RunRepository for PgRunRepository {
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines,
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_reason END AS waiting_reason,
-                k.provider AS "api_key?"
+                -- The vendor of the agent's own key, once a call of the
+                -- Step's session ran on it (crates/agent_api_keys records
+                -- each such call with the key): a key stored for an agent
+                -- that no longer runs on it, or a lapsed plan, shows none.
+                (
+                    SELECT k.provider
+                    FROM ai_usage u
+                    JOIN agent_api_keys k ON k.bot_id = u.agent_api_key_id
+                    WHERE u.agent_session_id = s.session_id
+                        AND u.agent_api_key_id IS NOT NULL
+                    LIMIT 1
+                ) AS "api_key?"
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             LEFT JOIN bots b ON b.id = s.bot_id
-            -- An agent's own key pays for its calls only on Macro's
-            -- in-memory runtime (crates/agent_api_keys).
-            LEFT JOIN agent_api_keys k ON k.bot_id = s.bot_id
-                AND EXISTS (
-                    SELECT 1 FROM agent_configs c
-                    WHERE c.bot_id = s.bot_id AND c.harness IN ('in-memory', 'macro-inmem')
-                )
             WHERE s.run_id = $1
             ORDER BY s.seq
             "#,
@@ -1897,17 +1901,21 @@ impl RunRepository for PgRunRepository {
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines,
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_reason END AS waiting_reason,
-                k.provider AS "api_key?"
+                -- The vendor of the agent's own key, once a call of the
+                -- Step's session ran on it (crates/agent_api_keys records
+                -- each such call with the key): a key stored for an agent
+                -- that no longer runs on it, or a lapsed plan, shows none.
+                (
+                    SELECT k.provider
+                    FROM ai_usage u
+                    JOIN agent_api_keys k ON k.bot_id = u.agent_api_key_id
+                    WHERE u.agent_session_id = s.session_id
+                        AND u.agent_api_key_id IS NOT NULL
+                    LIMIT 1
+                ) AS "api_key?"
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             LEFT JOIN bots b ON b.id = s.bot_id
-            -- An agent's own key pays for its calls only on Macro's
-            -- in-memory runtime (crates/agent_api_keys).
-            LEFT JOIN agent_api_keys k ON k.bot_id = s.bot_id
-                AND EXISTS (
-                    SELECT 1 FROM agent_configs c
-                    WHERE c.bot_id = s.bot_id AND c.harness IN ('in-memory', 'macro-inmem')
-                )
             WHERE s.run_id = ANY($1)
             ORDER BY s.run_id, s.seq
             "#,

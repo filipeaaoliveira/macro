@@ -61,8 +61,9 @@ pub enum OwnerBotRuns {
     Subscription,
     /// An agent of the owner's own with its own API key, of this provider.
     OwnKey(Vendor),
-    /// An agent of a team the owner is a member of, with its own API key.
-    TeamKey(Vendor),
+    /// An agent of the team `team` the owner is a member of, with its own
+    /// API key of this provider.
+    TeamKey(Vendor, Uuid),
 }
 
 /// A model vendor whose official CLI or API an agent Step runs on: an
@@ -153,7 +154,8 @@ pub trait MachineRepository: Send + Sync + 'static {
 
     /// The bots `owner`'s agent Steps may run on for an Agent that names a
     /// vendor: each coding agent bound to a macrod machine `owner` paired
-    /// (never a Macro computer, nor a machine shared with them), then each
+    /// (never a Macro computer, nor a machine shared with them) that is
+    /// `owner`'s own agent or one of a team they are a member of, then each
     /// in-memory agent of `owner`'s own with its own API key, then each of a
     /// team `owner` is a member of. Each kind in the order its bots were
     /// made.
@@ -192,11 +194,14 @@ pub trait MachineRepository: Send + Sync + 'static {
 
     /// Record that the Step `key` waits for a slot on the full Machines
     /// `machines`, by name, or, with `reason`, for a Machine or an API key
-    /// it may run on at all, keeping when it first started to wait.
+    /// it may run on at all, keeping when it first started to wait, and let
+    /// go of any slot it holds meanwhile. Answers whether the Step started
+    /// more than `take_within` ago, so it should stop waiting.
     fn wait_for_machine_slot(
         &self,
         key: StepKey,
         machines: &[String],
         reason: Option<&str>,
-    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+        take_within: Duration,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 }

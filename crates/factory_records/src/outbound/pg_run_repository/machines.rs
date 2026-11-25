@@ -66,20 +66,26 @@ impl MachineRepository for PgRunRepository {
         // agents are few: each kind reads through its owner's index.
         let rows = sqlx::query!(
             r#"
-            SELECT bot_id AS "bot_id!", model AS "model!", place AS "place!", provider
+            SELECT bot_id AS "bot_id!", model AS "model!", place AS "place!", provider, team_id
             FROM (
                 SELECT b.id AS bot_id, c.default_model AS model, 0 AS place,
-                    NULL::text AS provider
+                    NULL::text AS provider, NULL::uuid AS team_id
                 FROM harnesses h
                 JOIN agent_configs c ON c.harness_id = h.id AND c.is_coding
                 JOIN bots b ON b.id = c.bot_id AND b.deleted_at IS NULL
                 WHERE h.owner_user_id = $1
                     AND h.deleted_at IS NULL
                     AND h.computer_id IS NULL
+                    -- A teammate's private agent bound to the owner's
+                    -- machine is not the owner's to run.
+                    AND (
+                        b.owner_user_id = $1
+                        OR b.team_id IN (SELECT team_id FROM team_user WHERE user_id = $1)
+                    )
                 UNION ALL
                 SELECT b.id, c.default_model,
                     CASE WHEN b.owner_user_id = $1 THEN 1 ELSE 2 END,
-                    k.provider
+                    k.provider, b.team_id
                 FROM bots b
                 JOIN agent_api_keys k ON k.bot_id = b.id
                 JOIN agent_configs c ON c.bot_id = b.id
@@ -102,7 +108,7 @@ impl MachineRepository for PgRunRepository {
                 let runs_on = match (row.place, row.provider.as_deref().and_then(Vendor::parse)) {
                     (0, _) => OwnerBotRuns::Subscription,
                     (1, Some(vendor)) => OwnerBotRuns::OwnKey(vendor),
-                    (2, Some(vendor)) => OwnerBotRuns::TeamKey(vendor),
+                    (2, Some(vendor)) => OwnerBotRuns::TeamKey(vendor, row.team_id?),
                     _ => return None,
                 };
                 Some(OwnerBot {
@@ -256,22 +262,28 @@ impl MachineRepository for PgRunRepository {
         key: StepKey,
         machines: &[String],
         reason: Option<&str>,
-    ) -> Result<(), Self::Err> {
-        sqlx::query!(
+        take_within: Duration,
+    ) -> Result<bool, Self::Err> {
+        // The wait keeps when it began across looks; the slot is let go of
+        // meanwhile, so a Step that waits blocks no other.
+        let late = sqlx::query_scalar!(
             r#"
             UPDATE factory_step
-            SET slot_wait_since = COALESCE(slot_wait_since, now()),
+            SET machine_id = NULL,
+                slot_wait_since = COALESCE(slot_wait_since, now()),
                 slot_wait_machines = $3,
                 slot_wait_reason = $4
             WHERE run_id = $1 AND seq = $2 AND ended_at IS NULL
+            RETURNING now() - started_at > make_interval(secs => $5) AS "late!"
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
             machines,
             reason,
+            take_within.as_secs_f64(),
         )
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
-        Ok(())
+        Ok(late.unwrap_or(false))
     }
 }
