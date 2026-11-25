@@ -33,6 +33,7 @@ use xtask_crap::nextest;
 use xtask_crap::packages::Metadata;
 use xtask_crap::rows::{self, BaseFile, Entry, Report as Scores, Row, TouchedFile, Verdict};
 use xtask_crap::spans;
+use xtask_crap::target;
 
 #[cfg(test)]
 mod test;
@@ -80,7 +81,7 @@ slow-timeout = { period = \"60s\", terminate-after = 3 }
 ";
 /// Where coverage builds go when neither `CARGO_LLVM_COV_TARGET_DIR` nor
 /// `CARGO_TARGET_DIR` says, under the user's cache: outside the worktree,
-/// so a later round's build is warm.
+/// so a later round's build is warm, in a folder of each repository's own.
 const COVERAGE_TARGET: &str = "macro-check/crap-target";
 /// The exit code when the check could not run.
 const NOT_RUN: u8 = 2;
@@ -180,6 +181,22 @@ fn require_tools(root: &Path) -> Result<(), Report> {
         output(cargo(root).args([tool, "--version"]))
             .map_err(|_| report!("cargo {tool} is missing: {INSTALL_HINT}"))?;
     }
+
+    // cargo llvm-cov needs the toolchain's LLVM tools, which rustup installs
+    // per toolchain: the one the repository pins, run from its root.
+    let components =
+        output(
+            Command::new("rustup")
+                .current_dir(root)
+                .args(["component", "list", "--installed"]),
+        )
+        .map_err(|_| report!("rustup is missing: {INSTALL_HINT}"))?;
+    if !components
+        .lines()
+        .any(|component| component.starts_with("llvm-tools"))
+    {
+        bail!("the llvm-tools-preview component is missing: {INSTALL_HINT}");
+    }
     Ok(())
 }
 
@@ -274,7 +291,11 @@ fn score_change(root: &Path, touched: &mut Touched, work: &Path) -> Result<Score
         .iter()
         .map(|file| file.diff.path.clone())
         .collect();
-    for path in metadata.outside(&paths) {
+    let outside = metadata.outside(&paths);
+    touched
+        .files
+        .retain(|file| !outside.contains(&file.diff.path));
+    for path in outside {
         touched.warnings.push(Warning {
             warning: "not scored: no package of the workspace holds it".to_owned(),
             path,
@@ -298,7 +319,7 @@ fn measure(root: &Path, packages: &[String], work: &Path) -> Result<Scored, Repo
     fs::create_dir_all(&target).context("could not create the coverage build's folder")?;
     let lock = File::create(target.join("crap-rust.lock"))
         .context("could not create the coverage build's lock")?;
-    lock.lock().context("could not lock the coverage build")?;
+    wait_for(&lock, &target)?;
 
     let selection: Vec<&str> = packages
         .iter()
@@ -343,6 +364,18 @@ fn measure(root: &Path, packages: &[String], work: &Path) -> Result<Scored, Repo
     })
 }
 
+/// Takes the coverage build's lock, saying so when another round holds it.
+fn wait_for(lock: &File, target: &Path) -> Result<(), Report> {
+    if lock.try_lock().is_err() {
+        eprintln!(
+            "crap-rust: waiting for the coverage build in {}",
+            target.display()
+        );
+        lock.lock().context("could not lock the coverage build")?;
+    }
+    Ok(())
+}
+
 /// `crap-rust:<path>`, as nextest takes a tool's settings.
 fn tool_config(path: &Path) -> OsString {
     let mut argument = OsString::from("crap-rust:");
@@ -365,7 +398,15 @@ fn coverage_target(root: &Path) -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| variable("HOME").map(|home| PathBuf::from(home).join(".cache")))
         .unwrap_or_else(|| root.join("target"));
-    cache.join(COVERAGE_TARGET)
+    cache.join(COVERAGE_TARGET).join(repository_folder(root))
+}
+
+/// The repository's folder of the shared coverage build, from its `origin`
+/// URL, else its path: repositories never share build output.
+fn repository_folder(root: &Path) -> String {
+    let remote = output(git(root).args(["config", "--get", "remote.origin.url"]));
+    let remote = remote.unwrap_or_else(|_| root.display().to_string());
+    target::repository_folder(&remote)
 }
 
 /// The base versions of the touched files and of the removed ones, written

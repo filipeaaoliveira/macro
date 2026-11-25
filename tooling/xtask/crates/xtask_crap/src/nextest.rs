@@ -4,10 +4,9 @@
 mod test;
 
 /// How nextest's status lines begin for a test that did not pass: it
-/// failed, ran out of time or died on a signal.
-const NOT_PASSED: &[&str] = &[
-    "FAIL", "TIMEOUT", "ABORT", "SIGSEGV", "SIGABRT", "SIGBUS", "SIGILL",
-];
+/// failed, ran out of time, or leaked a process; a status starting `SIG`
+/// is a signal that killed it. A retry's status follows `TRY <n> `.
+const NOT_PASSED: &[&str] = &["FAIL", "TIMEOUT", "ABORT", "LEAK-FAIL"];
 
 /// The tests nextest's output says did not pass, each named once, in the
 /// order it first names them.
@@ -25,7 +24,8 @@ pub fn failed_tests(output: &str) -> Vec<String> {
 /// names.
 fn failed_test(line: &str) -> Option<&str> {
     let (status, rest) = line.trim_start().split_once(" [")?;
-    if !NOT_PASSED.contains(&status) {
+    let status = retried(status);
+    if !NOT_PASSED.contains(&status) && !status.starts_with("SIG") {
         return None;
     }
 
@@ -36,4 +36,12 @@ fn failed_test(line: &str) -> Option<&str> {
         None => test,
     };
     Some(test.trim())
+}
+
+/// The status without a retry's `TRY <n> ` before it.
+fn retried(status: &str) -> &str {
+    status
+        .strip_prefix("TRY ")
+        .and_then(|rest| rest.split_once(' '))
+        .map_or(status, |(_, status)| status)
 }
