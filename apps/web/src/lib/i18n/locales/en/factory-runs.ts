@@ -98,6 +98,12 @@ export default {
   breakInterrupted: 'Interrupted',
   breakOldText: '− {{text}}',
   breakNewText: '+ {{text}}',
+  breakOutput: 'Output',
+  breakOutputAll: {
+    one: 'Show all {{count}} line',
+    other: 'Show all {{count}} lines',
+  },
+  breakOutputLess: 'Show the last lines',
   mainHold: 'Main hold',
   mainHoldBody:
     'Checks fail on {{branch}}, so this run won’t merge until they pass again.',
