@@ -2,11 +2,13 @@
 //! to, and the slots its Steps hold on it.
 
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
+use std::time::Duration;
+
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::test::{entry, insert, key, outcome};
-use crate::domain::machines::{MachineRepository, StepMachine};
+use crate::domain::machines::{MachineRepository, SlotTake, StepMachine};
 use crate::domain::models::RunId;
 use crate::domain::ports::RunRepository;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -17,6 +19,20 @@ const WRITER: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00b1);
 const CLOUD: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00b2);
 /// Her Machine `m4`.
 const M4: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00a1);
+
+/// How long after its start a Step may take a slot, in these tests.
+const WITHIN: Duration = Duration::from_secs(90 * 60);
+
+/// Take a slot on `machine` for `step`, as placement does.
+async fn take(
+    repo: &PgRunRepository,
+    step: crate::domain::models::StepKey,
+    machine: Uuid,
+) -> SlotTake {
+    repo.take_machine_slot(step, machine, WITHIN)
+        .await
+        .expect("take")
+}
 
 /// Give `m4` `slots` and the tags `gpu` and `rust-build`.
 async fn set_m4(pool: &PgPool, slots: Option<i32>) {
@@ -85,23 +101,13 @@ async fn a_full_machine_makes_the_next_step_wait_until_a_slot_frees(pool: PgPool
     let first = started(&repo).await;
     let second = started(&repo).await;
 
-    assert!(
-        repo.take_machine_slot(key(first, 1), M4)
-            .await
-            .expect("take")
-    );
-    assert!(
-        repo.take_machine_slot(key(first, 1), M4)
-            .await
-            .expect("retake"),
+    assert_eq!(take(&repo, key(first, 1), M4).await, SlotTake::Taken);
+    assert_eq!(
+        take(&repo, key(first, 1), M4).await,
+        SlotTake::Taken,
         "a retried attempt keeps its slot"
     );
-    assert!(
-        !repo
-            .take_machine_slot(key(second, 1), M4)
-            .await
-            .expect("take")
-    );
+    assert_eq!(take(&repo, key(second, 1), M4).await, SlotTake::Full);
 
     repo.wait_for_machine_slot(key(second, 1), &["m4".to_string()])
         .await
@@ -125,11 +131,7 @@ async fn a_full_machine_makes_the_next_step_wait_until_a_slot_frees(pool: PgPool
     repo.end_step(key(first, 1), &outcome("done"), "Planned")
         .await
         .expect("end");
-    assert!(
-        repo.take_machine_slot(key(second, 1), M4)
-            .await
-            .expect("take")
-    );
+    assert_eq!(take(&repo, key(second, 1), M4).await, SlotTake::Taken);
     let placed = repo.list_steps(second).await.expect("steps")[0]
         .runtime
         .clone();
@@ -138,11 +140,7 @@ async fn a_full_machine_makes_the_next_step_wait_until_a_slot_frees(pool: PgPool
 
     set_m4(&pool, None).await;
     let third = started(&repo).await;
-    assert!(
-        repo.take_machine_slot(key(third, 1), M4)
-            .await
-            .expect("take")
-    );
+    assert_eq!(take(&repo, key(third, 1), M4).await, SlotTake::Taken);
 }
 
 /// Steps that hold no slot, of another Machine, or of a Run that ended, do
@@ -156,19 +154,11 @@ async fn only_running_steps_on_the_machine_hold_its_slots(pool: PgPool) {
     set_m4(&pool, Some(1)).await;
     let elsewhere = started(&repo).await;
     let m3 = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00a2);
-    assert!(
-        repo.take_machine_slot(key(elsewhere, 1), m3)
-            .await
-            .expect("take")
-    );
+    assert_eq!(take(&repo, key(elsewhere, 1), m3).await, SlotTake::Taken);
     let _unplaced = started(&repo).await;
 
     let ended = started(&repo).await;
-    assert!(
-        repo.take_machine_slot(key(ended, 1), M4)
-            .await
-            .expect("take")
-    );
+    assert_eq!(take(&repo, key(ended, 1), M4).await, SlotTake::Taken);
     sqlx::query!(
         "UPDATE factory_run SET outcome = 'cancelled', ended_at = now() WHERE id = $1",
         ended.as_uuid()
@@ -178,9 +168,109 @@ async fn only_running_steps_on_the_machine_hold_its_slots(pool: PgPool) {
     .expect("end the run");
 
     let next = started(&repo).await;
-    assert!(
-        repo.take_machine_slot(key(next, 1), M4)
-            .await
-            .expect("take")
+    assert_eq!(take(&repo, key(next, 1), M4).await, SlotTake::Taken);
+}
+
+/// Move the start of the Step `step` back by `minutes`.
+async fn started_ago(pool: &PgPool, step: crate::domain::models::StepKey, minutes: i32) {
+    sqlx::query!(
+        "UPDATE factory_step SET started_at = now() - make_interval(mins => $3)
+         WHERE run_id = $1 AND seq = $2",
+        step.run_id.as_uuid(),
+        i32::from(step.seq),
+        minutes,
+    )
+    .execute(pool)
+    .await
+    .expect("move the start");
+}
+
+/// A Step that started longer ago than its work can run holds no slot, as
+/// one whose Run's workflow went without recording its end; a Step that
+/// started too long ago to take a slot gets none, but one that holds a slot
+/// keeps it however late. Letting go frees the slot and the wait.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "agents"))
+)]
+async fn old_steps_hold_no_slot_and_late_steps_take_none(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    set_m4(&pool, Some(1)).await;
+    let gone = started(&repo).await;
+    assert_eq!(take(&repo, key(gone, 1), M4).await, SlotTake::Taken);
+    let next = started(&repo).await;
+    assert_eq!(take(&repo, key(next, 1), M4).await, SlotTake::Full);
+
+    started_ago(&pool, key(gone, 1), 180).await;
+    assert_eq!(take(&repo, key(next, 1), M4).await, SlotTake::Taken);
+
+    let late = started(&repo).await;
+    started_ago(&pool, key(late, 1), 100).await;
+    repo.end_step(key(next, 1), &outcome("done"), "Planned")
+        .await
+        .expect("end");
+    assert_eq!(take(&repo, key(late, 1), M4).await, SlotTake::TooLate);
+
+    started_ago(&pool, key(next, 1), 0).await;
+    let holder = started(&repo).await;
+    assert_eq!(take(&repo, key(holder, 1), M4).await, SlotTake::Taken);
+    started_ago(&pool, key(holder, 1), 100).await;
+    assert_eq!(
+        take(&repo, key(holder, 1), M4).await,
+        SlotTake::Taken,
+        "a Step keeps the slot it holds"
     );
+
+    repo.wait_for_machine_slot(key(late, 1), &["m4".to_string()])
+        .await
+        .expect("wait");
+    repo.release_machine_slot(key(holder, 1))
+        .await
+        .expect("release");
+    repo.release_machine_slot(key(late, 1))
+        .await
+        .expect("release");
+    assert_eq!(
+        repo.list_steps(late).await.expect("steps")[0]
+            .runtime
+            .waiting_for_slot_since,
+        None
+    );
+    let after = started(&repo).await;
+    assert_eq!(take(&repo, key(after, 1), M4).await, SlotTake::Taken);
+}
+
+/// Steps that ask at once for a Machine's last slot: exactly one takes it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "agents"))
+)]
+async fn concurrent_steps_never_both_take_the_last_slot(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    set_m4(&pool, Some(1)).await;
+    for _ in 0..20 {
+        let steps = [
+            started(&repo).await,
+            started(&repo).await,
+            started(&repo).await,
+            started(&repo).await,
+        ];
+        let taken = futures::future::join_all(
+            steps
+                .iter()
+                .map(|run| repo.take_machine_slot(key(*run, 1), M4, WITHIN)),
+        )
+        .await;
+        let won = taken
+            .into_iter()
+            .map(|taken| taken.expect("take"))
+            .filter(|taken| *taken == SlotTake::Taken)
+            .count();
+        assert_eq!(won, 1, "one Step takes the last slot");
+        for run in steps {
+            repo.end_step(key(run, 1), &outcome("done"), "Planned")
+                .await
+                .expect("end");
+        }
+    }
 }

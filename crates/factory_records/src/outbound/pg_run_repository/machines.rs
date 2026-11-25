@@ -4,10 +4,12 @@
 #[cfg(test)]
 mod test;
 
+use std::time::Duration;
+
 use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr};
-use crate::domain::machines::{MachineRepository, StepMachine};
+use crate::domain::machines::{MachineRepository, SLOT_HELD_AT_MOST, SlotTake, StepMachine};
 use crate::domain::models::StepKey;
 
 impl MachineRepository for PgRunRepository {
@@ -36,10 +38,14 @@ impl MachineRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn take_machine_slot(&self, key: StepKey, machine: Uuid) -> Result<bool, Self::Err> {
+    async fn take_machine_slot(
+        &self,
+        key: StepKey,
+        machine: Uuid,
+        take_within: Duration,
+    ) -> Result<SlotTake, Self::Err> {
         // One lock per Machine, held to the commit: the count and the take
-        // are one decision, so two Steps never both take its last slot. A
-        // Step of a Run that ended holds none, should its own end be missing.
+        // are one decision, so two Steps never both take its last slot.
         let mut tx = self.pool.begin().await?;
         sqlx::query!(
             "SELECT pg_advisory_xact_lock(hashtextextended('factory-machine-slot:' || $1, 0))",
@@ -47,6 +53,45 @@ impl MachineRepository for PgRunRepository {
         )
         .execute(&mut *tx)
         .await?;
+
+        // A Step that holds this Machine's slot keeps it; one that started
+        // too long ago takes none. A Step not recorded has nothing to hold:
+        // its claim finds out why.
+        let step = sqlx::query!(
+            r#"
+            SELECT
+                machine_id IS NOT DISTINCT FROM $3 AS "holds!",
+                now() - started_at > make_interval(secs => $4) AS "late!"
+            FROM factory_step
+            WHERE run_id = $1 AND seq = $2
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            machine,
+            take_within.as_secs_f64(),
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        match step {
+            Some(step) if step.holds => {
+                tx.rollback().await?;
+                return Ok(SlotTake::Taken);
+            }
+            Some(step) if step.late => {
+                tx.rollback().await?;
+                return Ok(SlotTake::TooLate);
+            }
+            Some(_) => {}
+            None => {
+                tx.rollback().await?;
+                return Ok(SlotTake::Taken);
+            }
+        }
+
+        // Running Steps hold the slots: those that have not ended, in Runs
+        // that have not ended, started within SLOT_HELD_AT_MOST. An older
+        // one's work can no longer run, as when its Run's workflow is gone
+        // without recording its end.
         let free = sqlx::query_scalar!(
             r#"
             SELECT
@@ -58,6 +103,7 @@ impl MachineRepository for PgRunRepository {
                     WHERE s.machine_id = h.id
                         AND s.ended_at IS NULL
                         AND r.ended_at IS NULL
+                        AND s.started_at > now() - make_interval(secs => $4)
                         AND NOT (s.run_id = $2 AND s.seq = $3)
                 ) AS "free!"
             FROM harnesses h
@@ -66,6 +112,7 @@ impl MachineRepository for PgRunRepository {
             machine,
             key.run_id.as_uuid(),
             i32::from(key.seq),
+            SLOT_HELD_AT_MOST.as_secs_f64(),
         )
         .fetch_optional(&mut *tx)
         .await?
@@ -73,8 +120,10 @@ impl MachineRepository for PgRunRepository {
         // session is refused when it opens.
         .unwrap_or(true);
         if !free {
-            return Ok(false);
+            tx.rollback().await?;
+            return Ok(SlotTake::Full);
         }
+
         sqlx::query!(
             r#"
             UPDATE factory_step
@@ -88,7 +137,24 @@ impl MachineRepository for PgRunRepository {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(true)
+        Ok(SlotTake::Taken)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn release_machine_slot(&self, key: StepKey) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET machine_id = NULL, slot_wait_since = NULL, slot_wait_machines = NULL
+            WHERE run_id = $1 AND seq = $2
+                AND (machine_id IS NOT NULL OR slot_wait_since IS NOT NULL)
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self))]
