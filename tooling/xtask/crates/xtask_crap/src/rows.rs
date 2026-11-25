@@ -176,9 +176,12 @@ fn pair_in_file<'a>(
         .filter(|entry| entry.file == diff.path)
         .collect();
     entries.sort_by_key(|entry| entry.line);
-    let candidates: Vec<usize> = (0..base.len())
+    // In line order: cargo crap lists the worst first, and a function left
+    // over pairs with the first of its name in the file.
+    let mut candidates: Vec<usize> = (0..base.len())
         .filter(|&index| Some(base[index].file.as_str()) == diff.base_path.as_deref())
         .collect();
+    candidates.sort_by_key(|&index| base[index].line);
 
     let mut pairs = pair_by_line(&entries, base, &candidates, diff, taken);
     pair_in_order(&entries, base, &candidates, &mut pairs, taken);

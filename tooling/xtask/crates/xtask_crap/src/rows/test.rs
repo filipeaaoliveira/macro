@@ -302,3 +302,35 @@ fn a_row_prints_as_one_json_object() {
         r#"{"path":"crates/a/src/lib.rs","name":"added","line":1,"complexity":6.0,"coverage":0.0,"score":42.0,"change":"new","base_complexity":null,"fails":false,"unproven":true,"coverage_uncertain":true}"#
     );
 }
+
+/// Both `fn` lines rewritten, so neither pairs by line; cargo crap lists
+/// the base's worse `A::from` first, and the pairs still follow the lines.
+#[test]
+fn functions_of_one_name_left_over_pair_in_line_order() {
+    let file = TouchedFile {
+        diff: FileDiff {
+            path: LIB.to_owned(),
+            base_path: Some(LIB.to_owned()),
+            hunks: vec![hunk(10, 1, 10, 1), hunk(30, 1, 30, 1)],
+        },
+        functions: BTreeMap::from([(10, function(20, "{ a }")), (30, function(40, "{ b }"))]),
+    };
+    let current = [
+        entry(LIB, "A::from", 10, 12.0, 156.0),
+        entry(LIB, "A::from", 30, 3.0, 3.0),
+    ];
+    let base = [
+        entry(LIB, "A::from", 30, 12.0, 12.0),
+        entry(LIB, "A::from", 10, 2.0, 2.0),
+    ];
+
+    let rows = rows(&current, &base, &[file], &[], pass());
+
+    assert_eq!(
+        summary(&rows),
+        [
+            ("A::from", Change::Fell, Some(12.0), false),
+            ("A::from", Change::Rose, Some(2.0), true),
+        ]
+    );
+}
