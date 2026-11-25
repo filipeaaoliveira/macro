@@ -594,7 +594,9 @@ function BreakRecordsNote(props: { records: BreakRecord[] }) {
                     {t('factoryRuns.breakNewText', { text: record.newText })}
                   </span>
                 </span>
-                <Show when={record.output.trim()}>
+                {/* `trimEnd` keeps the first line's indentation; output of
+                    whitespace alone shows nothing. */}
+                <Show when={record.output.trimEnd()}>
                   {(output) => <BreakOutput output={output()} />}
                 </Show>
               </StepNote>
@@ -638,8 +640,22 @@ function BreakOutput(props: { output: string }) {
           </button>
         </Show>
       </span>
-      <span class="mt-1 block max-h-64 overflow-y-auto rounded-lg border border-edge-muted bg-surface-1 px-2.5 py-1 font-mono text-[11.5px] leading-5 whitespace-pre-wrap text-ink-muted">
-        {shown()}
+      {/* Focusable, so a keyboard can scroll the whole output. */}
+      <span
+        tabindex="0"
+        aria-label={t('factoryRuns.breakOutput')}
+        class="mt-1 block max-h-64 overflow-y-auto rounded-lg border border-edge-muted bg-surface-1 px-2.5 py-1 font-mono text-[11.5px] leading-5 whitespace-pre-wrap text-ink-muted outline-none focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <Show when={long() && !all()}>
+          <span
+            aria-hidden="true"
+            class="block text-ink-subtle"
+            data-break-output-cut
+          >
+            …
+          </span>
+        </Show>
+        <span data-break-output-text>{shown()}</span>
       </span>
     </span>
   );

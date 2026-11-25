@@ -2045,7 +2045,26 @@ describe('RunView break records', () => {
           oldText: 'parse(text)',
           newText: 'parse(',
           status: 'unreadable',
-          output: 'the break leaves src/config.ts unparsable',
+          output: '  the break leaves src/config.ts unparsable',
+        },
+        {
+          seq: 1,
+          test: 'counts six lines',
+          file: 'src/count.ts',
+          oldText: 'n + 1',
+          newText: 'n',
+          status: 'not_run',
+          // Six lines, then the newline a test runner ends on.
+          output: `${printed.slice(0, 6).join('\n')}\n`,
+        },
+        {
+          seq: 1,
+          test: 'prints nothing',
+          file: 'src/quiet.ts',
+          oldText: 'log()',
+          newText: '',
+          status: 'dropped',
+          output: ' \n\t\n',
         },
       ],
     });
@@ -2056,22 +2075,48 @@ describe('RunView break records', () => {
           '[data-factory-run-step="1"] [data-break-output]'
         )
       ) as HTMLElement[];
-    await waitFor(() => expect(outputs()).toHaveLength(2));
-    const [hung, unreadable] = outputs() as [HTMLElement, HTMLElement];
+    await waitFor(() => expect(outputs()).toHaveLength(3));
+    // Output of whitespace alone shows nothing.
+    const quiet = document.querySelector(
+      '[data-factory-run-step="1"] [data-break-test="prints nothing"]'
+    ) as HTMLElement;
+    expect(quiet.querySelector('[data-break-output]')).toBeNull();
+    const [hung, unreadable, six] = outputs() as [
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+    ];
     // Closed until asked, as a Step's break records start.
     fireEvent.click(screen.getByRole('button', { name: /Break records/ }));
 
     const text = (output: HTMLElement) =>
-      output.querySelector('.font-mono')?.textContent ?? '';
-    expect(text(unreadable)).toBe('the break leaves src/config.ts unparsable');
+      output.querySelector('[data-break-output-text]')?.textContent ?? '';
+    const cut = (output: HTMLElement) =>
+      output.querySelector('[data-break-output-cut]') !== null;
+    // The first line keeps its indentation.
+    expect(text(unreadable)).toBe(
+      '  the break leaves src/config.ts unparsable'
+    );
     expect(within(unreadable).queryByRole('button')).toBeNull();
+    expect(cut(unreadable)).toBe(false);
+
+    // Exactly six lines show whole, with no empty line after the last.
+    expect(text(six)).toBe(printed.slice(0, 6).join('\n'));
+    expect(within(six).queryByRole('button')).toBeNull();
+    expect(cut(six)).toBe(false);
+
+    // A keyboard can reach the block to scroll it.
+    const block = within(hung).getByLabelText('Output');
+    expect(block.getAttribute('tabindex')).toBe('0');
 
     expect(text(hung)).toBe(printed.slice(-6).join('\n'));
+    expect(cut(hung)).toBe(true);
     const all = within(hung).getByRole('button', {
       name: 'Show all 9 lines',
     });
     fireEvent.click(all);
     expect(text(hung)).toBe(printed.join('\n'));
+    expect(cut(hung)).toBe(false);
     fireEvent.click(
       within(hung).getByRole('button', { name: 'Show the last lines' })
     );
