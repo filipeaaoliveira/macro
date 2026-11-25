@@ -2716,6 +2716,7 @@
       "crates/entity_registry/entity_registry",
       "crates/entity_registry/entity_registry_db_utils",
       "crates/entity_registry/shared_entity_registry",
+      "crates/factory_records",
       "crates/favorites",
       "crates/feature_flags",
       "crates/fig_engine",
@@ -17849,6 +17850,10 @@
     ],
     "xtask": [
       "tooling/xtask"
+    ],
+    "xtask_crap": [
+      "tooling/xtask/crates/xtask_crap",
+      "tooling/xtask/crates/xtask_paths"
     ],
     "xtask_deps": [
       "tooling/xtask/crates/xtask_deps",
