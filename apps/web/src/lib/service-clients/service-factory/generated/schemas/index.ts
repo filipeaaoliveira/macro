@@ -329,6 +329,7 @@ export * from './stepRuntime';
 export * from './stepRuntimeAgentName';
 export * from './stepRuntimeMachine';
 export * from './stepRuntimeModel';
+export * from './stepRuntimeWaitingForSlotSince';
 export * from './stepTerminal';
 export * from './stepTerminalEndsBy';
 export * from './stepTerminalPausedAt';

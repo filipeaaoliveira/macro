@@ -3380,6 +3380,17 @@ export type StepRuntime = {
      * Step first saw it open.
      */
     model?: string | null;
+    /**
+     * Since when the Step waits for a free slot, while every Machine its
+     * Agents may run on is full: it starts once one frees. None once it
+     * took a slot, ended, or never waited.
+     */
+    waitingForSlotSince?: string | null;
+    /**
+     * The full Machines it waits on, by name, while it waits. Only the
+     * Run's owner reads them, as `machine`.
+     */
+    waitingOnMachines: Array<string>;
 };
 
 /**

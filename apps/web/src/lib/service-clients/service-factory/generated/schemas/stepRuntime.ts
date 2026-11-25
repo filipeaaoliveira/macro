@@ -7,6 +7,7 @@
 import type { StepRuntimeAgentName } from './stepRuntimeAgentName';
 import type { StepRuntimeMachine } from './stepRuntimeMachine';
 import type { StepRuntimeModel } from './stepRuntimeModel';
+import type { StepRuntimeWaitingForSlotSince } from './stepRuntimeWaitingForSlotSince';
 
 /**
  * Where an agent Step's session ran: the model, the Machine, and the
@@ -27,4 +28,11 @@ owner reads it: a harness is private to whoever paired it. */
   /** The model the session ran on, as the session recorded it when the
 Step first saw it open. */
   model?: StepRuntimeModel;
+  /** Since when the Step waits for a free slot, while every Machine its
+Agents may run on is full: it starts once one frees. None once it
+took a slot, ended, or never waited. */
+  waitingForSlotSince?: StepRuntimeWaitingForSlotSince;
+  /** The full Machines it waits on, by name, while it waits. Only the
+Run's owner reads them, as `machine`. */
+  waitingOnMachines: string[];
 }
