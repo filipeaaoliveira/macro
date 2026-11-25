@@ -21,3 +21,7 @@ syn = { workspace = true, features = ["visit"] }
 tempfile = { workspace = true }
 toml = { workspace = true }
 xtask_paths = { path = "../xtask_paths" }
+
+[package.metadata.cargo-shear]
+# Only its `span-locations` feature is used, through syn's spans.
+ignored = ["proc-macro2"]
