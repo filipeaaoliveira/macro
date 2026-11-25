@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "name": "crap-rust",
+      "run": "cargo x crap-rust",
+      "paths": ["apps/web/tauri", "crates", "services", "tooling", ".cargo-crap.toml"],
+      "timeout": 1200
+    }
+  ]
+}
