@@ -6,7 +6,7 @@
 use agent_session::domain::routines::RoutineActionStatus;
 use bot_id::BotId;
 use chrono::Utc;
-use factory_records::domain::machines::{MachineRepository, SlotTake, StepMachine};
+use factory_records::domain::machines::{MachineLogin, MachineRepository, SlotTake, StepMachine};
 use factory_records::domain::models::{EntryId, Outcome, Role, StepKey};
 use factory_records::domain::ports::RunRepository;
 use uuid::Uuid;
@@ -33,6 +33,7 @@ fn bind(repo: &FakeRepo, bot: BotId, id: Uuid, name: &str, slots: Option<u16>, t
             name: name.to_string(),
             step_slots: slots,
             tags: tags.iter().map(ToString::to_string).collect(),
+            login: MachineLogin::Owner("macro|julia@example.com".to_string()),
         },
     );
 }
@@ -257,6 +258,7 @@ async fn placement_books_no_slot_on_an_agent_the_quota_refused_lately() {
         agents: agents(),
         quota: planner.quota.clone(),
         pause_notices: None,
+        key_plans: planner.key_plans.clone(),
     };
     planner.answer(next).await.expect("next");
 

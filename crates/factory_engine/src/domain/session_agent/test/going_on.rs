@@ -191,7 +191,7 @@ async fn a_session_lost_with_nothing_to_go_on_afresh_with_fails_for_good() {
 /// the Step holds a slot on the Machine its new session opens on.
 #[tokio::test(start_paused = true)]
 async fn a_lost_session_goes_on_afresh_with_an_agent_whose_machine_has_the_tags() {
-    use factory_records::domain::machines::StepMachine;
+    use factory_records::domain::machines::{MachineLogin, StepMachine};
     use uuid::Uuid;
 
     use super::{BACKUP, PRIMARY};
@@ -204,6 +204,7 @@ async fn a_lost_session_goes_on_afresh_with_an_agent_whose_machine_has_the_tags(
         name: name.to_string(),
         step_slots: Some(1),
         tags: tags.iter().map(ToString::to_string).collect(),
+        login: MachineLogin::Owner("macro|julia@example.com".to_string()),
     };
     repo.machines
         .lock()
@@ -252,4 +253,49 @@ async fn a_lost_session_goes_on_afresh_with_an_agent_whose_machine_has_the_tags(
         repo.machine_slots.lock().expect("slots").get(&next.key),
         Some(&m5)
     );
+}
+
+/// A session lost after its question, whose Role's Agents are all on a
+/// Machine someone else paired, waits to go on afresh, saying why, rather
+/// than fail.
+#[tokio::test(start_paused = true)]
+async fn a_lost_session_with_no_agent_of_the_owners_waits_saying_why() {
+    use factory_records::domain::machines::{MachineLogin, StepMachine};
+    use uuid::Uuid;
+
+    use super::{BACKUP, PRIMARY};
+
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_question()), RoutineActionStatus::Succeeded);
+    let (_, next) = asked(&repo, &sessions).await;
+    for bot in [PRIMARY, BACKUP] {
+        repo.machines.lock().expect("machines").insert(
+            bot.as_uuid(),
+            StepMachine {
+                id: Uuid::from_u128(0x0a7),
+                name: "teos-mac".to_string(),
+                step_slots: None,
+                tags: Vec::new(),
+                login: MachineLogin::Owner("macro|teo@example.com".to_string()),
+            },
+        );
+    }
+    let mut losing = sessions.clone();
+    losing.follow_up_loses = true;
+    losing.handed = Some(the_plan());
+    let next = AgentTask {
+        afresh: Some("Plan the change, afresh".to_string()),
+        ..next
+    };
+
+    let error = agent(&losing, &repo)
+        .answer(next)
+        .await
+        .expect_err("nothing to go on in");
+
+    assert!(
+        matches!(&error, SessionAgentError::WaitingForMachineOrKey(why) if why.contains("teos-mac, which is not yours")),
+        "{error:?}"
+    );
+    assert!(error.retryable());
 }

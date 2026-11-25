@@ -130,6 +130,7 @@ fn tokens(n: u128, input: u64, cost_usd: f64, unpriced_calls: u64) -> SessionTok
         cost_usd,
         unpriced_calls,
         reported_by_runtime: false,
+        api_key: None,
     }
 }
 

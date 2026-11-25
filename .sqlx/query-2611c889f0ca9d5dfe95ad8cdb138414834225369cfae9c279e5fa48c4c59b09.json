@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET machine_id = NULL, slot_wait_since = NULL, slot_wait_machines = NULL,\n                slot_wait_reason = NULL\n            WHERE run_id = $1 AND seq = $2\n                AND (machine_id IS NOT NULL OR slot_wait_since IS NOT NULL)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2611c889f0ca9d5dfe95ad8cdb138414834225369cfae9c279e5fa48c4c59b09"
+}

@@ -7,7 +7,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use macro_uuid::Uuid;
 use sqlx::PgPool;
 
-use crate::domain::session_usage::{SessionTokens, SessionUsageReader};
+use crate::domain::ports::AiFeature;
+use crate::domain::session_usage::{ApiKeySpend, SessionTokens, SessionUsageReader};
 
 /// The most sessions one read sums up. Callers read at most this many at a
 /// time.
@@ -67,6 +68,13 @@ impl SessionUsageReader for PgSessionUsageReader {
         // planner with stale statistics adds the user's own index to every
         // lookup and reads their whole history once per session. A session
         // makes one row per model call, so the timeout bounds a long one.
+        // Macro's own calls about a session (its title, its activity
+        // summary) are not the session's turns: a runtime that records none
+        // of its turns here still has them.
+        let housekeeping = [
+            AiFeature::ChatRename.to_string(),
+            AiFeature::AgentActivitySummary.to_string(),
+        ];
         let mut transaction = self.pool.begin().await?;
         sqlx::query!("SET LOCAL statement_timeout = '5s'")
             .execute(&mut *transaction)
@@ -80,13 +88,23 @@ impl SessionUsageReader for PgSessionUsageReader {
                 sum(calls.cache_read_input_tokens)::bigint AS "cache_read!",
                 sum(calls.cache_write_input_tokens)::bigint AS "cache_write!",
                 coalesce(sum(calls.total::float8), 0)::float8 AS "cost_usd!",
-                count(*) FILTER (WHERE calls.total IS NULL) AS "unpriced_calls!"
+                count(*) FILTER (WHERE calls.total IS NULL) AS "unpriced_calls!",
+                (array_agg(calls.agent_api_key_id)
+                    FILTER (WHERE calls.agent_api_key_id IS NOT NULL))[1] AS api_key,
+                coalesce(
+                    sum(calls.total::float8) FILTER (WHERE calls.agent_api_key_id IS NOT NULL),
+                    0
+                )::float8 AS "api_key_cost_usd!",
+                count(*) FILTER (
+                    WHERE calls.agent_api_key_id IS NOT NULL AND calls.total IS NULL
+                ) AS "api_key_unpriced_calls!"
             FROM unnest($1::uuid[]) AS sessions(id)
             CROSS JOIN LATERAL (
                 SELECT user_id, input_tokens, output_tokens, cache_read_input_tokens,
-                       cache_write_input_tokens, total
+                       cache_write_input_tokens, total, agent_api_key_id
                 FROM ai_usage
                 WHERE agent_session_id = sessions.id
+                    AND feature <> ALL($3::text[])
                 OFFSET 0
             ) calls
             WHERE calls.user_id = $2
@@ -94,6 +112,7 @@ impl SessionUsageReader for PgSessionUsageReader {
             "#,
             sessions,
             user.as_ref(),
+            &housekeeping,
         )
         .fetch_all(&mut *transaction)
         .await?;
@@ -110,6 +129,11 @@ impl SessionUsageReader for PgSessionUsageReader {
                 cost_usd: row.cost_usd,
                 unpriced_calls: tokens(row.unpriced_calls),
                 reported_by_runtime: false,
+                api_key: row.api_key.map(|key| ApiKeySpend {
+                    key,
+                    cost_usd: row.api_key_cost_usd,
+                    unpriced_calls: tokens(row.api_key_unpriced_calls),
+                }),
             })
             .collect())
     }

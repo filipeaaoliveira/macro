@@ -1,10 +1,17 @@
 //! What the agent sessions of Steps used, for Insights, quality, Benchmarks
-//! and a Run's token budget: the usage a session's runtime reported, which
-//! the factory keeps (`SessionAgent` keeps it as turns end and before it
-//! deletes a session), else the model calls Macro's usage log recorded for
-//! the session. A runtime that calls its model directly, as Claude Code does
-//! through macrod, records nothing in the usage log; one that calls it
-//! through Macro's model router records its calls there.
+//! and a Run's token budget: the model calls Macro's usage log recorded for
+//! the session, priced, else the usage its runtime reported, which the
+//! factory keeps (`SessionAgent` keeps it as turns end and before it deletes
+//! a session). A runtime that calls its model directly, as Claude Code does
+//! through macrod on its owner's own login, records none of its turns in the
+//! usage log; one that calls it through Macro's model router or gateway, or
+//! on an agent's own API key, records them there. The log's read leaves out
+//! Macro's own calls about a session (its title, its activity summary), so a
+//! session it has calls for is one whose turns it recorded.
+//!
+//! What a runtime reported counts in tokens only: the cost it reports is
+//! its own estimate of a subscription's use, not money billed per use, so
+//! it is never shown as spend.
 
 #[cfg(test)]
 mod test;
@@ -46,10 +53,10 @@ fn report(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::R
     rootcause::Report::new(error).into_dynamic()
 }
 
-/// The tokens of a session's kept usage. A runtime that reported no cost
-/// leaves what the session cost unknown: it counts as one call with no
-/// price, so no money figure is given for what it is part of, as for a
-/// model call with no price recorded.
+/// The tokens of a session's kept usage. Whatever cost its runtime
+/// reported, what the session cost in money is unknown: it counts as one
+/// call with no price, so no money figure is given for what it is part of,
+/// as for a model call with no price recorded.
 fn tokens(usage: SessionUsage) -> SessionTokens {
     SessionTokens {
         session_id: usage.session_id,
@@ -57,9 +64,10 @@ fn tokens(usage: SessionUsage) -> SessionTokens {
         output: usage.output_tokens,
         cache_read: usage.cache_read_tokens,
         cache_write: usage.cache_write_tokens,
-        cost_usd: usage.cost_usd.unwrap_or(0.0),
-        unpriced_calls: u64::from(usage.cost_usd.is_none()),
+        cost_usd: 0.0,
+        unpriced_calls: 1,
         reported_by_runtime: true,
+        api_key: None,
     }
 }
 
@@ -70,47 +78,37 @@ where
 {
     type Err = AgentUsageError;
 
-    /// Each session counts once. One whose runtime reported its cost reads
-    /// as reported. Otherwise, one the usage log recorded calls for reads
-    /// from the log, whose calls are priced: a runtime on Macro's model
-    /// router may report its tokens with no cost. Any other session with
-    /// usage kept reads as its runtime reported it, its cost unknown.
+    /// Each session counts once. One the usage log recorded turns for reads
+    /// from the log, whose calls are priced. Any other session with usage
+    /// kept reads as its runtime reported it, in tokens only.
     async fn session_tokens(
         &self,
         user: &MacroUserIdStr<'static>,
         sessions: &[Uuid],
     ) -> Result<Vec<SessionTokens>, Self::Err> {
-        let kept = self
-            .kept
-            .session_usage(user, sessions)
-            .await
-            .map_err(|error| AgentUsageError::Kept(report(error)))?;
-        let costed: HashSet<Uuid> = kept
-            .iter()
-            .filter(|usage| usage.cost_usd.is_some())
-            .map(|usage| usage.session_id)
-            .collect();
-        let rest: Vec<Uuid> = sessions
-            .iter()
-            .filter(|session| !costed.contains(session))
-            .copied()
-            .collect();
-        let mut read = if rest.is_empty() {
+        let mut read = if sessions.is_empty() {
             Vec::new()
         } else {
             self.log
-                .session_tokens(user, &rest)
+                .session_tokens(user, sessions)
                 .await
                 .map_err(|error| AgentUsageError::Log(report(error)))?
         };
         let logged: HashSet<Uuid> = read.iter().map(|tokens| tokens.session_id).collect();
-        read.extend(
-            kept.into_iter()
-                .filter(|usage| {
-                    costed.contains(&usage.session_id) || !logged.contains(&usage.session_id)
-                })
-                .map(tokens),
-        );
+        let rest: Vec<Uuid> = sessions
+            .iter()
+            .filter(|session| !logged.contains(session))
+            .copied()
+            .collect();
+        if rest.is_empty() {
+            return Ok(read);
+        }
+        let kept = self
+            .kept
+            .session_usage(user, &rest)
+            .await
+            .map_err(|error| AgentUsageError::Kept(report(error)))?;
+        read.extend(kept.into_iter().map(tokens));
         Ok(read)
     }
 }

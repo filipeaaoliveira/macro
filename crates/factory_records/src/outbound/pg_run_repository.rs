@@ -494,6 +494,8 @@ struct StepRow {
     agent_name: Option<String>,
     waiting_for_slot_since: Option<DateTime<Utc>>,
     waiting_on_machines: Option<Vec<String>>,
+    waiting_reason: Option<String>,
+    api_key: Option<String>,
 }
 
 impl StepRow {
@@ -739,6 +741,8 @@ impl TryFrom<StepRow> for Step {
                 agent_name: row.agent_name,
                 waiting_for_slot_since: row.waiting_for_slot_since,
                 waiting_on_machines: row.waiting_on_machines.unwrap_or_default(),
+                waiting_reason: row.waiting_reason,
+                api_key: row.api_key,
             },
         })
     }
@@ -1667,7 +1671,20 @@ impl RunRepository for PgRunRepository {
                 s.machine,
                 b.name AS "agent_name?",
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,
-                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines,
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_reason END AS waiting_reason,
+                -- The vendor of the agent's own key, once a call of the
+                -- Step's session ran on it (crates/agent_api_keys records
+                -- each such call with the key): a key stored for an agent
+                -- that no longer runs on it, or a lapsed plan, shows none.
+                (
+                    SELECT k.provider
+                    FROM ai_usage u
+                    JOIN agent_api_keys k ON k.bot_id = u.agent_api_key_id
+                    WHERE u.agent_session_id = s.session_id
+                        AND u.agent_api_key_id IS NOT NULL
+                    LIMIT 1
+                ) AS "api_key?"
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             LEFT JOIN bots b ON b.id = s.bot_id
@@ -1882,7 +1899,20 @@ impl RunRepository for PgRunRepository {
                 s.machine,
                 b.name AS "agent_name?",
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,
-                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines,
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_reason END AS waiting_reason,
+                -- The vendor of the agent's own key, once a call of the
+                -- Step's session ran on it (crates/agent_api_keys records
+                -- each such call with the key): a key stored for an agent
+                -- that no longer runs on it, or a lapsed plan, shows none.
+                (
+                    SELECT k.provider
+                    FROM ai_usage u
+                    JOIN agent_api_keys k ON k.bot_id = u.agent_api_key_id
+                    WHERE u.agent_session_id = s.session_id
+                        AND u.agent_api_key_id IS NOT NULL
+                    LIMIT 1
+                ) AS "api_key?"
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             LEFT JOIN bots b ON b.id = s.bot_id

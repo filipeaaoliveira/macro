@@ -23,7 +23,10 @@ path = "src/definition_check.rs"
 
 [dependencies]
 agent_correlation = { path = "../../crates/agent_correlation", features = ["http", "postgres"] }
+agent_api_keys = { path = "../../crates/agent_api_keys" }
 agent_harness_service_client = { path = "../../crates/agent_harness_service_client" }
+# Plans, read to tell whether an agent's own API key may be spent.
+ai_billing = { path = "../../crates/ai_billing", features = ["pg-admission"] }
 ai_usage = { path = "../../crates/ai_usage" }
 aws-sdk-secretsmanager = { workspace = true }
 aws-sdk-sns = { workspace = true }

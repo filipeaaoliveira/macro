@@ -504,7 +504,7 @@ pub fn check_choices(
                 agent: agent.as_str().to_string(),
             });
         };
-        if defined.bot == bot_id::CODEX_BOT_ID {
+        if defined.bot == Some(bot_id::CODEX_BOT_ID) {
             return Err(EvaluationDefinitionError::CloudCodexAgent {
                 whose: whose.to_string(),
                 role: role.clone(),

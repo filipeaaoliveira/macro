@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET machine_id = $3, slot_wait_since = NULL, slot_wait_machines = NULL,\n                slot_wait_reason = NULL\n            WHERE run_id = $1 AND seq = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c3a52c680ac876c4d879e832dc364e5284f05ff2b89c9cba796ac677f8cdc0b1"
+}

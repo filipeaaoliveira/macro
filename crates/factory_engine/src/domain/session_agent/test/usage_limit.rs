@@ -144,6 +144,7 @@ async fn an_agent_at_its_usage_limit_is_skipped_by_the_next_step() {
         agents: agents(),
         quota: first.quota.clone(),
         pause_notices: None,
+        key_plans: first.key_plans.clone(),
     };
     let task = plan_task(&repo).await;
     let key = task.key;

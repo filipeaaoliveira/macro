@@ -327,6 +327,56 @@ its own (trimmed, lowered, once each, sorted, 1 to 32 letters, digits, `-`,
 (`AgentDefinitionError::MachineTag`), not a Run. An Agent fits a Step while
 its Machine has every tag it asks for; a bot on no Machine has none.
 
+Subscriptions and API keys (`placement.rs`, `MachineRepository::owner_bots`):
+an Agent names a `bot` or a `vendor` (`anthropic`, `openai`), never both
+(`AgentDefinitionError::BotOrVendor`), and a vendor Agent names no `model`
+(`VendorModel`): each of its bots runs on its own default model, as a
+machine's CLI and Macro's in-memory runtime name models their own way. A
+vendor Agent runs, for each Run's owner, on their own: first each coding
+agent of theirs (or of a team they are in) bound to a macrod machine they
+paired (its CLI signed in with their own login: their subscription; its
+vendor read from the agent's model, `Vendor::of_model`), then each of the
+owner's own in-memory agents with an API key of the vendor's
+(`agent_api_keys`), then each of their teams'. A key is taken only while
+its owner's plan includes keys (`SessionAgent::with_key_plans`, the
+`agent_api_keys` rule the in-memory runtime applies per turn; no plans or
+an unread plan takes no key), so a lapsed plan waits rather than run on
+Macro credits. Each is one place in the order a Step takes its Agents
+(`AgentBot`), so lack of quota or a usage limit passes the Step to the
+next, and the quota memory is kept per Agent and bot. A Macro computer is
+never a vendor Agent's, and a machine shared with the owner is not theirs.
+A Standing Role lists no vendor Agent (`StandingVendorAgent`). An agent's
+key is never read here: its calls run on it in Macro's in-memory runtime.
+
+A Machine's provider login runs only its owner's Steps, for every Agent,
+not only vendor Agents: a macrod machine runs its CLI on the login of the
+person who paired it (`MachineLogin::Owner`), and another person's Run
+would spend that person's subscription, which provider terms do not allow
+and its owner did not agree to by sharing the machine. So an Agent whose
+Machine someone else paired does not fit the Step, whatever access the
+Run's owner has to it, and neither does a Macro computer with a provider
+sign-in made through Macro (`MachineLogin::HostedSignIn`); a Macro computer
+with none runs on Macro credits (`MachineLogin::MacroCredits`) and fits.
+Such an Agent is passed over as one whose Machine lacks its tags; a session
+claimed for it and not yet opened (as before this rule) is handed to the
+next fitting Agent, recorded passed over as `not_the_owners`. When no Agent
+fits for that reason, or a vendor Agent's owner has no Machine or usable
+key for it, the Step waits as for a full Machine (at placement, before a
+claimed session opens, and to go on afresh after a lost session), holding
+no slot, saying why (`slot_wait_reason`, at most 1900 characters, shown as
+`runtime.waitingReason` to the Run's owner only), reading the owner's
+Machines and keys again at each look; the wait keeps when it began across
+looks. An attempt out of time fails `WaitingForMachineOrKey`, retried as
+`FactoryWaitingForMachine`; past `TAKE_SLOT_WITHIN` after the Step started
+it fails for good (`MachineOrKeyTimeRanOut`, the same type), so its Run
+ends `infrastructure`. A Step whose Agents fit nowhere for want of tags
+only still fails at once. A Step's read names the vendor of the agent's
+own API key once a call of its session ran on it (`runtime.apiKey`,
+`ai_usage.agent_api_key_id`), never the key. Known limit: the runtime
+router binds a session to its agent's Machine as it is now, so a team
+agent rebound to another person's Machine after its Step's session opened
+goes on there; placement checks only before a session opens.
+
 A Step's slot follows the Agent that opens its session: just before an
 Agent's session opens (`SessionAgent::hold_slot`, in `answer_in`), the Step
 takes a slot on that Agent's Machine (`MachineRepository::take_machine_slot`,
@@ -369,8 +419,10 @@ attempts of one Step can briefly split its slot and its session: an attempt
 that moved the slot to another Agent's Machine, then found another attempt
 had handed the Step on, goes on in that attempt's session, and the slot is
 held where the last attempt to open a session took it. Deploy every worker
-before a Definition adds `machine_tags`: `Agent` denies unknown fields, so
-an older worker fails the agent Steps of a Run that kept one.
+before a Definition adds `machine_tags` or a `vendor` Agent: `Agent` denies
+unknown fields, so an older worker fails the agent Steps of a Run that kept
+one. A Step that goes on in a session it opened before the rule that a
+Machine runs only its owner's Steps stays where it opened.
 
 Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
 `deny_unknown_fields`, and an agent Step reads its Run's kept Agents
@@ -537,12 +589,17 @@ unchecked, and a newer worker replays that history without the marker.
 
 What a Step's agent session used comes through one `SessionUsageReader`,
 `domain/agent_usage.rs`'s `AgentUsageReader`, which the token budget,
-Insights, quality, Scorers and Benchmarks all read. A session whose
-runtime reported its usage and cost reads as reported, kept in
-`factory_session_usage` (`factory_records`'s `SessionUsageRepository`);
-any other session is read from the usage log (`ai_usage`), whose calls are
-priced, and one the log has nothing for reads as its runtime reported it,
-so none counts twice. Such tokens are marked
+Insights, quality, Scorers and Benchmarks all read. A session the usage log
+(`ai_usage`) recorded calls for reads from the log, whose calls are priced;
+one the log has nothing for reads as its runtime reported it, kept in
+`factory_session_usage` (`factory_records`'s `SessionUsageRepository`), so
+none counts twice. The log's read counts a session's turns only: Macro's
+own calls about the session (its title, its activity summary) are left
+out, so a runtime on its owner's login that records no turn there still
+reads as it reported. What a runtime reported counts in tokens only, as one
+call with no price: the cost Claude Code reports on its owner's own login
+is its estimate of a subscription's use, not money billed per use, so it is
+never shown as spend. Such tokens are marked
 `SessionTokens::reported_by_runtime`. A runtime that calls its model directly, as Claude Code does through
 claude-agent-acp on macrod, records nothing in the usage log, but its
 prompt responses report each turn's tokens and its usage updates the
@@ -553,10 +610,9 @@ keeps them as each turn ends, and again before it deletes the session
 (`release`, `stop`, and a session it leaves), since the log goes with the
 session. It keeps a turn's usage once, not on every look at a paused
 Step's ended turn. A Run's token budget now counts these sessions too. A read or a write that fails is logged and the Step goes on. A
-session that reported tokens but no cost (or a cost in another currency)
-reads as one call with no price, so no money figure is given for what it
-is part of; one that reported nothing keeps nothing and reads as
-unmeasured.
+session that reported tokens reads as one call with no price, whatever cost
+it reported, so no money figure is given for what it is part of; one that
+reported nothing keeps nothing and reads as unmeasured.
 
 `GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,
 `domain/insights.rs`) sums up how the caller's own Runs went over a period of
@@ -566,7 +622,10 @@ waits and answers, the entries that failed or were revisited with their
 newest Runs, and the tokens each agent Step's sessions used, with what an
 entry's calls cost when every one was priced (`entries[].costUsd`)
 (its current one and those it left for a new one, the same sessions the
-token budget counts), read by session id through `AgentUsageReader`. A Step counts once in the agent and
+token budget counts), read by session id through `AgentUsageReader`, and what the calls billed
+to each agent's own API key cost (`usage.apiKeys`, by the agent that holds
+the key, each session once, no cost when one of its calls had no price:
+`ai_usage.agent_api_key_id`, `SessionTokens::api_key`). A Step counts once in the agent and
 measured Steps however many sessions it worked in (`StepSessionRef::seq`),
 and is measured when any of them recorded usage; a session counts its
 tokens once for its entry in its Run, however many Steps shared it. It

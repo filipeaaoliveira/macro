@@ -286,6 +286,11 @@ pub(crate) struct FakeRepo {
     pub(crate) machine_slots: Arc<Mutex<HashMap<StepKey, Uuid>>>,
     /// The full Machines each waiting Step waits on, by name.
     pub(crate) slot_waits: Arc<Mutex<HashMap<StepKey, Vec<String>>>>,
+    /// Why each Step waits that waits for a Machine or key it may run on.
+    pub(crate) slot_wait_reasons: Arc<Mutex<HashMap<StepKey, String>>>,
+    /// Each owner's bots for an Agent that names a vendor, in order.
+    pub(crate) owner_bots:
+        Arc<Mutex<HashMap<String, Vec<factory_records::domain::machines::OwnerBot>>>>,
 }
 
 /// A firing: its Automation and its key.

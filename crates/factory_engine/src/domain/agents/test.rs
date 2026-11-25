@@ -717,3 +717,59 @@ fn machine_tags_are_read_as_machines_keep_theirs() {
         );
     }
 }
+
+/// An Agent names a bot or a vendor: one that names both, or neither, does
+/// not read, and one that names a vendor reads back as written.
+#[test]
+fn an_agent_names_a_bot_or_a_vendor() {
+    let both = read(json!({
+        "agents": { "claude": { "bot": PRIMARY_BOT, "vendor": "anthropic" } },
+        "roles": { "planner": ["claude"] }
+    }));
+    let neither = read(json!({
+        "agents": { "claude": { "model": "claude-opus-4-5" } },
+        "roles": { "planner": ["claude"] }
+    }));
+    let vendor = json!({
+        "agents": { "claude": { "vendor": "anthropic" } },
+        "roles": { "planner": ["claude"] }
+    });
+
+    let refusal = AgentDefinitionError::BotOrVendor(agent("claude")).to_string();
+    assert_eq!(both.expect_err("both"), refusal);
+    assert_eq!(neither.expect_err("neither"), refusal);
+    let read_back = read(vendor.clone()).expect("a vendor agent");
+    assert_eq!(serde_json::to_value(&read_back).expect("written"), vendor);
+}
+
+/// A Standing Role is filled by a bot, so one that lists an Agent naming a
+/// vendor does not read; nor does a vendor Agent that names a model, which
+/// each owner's bots name their own way.
+#[test]
+fn a_vendor_agent_fills_no_standing_role_and_names_no_model() {
+    let standing = read(json!({
+        "agents": {
+            "claude": { "vendor": "anthropic" },
+            "primary": { "bot": PRIMARY_BOT }
+        },
+        "roles": { "planner": ["claude"] },
+        "standing": { "intake": { "acts": ["start"], "agents": ["claude"] } }
+    }));
+    let model = read(json!({
+        "agents": { "claude": { "vendor": "anthropic", "model": "opus" } },
+        "roles": { "planner": ["claude"] }
+    }));
+
+    assert_eq!(
+        standing.expect_err("a vendor agent in a standing role"),
+        AgentDefinitionError::StandingVendorAgent {
+            role: standing_role("intake"),
+            agent: agent("claude"),
+        }
+        .to_string()
+    );
+    assert_eq!(
+        model.expect_err("a vendor agent with a model"),
+        AgentDefinitionError::VendorModel(agent("claude")).to_string()
+    );
+}
