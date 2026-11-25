@@ -13,7 +13,7 @@ use temporalio_common::protos::temporal::api::failure::v1::{
 
 use super::{WorkFailure, work_failure};
 use crate::inbound::temporal::activities::{
-    AGENT_OVERDUE_FAILURE, INFRASTRUCTURE_FAILURE, REFUSED_FAILURE,
+    AGENT_OVERDUE_FAILURE, INFRASTRUCTURE_FAILURE, REFUSED_FAILURE, WAITING_FOR_MACHINE_FAILURE,
 };
 
 /// An application failure of `kind`, if any, as an activity raised it.
@@ -122,4 +122,22 @@ fn a_refused_session_is_infrastructure_s_and_keeps_its_refusal() {
         assert_eq!(read.output(), "the step's work failed");
     }
     assert!(!WorkFailure::Work.infrastructure());
+}
+
+/// A Step whose every Machine stayed full until its time ran out failed for
+/// infrastructure, not its work, however Temporal hands its last attempt
+/// back.
+#[test]
+fn a_step_that_waited_on_full_machines_to_the_end_is_infrastructure_s() {
+    let waited = activity(application(Some(WAITING_FOR_MACHINE_FAILURE), false));
+    let waited_to_the_end = activity(timed_out(application(
+        Some(WAITING_FOR_MACHINE_FAILURE),
+        false,
+    )));
+
+    assert_eq!(work_failure(&waited), WorkFailure::Infrastructure);
+    assert_eq!(
+        work_failure(&waited_to_the_end),
+        WorkFailure::Infrastructure
+    );
 }

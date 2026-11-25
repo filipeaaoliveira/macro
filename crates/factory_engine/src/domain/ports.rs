@@ -150,6 +150,13 @@ pub trait AgentFailure: Retryable {
     fn setup_failed(&self) -> Option<&str> {
         None
     }
+
+    /// Whether the Step could not start because every Machine its Agents
+    /// may run on stayed full: a retry waits on, and should the Step's time
+    /// run out so, it failed for infrastructure, not its work.
+    fn waits_for_machine(&self) -> bool {
+        false
+    }
 }
 
 /// Does the work of a Flow's Steps.

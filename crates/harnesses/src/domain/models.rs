@@ -113,6 +113,15 @@ pub struct Harness {
     /// it has an active Claude login. Only meaningful for Macro computers.
     #[serde(default)]
     pub claude_mode: ClaudeMode,
+    /// How many software factory Steps may run on it at once; none for no
+    /// limit. A Step that finds every Machine its Agents run on full waits.
+    #[serde(default)]
+    pub step_slots: Option<u16>,
+    /// Its tags, lower case and sorted, such as `rust-build`, `gpu` or
+    /// `arm64`: a Factory Definition's Agent may ask that the Machine its
+    /// Steps run on has some.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// How Claude Code on a Macro computer is paid for: its own Claude account
@@ -259,6 +268,35 @@ pub struct PatchHarnessRequest {
     /// Live sessions pick the change up at their next turn.
     #[serde(default)]
     pub allow_permission_bypass: Option<bool>,
+    /// How many software factory Steps may run on it at once, 1 to
+    /// [`MAX_STEP_SLOTS`]. Omit to leave unchanged, or pass `null` for no
+    /// limit.
+    #[serde(default, deserialize_with = "double_option")]
+    pub step_slots: Option<Option<u16>>,
+    /// Its tags, replacing the ones it has: at most [`MAX_TAGS`], each 1 to
+    /// [`MAX_TAG_CHARS`] lower-case letters, digits, `-`, `_` or `.`,
+    /// starting with a letter or digit. Upper case is lowered, and a tag
+    /// given twice is kept once.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+}
+
+/// The most software factory Steps a Machine may run at once.
+pub const MAX_STEP_SLOTS: u16 = 64;
+
+/// The most tags a Machine has.
+pub const MAX_TAGS: usize = 16;
+
+/// The longest tag, in characters.
+pub const MAX_TAG_CHARS: usize = 32;
+
+/// Deserializes an optional field while preserving explicit `null` values.
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
 }
 
 /// Request to claim an approved pairing's credential.

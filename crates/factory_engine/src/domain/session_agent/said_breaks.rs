@@ -9,6 +9,7 @@
 use agent_runtime_protocol::domain::action::AgentActionId;
 use agent_session::domain::routines::{RoutineSessionAction, RoutineSessions};
 use factory_records::domain::evaluation::EvaluationRepository;
+use factory_records::domain::machines::MachineRepository;
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::session_usage::SessionUsageRepository;
 
@@ -20,8 +21,10 @@ use crate::domain::review_rounds::json_blocks;
 /// What heads the break lines added from the agent's reply.
 pub(super) const FROM_REPLY: &str = "Breaks the agent wrote in its reply:";
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
-    SessionAgent<S, R>
+impl<
+    S: RoutineSessions,
+    R: RunRepository + EvaluationRepository + SessionUsageRepository + MachineRepository,
+> SessionAgent<S, R>
 {
     /// `answer`, with each readable break line the agent wrote in its
     /// replies to `turns` (prompts of `action`'s session) whose test the

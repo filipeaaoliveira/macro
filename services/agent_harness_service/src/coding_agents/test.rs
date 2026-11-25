@@ -22,6 +22,8 @@ fn harness(id: HarnessId, connected: bool) -> Harness {
         computer_id: None,
         team_agent_user_id: None,
         claude_mode: Default::default(),
+        step_slots: None,
+        tags: Vec::new(),
     }
 }
 

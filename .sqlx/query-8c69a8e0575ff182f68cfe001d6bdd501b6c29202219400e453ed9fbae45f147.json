@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                s.entry,\n                s.visit,\n                s.started_at,\n                s.outcome,\n                s.output,\n                s.ended_at,\n                g.question AS \"question?\",\n                g.answers AS \"answers?\",\n                g.opened_at AS \"opened_at?\",\n                g.answer,\n                g.note,\n                g.user_id,\n                g.approved_control_files,\n                g.rule,\n                g.reply_confidence,\n                g.by_stand_in AS \"by_stand_in?\",\n                g.agent_session_id AS \"agent_session_id?\",\n                g.asked_back_reply,\n                g.asked_back_at,\n                g.stand_in_answer,\n                g.stand_in_reason,\n                g.stand_in_confidence,\n                g.stand_in_until,\n                g.stand_in_declined_pick,\n                g.stand_in_declined_confidence,\n                g.stand_in_declined_reason,\n                g.asked_back_pick,\n                g.asked_back_confidence,\n                g.asked_back_reason,\n                g.asked_back_refused_tampered AS \"asked_back_refused_tampered?\",\n                g.answered_at,\n                s.role,\n                s.agent,\n                s.passed_over,\n                s.pass_reasons,\n                CASE WHEN s.ended_at IS NULL AND s.session_released_at IS NULL\n                    THEN s.session_id END AS terminal_session_id,\n                s.paused_at,\n                s.stop_asked_at,\n                s.steer_closed AND s.ended_at IS NULL AS \"between_turns!\",\n                s.pause_ran_out_at,\n                s.model,\n                s.machine,\n                b.name AS \"agent_name?\"\n            FROM factory_step s\n            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            LEFT JOIN bots b ON b.id = s.bot_id\n            WHERE s.run_id = $1\n            ORDER BY s.seq\n            ",
+  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                s.entry,\n                s.visit,\n                s.started_at,\n                s.outcome,\n                s.output,\n                s.ended_at,\n                g.question AS \"question?\",\n                g.answers AS \"answers?\",\n                g.opened_at AS \"opened_at?\",\n                g.answer,\n                g.note,\n                g.user_id,\n                g.approved_control_files,\n                g.rule,\n                g.reply_confidence,\n                g.by_stand_in AS \"by_stand_in?\",\n                g.agent_session_id AS \"agent_session_id?\",\n                g.asked_back_reply,\n                g.asked_back_at,\n                g.stand_in_answer,\n                g.stand_in_reason,\n                g.stand_in_confidence,\n                g.stand_in_until,\n                g.stand_in_declined_pick,\n                g.stand_in_declined_confidence,\n                g.stand_in_declined_reason,\n                g.asked_back_pick,\n                g.asked_back_confidence,\n                g.asked_back_reason,\n                g.asked_back_refused_tampered AS \"asked_back_refused_tampered?\",\n                g.answered_at,\n                s.role,\n                s.agent,\n                s.passed_over,\n                s.pass_reasons,\n                CASE WHEN s.ended_at IS NULL AND s.session_released_at IS NULL\n                    THEN s.session_id END AS terminal_session_id,\n                s.paused_at,\n                s.stop_asked_at,\n                s.steer_closed AND s.ended_at IS NULL AS \"between_turns!\",\n                s.pause_ran_out_at,\n                s.model,\n                s.machine,\n                b.name AS \"agent_name?\",\n                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,\n                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines\n            FROM factory_step s\n            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            LEFT JOIN bots b ON b.id = s.bot_id\n            WHERE s.run_id = $1\n            ORDER BY s.seq\n            ",
   "describe": {
     "columns": [
       {
@@ -227,6 +227,16 @@
         "ordinal": 44,
         "name": "agent_name?",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 45,
+        "name": "waiting_for_slot_since",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 46,
+        "name": "waiting_on_machines",
+        "type_info": "TextArray"
       }
     ],
     "parameters": {
@@ -279,8 +289,10 @@
       true,
       true,
       true,
-      false
+      false,
+      null,
+      null
     ]
   },
-  "hash": "13227db276d9712d2e52a938405d918ab51f80f2030d1ae6d4366af2ffc67658"
+  "hash": "8c69a8e0575ff182f68cfe001d6bdd501b6c29202219400e453ed9fbae45f147"
 }

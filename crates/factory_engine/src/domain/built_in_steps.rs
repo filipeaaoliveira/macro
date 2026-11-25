@@ -255,6 +255,8 @@ pub enum BuiltInStepError {
         overdue: bool,
         /// Whether another attempt took the Step on to a later prompt.
         superseded: bool,
+        /// Whether every Machine its Agents may run on stayed full.
+        waits_for_machine: bool,
     },
     /// The agent's machine refused the Step's session, and said why.
     #[error("the agent's machine refused the session: {0}")]
@@ -297,6 +299,7 @@ impl BuiltInStepError {
             out_of_quota: error.out_of_quota(),
             overdue: error.overdue(),
             superseded: error.superseded(),
+            waits_for_machine: error.waits_for_machine(),
             report: rootcause::Report::new(error).into_dynamic(),
         }
     }
@@ -357,6 +360,15 @@ impl AgentFailure for BuiltInStepError {
         match self {
             BuiltInStepError::Refused(reason) => Some(reason),
             _ => None,
+        }
+    }
+
+    fn waits_for_machine(&self) -> bool {
+        match self {
+            BuiltInStepError::Agent {
+                waits_for_machine, ..
+            } => *waits_for_machine,
+            _ => false,
         }
     }
 

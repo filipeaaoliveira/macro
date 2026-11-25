@@ -97,7 +97,12 @@ before acting"); paired machines keep it off until their owner turns it on.
   stamps the notice it sent with `record_login_notice` (`notice_stage`,
   `notice_expires_at`). Nothing else reads or writes these tables.
 - `patch_harness` lets managers change the name and permission bypass while
-  preserving computer identity and Claude billing mode.
+  preserving computer identity and Claude billing mode. It also sets what the
+  Machine offers the software factory: `step_slots`, how many factory Steps
+  run on it at once (1 to 64; `null` for no limit, the default), and `tags`
+  (at most 16, lowered, kept once and sorted), which a Factory Definition's
+  Agent asks of the Machine its Steps run on (`machine_tags`). The factory
+  reads both from `harnesses` itself (`factory_records`' `MachineRepository`).
 - Harness rows carry `computer_id` (set only for Macro computers; unique
   among live rows).
 - An agent teammate's computer: `HarnessServiceImpl` takes a

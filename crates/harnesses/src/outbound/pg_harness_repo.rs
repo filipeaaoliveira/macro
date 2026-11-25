@@ -95,6 +95,8 @@ struct HarnessRow {
     last_connected_at: Option<DateTime<Utc>>,
     last_disconnected_at: Option<DateTime<Utc>>,
     computer_id: Option<Uuid>,
+    step_slots: Option<i32>,
+    tags: Vec<String>,
     has_claude_login: bool,
     has_live_connection: bool,
     has_connection_record: bool,
@@ -169,6 +171,12 @@ impl TryFrom<HarnessRow> for Harness {
             } else {
                 ClaudeMode::MacroCredits
             },
+            step_slots: row
+                .step_slots
+                .map(u16::try_from)
+                .transpose()
+                .context("persisted step slots out of range")?,
+            tags: row.tags,
         })
     }
 }
@@ -192,7 +200,7 @@ async fn fetch_harness(
         SELECT
             id, kind, name, owner_user_id, created_by, allow_permission_bypass,
             created_at, updated_at, last_connected_at, last_disconnected_at,
-            computer_id,
+            computer_id, step_slots, tags,
             EXISTS (SELECT 1 FROM harness_account_logins login WHERE login.harness_id = harnesses.id AND login.provider = 'claude' AND login.signed_out_at IS NULL) AS "has_claude_login!",
             EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = harnesses.id AND c.lease_expires_at > now()) AS "has_live_connection!",
             EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = harnesses.id) AS "has_connection_record!",
@@ -595,7 +603,7 @@ impl HarnessRepo for PgHarnessRepo {
             SELECT
                 h.id, h.kind, h.name, h.owner_user_id, h.created_by, h.allow_permission_bypass,
                 h.created_at, h.updated_at, h.last_connected_at, h.last_disconnected_at,
-                h.computer_id,
+                h.computer_id, h.step_slots, h.tags,
                 EXISTS (SELECT 1 FROM harness_account_logins login WHERE login.harness_id = h.id AND login.provider = 'claude' AND login.signed_out_at IS NULL) AS "has_claude_login!",
                 EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = h.id AND c.lease_expires_at > now()) AS "has_live_connection!",
                 EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = h.id) AS "has_connection_record!",
@@ -624,7 +632,7 @@ impl HarnessRepo for PgHarnessRepo {
             SELECT
                 h.id, h.kind, h.name, h.owner_user_id, h.created_by, h.allow_permission_bypass,
                 h.created_at, h.updated_at, h.last_connected_at, h.last_disconnected_at,
-                h.computer_id,
+                h.computer_id, h.step_slots, h.tags,
                 EXISTS (SELECT 1 FROM harness_account_logins login WHERE login.harness_id = h.id AND login.provider = 'claude' AND login.signed_out_at IS NULL) AS "has_claude_login!",
                 EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = h.id AND c.lease_expires_at > now()) AS "has_live_connection!",
                 EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = h.id) AS "has_connection_record!",
@@ -743,12 +751,14 @@ impl HarnessRepo for PgHarnessRepo {
             SET
                 name = COALESCE($2, name),
                 allow_permission_bypass = COALESCE($3, allow_permission_bypass),
+                step_slots = CASE WHEN $4 THEN $5 ELSE step_slots END,
+                tags = COALESCE($6, tags),
                 updated_at = now()
             WHERE id = $1 AND deleted_at IS NULL
             RETURNING
             id, kind, name, owner_user_id, created_by, allow_permission_bypass,
             created_at, updated_at, last_connected_at, last_disconnected_at,
-            computer_id,
+            computer_id, step_slots, tags,
             EXISTS (SELECT 1 FROM harness_account_logins login WHERE login.harness_id = harnesses.id AND login.provider = 'claude' AND login.signed_out_at IS NULL) AS "has_claude_login!",
             EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = harnesses.id AND c.lease_expires_at > now()) AS "has_live_connection!",
             EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = harnesses.id) AS "has_connection_record!",
@@ -758,6 +768,9 @@ impl HarnessRepo for PgHarnessRepo {
             harness_id.as_uuid(),
             changes.name,
             changes.allow_permission_bypass,
+            changes.step_slots.is_some(),
+            changes.step_slots.flatten().map(i32::from),
+            changes.tags.as_deref(),
         )
         .fetch_optional(&self.pool)
         .await

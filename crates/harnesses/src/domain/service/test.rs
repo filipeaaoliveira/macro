@@ -43,6 +43,8 @@ fn harness(owner: HarnessOwner) -> Harness {
         computer_id: None,
         team_agent_user_id: None,
         claude_mode: ClaudeMode::MacroCredits,
+        step_slots: None,
+        tags: Vec::new(),
     }
 }
 
@@ -1037,6 +1039,8 @@ async fn a_manager_changes_bypass_and_name_on_the_web() {
             PatchHarnessRequest {
                 name: Some("  studio  ".to_owned()),
                 allow_permission_bypass: Some(true),
+                step_slots: None,
+                tags: None,
             },
         )
         .await
@@ -1051,6 +1055,8 @@ async fn a_manager_changes_bypass_and_name_on_the_web() {
             HarnessChanges {
                 name: Some("studio".to_owned()),
                 allow_permission_bypass: Some(true),
+                step_slots: None,
+                tags: None,
             }
         )]
     );
@@ -1092,11 +1098,110 @@ async fn a_patch_rejects_a_blank_name() {
             PatchHarnessRequest {
                 name: Some("   ".to_owned()),
                 allow_permission_bypass: None,
+                step_slots: None,
+                tags: None,
             },
         )
         .await;
 
     assert!(matches!(result, Err(HarnessError::BadRequest(_))));
+    assert!(repo.calls.lock().unwrap().updated.is_empty());
+}
+
+#[tokio::test]
+async fn a_manager_sets_a_machines_step_slots_and_tags() {
+    let repo = FakeRepo {
+        harness: Some(harness(HarnessOwner::User {
+            user_id: OWNER_ID.to_owned(),
+        })),
+        ..FakeRepo::default()
+    };
+    service(repo.clone())
+        .patch_harness(
+            caller(OWNER_ID),
+            HarnessId::TEST_A,
+            PatchHarnessRequest {
+                step_slots: Some(Some(2)),
+                tags: Some(vec![
+                    " GPU ".to_owned(),
+                    "rust-build".to_owned(),
+                    "gpu".to_owned(),
+                ]),
+                ..PatchHarnessRequest::default()
+            },
+        )
+        .await
+        .unwrap();
+    service(repo.clone())
+        .patch_harness(
+            caller(OWNER_ID),
+            HarnessId::TEST_A,
+            PatchHarnessRequest {
+                step_slots: Some(None),
+                ..PatchHarnessRequest::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let updated = repo.calls.lock().unwrap().updated.clone();
+    assert_eq!(updated[0].1.step_slots, Some(Some(2)));
+    assert_eq!(
+        updated[0].1.tags,
+        Some(vec!["gpu".to_owned(), "rust-build".to_owned()])
+    );
+    // No limit clears it; an omitted field stays as it is.
+    assert_eq!(updated[1].1.step_slots, Some(None));
+    assert_eq!(updated[1].1.tags, None);
+}
+
+#[tokio::test]
+async fn a_patch_rejects_step_slots_and_tags_out_of_bounds() {
+    let repo = FakeRepo {
+        harness: Some(harness(HarnessOwner::User {
+            user_id: OWNER_ID.to_owned(),
+        })),
+        ..FakeRepo::default()
+    };
+    let too_many: Vec<String> = (0..17).map(|n| format!("tag-{n}")).collect();
+    for request in [
+        PatchHarnessRequest {
+            step_slots: Some(Some(0)),
+            ..PatchHarnessRequest::default()
+        },
+        PatchHarnessRequest {
+            step_slots: Some(Some(65)),
+            ..PatchHarnessRequest::default()
+        },
+        PatchHarnessRequest {
+            tags: Some(vec!["-gpu".to_owned()]),
+            ..PatchHarnessRequest::default()
+        },
+        PatchHarnessRequest {
+            tags: Some(vec!["two words".to_owned()]),
+            ..PatchHarnessRequest::default()
+        },
+        PatchHarnessRequest {
+            tags: Some(vec![String::new()]),
+            ..PatchHarnessRequest::default()
+        },
+        PatchHarnessRequest {
+            tags: Some(vec!["a".repeat(33)]),
+            ..PatchHarnessRequest::default()
+        },
+        PatchHarnessRequest {
+            tags: Some(too_many),
+            ..PatchHarnessRequest::default()
+        },
+    ] {
+        let result = service(repo.clone())
+            .patch_harness(caller(OWNER_ID), HarnessId::TEST_A, request.clone())
+            .await;
+        assert!(
+            matches!(result, Err(HarnessError::BadRequest(_))),
+            "{request:?} was not refused"
+        );
+    }
     assert!(repo.calls.lock().unwrap().updated.is_empty());
 }
 
@@ -1124,6 +1229,8 @@ async fn only_a_harness_manager_may_patch() {
                 PatchHarnessRequest {
                     name: None,
                     allow_permission_bypass: Some(true),
+                    step_slots: None,
+                    tags: None,
                 },
             )
             .await;
@@ -1146,6 +1253,8 @@ async fn only_a_harness_manager_may_patch() {
             PatchHarnessRequest {
                 name: None,
                 allow_permission_bypass: Some(false),
+                step_slots: None,
+                tags: None,
             },
         )
         .await;
@@ -1408,6 +1517,8 @@ async fn a_computer_harness_is_managed_by_its_team_admins_not_its_buyer() {
             PatchHarnessRequest {
                 name: Some("Team computer".to_owned()),
                 allow_permission_bypass: None,
+                step_slots: None,
+                tags: None,
             },
         )
         .await
@@ -1438,6 +1549,8 @@ async fn a_computer_harness_is_managed_by_its_team_admins_not_its_buyer() {
             PatchHarnessRequest {
                 name: Some("Mine now".to_owned()),
                 allow_permission_bypass: None,
+                step_slots: None,
+                tags: None,
             },
         )
         .await;

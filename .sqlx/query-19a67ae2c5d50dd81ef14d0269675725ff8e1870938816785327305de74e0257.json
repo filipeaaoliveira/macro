@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET slot_wait_since = COALESCE(slot_wait_since, now()),\n                slot_wait_machines = $3\n            WHERE run_id = $1 AND seq = $2 AND ended_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "19a67ae2c5d50dd81ef14d0269675725ff8e1870938816785327305de74e0257"
+}

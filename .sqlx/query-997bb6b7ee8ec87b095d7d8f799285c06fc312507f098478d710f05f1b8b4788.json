@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                machine_id IS NOT DISTINCT FROM $3 AS \"holds!\",\n                now() - started_at > make_interval(secs => $4) AS \"late!\"\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "holds!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "late!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "997bb6b7ee8ec87b095d7d8f799285c06fc312507f098478d710f05f1b8b4788"
+}

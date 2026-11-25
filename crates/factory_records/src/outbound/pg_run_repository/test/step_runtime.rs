@@ -85,6 +85,7 @@ async fn a_step_keeps_where_its_session_opened(pool: PgPool) {
             model: None,
             machine: None,
             agent_name: Some("Writer".to_string()),
+            ..StepRuntime::default()
         },
         "nothing ran yet, but the agent is known"
     );
@@ -97,6 +98,7 @@ async fn a_step_keeps_where_its_session_opened(pool: PgPool) {
         model: Some("claude-opus-4-5".to_string()),
         machine: Some("m4".to_string()),
         agent_name: Some("Writer".to_string()),
+        ..StepRuntime::default()
     };
     assert_eq!(runtime(&repo, id, 1).await, opened);
 
@@ -172,6 +174,7 @@ async fn a_step_that_goes_on_in_a_new_session_reads_where_that_one_ran(pool: PgP
             model: None,
             machine: None,
             agent_name: Some("Cloud".to_string()),
+            ..StepRuntime::default()
         }
     );
 
@@ -185,6 +188,7 @@ async fn a_step_that_goes_on_in_a_new_session_reads_where_that_one_ran(pool: PgP
             model: Some("claude-sonnet-4-5".to_string()),
             machine: None,
             agent_name: Some("Cloud".to_string()),
+            ..StepRuntime::default()
         }
     );
 
@@ -326,6 +330,7 @@ async fn a_retry_keeps_where_its_kept_steps_ran(pool: PgPool) {
             model: Some("claude-opus-4-5".to_string()),
             machine: Some("m4".to_string()),
             agent_name: Some("Writer".to_string()),
+            ..StepRuntime::default()
         }
     );
 }

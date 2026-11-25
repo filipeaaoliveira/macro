@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE harnesses\n            SET\n                name = COALESCE($2, name),\n                allow_permission_bypass = COALESCE($3, allow_permission_bypass),\n                updated_at = now()\n            WHERE id = $1 AND deleted_at IS NULL\n            RETURNING\n            id, kind, name, owner_user_id, created_by, allow_permission_bypass,\n            created_at, updated_at, last_connected_at, last_disconnected_at,\n            computer_id,\n            EXISTS (SELECT 1 FROM harness_account_logins login WHERE login.harness_id = harnesses.id AND login.provider = 'claude' AND login.signed_out_at IS NULL) AS \"has_claude_login!\",\n            EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = harnesses.id AND c.lease_expires_at > now()) AS \"has_live_connection!\",\n            EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = harnesses.id) AS \"has_connection_record!\",\n            NULL::\"AccessLevel\" AS \"access?: AccessLevel\",\n            ARRAY(SELECT ea.source_id FROM entity_access ea WHERE ea.entity_id = harnesses.id AND ea.entity_type = 'harness' AND ea.source_type = 'team') AS shared_team_ids\n            ",
+  "query": "\n            UPDATE harnesses\n            SET\n                name = COALESCE($2, name),\n                allow_permission_bypass = COALESCE($3, allow_permission_bypass),\n                step_slots = CASE WHEN $4 THEN $5 ELSE step_slots END,\n                tags = COALESCE($6, tags),\n                updated_at = now()\n            WHERE id = $1 AND deleted_at IS NULL\n            RETURNING\n            id, kind, name, owner_user_id, created_by, allow_permission_bypass,\n            created_at, updated_at, last_connected_at, last_disconnected_at,\n            computer_id, step_slots, tags,\n            EXISTS (SELECT 1 FROM harness_account_logins login WHERE login.harness_id = harnesses.id AND login.provider = 'claude' AND login.signed_out_at IS NULL) AS \"has_claude_login!\",\n            EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = harnesses.id AND c.lease_expires_at > now()) AS \"has_live_connection!\",\n            EXISTS (SELECT 1 FROM harness_runtime_connection c WHERE c.harness_id = harnesses.id) AS \"has_connection_record!\",\n            NULL::\"AccessLevel\" AS \"access?: AccessLevel\",\n            ARRAY(SELECT ea.source_id FROM entity_access ea WHERE ea.entity_id = harnesses.id AND ea.entity_type = 'harness' AND ea.source_type = 'team') AS shared_team_ids\n            ",
   "describe": {
     "columns": [
       {
@@ -60,21 +60,31 @@
       },
       {
         "ordinal": 11,
+        "name": "step_slots",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "tags",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 13,
         "name": "has_claude_login!",
         "type_info": "Bool"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "has_live_connection!",
         "type_info": "Bool"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "has_connection_record!",
         "type_info": "Bool"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "access?: AccessLevel",
         "type_info": {
           "Custom": {
@@ -91,7 +101,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "shared_team_ids",
         "type_info": "TextArray"
       }
@@ -100,7 +110,10 @@
       "Left": [
         "Uuid",
         "Text",
-        "Bool"
+        "Bool",
+        "Bool",
+        "Int4",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -115,6 +128,8 @@
       true,
       true,
       true,
+      true,
+      false,
       null,
       null,
       null,
@@ -122,5 +137,5 @@
       null
     ]
   },
-  "hash": "ae8ec608159318a1b7b56a3af820bd96040a1c514d1190094832122ad9369f6e"
+  "hash": "4a2c3ee521258f09a4552ac4a515516309f7b7c843cc6b1e1b8d301b52ec3c11"
 }

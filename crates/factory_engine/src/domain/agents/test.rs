@@ -672,3 +672,48 @@ fn agent_rules_are_written_as_they_are_read() {
             .is_none()
     );
 }
+
+/// An Agent's machine tags are kept as a Machine keeps its own: trimmed,
+/// lowered, once each and sorted; a tag no Machine can have fails the
+/// definition, naming the Agent.
+#[test]
+fn machine_tags_are_read_as_machines_keep_theirs() {
+    let definition = read(json!({
+        "agents": {
+            "primary": {
+                "bot": "00000000-0000-0000-0000-00000000c1a0",
+                "machine_tags": [" Rust-Build ", "gpu", "GPU"]
+            }
+        },
+        "roles": { "planner": ["primary"] }
+    }))
+    .expect("a definition");
+    assert_eq!(
+        definition
+            .agent(&agent("primary"))
+            .expect("primary")
+            .machine_tags,
+        ["gpu", "rust-build"]
+    );
+
+    let too_many: Vec<String> = (0..17).map(|n| format!("tag-{n}")).collect();
+    for tags in [
+        json!(["two words"]),
+        json!(["-gpu"]),
+        json!([""]),
+        json!(["a".repeat(33)]),
+        json!(too_many),
+    ] {
+        let read = read(json!({
+            "agents": {
+                "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0", "machine_tags": tags }
+            },
+            "roles": { "planner": ["primary"] }
+        }));
+        let error = read.expect_err("a tag no machine can have");
+        assert!(
+            error.contains("agent primary asks for machine tag"),
+            "{error}"
+        );
+    }
+}

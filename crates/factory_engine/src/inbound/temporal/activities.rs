@@ -158,6 +158,12 @@ pub(crate) const REFUSED_FAILURE: &str = "FactoryRefused";
 /// how the Runs that failed so before replay.
 pub(crate) const AGENT_OVERDUE_FAILURE: &str = "FactoryAgentOverdue";
 
+/// The type a Step's work failure carries when every Machine its Agents may
+/// run on stayed full: retried, and should the Step's time run out on it,
+/// infrastructure's, never the work's. Renaming it changes how the Runs that
+/// failed so before replay.
+pub(crate) const WAITING_FOR_MACHINE_FAILURE: &str = "FactoryWaitingForMachine";
+
 /// A Step error as Temporal sees it: retried unless the same Step would fail
 /// the same way again.
 pub(super) fn failure(error: StepError) -> ActivityError {
@@ -180,6 +186,11 @@ pub(super) fn failure(error: StepError) -> ActivityError {
         | StepError::NoSuchRun
         | StepError::RunEnded
         | StepError::Final(_) => ApplicationFailure::non_retryable(error).into(),
+        StepError::WaitingForMachine { last, .. } => ApplicationFailure::builder(error)
+            .type_name(WAITING_FOR_MACHINE_FAILURE.to_string())
+            .non_retryable(last)
+            .build()
+            .into(),
         StepError::Internal(_) => ApplicationFailure::new(error).into(),
     }
 }
