@@ -1941,6 +1941,73 @@ describe('RunView break records', () => {
     expect(unproven.getAttribute('data-break-tone')).toBe('warning');
   });
 
+  it('warns on the unproven test’s own row, leaving its siblings and its Step in their own tone', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'blocked', endedAt: '2026-11-16T10:00:00Z' },
+      steps: [
+        {
+          seq: 1,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:00:00Z',
+          end: {
+            outcome: 'done',
+            output: '',
+            endedAt: '2026-11-16T09:01:00Z',
+          },
+        },
+      ],
+      breakRecords: [
+        {
+          seq: 1,
+          test: 'parses a due date',
+          file: 'src/due.ts',
+          oldText: 'return date;',
+          newText: 'return null;',
+          status: 'verified',
+          checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+          output: '1 failed',
+        },
+        {
+          seq: 1,
+          test: 'retries a flaky fetch',
+          file: 'src/fetch.ts',
+          oldText: 'retry()',
+          newText: '',
+          status: 'not_reproduced',
+          checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+          output: '1 passed',
+        },
+      ],
+    });
+
+    const row = (test: string) =>
+      document.querySelector(
+        `[data-factory-run-step="1"] [data-break-test="${test}"]`
+      ) as HTMLElement | null;
+    await waitFor(() => expect(row('retries a flaky fetch')).not.toBeNull());
+
+    const flaky = row('retries a flaky fetch') as HTMLElement;
+    expect(flaky.getAttribute('data-break-tone')).toBe('warning');
+    const verified = row('parses a due date') as HTMLElement;
+    expect(verified.getAttribute('data-break-tone')).toBeNull();
+    expect(
+      within(verified).getByText('Verified').getAttribute('data-break-tone')
+    ).toBeNull();
+    expect(verified.querySelector('[data-break-tone="warning"]')).toBeNull();
+
+    // The Step keeps the tone of its own outcome, `done`: plain.
+    const step = document.querySelector(
+      '[data-factory-run-step="1"]'
+    ) as HTMLElement;
+    expect(step.querySelector('[data-outcome-tone]')).toBeNull();
+    const dot = step.querySelector('span[aria-hidden="true"].rounded-full');
+    expect(dot?.className).toContain('bg-surface-2');
+    expect(dot?.className).not.toContain('bg-warning');
+  });
+
   it('shows what a break’s test printed in monospace, its last lines until asked for all', async () => {
     const { setRun } = mount({});
     const printed = Array.from({ length: 9 }, (_, n) => `line ${n + 1}`);

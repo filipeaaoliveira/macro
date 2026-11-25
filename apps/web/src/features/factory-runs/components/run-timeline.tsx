@@ -557,39 +557,48 @@ function BreakRecordsNote(props: { records: BreakRecord[] }) {
       <div hidden={!open()} class="flex flex-col gap-2 pt-1">
         <For each={props.records}>
           {(record) => (
-            <StepNote>
-              <span class="flex min-w-0 items-center gap-2">
-                <Badge
-                  variant="outline"
-                  size="xs"
-                  data-break-status={record.status}
-                  data-break-tone={
-                    isBlockingBreak(record.status) ? 'warning' : undefined
-                  }
-                  class={cn(
-                    'shrink-0',
-                    isBlockingBreak(record.status) && OUTCOME_TONES.sentBack
-                  )}
-                >
-                  {t(BREAK_STATUSES[record.status])}
-                </Badge>
-                <span class="min-w-0 truncate text-ink">{record.test}</span>
-              </span>
-              <span class="mt-1.5 block overflow-hidden rounded-lg border border-edge-muted font-mono text-[11.5px] leading-5">
-                <span class="block border-b border-edge-muted bg-surface-1 px-2.5 py-1 text-ink-muted">
-                  {record.file}
+            // The tone is the test's own: one unproven test marks its row,
+            // not its siblings or the Step, whose tone is its outcome's.
+            <div
+              data-break-test={record.test}
+              data-break-tone={
+                isBlockingBreak(record.status) ? 'warning' : undefined
+              }
+            >
+              <StepNote>
+                <span class="flex min-w-0 items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    size="xs"
+                    data-break-status={record.status}
+                    data-break-tone={
+                      isBlockingBreak(record.status) ? 'warning' : undefined
+                    }
+                    class={cn(
+                      'shrink-0',
+                      isBlockingBreak(record.status) && OUTCOME_TONES.sentBack
+                    )}
+                  >
+                    {t(BREAK_STATUSES[record.status])}
+                  </Badge>
+                  <span class="min-w-0 truncate text-ink">{record.test}</span>
                 </span>
-                <span class="block whitespace-pre-wrap bg-failure-bg/60 px-2.5 text-failure-ink">
-                  {t('factoryRuns.breakOldText', { text: record.oldText })}
+                <span class="mt-1.5 block overflow-hidden rounded-lg border border-edge-muted font-mono text-[11.5px] leading-5">
+                  <span class="block border-b border-edge-muted bg-surface-1 px-2.5 py-1 text-ink-muted">
+                    {record.file}
+                  </span>
+                  <span class="block whitespace-pre-wrap bg-failure-bg/60 px-2.5 text-failure-ink">
+                    {t('factoryRuns.breakOldText', { text: record.oldText })}
+                  </span>
+                  <span class="block whitespace-pre-wrap bg-success-bg/60 px-2.5 text-success-ink">
+                    {t('factoryRuns.breakNewText', { text: record.newText })}
+                  </span>
                 </span>
-                <span class="block whitespace-pre-wrap bg-success-bg/60 px-2.5 text-success-ink">
-                  {t('factoryRuns.breakNewText', { text: record.newText })}
-                </span>
-              </span>
-              <Show when={record.output.trim()}>
-                {(output) => <BreakOutput output={output()} />}
-              </Show>
-            </StepNote>
+                <Show when={record.output.trim()}>
+                  {(output) => <BreakOutput output={output()} />}
+                </Show>
+              </StepNote>
+            </div>
           )}
         </For>
       </div>
