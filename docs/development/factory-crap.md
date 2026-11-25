@@ -218,7 +218,7 @@ Install the tools on each machine that runs the checks:
 cargo install --locked cargo-llvm-cov cargo-nextest cargo-crap
 rustup component add llvm-tools-preview
 cargo install --locked --git https://github.com/filipeaaoliveira/macro \
-  --rev e95b3ac48e21bd6a69db9eca47e9d513e2173c08 xtask_crap
+  --rev a24042fdafb0305bc216f01cec818e7f7789431d xtask_crap
 ```
 
 Then add the check to the repository's `.macro/checks.json`, with `paths`
