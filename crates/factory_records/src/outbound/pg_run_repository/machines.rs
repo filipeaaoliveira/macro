@@ -54,9 +54,9 @@ impl MachineRepository for PgRunRepository {
         .execute(&mut *tx)
         .await?;
 
-        // A Step that holds this Machine's slot keeps it; one that started
-        // too long ago takes none. A Step not recorded has nothing to hold:
-        // its claim finds out why.
+        // A Step that holds this Machine's slot keeps it. A Step not
+        // recorded has nothing to hold: the take answers Taken and changes
+        // nothing, and its claim then finds out why.
         let step = sqlx::query!(
             r#"
             SELECT
@@ -72,20 +72,13 @@ impl MachineRepository for PgRunRepository {
         )
         .fetch_optional(&mut *tx)
         .await?;
-        match step {
-            Some(step) if step.holds => {
-                tx.rollback().await?;
-                return Ok(SlotTake::Taken);
-            }
-            Some(step) if step.late => {
-                tx.rollback().await?;
-                return Ok(SlotTake::TooLate);
-            }
-            Some(_) => {}
-            None => {
-                tx.rollback().await?;
-                return Ok(SlotTake::Taken);
-            }
+        let Some(step) = step else {
+            tx.rollback().await?;
+            return Ok(SlotTake::Taken);
+        };
+        if step.holds {
+            tx.rollback().await?;
+            return Ok(SlotTake::Taken);
         }
 
         // Running Steps hold the slots: those that have not ended, in Runs
@@ -119,8 +112,13 @@ impl MachineRepository for PgRunRepository {
         // A Machine removed since it was read has no limit to keep: its
         // session is refused when it opens.
         .unwrap_or(true);
+        // A full Machine is not worth waiting for once the Step started too
+        // long ago; a free slot is taken however late.
         if !free {
             tx.rollback().await?;
+            if step.late {
+                return Ok(SlotTake::TooLate);
+            }
             return Ok(SlotTake::Full);
         }
 
@@ -138,6 +136,22 @@ impl MachineRepository for PgRunRepository {
         .await?;
         tx.commit().await?;
         Ok(SlotTake::Taken)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn session_opened(&self, key: StepKey) -> Result<bool, Self::Err> {
+        let opened = sqlx::query_scalar!(
+            r#"
+            SELECT opened_at IS NOT NULL AS "opened!"
+            FROM factory_step
+            WHERE run_id = $1 AND seq = $2
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(opened.unwrap_or(false))
     }
 
     #[tracing::instrument(err, skip(self))]

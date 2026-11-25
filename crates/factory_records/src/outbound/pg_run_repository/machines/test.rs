@@ -187,7 +187,7 @@ async fn started_ago(pool: &PgPool, step: crate::domain::models::StepKey, minute
 
 /// A Step that started longer ago than its work can run holds no slot, as
 /// one whose Run's workflow went without recording its end; a Step that
-/// started too long ago to take a slot gets none, but one that holds a slot
+/// started too long ago finds a full Machine too late, but one that holds a slot
 /// keeps it however late. Letting go frees the slot and the wait.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
@@ -206,12 +206,11 @@ async fn old_steps_hold_no_slot_and_late_steps_take_none(pool: PgPool) {
 
     let late = started(&repo).await;
     started_ago(&pool, key(late, 1), 100).await;
+    assert_eq!(take(&repo, key(late, 1), M4).await, SlotTake::TooLate);
     repo.end_step(key(next, 1), &outcome("done"), "Planned")
         .await
         .expect("end");
-    assert_eq!(take(&repo, key(late, 1), M4).await, SlotTake::TooLate);
 
-    started_ago(&pool, key(next, 1), 0).await;
     let holder = started(&repo).await;
     assert_eq!(take(&repo, key(holder, 1), M4).await, SlotTake::Taken);
     started_ago(&pool, key(holder, 1), 100).await;
@@ -273,4 +272,45 @@ async fn concurrent_steps_never_both_take_the_last_slot(pool: PgPool) {
                 .expect("end");
         }
     }
+}
+
+/// A Step that moves to another Machine frees the slot it held: the next
+/// Step takes it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "agents"))
+)]
+async fn a_step_that_moves_frees_its_old_machine(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    set_m4(&pool, Some(1)).await;
+    let m3 = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00a2);
+    let moving = started(&repo).await;
+    let next = started(&repo).await;
+    assert_eq!(take(&repo, key(moving, 1), M4).await, SlotTake::Taken);
+    assert_eq!(take(&repo, key(next, 1), M4).await, SlotTake::Full);
+
+    assert_eq!(take(&repo, key(moving, 1), m3).await, SlotTake::Taken);
+    assert_eq!(take(&repo, key(next, 1), M4).await, SlotTake::Taken);
+}
+
+/// A Step past the time to wait for a slot still takes a free one, on a
+/// Machine with a slot left as on one with no limit: only a full Machine is
+/// too late.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "agents"))
+)]
+async fn a_late_step_takes_a_free_slot(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    set_m4(&pool, Some(2)).await;
+    let busy = started(&repo).await;
+    assert_eq!(take(&repo, key(busy, 1), M4).await, SlotTake::Taken);
+    let late = started(&repo).await;
+    started_ago(&pool, key(late, 1), 100).await;
+    assert_eq!(take(&repo, key(late, 1), M4).await, SlotTake::Taken);
+
+    set_m4(&pool, None).await;
+    let unlimited = started(&repo).await;
+    started_ago(&pool, key(unlimited, 1), 100).await;
+    assert_eq!(take(&repo, key(unlimited, 1), M4).await, SlotTake::Taken);
 }

@@ -38,8 +38,8 @@ pub enum SlotTake {
     Taken,
     /// Every slot is held by another Step.
     Full,
-    /// The Step started too long ago to take a slot: too little of its
-    /// time would be left for its work.
+    /// Every slot is held, and the Step started too long ago to wait for
+    /// one: too little of its time would be left for its work.
     TooLate,
 }
 
@@ -57,8 +57,9 @@ pub trait MachineRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<StepMachine>, Self::Err>> + Send;
 
     /// Take a slot on the Machine `machine` for the Step `key`, unless every
-    /// slot is held by another running Step ([`SlotTake::Full`]), or the
-    /// Step started more than `take_within` ago ([`SlotTake::TooLate`]). A
+    /// slot is held by another running Step: then [`SlotTake::Full`], or
+    /// [`SlotTake::TooLate`] when the Step started more than `take_within`
+    /// ago, so it should stop waiting. A free slot is taken however late. A
     /// Step that holds a slot on another Machine moves it here; one that
     /// holds this Machine's keeps it, however late, so a retried attempt
     /// takes no second slot. A Step holds its slot while it and its Run
@@ -71,6 +72,10 @@ pub trait MachineRepository: Send + Sync + 'static {
         machine: Uuid,
         take_within: Duration,
     ) -> impl Future<Output = Result<SlotTake, Self::Err>> + Send;
+
+    /// Whether the session the Step `key` works in now has opened: then its
+    /// Machine is settled, and the Step takes no slot for it.
+    fn session_opened(&self, key: StepKey) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// Let go of the Step `key`'s slot, if it holds one, and of its wait:
     /// its session runs on no Machine.

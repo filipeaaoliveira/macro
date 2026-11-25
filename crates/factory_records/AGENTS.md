@@ -65,8 +65,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `tags`, the slot each Step holds on one (`factory_step.machine_id`, counted
   while the Step and its Run have not ended and for at most
   `SLOT_HELD_AT_MOST` after the Step started, under a transaction-scoped
-  advisory lock per Machine; a Step past `take_within` takes none:
-  `SlotTake::TooLate`), letting go of it (`release_machine_slot`), and a
+  advisory lock per Machine; a Step past `take_within` that finds the
+  Machine full is `SlotTake::TooLate`, and still takes a free slot), whether
+  a Step's current session opened (`session_opened`), letting go of a slot
+  (`release_machine_slot`), and a
   Step's wait for a slot (`slot_wait_since`, `slot_wait_machines`, cleared
   when it takes or lets go of one).
 - `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
