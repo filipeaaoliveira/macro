@@ -146,7 +146,8 @@ machine, so the checks should score changed packages only.
 
 `bun tooling/crap-ts/crap-ts.ts` ([`tooling/crap-ts`](../../tooling/crap-ts/AGENTS.md))
 scores the TypeScript functions a change touched in one package, `apps/web`
-unless `--package` names another. It takes the same inputs and writes the
+unless `--package` names another (`.` for a package at the repository's
+root). It takes the same inputs and writes the
 same output as the Rust check:
 
 - The base is `--base`, else `MACRO_CHECK_BASE`. With neither, or with a
@@ -217,7 +218,10 @@ one covering it. The tests' own check reports the failure. A run that
 fails with no failed test (a crash, a worker out of memory, an import
 error, an unhandled error) measured nothing, and the check exits 2. So
 does a vitest still running after `--vitest-timeout` seconds (240): the
-check stops its whole process group, workers included. A touched file no
+check stops its whole process group, workers included, and does the same
+when it is stopped itself (SIGTERM or SIGINT, as a round's timeout or a
+cancel sends). The package's own `coverage.thresholds` are turned off for
+the run, so coverage below them is not a failed run. A touched file no
 test reached while the tests passed scores 0%.
 
 It scores and tests the working tree but diffs the committed `HEAD`, and
