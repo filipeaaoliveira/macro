@@ -956,6 +956,13 @@ pub struct StepRuntime {
     /// live, so renaming the agent renames it on old Runs too; none for a
     /// first-party bot, which has no row of its own.
     pub agent_name: Option<String>,
+    /// Since when the Step waits for a free slot, while every Machine its
+    /// Agents may run on is full: it starts once one frees. None once it
+    /// took a slot, ended, or never waited.
+    pub waiting_for_slot_since: Option<DateTime<Utc>>,
+    /// The full Machines it waits on, by name, while it waits. Only the
+    /// Run's owner reads them, as `machine`.
+    pub waiting_on_machines: Vec<String>,
 }
 
 /// A running agent Step as its owner watches and steers it, from the Run

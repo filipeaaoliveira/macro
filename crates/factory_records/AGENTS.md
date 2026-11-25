@@ -59,6 +59,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   the model, who the session ran as and its bot. A write never lowers what
   was kept. `factory_step_used_session.bot_id` keeps the bot of each session
   a Step worked in, those it left included.
+- `src/domain/machines.rs` and
+  `src/outbound/pg_run_repository/machines.rs`: `MachineRepository`, the
+  Machine (harness) an agent's bot is bound to with its `step_slots` and
+  `tags`, the slot each Step holds on one (`factory_step.machine_id`, counted
+  while the Step and its Run have not ended, under a transaction-scoped
+  advisory lock per Machine), and a Step's wait for a slot
+  (`slot_wait_since`, `slot_wait_machines`, cleared when it takes one).
 - `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
   `RunBoardRepository`, the board's read of Runs across tasks, and of the
   Runs that opened some pull requests.

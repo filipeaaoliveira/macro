@@ -9,6 +9,7 @@ mod evaluation;
 mod flaws;
 mod gate_replies;
 mod insights;
+mod machines;
 mod main_hold;
 mod merge_guard;
 mod merge_queue;
@@ -491,6 +492,8 @@ struct StepRow {
     model: Option<String>,
     machine: Option<String>,
     agent_name: Option<String>,
+    waiting_for_slot_since: Option<DateTime<Utc>>,
+    waiting_on_machines: Option<Vec<String>>,
 }
 
 impl StepRow {
@@ -734,6 +737,8 @@ impl TryFrom<StepRow> for Step {
                 model: row.model,
                 machine: row.machine,
                 agent_name: row.agent_name,
+                waiting_for_slot_since: row.waiting_for_slot_since,
+                waiting_on_machines: row.waiting_on_machines.unwrap_or_default(),
             },
         })
     }
@@ -1660,7 +1665,9 @@ impl RunRepository for PgRunRepository {
                 s.pause_ran_out_at,
                 s.model,
                 s.machine,
-                b.name AS "agent_name?"
+                b.name AS "agent_name?",
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             LEFT JOIN bots b ON b.id = s.bot_id
@@ -1873,7 +1880,9 @@ impl RunRepository for PgRunRepository {
                 s.pause_ran_out_at,
                 s.model,
                 s.machine,
-                b.name AS "agent_name?"
+                b.name AS "agent_name?",
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             LEFT JOIN bots b ON b.id = s.bot_id

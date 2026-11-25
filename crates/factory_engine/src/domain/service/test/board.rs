@@ -602,6 +602,7 @@ async fn a_team_member_reads_no_machine_of_a_run() {
         model: Some("claude-opus-4-5".to_string()),
         machine: Some("teo-laptop".to_string()),
         agent_name: Some("Writer".to_string()),
+        ..StepRuntime::default()
     };
     for (_, step) in repo.steps.lock().expect("steps").iter_mut() {
         step.runtime = runtime.clone();

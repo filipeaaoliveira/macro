@@ -912,6 +912,7 @@ impl RunDetail {
         if self.run.user_id.as_ref() != viewer.as_ref() {
             for step in &mut self.steps {
                 step.runtime.machine = None;
+                step.runtime.waiting_on_machines = Vec::new();
             }
         }
         self
@@ -1629,6 +1630,11 @@ pub enum StepError {
     /// again would repeat the refusal, and the work never started.
     #[error("the step's agents are out of quota: {0:?}")]
     OutOfQuota(rootcause::Report),
+    /// Every Machine the Step's Agents may run on stayed full through the
+    /// attempt: a retry waits on. Should the Step's time run out so, its
+    /// Run ends `infrastructure`.
+    #[error("every machine the step may run on stayed full: {0:?}")]
+    WaitingForMachine(rootcause::Report),
     /// Any other internal error.
     #[error("internal step error: {0:?}")]
     Internal(rootcause::Report),
