@@ -95,4 +95,28 @@ export default () => {};
 
     expect(after[0].body).toBe(before[0].body);
   });
+
+  it('starts an arrow body after the variable or property holding it', () => {
+    const source = `export const pick = (n: number) => {
+  return n;
+};
+class Box {
+  close = () =>
+    1;
+}
+`;
+
+    expect(
+      functionsOf(source, 'a.ts').map((fn) => [fn.bodyStart, fn.bodyEnd])
+    ).toEqual([
+      [
+        { line: 1, column: 35 },
+        { line: 3, column: 1 },
+      ],
+      [
+        { line: 6, column: 4 },
+        { line: 6, column: 5 },
+      ],
+    ]);
+  });
 });

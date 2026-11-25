@@ -13,7 +13,15 @@ function fn(
   complexity: number,
   body = `{ ${name} }`
 ): ScoredFunction {
-  return { name, line, endLine, complexity, body };
+  return {
+    name,
+    line,
+    endLine,
+    complexity,
+    body,
+    bodyStart: { line, column: 0 },
+    bodyEnd: { line: endLine, column: 1 },
+  };
 }
 
 /** Coverage with one statement per line from `first` to `last`, all run or none. */

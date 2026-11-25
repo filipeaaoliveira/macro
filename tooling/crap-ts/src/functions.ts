@@ -27,7 +27,17 @@ export type ScoredFunction = {
   complexity: number;
   /** Its parameters and body with whitespace collapsed, to find it again under another name. */
   body: string;
+  /**
+   * Where its body starts and ends. Coverage counts only the statements in
+   * it: a variable or class property holding an arrow is a statement of its
+   * own, which runs on import or construction, not when the arrow is called.
+   */
+  bodyStart: Position;
+  bodyEnd: Position;
 };
+
+/** A line from 1 and a column from 0, as Istanbul's JSON gives them. */
+export type Position = { line: number; column: number };
 
 /** The functions in `source`, a file at `path` (its extension picks TSX or TS). */
 export function functionsOf(source: string, path: string): ScoredFunction[] {
@@ -150,6 +160,7 @@ function scored(
   const line = lineOf(file, declaration.getStart(file));
   const endLine = lineOf(file, declaration.getEnd());
   const parameters = fn.parameters.map((parameter) => parameter.getText(file));
+  const bodyNode = fn.body ?? fn;
   const body = fn.body ? fn.body.getText(file) : '';
 
   return {
@@ -158,11 +169,18 @@ function scored(
     endLine,
     complexity: fn.body ? 1 + decisions(fn.body) : 1,
     body: `(${parameters.join(',')})${body}`.replace(/\s+/g, ' '),
+    bodyStart: positionOf(file, bodyNode.getStart(file)),
+    bodyEnd: positionOf(file, bodyNode.getEnd()),
   };
 }
 
 function lineOf(file: ts.SourceFile, position: number): number {
   return file.getLineAndCharacterOfPosition(position).line + 1;
+}
+
+function positionOf(file: ts.SourceFile, offset: number): Position {
+  const { line, character } = file.getLineAndCharacterOfPosition(offset);
+  return { line: line + 1, column: character };
 }
 
 const LOGICAL_OPERATORS = new Set([

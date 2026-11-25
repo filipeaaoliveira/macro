@@ -1,17 +1,23 @@
 /**
- * Line coverage of a function from vitest's Istanbul JSON
- * (`coverage-final.json`), counted as crap4ts counts it: the share of the
- * statements starting inside the function's lines that the tests ran.
- * Reading the function's own lines also covers what crap4ts misses: a
- * function whose signature wraps onto several lines.
+ * Coverage of a function from vitest's Istanbul JSON
+ * (`coverage-final.json`), counted as crap4ts counts line coverage: the
+ * share of the statements in the function that the tests ran. Only the
+ * statements inside its body count, so a variable or class property holding
+ * an arrow, which runs on import, does not make an uncalled arrow look run,
+ * and a signature wrapped onto several lines (which crap4ts misses) does not
+ * matter.
  */
+import type { Position } from './functions';
 
-type Position = { line: number; column: number | null };
+type StatementPosition = { line: number; column: number | null };
 
 /** One file's entry in `coverage-final.json`. */
 export type FileCoverage = {
   path: string;
-  statementMap: Record<string, { start: Position; end: Position }>;
+  statementMap: Record<
+    string,
+    { start: StatementPosition; end: StatementPosition }
+  >;
   s: Record<string, number>;
 };
 
@@ -19,14 +25,14 @@ export type FileCoverage = {
 export type Coverage = Record<string, FileCoverage>;
 
 /**
- * The percent of the statements from `line` to `endLine` the tests ran;
- * null when the coverage has none there (no entry for the file, or no
- * statement in those lines).
+ * The percent of the statements starting from `from` to `to` the tests
+ * ran; null when the coverage has none there (no entry for the file, or no
+ * statement in the body).
  */
-export function lineCoverage(
+export function bodyCoverage(
   file: FileCoverage | undefined,
-  line: number,
-  endLine: number
+  from: Position,
+  to: Position
 ): number | null {
   if (!file) {
     return null;
@@ -35,8 +41,11 @@ export function lineCoverage(
   let total = 0;
   let covered = 0;
   for (const [id, statement] of Object.entries(file.statementMap)) {
-    const start = statement.start.line;
-    if (start < line || start > endLine) {
+    const start = {
+      line: statement.start.line,
+      column: statement.start.column ?? 0,
+    };
+    if (before(start, from) || before(to, start)) {
       continue;
     }
 
@@ -51,6 +60,10 @@ export function lineCoverage(
   }
 
   return round((covered / total) * 100);
+}
+
+function before(a: Position, b: Position): boolean {
+  return a.line < b.line || (a.line === b.line && a.column < b.column);
 }
 
 /** CRAP = CC² × (1 − coverage)³ + CC; no coverage counts as none. */

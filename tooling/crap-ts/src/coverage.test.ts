@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { crap, type FileCoverage, lineCoverage } from './coverage';
+import { bodyCoverage, crap, type FileCoverage } from './coverage';
 
 const FILE: FileCoverage = {
   path: '/repo/apps/web/src/a.ts',
@@ -12,18 +12,28 @@ const FILE: FileCoverage = {
   s: { '0': 1, '1': 4, '2': 0, '3': 0 },
 };
 
-describe('lineCoverage', () => {
-  it('counts the statements starting in the function lines that ran', () => {
-    expect(lineCoverage(FILE, 1, 6)).toBe(66.67);
-    expect(lineCoverage(FILE, 2, 3)).toBe(100);
-    expect(lineCoverage(FILE, 8, 10)).toBe(0);
+describe('bodyCoverage', () => {
+  it('counts the statements starting in the body that ran', () => {
+    expect(bodyCoverage(FILE, at(1, 0), at(6, 1))).toBe(66.67);
+    expect(bodyCoverage(FILE, at(2, 0), at(3, 9))).toBe(100);
+    expect(bodyCoverage(FILE, at(8, 0), at(10, 0))).toBe(0);
   });
 
-  it('knows nothing of a file it has no entry for, or lines with no statement', () => {
-    expect(lineCoverage(undefined, 1, 6)).toBeNull();
-    expect(lineCoverage(FILE, 7, 8)).toBeNull();
+  it('leaves out a statement starting before the body on its first line', () => {
+    // `export const pick = (n) => {` on line 2: the declaration's own
+    // statement (run on import) starts at column 0, the body at column 20.
+    expect(bodyCoverage(FILE, at(2, 20), at(6, 1))).toBe(50);
+  });
+
+  it('knows nothing of a file it has no entry for, or a body with no statement', () => {
+    expect(bodyCoverage(undefined, at(1, 0), at(6, 1))).toBeNull();
+    expect(bodyCoverage(FILE, at(7, 0), at(8, 9))).toBeNull();
   });
 });
+
+function at(line: number, column: number) {
+  return { line, column };
+}
 
 describe('crap', () => {
   it('scores complexity against the share left untested', () => {

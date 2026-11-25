@@ -2,7 +2,7 @@
  * The rows the check prints: one per touched function, its score at the
  * change joined with its complexity at the base.
  */
-import { crap, type FileCoverage, lineCoverage } from './coverage';
+import { bodyCoverage, crap, type FileCoverage } from './coverage';
 import { type FileDiff, lineAtBase, touches } from './diff';
 import type { ScoredFunction } from './functions';
 
@@ -139,7 +139,7 @@ function row(
   atBase: ScoredFunction | undefined,
   input: RowsInput
 ): Row {
-  const coverage = lineCoverage(file.coverage, fn.line, fn.endLine);
+  const coverage = bodyCoverage(file.coverage, fn.bodyStart, fn.bodyEnd);
   const score = crap(fn.complexity, coverage);
   const change = changeOf(fn.complexity, atBase?.complexity);
   const riskier = change === 'new' || change === 'rose';
