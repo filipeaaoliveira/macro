@@ -30,6 +30,9 @@ use xtask_crap::packages::Metadata;
 use xtask_crap::rows::{self, Entry, Report as Scores, Row, TouchedFile};
 use xtask_crap::spans;
 
+#[cfg(test)]
+mod test;
+
 #[derive(Parser)]
 #[command(
     name = "crap-rust",
@@ -75,7 +78,7 @@ fn main() -> ExitCode {
 fn check(cli: &Cli) -> Result<bool, Report> {
     let root = xtask_paths::repo_root();
     let base = base_commit(cli)?;
-    let files = touched_files(&root, &base)?;
+    let files = touched_files(&root, &base, listing())?;
     if files.is_empty() {
         println!("crap-rust: the change touched no scored Rust source");
         return Ok(false);
@@ -109,8 +112,8 @@ fn listing() -> Listing {
 
 /// The scored files the change left in the tree, with their diffs and their
 /// functions' spans.
-fn touched_files(root: &Path, base: &str) -> Result<Vec<TouchedFile>, Report> {
-    let pathspec: Vec<String> = match listing() {
+fn touched_files(root: &Path, base: &str, listing: Listing) -> Result<Vec<TouchedFile>, Report> {
+    let pathspec: Vec<String> = match listing {
         Listing::Complete(paths) => paths
             .into_iter()
             .filter(|path| changed::is_scored(path))
