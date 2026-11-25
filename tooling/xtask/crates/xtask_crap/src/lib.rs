@@ -11,14 +11,14 @@
 //!
 //! [`changed`] says which files to score, [`diff`] which of their lines
 //! changed, [`packages`] which packages hold them, [`spans`] where each
-//! function ends, [`nextest`] which tests failed, [`target`] where the coverage build
-//! goes, and [`rows`] joins `cargo crap`'s scores into the rows the check
-//! prints.
+//! function ends, [`nextest`] which tests failed, [`build_folder`] where
+//! the coverage build goes, and [`rows`] joins `cargo crap`'s scores into
+//! the rows the check prints.
 
+pub mod build_folder;
 pub mod changed;
 pub mod diff;
 pub mod nextest;
 pub mod packages;
 pub mod rows;
 pub mod spans;
-pub mod target;

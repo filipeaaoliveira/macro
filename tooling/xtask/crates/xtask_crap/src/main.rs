@@ -27,13 +27,13 @@ use std::process::{Command, ExitCode};
 use clap::Parser;
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
+use xtask_crap::build_folder;
 use xtask_crap::changed::{self, Listing};
 use xtask_crap::diff::{self, FileDiff};
 use xtask_crap::nextest;
 use xtask_crap::packages::Metadata;
 use xtask_crap::rows::{self, BaseFile, Entry, Report as Scores, Row, TouchedFile, Verdict};
 use xtask_crap::spans;
-use xtask_crap::target;
 
 #[cfg(test)]
 mod test;
@@ -406,7 +406,7 @@ fn coverage_target(root: &Path) -> PathBuf {
 fn repository_folder(root: &Path) -> String {
     let remote = output(git(root).args(["config", "--get", "remote.origin.url"]));
     let remote = remote.unwrap_or_else(|_| root.display().to_string());
-    target::repository_folder(&remote)
+    build_folder::repository_folder(&remote)
 }
 
 /// The base versions of the touched files and of the removed ones, written
