@@ -187,13 +187,7 @@ fn score_change(root: &Path, files: &[TouchedFile], work: &Path) -> Result<Vec<E
     // others still scores.
     run(cargo(root).args(["llvm-cov", "clean", "--profraw-only"]))?;
     run(cargo(root)
-        .args([
-            "llvm-cov",
-            "nextest",
-            "--no-clean",
-            "--no-fail-fast",
-            "--ignore-run-fail",
-        ])
+        .args(["llvm-cov", "nextest", "--no-clean", "--ignore-run-fail"])
         .args(&selection)
         .arg("--lcov")
         .arg("--output-path")
