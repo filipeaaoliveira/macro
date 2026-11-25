@@ -8418,6 +8418,7 @@ name = "factory_engine"
 version = "0.1.0"
 dependencies = [
  "agent",
+ "agent_api_keys",
  "agent_correlation",
  "agent_runtime_protocol",
  "agent_session",
@@ -8499,8 +8500,10 @@ dependencies = [
 name = "factory_service"
 version = "0.1.0"
 dependencies = [
+ "agent_api_keys",
  "agent_correlation",
  "agent_harness_service_client",
+ "ai_billing",
  "ai_usage",
  "authentication_service_client",
  "aws-sdk-secretsmanager",

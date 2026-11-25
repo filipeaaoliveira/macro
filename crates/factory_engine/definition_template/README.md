@@ -52,7 +52,9 @@ Outside the files, all must be done:
   Agent a `vendor` (`anthropic` or `openai`) instead of a `bot`: each
   member's Steps then run on their own machine whose agent runs that
   vendor's CLI, else on an agent of theirs with an API key of the
-  vendor's, else on their team's. A Step with none waits and says why.
+  vendor's on a paid plan, else on their team's. A Step with none waits
+  and says why. A vendor Agent names no `model`: each runs on its agent's
+  own default model.
 - `model` (may): left out, the agent's own default model. It must be one
   the agent's runtime offers: a Claude Code agent's (`opus`, `sonnet`), a
   Codex agent's (`gpt-5.5`, as `codex` lists it). A model the runtime does

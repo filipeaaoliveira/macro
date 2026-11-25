@@ -742,24 +742,34 @@ fn an_agent_names_a_bot_or_a_vendor() {
     assert_eq!(serde_json::to_value(&read_back).expect("written"), vendor);
 }
 
-/// An Agent that names a vendor fills no Standing Role: a session of no
-/// bot of the owner's is not taken for it.
+/// A Standing Role is filled by a bot, so one that lists an Agent naming a
+/// vendor does not read; nor does a vendor Agent that names a model, which
+/// each owner's bots name their own way.
 #[test]
-fn a_vendor_agent_fills_no_standing_role() {
-    let definition = read(json!({
+fn a_vendor_agent_fills_no_standing_role_and_names_no_model() {
+    let standing = read(json!({
         "agents": {
             "claude": { "vendor": "anthropic" },
             "primary": { "bot": PRIMARY_BOT }
         },
         "roles": { "planner": ["claude"] },
         "standing": { "intake": { "acts": ["start"], "agents": ["claude"] } }
-    }))
-    .expect("a definition");
+    }));
+    let model = read(json!({
+        "agents": { "claude": { "vendor": "anthropic", "model": "opus" } },
+        "roles": { "planner": ["claude"] }
+    }));
 
     assert_eq!(
-        definition.standing_check(StandingAct::Start, None),
-        StandingCheck::Refused {
-            allowing: vec![standing_role("intake")]
+        standing.expect_err("a vendor agent in a standing role"),
+        AgentDefinitionError::StandingVendorAgent {
+            role: standing_role("intake"),
+            agent: agent("claude"),
         }
+        .to_string()
+    );
+    assert_eq!(
+        model.expect_err("a vendor agent with a model"),
+        AgentDefinitionError::VendorModel(agent("claude")).to_string()
     );
 }

@@ -13,8 +13,10 @@
 //! on the first fitting Agent whose Machine has a free slot, and waits,
 //! saying why, while none may run it for its owner.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
+use agent_api_keys::domain::AgentOwner;
 use agent_session::domain::routines::RoutineSessions;
 use bot_id::BotId;
 use factory_records::domain::evaluation::EvaluationRepository;
@@ -36,8 +38,13 @@ const SLOT_LOOK: Duration = Duration::from_secs(10);
 /// How long after it started a Step may still take a slot: short of the two
 /// hours its work has across its attempts (the workflow's `STEP_TOTAL`), so
 /// a Step that takes one has at least half an hour left to work. Past it a
-/// Step that holds no slot fails as one whose Machines stayed full.
+/// Step that holds no slot fails as one whose Machines stayed full, and one
+/// with no Machine or key it may run on fails as such.
 pub(crate) const TAKE_SLOT_WITHIN: Duration = Duration::from_secs(90 * 60);
+
+/// The longest reason a waiting Step keeps, in characters: the table keeps
+/// at most 2000.
+const REASON_CHARS: usize = 1900;
 
 /// Where an Agent's sessions run, for a Step.
 enum Fit {
@@ -52,6 +59,22 @@ enum Fit {
     Anywhere,
     /// It runs on this Machine, which has its tags.
     On(StepMachine),
+}
+
+/// What came of holding a slot for an Agent whose session is about to open.
+pub(super) enum Hold {
+    /// The Step holds a slot on its Machine, or needs none.
+    Held,
+    /// Its Machine's provider login is not the Run's owner's: the session
+    /// must not open there. It holds why.
+    NotTheOwners(String),
+}
+
+/// The Agents of a Step's Role on the bots that run them for its owner,
+/// and why each Agent that names a vendor has none.
+struct Resolved {
+    bots: Vec<AgentBot>,
+    unmet: Vec<String>,
 }
 
 /// Whether `machine` has every tag `agent` asks for, ignoring case.
@@ -94,7 +117,7 @@ fn serves(owned: &OwnerBot, vendor: Vendor) -> bool {
     let model = Vendor::of_model(&owned.model) == Some(vendor);
     match owned.runs_on {
         OwnerBotRuns::Subscription => model,
-        OwnerBotRuns::OwnKey(key) | OwnerBotRuns::TeamKey(key) => key == vendor && model,
+        OwnerBotRuns::OwnKey(key) | OwnerBotRuns::TeamKey(key, _) => key == vendor && model,
     }
 }
 
@@ -116,14 +139,36 @@ pub(super) fn no_machine(agents: &AgentDefinition, listed: &[AgentBot]) -> Strin
 }
 
 /// What `vendor`'s Agent `name` is shown when its owner has no Machine or
-/// API key for it.
-fn no_vendor_bot(name: &AgentName, vendor: Vendor) -> String {
+/// API key for it they may run on: `unrecognised` are the models of their
+/// machines' agents that name no vendor, and `unpaid` whether a key of the
+/// vendor's was left out as its owner's plan does not include keys.
+fn no_vendor_bot(name: &AgentName, vendor: Vendor, unrecognised: &[&str], unpaid: bool) -> String {
     let vendor = vendor.display_name();
-    format!(
-        "agent {name} runs on your own {vendor} machine or API key, and you have none: \
-         pair a machine of your own whose agent runs {vendor}'s CLI signed in with your login, \
-         or give an agent of yours or your team's an {vendor} API key"
-    )
+    let mut why = format!(
+        "agent {name} runs on your own {vendor} machine or API key, and you have none it may run on"
+    );
+    if !unrecognised.is_empty() {
+        why.push_str(&format!(
+            ": no machine of yours has an agent with a recognised vendor (its model is {})",
+            unrecognised.join(", ")
+        ));
+    }
+    if unpaid {
+        why.push_str(": an API key's agent is on a plan that does not include API keys");
+    }
+    why.push_str(&format!(
+        ". Pair a machine of your own whose agent runs {vendor}'s CLI signed in with your login, \
+         or give an agent of yours or your team's an {vendor} API key on a paid plan"
+    ));
+    why
+}
+
+/// `reason`, cut to [`REASON_CHARS`] characters.
+fn cut(reason: String) -> String {
+    match reason.char_indices().nth(REASON_CHARS) {
+        Some((end, _)) => format!("{}…", &reason[..end]),
+        None => reason,
+    }
 }
 
 /// Add `machine` to the full Machines a Step waits on, once.
@@ -141,20 +186,35 @@ impl<
     /// The Agents `names` on the bots that run them for `task`'s owner, in
     /// order: an Agent that names a bot on it, and one that names a vendor
     /// on each of the owner's bots for it, as `owner_bots` orders them
-    /// (their Machines, then their own keys, then their teams'). The
-    /// owner's bots are read once, when an Agent names a vendor.
+    /// (their Machines, then their own keys, then their teams'), a key's
+    /// only while its owner's plan includes keys. The owner's bots are read
+    /// once, when an Agent names a vendor.
     pub(super) async fn on_bots(
         &self,
         agents: &AgentDefinition,
         task: &AgentTask,
         names: &[AgentName],
     ) -> Result<Vec<AgentBot>, SessionAgentError> {
+        Ok(self.resolve(agents, task, names).await?.bots)
+    }
+
+    /// [`Self::on_bots`], with why each vendor Agent has no bot.
+    async fn resolve(
+        &self,
+        agents: &AgentDefinition,
+        task: &AgentTask,
+        names: &[AgentName],
+    ) -> Result<Resolved, SessionAgentError> {
         let mut owned: Option<Vec<OwnerBot>> = None;
-        let mut bots = Vec::new();
+        let mut paid: HashMap<Option<Uuid>, bool> = HashMap::new();
+        let mut resolved = Resolved {
+            bots: Vec::new(),
+            unmet: Vec::new(),
+        };
         for name in names {
             let agent = Self::agent(agents, name)?;
             if let Some(bot) = agent.bot {
-                bots.push(AgentBot {
+                resolved.bots.push(AgentBot {
                     agent: name.clone(),
                     bot,
                 });
@@ -171,17 +231,78 @@ impl<
                         .map_err(Self::records)?,
                 );
             }
+            let mut found = false;
+            let mut unpaid = false;
             for bot in owned.iter().flatten().filter(|owned| serves(owned, vendor)) {
+                let team = match bot.runs_on {
+                    OwnerBotRuns::Subscription => None,
+                    OwnerBotRuns::OwnKey(_) => Some(None),
+                    OwnerBotRuns::TeamKey(_, team) => Some(Some(team)),
+                };
+                if let Some(team) = team {
+                    let allowed = match paid.get(&team) {
+                        Some(allowed) => *allowed,
+                        None => {
+                            let allowed = self.keys_allowed(task, team).await;
+                            paid.insert(team, allowed);
+                            allowed
+                        }
+                    };
+                    if !allowed {
+                        unpaid = true;
+                        continue;
+                    }
+                }
                 let on = AgentBot {
                     agent: name.clone(),
                     bot: BotId::new_from_uuid(bot.bot),
                 };
-                if !bots.contains(&on) {
-                    bots.push(on);
+                found = true;
+                if !resolved.bots.contains(&on) {
+                    resolved.bots.push(on);
                 }
             }
+            if !found {
+                let unrecognised: Vec<&str> = owned
+                    .iter()
+                    .flatten()
+                    .filter(|owned| {
+                        owned.runs_on == OwnerBotRuns::Subscription
+                            && Vendor::of_model(&owned.model).is_none()
+                    })
+                    .map(|owned| owned.model.as_str())
+                    .collect();
+                resolved
+                    .unmet
+                    .push(no_vendor_bot(name, vendor, &unrecognised, unpaid));
+            }
         }
-        Ok(bots)
+        Ok(resolved)
+    }
+
+    /// Whether the plan of the agent's owner (`team`, else the Step's owner)
+    /// lets an agent's own API key be spent: no when no plans are read, or
+    /// they cannot be, so a Step never runs on a key whose turn would fall
+    /// back to Macro credits.
+    async fn keys_allowed(&self, task: &AgentTask, team: Option<Uuid>) -> bool {
+        let Some(plans) = &self.key_plans else {
+            return false;
+        };
+        let owner = match team {
+            Some(team) => AgentOwner::Team(team),
+            None => AgentOwner::User(task.owner.clone()),
+        };
+        plans
+            .0
+            .allows_keys(&owner)
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(
+                    ?error,
+                    "a key owner's plan was not read: its key is not taken"
+                );
+            })
+            .unwrap_or(false)
     }
 
     /// Where the sessions of `on` run, for the Step `task`.
@@ -233,10 +354,13 @@ impl<
         Ok(None)
     }
 
-    /// Record that the Step `task` waits, on the full Machines `full` or,
-    /// with `reason`, for a Machine or key it may run on, and wait one look;
-    /// fail for a retry when the attempt has no time left for one.
-    async fn wait_for_slot(
+    /// Record that the Step `task` waits, letting go of any slot it holds,
+    /// on the full Machines `full` or, with `reason`, for a Machine or key
+    /// it may run on, and wait one look. It fails for a retry when the
+    /// attempt has no time left for one, and, waiting with a reason, for
+    /// good past [`TAKE_SLOT_WITHIN`] after the Step started; a slot's wait
+    /// learns that from its take.
+    pub(super) async fn wait_for_slot(
         &self,
         task: &AgentTask,
         full: &[(Uuid, String)],
@@ -244,10 +368,18 @@ impl<
         deadline: tokio::time::Instant,
     ) -> Result<(), SessionAgentError> {
         let names: Vec<String> = full.iter().map(|(_, name)| name.clone()).collect();
-        self.repo
-            .wait_for_machine_slot(task.key, &names, reason)
+        let late = self
+            .repo
+            .wait_for_machine_slot(task.key, &names, reason, TAKE_SLOT_WITHIN)
             .await
             .map_err(Self::records)?;
+        if let Some(reason) = reason
+            && late
+        {
+            return Err(SessionAgentError::MachineOrKeyTimeRanOut(
+                reason.to_string(),
+            ));
+        }
         if deadline.saturating_duration_since(tokio::time::Instant::now()) < SLOT_LOOK {
             return Err(match reason {
                 Some(reason) => SessionAgentError::WaitingForMachineOrKey(reason.to_string()),
@@ -264,35 +396,14 @@ impl<
     }
 
     /// The Agent, on its bot, whose session the Step `task` claims first:
-    /// the first of its Role's that fits it and whose Machine has a slot
-    /// the Step now holds, or that runs on no Machine and asks for no tag.
-    /// An Agent its owner's quota refused lately, with a fitting Agent after
-    /// it, is claimed with no slot booked: the session's start passes it
-    /// over and the next fitting Agent holds the slot as it opens. A Step
-    /// that already claimed a session goes on in it, so it is not placed
-    /// again.
-    ///
-    /// While every fitting Machine is full, the Step records that it waits
-    /// on them and looks again every [`SLOT_LOOK`]; with no time left before
-    /// `deadline`, it fails for a retry ([`SessionAgentError::WaitingForSlot`]),
-    /// and past [`TAKE_SLOT_WITHIN`] after it started, for good
-    /// ([`SessionAgentError::SlotTimeRanOut`]). While no Agent fits because
-    /// none has a Machine or key its owner may spend (its Machine is someone
-    /// else's, or its owner has none for its vendor), the Step waits the
-    /// same way, saying why, reading the owner's Machines and keys again at
-    /// each look, and fails for a retry
-    /// ([`SessionAgentError::WaitingForMachineOrKey`]). With no fitting
-    /// Agent for want of tags only, it fails at once
-    /// ([`SessionAgentError::NoMachine`]).
+    /// see [`Self::first_fitting`]. A Step that already claimed a session
+    /// goes on in it, so it is not placed again.
     pub(super) async fn place(
         &self,
         agents: &AgentDefinition,
         task: &AgentTask,
         deadline: tokio::time::Instant,
     ) -> Result<AgentBot, SessionAgentError> {
-        if agents.for_role(&task.role).is_empty() {
-            return Err(SessionAgentError::UnfilledRole(task.role.clone()));
-        }
         let claimed = self
             .repo
             .claimed_session(task.key)
@@ -304,12 +415,46 @@ impl<
         if let Some(claimed) = claimed {
             return Self::agent_bot(agents, &claimed, &task.role);
         }
+        self.first_fitting(agents, task, deadline).await
+    }
 
+    /// The first Agent of the Step `task`'s Role, on its bot, that fits it
+    /// and whose Machine has a slot the Step now holds, or that runs on no
+    /// Machine and asks for no tag. An Agent its owner's quota refused
+    /// lately, with a fitting Agent after it, is taken with no slot booked:
+    /// the session's start passes it over and the next fitting Agent holds
+    /// the slot as it opens.
+    ///
+    /// While every fitting Machine is full, the Step records that it waits
+    /// on them and looks again every [`SLOT_LOOK`]; with no time left before
+    /// `deadline`, it fails for a retry ([`SessionAgentError::WaitingForSlot`]),
+    /// and past [`TAKE_SLOT_WITHIN`] after it started, for good
+    /// ([`SessionAgentError::SlotTimeRanOut`]). While no Agent fits because
+    /// none has a Machine or key its owner may spend (its Machine is someone
+    /// else's, or its owner has none for its vendor), the Step waits the
+    /// same way, saying why, reading the owner's Machines and keys again at
+    /// each look ([`SessionAgentError::WaitingForMachineOrKey`],
+    /// [`SessionAgentError::MachineOrKeyTimeRanOut`]). With no fitting
+    /// Agent for want of tags only, it fails at once
+    /// ([`SessionAgentError::NoMachine`]).
+    pub(super) async fn first_fitting(
+        &self,
+        agents: &AgentDefinition,
+        task: &AgentTask,
+        deadline: tokio::time::Instant,
+    ) -> Result<AgentBot, SessionAgentError> {
+        if agents.for_role(&task.role).is_empty() {
+            return Err(SessionAgentError::UnfilledRole(task.role.clone()));
+        }
         loop {
-            let listed = self.role_agents(agents, task).await?;
+            let (names, trial) = self.ordered_names(agents, task).await?;
+            let mut resolved = self.resolve(agents, task, &names).await?;
+            if trial {
+                resolved.bots.truncate(1);
+            }
             let mut fitting = Vec::new();
             let mut not_the_owners = Vec::new();
-            for on in &listed {
+            for on in &resolved.bots {
                 match self.fit(agents, task, on).await? {
                     Fit::Unfit => {}
                     Fit::NotTheOwners(why) => not_the_owners.push(why),
@@ -317,28 +462,17 @@ impl<
                 }
             }
             if fitting.is_empty() {
-                // An Agent that names a vendor its owner has no bot for is
-                // not listed: say so, as for a Machine not theirs.
-                let names = self.role_names(agents, task).await?;
-                for name in &names {
-                    let vendor = agents.agent(name).and_then(|agent| agent.vendor);
-                    if let Some(vendor) = vendor
-                        && !listed.iter().any(|on| &on.agent == name)
-                    {
-                        not_the_owners.push(no_vendor_bot(name, vendor));
-                    }
-                }
+                not_the_owners.append(&mut resolved.unmet);
                 if not_the_owners.is_empty() {
-                    return Err(SessionAgentError::NoMachine(no_machine(agents, &listed)));
+                    return Err(SessionAgentError::NoMachine(no_machine(
+                        agents,
+                        &resolved.bots,
+                    )));
                 }
-                let reason = format!(
+                let reason = cut(format!(
                     "No machine or API key this step may run on for you: {}.",
                     not_the_owners.join("; ")
-                );
-                self.repo
-                    .release_machine_slot(task.key)
-                    .await
-                    .map_err(Self::records)?;
+                ));
                 self.wait_for_slot(task, &[], Some(&reason), deadline)
                     .await?;
                 continue;
@@ -383,10 +517,6 @@ impl<
                     full.into_iter().map(|(_, name)| name).collect(),
                 ));
             }
-            self.repo
-                .release_machine_slot(task.key)
-                .await
-                .map_err(Self::records)?;
             self.wait_for_slot(task, &full, None, deadline).await?;
         }
     }
@@ -397,7 +527,9 @@ impl<
     /// runs on no Machine lets go of any. While the Machine is full, the
     /// Step waits as placement does, having let go of the slot it held
     /// elsewhere, so two Steps moving between two full Machines never hold
-    /// each other's way.
+    /// each other's way. A Machine whose provider login is not the Run's
+    /// owner's takes no slot, and the caller hands the Step on or waits
+    /// ([`Hold::NotTheOwners`]).
     ///
     /// A Step whose session already opened, as on a retry, keeps the slot
     /// it holds, if any, and takes none: the session stays where it opened,
@@ -409,14 +541,14 @@ impl<
         task: &AgentTask,
         on: &AgentBot,
         deadline: tokio::time::Instant,
-    ) -> Result<(), SessionAgentError> {
+    ) -> Result<Hold, SessionAgentError> {
         let opened = self
             .repo
             .session_opened(task.key)
             .await
             .map_err(Self::records)?;
         if opened {
-            return Ok(());
+            return Ok(Hold::Held);
         }
         let machine = match self.fit(agents, task, on).await? {
             Fit::Unfit => {
@@ -425,27 +557,27 @@ impl<
                     std::slice::from_ref(on),
                 )));
             }
-            Fit::NotTheOwners(why) => return Err(SessionAgentError::NoMachine(why)),
+            Fit::NotTheOwners(why) => {
+                return Ok(Hold::NotTheOwners(cut(format!(
+                    "No machine or API key this step may run on for you: {why}."
+                ))));
+            }
             Fit::Anywhere => {
-                return self
-                    .repo
+                self.repo
                     .release_machine_slot(task.key)
                     .await
-                    .map_err(Self::records);
+                    .map_err(Self::records)?;
+                return Ok(Hold::Held);
             }
             Fit::On(machine) => machine,
         };
         loop {
             match self.take(task, &machine).await? {
-                SlotTake::Taken => return Ok(()),
+                SlotTake::Taken => return Ok(Hold::Held),
                 SlotTake::TooLate => {
                     return Err(SessionAgentError::SlotTimeRanOut(vec![machine.name]));
                 }
                 SlotTake::Full => {
-                    self.repo
-                        .release_machine_slot(task.key)
-                        .await
-                        .map_err(Self::records)?;
                     self.wait_for_slot(task, &[(machine.id, machine.name.clone())], None, deadline)
                         .await?;
                 }

@@ -6,6 +6,7 @@
 //! a Macro computer signed in through Macro, is passed over, and a Step
 //! with nothing it may run on waits, saying why.
 
+use agent_api_keys::domain::{AgentOwner, KeyPlans};
 use agent_session::domain::routines::RoutineActionStatus;
 use bot_id::BotId;
 use chrono::Utc;
@@ -89,6 +90,25 @@ const JULIAS_MACHINE_BOT: BotId = BotId::new_from_uuid(Uuid::from_u128(0x11));
 const TEOS_MACHINE_BOT: BotId = BotId::new_from_uuid(Uuid::from_u128(0x22));
 const JULIAS_KEY_BOT: BotId = BotId::new_from_uuid(Uuid::from_u128(0x33));
 const TEAM_KEY_BOT: BotId = BotId::new_from_uuid(Uuid::from_u128(0x44));
+const TEAM: Uuid = Uuid::from_u128(0x201);
+
+/// Plans that include agents' own API keys for every owner but those in
+/// `lapsed`.
+struct Plans {
+    lapsed: Vec<AgentOwner>,
+}
+
+#[async_trait::async_trait]
+impl KeyPlans for Plans {
+    async fn allows_keys(&self, owner: &AgentOwner) -> agent_api_keys::domain::Result<bool> {
+        Ok(!self.lapsed.contains(owner))
+    }
+}
+
+/// Every owner's plan includes keys.
+fn paid() -> Plans {
+    Plans { lapsed: Vec::new() }
+}
 
 /// Two people's Runs of one Definition each run on their own Subscription:
 /// the vendor Agent takes Julia's Machine for Julia and Teo's for Teo.
@@ -182,7 +202,7 @@ async fn a_vendor_agent_falls_back_from_the_subscription_to_the_owners_key_then_
             owner_bot(
                 TEAM_KEY_BOT,
                 "anthropic/claude-sonnet-4-5",
-                OwnerBotRuns::TeamKey(Vendor::Anthropic),
+                OwnerBotRuns::TeamKey(Vendor::Anthropic, TEAM),
             ),
         ],
     );
@@ -192,7 +212,11 @@ async fn a_vendor_agent_falls_back_from_the_subscription_to_the_owners_key_then_
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
         .preparing(&[no_quota(), no_quota()]);
 
-    agent(&sessions, &repo).answer(task).await.expect("plan");
+    agent(&sessions, &repo)
+        .with_key_plans(paid())
+        .answer(task)
+        .await
+        .expect("plan");
 
     assert_eq!(
         prepared_bots(&sessions),
@@ -334,4 +358,157 @@ async fn a_vendor_agent_with_nothing_of_its_owners_waits_until_they_pair_a_machi
         repo.slot_wait_reasons.lock().expect("reasons").get(&key),
         None
     );
+}
+
+/// A key whose owner's plan does not include keys is not taken, so its
+/// turns never fall back to Macro credits: the team's key takes the Step
+/// when only Julia's plan lapsed, and with every plan lapsed the Step waits,
+/// saying the plan does not include keys.
+#[tokio::test(start_paused = true)]
+async fn a_key_whose_plan_lapsed_is_not_taken() {
+    let repo = FakeRepo::default();
+    own(
+        &repo,
+        JULIA,
+        vec![
+            owner_bot(
+                JULIAS_KEY_BOT,
+                "anthropic/claude-sonnet-4-5",
+                OwnerBotRuns::OwnKey(Vendor::Anthropic),
+            ),
+            owner_bot(
+                TEAM_KEY_BOT,
+                "anthropic/claude-sonnet-4-5",
+                OwnerBotRuns::TeamKey(Vendor::Anthropic, TEAM),
+            ),
+        ],
+    );
+    let julia = MacroUserIdStr::try_from(JULIA.to_string()).expect("valid");
+    let task = plan_task(&repo).await;
+    vendor_planner(&repo, &task);
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+
+    agent(&sessions, &repo)
+        .with_key_plans(Plans {
+            lapsed: vec![AgentOwner::User(julia.clone())],
+        })
+        .answer(task)
+        .await
+        .expect("plan");
+    assert_eq!(prepared_bots(&sessions), [TEAM_KEY_BOT]);
+
+    let mut task = plan_task(&repo).await;
+    vendor_planner(&repo, &task);
+    task.answer_by = Some(Utc::now() + chrono::Duration::seconds(60));
+    let waiting = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let error = agent(&waiting, &repo)
+        .with_key_plans(Plans {
+            lapsed: vec![AgentOwner::User(julia), AgentOwner::Team(TEAM)],
+        })
+        .answer(task)
+        .await
+        .expect_err("no key to run on");
+    assert!(
+        matches!(&error, SessionAgentError::WaitingForMachineOrKey(why) if why.contains("does not include API keys")),
+        "{error:?}"
+    );
+    assert!(prepared_bots(&waiting).is_empty());
+}
+
+/// A Step that waited for a Machine or key past the time a Step may still
+/// take a slot stops waiting for good, saying why.
+#[tokio::test(start_paused = true)]
+async fn a_step_waiting_past_its_time_for_a_machine_or_key_stops() {
+    let repo = FakeRepo::default();
+    let task = plan_task(&repo).await;
+    vendor_planner(&repo, &task);
+    repo.steps
+        .lock()
+        .expect("steps")
+        .iter_mut()
+        .filter(|(run, step)| *run == task.key.run_id && step.seq == task.key.seq)
+        .for_each(|(_, step)| step.started_at = Utc::now() - chrono::Duration::minutes(100));
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+
+    let error = agent(&sessions, &repo)
+        .answer(task)
+        .await
+        .expect_err("too late");
+
+    assert!(
+        matches!(&error, SessionAgentError::MachineOrKeyTimeRanOut(_)),
+        "{error:?}"
+    );
+    assert!(!error.retryable());
+    assert!(error.waits_for_machine());
+}
+
+/// A session claimed, unopened, for an Agent on someone else's Machine,
+/// as before the rule that a Machine runs only its owner's Steps, is handed
+/// to the next fitting Agent, recorded passed over as not the owner's; with
+/// none, the Step waits, saying why.
+#[tokio::test(start_paused = true)]
+async fn a_claimed_session_on_someone_elses_machine_is_handed_on_or_waits() {
+    use factory_records::domain::ports::RunRepository;
+
+    use super::planner;
+    use crate::domain::session_agent::{AgentBot, NOT_THE_OWNERS, SessionAgent};
+
+    let repo = FakeRepo::default();
+    let task = plan_task(&repo).await;
+    shared_machine(&repo, &task, None);
+    let claim = |task: AgentTask| {
+        let repo = repo.clone();
+        async move {
+            repo.claim_session(
+                task.key,
+                SessionAgent::<FakeSessions, FakeRepo>::new_session(&AgentBot {
+                    agent: name("primary"),
+                    bot: PRIMARY,
+                }),
+                &planner(),
+                &task.outcomes,
+            )
+            .await
+            .expect("an earlier attempt's claim");
+        }
+    };
+    claim(task.clone()).await;
+    let key = task.key;
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+
+    agent(&sessions, &repo).answer(task).await.expect("plan");
+
+    assert_eq!(prepared_bots(&sessions), [BACKUP]);
+    let reasons: Vec<String> = recorded(&repo, key)
+        .2
+        .iter()
+        .map(|passed| passed.reason.clone())
+        .collect();
+    assert_eq!(reasons, [NOT_THE_OWNERS]);
+
+    // With `primary` alone, the Step waits.
+    let mut alone = plan_task(&repo).await;
+    repo.definition_agents
+        .lock()
+        .expect("definition agents")
+        .insert(
+            alone.key.run_id,
+            serde_json::json!({
+                "agents": { "primary": { "bot": PRIMARY.as_uuid() } },
+                "roles": { "planner": ["primary"] }
+            }),
+        );
+    claim(alone.clone()).await;
+    alone.answer_by = Some(Utc::now() + chrono::Duration::seconds(60));
+    let waiting = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let error = agent(&waiting, &repo)
+        .answer(alone)
+        .await
+        .expect_err("nothing to run on");
+    assert!(
+        matches!(&error, SessionAgentError::WaitingForMachineOrKey(why) if why.contains("teos-mac, which is not yours")),
+        "{error:?}"
+    );
+    assert!(prepared_bots(&waiting).is_empty());
 }

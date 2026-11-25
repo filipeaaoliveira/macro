@@ -3,9 +3,11 @@
 //! the session, priced, else the usage its runtime reported, which the
 //! factory keeps (`SessionAgent` keeps it as turns end and before it deletes
 //! a session). A runtime that calls its model directly, as Claude Code does
-//! through macrod on its owner's own login, records nothing in the usage
-//! log; one that calls it through Macro's model router or gateway records
-//! its calls there.
+//! through macrod on its owner's own login, records none of its turns in the
+//! usage log; one that calls it through Macro's model router or gateway, or
+//! on an agent's own API key, records them there. The log's read leaves out
+//! Macro's own calls about a session (its title, its activity summary), so a
+//! session it has calls for is one whose turns it recorded.
 //!
 //! What a runtime reported counts in tokens only: the cost it reports is
 //! its own estimate of a subscription's use, not money billed per use, so
@@ -76,9 +78,9 @@ where
 {
     type Err = AgentUsageError;
 
-    /// Each session counts once. One the usage log recorded calls for
-    /// reads from the log, whose calls are priced. Any other session with
-    /// usage kept reads as its runtime reported it, in tokens only.
+    /// Each session counts once. One the usage log recorded turns for reads
+    /// from the log, whose calls are priced. Any other session with usage
+    /// kept reads as its runtime reported it, in tokens only.
     async fn session_tokens(
         &self,
         user: &MacroUserIdStr<'static>,

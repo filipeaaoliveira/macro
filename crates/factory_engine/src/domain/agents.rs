@@ -62,7 +62,7 @@ fn defaults_to_reviewer(role: &Role) -> bool {
 pub struct Agent {
     /// The Macro agent whose sessions do the work: its harness runs them.
     /// The Run's owner must be allowed to use it. An Agent names a bot or a
-    /// `vendor`, never both.
+    /// `vendor`, never both; one that names a vendor names no `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot: Option<BotId>,
     /// The vendor whose CLI or API the work runs on, for each Run's owner
@@ -309,6 +309,23 @@ pub enum AgentDefinitionError {
     /// An Agent names neither a bot nor a vendor, or both.
     #[error("agent {0} must name a bot or a vendor (anthropic, openai), not both")]
     BotOrVendor(AgentName),
+    /// An Agent that names a vendor names a model: each owner's bots for
+    /// the vendor name their models their own way (a machine's CLI, Macro's
+    /// in-memory runtime), so the Agent runs each on its bot's own.
+    #[error(
+        "agent {0} names a vendor and a model: a vendor's agent runs on each owner's own \
+         machine or API key, each with its own default model, so leave model out"
+    )]
+    VendorModel(AgentName),
+    /// A Standing Role lists an Agent that names a vendor: a Standing Role
+    /// is filled by a bot, which such an Agent does not name.
+    #[error("standing role {role} lists agent {agent}, which names a vendor rather than a bot")]
+    StandingVendorAgent {
+        /// The Standing Role.
+        role: StandingRoleName,
+        /// The Agent it lists.
+        agent: AgentName,
+    },
     /// Agents a work Role lists whose bot is Codex's cloud agent
     /// ([`CODEX_BOT_ID`]), in the order the definition lists them: its
     /// sessions work in a cloud environment of their own, outside the Run's
@@ -414,6 +431,9 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
             if agent.bot.is_some() == agent.vendor.is_some() {
                 return Err(AgentDefinitionError::BotOrVendor(name.clone()));
             }
+            if agent.vendor.is_some() && agent.model.is_some() {
+                return Err(AgentDefinitionError::VendorModel(name.clone()));
+            }
             agent.machine_tags = machine_tags(name, &agent.machine_tags)?;
         }
 
@@ -444,6 +464,17 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
                 let mut standing = BTreeMap::new();
                 for (name, role) in written {
                     let role = role.check(&name, |agent| fields.agents.contains_key(agent))?;
+                    if let Some(agent) = role.agents.iter().find(|agent| {
+                        fields
+                            .agents
+                            .get(*agent)
+                            .is_some_and(|known| known.vendor.is_some())
+                    }) {
+                        return Err(AgentDefinitionError::StandingVendorAgent {
+                            role: name,
+                            agent: agent.clone(),
+                        });
+                    }
                     standing.insert(name, role);
                 }
                 Some(standing)
@@ -601,8 +632,7 @@ impl AgentDefinition {
     /// a Run's owner, by the definition's Standing Roles: the first
     /// Standing Role, by name, that allows the act and lists an Agent of
     /// that bot fills it. A session with no bot of the owner's (`None`)
-    /// fills none, and an Agent that names a vendor rather than a bot
-    /// fills none either.
+    /// fills none; a Standing Role lists no Agent that names a vendor.
     pub fn standing_check(&self, act: StandingAct, bot: Option<BotId>) -> StandingCheck {
         let Some(standing) = &self.standing else {
             return StandingCheck::Open;

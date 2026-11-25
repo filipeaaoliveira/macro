@@ -246,7 +246,7 @@ async fn run() -> Result<(), rootcause::Report> {
         )?,
         client,
         authorization_state,
-        correlation: CorrelationState::new(db, jwt_args),
+        correlation: CorrelationState::new(db.clone(), jwt_args),
     };
 
     let pull_requests = PullRequestSteps::new(
@@ -262,7 +262,14 @@ async fn run() -> Result<(), rootcause::Report> {
                 config.internal_api_key.as_ref(),
             )
             .map_err(|error| rootcause::report!("{error:?}"))?;
-            let agent = SessionAgent::new(sessions, repo.clone(), agents);
+            // A Step runs on an agent's own API key only while the key
+            // owner's plan includes keys, as the in-memory runtime checks
+            // each turn: a lapsed plan waits rather than spend Macro credits.
+            let agent = SessionAgent::new(sessions, repo.clone(), agents).with_key_plans(
+                agent_api_keys::outbound::EntitlementKeyPlans::new(
+                    ai_billing::composition::pg_entitlement_source(db.clone()),
+                ),
+            );
             // A plan too big for one Run is split into child tasks, filed
             // as the Run's owner, as follow-up tasks are.
             let steps =

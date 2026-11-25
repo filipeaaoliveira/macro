@@ -105,7 +105,9 @@ impl MachineRepository for FakeRepo {
         key: StepKey,
         machines: &[String],
         reason: Option<&str>,
-    ) -> Result<(), FakeError> {
+        take_within: Duration,
+    ) -> Result<bool, FakeError> {
+        self.machine_slots.lock().expect("slots").remove(&key);
         self.slot_waits
             .lock()
             .expect("waits")
@@ -115,6 +117,12 @@ impl MachineRepository for FakeRepo {
             Some(reason) => reasons.insert(key, reason.to_string()),
             None => reasons.remove(&key),
         };
-        Ok(())
+        let steps = self.steps.lock().expect("steps");
+        Ok(steps
+            .iter()
+            .find(|(run, step)| *run == key.run_id && step.seq == key.seq)
+            .is_some_and(|(_, step)| {
+                (Utc::now() - step.started_at).to_std().unwrap_or_default() > take_within
+            }))
     }
 }

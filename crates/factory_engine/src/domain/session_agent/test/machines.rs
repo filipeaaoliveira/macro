@@ -258,6 +258,7 @@ async fn placement_books_no_slot_on_an_agent_the_quota_refused_lately() {
         agents: agents(),
         quota: planner.quota.clone(),
         pause_notices: None,
+        key_plans: planner.key_plans.clone(),
     };
     planner.answer(next).await.expect("next");
 

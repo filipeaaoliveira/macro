@@ -24,6 +24,7 @@ fn sharing(
         agents: agents(),
         quota: earlier.quota.clone(),
         pause_notices: None,
+        key_plans: earlier.key_plans.clone(),
     }
 }
 

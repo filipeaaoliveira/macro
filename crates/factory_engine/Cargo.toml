@@ -9,6 +9,8 @@ version = "0.1.0"
 agent = { path = "../agent" }
 agent_correlation = { path = "../agent_correlation" }
 agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
+# Whether an agent's own API key may be spent: its owner's plan.
+agent_api_keys = { path = "../agent_api_keys" }
 # `admission` names the refusal of an agent whose owner's quota is used up.
 agent_session = { path = "../agent_session", default-features = false, features = ["admission"] }
 ai_billing = { path = "../ai_billing" }

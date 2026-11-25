@@ -13,10 +13,12 @@ mod quota_memory;
 pub(crate) mod reminder;
 mod said_breaks;
 
+use placement::Hold;
 use quota_memory::{NO_QUOTA_LATELY, QuotaMemory};
 
 use std::time::Duration;
 
+use agent_api_keys::domain::KeyPlans;
 use agent_runtime_protocol::domain::action::AgentActionId;
 use agent_session::domain::error::AiAdmissionError;
 use agent_session::domain::model::{AgentSessionId, SessionSource, SessionVisibility};
@@ -81,6 +83,10 @@ const RESUME_SETTLE: Duration = Duration::from_secs(5 * 60);
 /// Why a Step that went on from its question left the asking Step's
 /// session, as its passed-over Agent records it.
 pub const SESSION_LOST: &str = "session_lost";
+
+/// Why a Step passed over an Agent whose session it had claimed, unopened,
+/// on a Machine whose provider login is not the Run's owner's.
+pub const NOT_THE_OWNERS: &str = "not_the_owners";
 
 /// Why a Step passed over an Agent whose first turn the usage limit of its
 /// runtime's own provider account ended before it called any tool, as the
@@ -237,6 +243,12 @@ pub enum SessionAgentError {
     /// is shown.
     #[error("{0}")]
     WaitingForMachineOrKey(String),
+    /// No Agent of the Step's Role had a Machine or an API key it may run
+    /// on for the Run's owner until [`placement::TAKE_SLOT_WITHIN`] after
+    /// it started: too little of its time is left for the work, so it is
+    /// not retried, and its Run ends `infrastructure`. It holds why.
+    #[error("{0}")]
+    MachineOrKeyTimeRanOut(String),
 }
 
 impl Retryable for SessionAgentError {
@@ -289,7 +301,8 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::SetupUnsupported(_)
             | SessionAgentError::Refused(_)
             | SessionAgentError::NoMachine(_)
-            | SessionAgentError::SlotTimeRanOut(_) => false,
+            | SessionAgentError::SlotTimeRanOut(_)
+            | SessionAgentError::MachineOrKeyTimeRanOut(_) => false,
         }
     }
 }
@@ -341,6 +354,7 @@ impl AgentFailure for SessionAgentError {
             SessionAgentError::WaitingForSlot(_)
                 | SessionAgentError::SlotTimeRanOut(_)
                 | SessionAgentError::WaitingForMachineOrKey(_)
+                | SessionAgentError::MachineOrKeyTimeRanOut(_)
         )
     }
 
@@ -362,6 +376,18 @@ pub struct SessionAgent<S, R> {
     agents: AgentDefinition,
     quota: QuotaMemory,
     pause_notices: Option<Notices>,
+    key_plans: Option<KeyPlansPort>,
+}
+
+/// Whose plans let their agents' own API keys be spent: without it no
+/// Step runs on an agent's key.
+#[derive(Clone)]
+struct KeyPlansPort(std::sync::Arc<dyn KeyPlans>);
+
+impl std::fmt::Debug for KeyPlansPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KeyPlans")
+    }
 }
 
 /// Where a paused Step's owner is told its time runs out.
@@ -388,7 +414,17 @@ impl<
             agents,
             quota: QuotaMemory::default(),
             pause_notices: None,
+            key_plans: None,
         }
+    }
+
+    /// Read through `plans` whether an agent's own API key may be spent, so
+    /// a Step may run on a key whose owner's plan includes keys. Without
+    /// it, no Step runs on an agent's key.
+    #[must_use]
+    pub fn with_key_plans(mut self, plans: impl KeyPlans) -> Self {
+        self.key_plans = Some(KeyPlansPort(std::sync::Arc::new(plans)));
+        self
     }
 
     /// Tell a paused Step's owner through `notices` when its time runs out.
@@ -436,15 +472,6 @@ impl<
             bots.truncate(1);
         }
         Ok(bots)
-    }
-
-    /// The names of the Agents [`Self::role_agents`] takes, in order.
-    async fn role_names(
-        &self,
-        agents: &AgentDefinition,
-        task: &AgentTask,
-    ) -> Result<Vec<AgentName>, SessionAgentError> {
-        Ok(self.ordered_names(agents, task).await?.0)
     }
 
     /// The names of the Agents [`Self::role_agents`] takes, in order, and
@@ -1298,16 +1325,10 @@ impl<
         );
         self.delete(&action).await;
         let agent = Self::agent_name(agents, &session, &task.role)?;
-        // The first Agent of the Role whose Machine has the tags it asks
-        // for; its slot is taken as its session opens.
-        let listed = self.role_agents(agents, task).await?;
-        if listed.is_empty() {
-            return Err(SessionAgentError::UnfilledRole(task.role.clone()));
-        }
-        let first = self
-            .next_fitting(agents, task, &listed, None)
-            .await?
-            .ok_or_else(|| SessionAgentError::NoMachine(placement::no_machine(agents, &listed)))?;
+        // The first Agent of the Role that fits the Step, its slot taken,
+        // placed as a Step that claimed none: waiting, saying why, while no
+        // Agent of the Role may run for its owner.
+        let first = self.first_fitting(agents, task, deadline).await?;
         let fresh = Self::new_session(&first);
         let passed = PassedOver {
             agent,
@@ -1428,12 +1449,24 @@ impl<
                 // take the Step; only in a session this attempt made, which no
                 // attempt can have started work in.
                 let skipped = fresh && to.is_some() && self.quota.refused_lately(&task.owner, &on);
+                // An unopened session of an Agent whose Machine's login is not
+                // the owner's (one claimed before that rule held) is handed to
+                // the next fitting Agent, or waits, saying why, while none is.
+                let mut not_theirs = false;
                 let refusal = if skipped {
                     None
-                } else {
+                } else if let Hold::NotTheOwners(why) =
                     // The Step's slot follows the Agent that opens its
                     // session.
-                    self.hold_slot(agents, task, &on, deadline).await?;
+                    self.hold_slot(agents, task, &on, deadline).await?
+                {
+                    if to.is_none() {
+                        self.wait_for_slot(task, &[], Some(&why), deadline).await?;
+                        continue;
+                    }
+                    not_theirs = true;
+                    None
+                } else {
                     match self.start(agents, task, &session, &agent, deadline).await {
                         Ok(action) => {
                             self.quota.started(&task.owner, &on);
@@ -1459,7 +1492,11 @@ impl<
                         Err(error) => return Err(error),
                     }
                 };
-                let reason = refusal.map_or(NO_QUOTA_LATELY, DenyReason::code);
+                let reason = if not_theirs {
+                    NOT_THE_OWNERS
+                } else {
+                    refusal.map_or(NO_QUOTA_LATELY, DenyReason::code)
+                };
                 let passed = PassedOver {
                     agent: agent.clone(),
                     reason: reason.to_string(),
