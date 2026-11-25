@@ -963,6 +963,16 @@ pub struct StepRuntime {
     /// The full Machines it waits on, by name, while it waits. Only the
     /// Run's owner reads them, as `machine`.
     pub waiting_on_machines: Vec<String>,
+    /// Why it waits, while it waits for no full Machine but for a Machine
+    /// or an API key it may run on at all: its Agent's Machine is someone
+    /// else's, or its owner has no Machine or key for the vendor its Agent
+    /// names. Only the Run's owner reads it, as `machine`.
+    pub waiting_reason: Option<String>,
+    /// The vendor of the API key its agent's own model calls are billed to
+    /// (`anthropic`, `openai`), read live: an agent with a key of its own.
+    /// None for an agent on a Machine's provider login or on Macro credits.
+    /// The key itself is never read here.
+    pub api_key: Option<String>,
 }
 
 /// A running agent Step as its owner watches and steers it, from the Run

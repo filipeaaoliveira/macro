@@ -9,7 +9,10 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr};
-use crate::domain::machines::{MachineRepository, SLOT_HELD_AT_MOST, SlotTake, StepMachine};
+use crate::domain::machines::{
+    MachineLogin, MachineRepository, OwnerBot, OwnerBotRuns, SLOT_HELD_AT_MOST, SlotTake,
+    StepMachine, Vendor,
+};
 use crate::domain::models::StepKey;
 
 impl MachineRepository for PgRunRepository {
@@ -19,7 +22,13 @@ impl MachineRepository for PgRunRepository {
     async fn bot_machine(&self, bot: Uuid) -> Result<Option<StepMachine>, Self::Err> {
         let row = sqlx::query!(
             r#"
-            SELECT h.id, h.name, h.step_slots, h.tags
+            SELECT h.id, h.name, h.step_slots, h.tags,
+                COALESCE(h.owner_user_id, h.created_by) AS "owner!",
+                h.computer_id IS NOT NULL AS "on_computer!",
+                EXISTS (
+                    SELECT 1 FROM harness_account_logins login
+                    WHERE login.harness_id = h.id AND login.signed_out_at IS NULL
+                ) AS "signed_in!"
             FROM agent_configs c
             JOIN harnesses h ON h.id = c.harness_id AND h.deleted_at IS NULL
             WHERE c.bot_id = $1
@@ -28,13 +37,81 @@ impl MachineRepository for PgRunRepository {
         )
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|row| StepMachine {
-            id: row.id,
-            name: row.name,
-            // The table keeps 1 to 64.
-            step_slots: row.step_slots.and_then(|slots| u16::try_from(slots).ok()),
-            tags: row.tags,
+        Ok(row.map(|row| {
+            // A Macro computer runs on Macro credits through the gateway
+            // unless a provider sign-in was made on it through Macro; a
+            // macrod machine runs its CLI on its owner's own login.
+            let login = match (row.on_computer, row.signed_in) {
+                (false, _) => MachineLogin::Owner(row.owner),
+                (true, false) => MachineLogin::MacroCredits,
+                (true, true) => MachineLogin::HostedSignIn,
+            };
+            StepMachine {
+                id: row.id,
+                name: row.name,
+                // The table keeps 1 to 64.
+                step_slots: row.step_slots.and_then(|slots| u16::try_from(slots).ok()),
+                tags: row.tags,
+                login,
+            }
         }))
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn owner_bots(&self, owner: &str) -> Result<Vec<OwnerBot>, Self::Err> {
+        // Three kinds, in the order a Step takes them (`place`): the coding
+        // agents on macrod machines the owner paired (no Macro computer, no
+        // machine only shared with them), the owner's own in-memory agents
+        // with a key, then those of the owner's teams. A user's machines and
+        // agents are few: each kind reads through its owner's index.
+        let rows = sqlx::query!(
+            r#"
+            SELECT bot_id AS "bot_id!", model AS "model!", place AS "place!", provider
+            FROM (
+                SELECT b.id AS bot_id, c.default_model AS model, 0 AS place,
+                    NULL::text AS provider
+                FROM harnesses h
+                JOIN agent_configs c ON c.harness_id = h.id AND c.is_coding
+                JOIN bots b ON b.id = c.bot_id AND b.deleted_at IS NULL
+                WHERE h.owner_user_id = $1
+                    AND h.deleted_at IS NULL
+                    AND h.computer_id IS NULL
+                UNION ALL
+                SELECT b.id, c.default_model,
+                    CASE WHEN b.owner_user_id = $1 THEN 1 ELSE 2 END,
+                    k.provider
+                FROM bots b
+                JOIN agent_api_keys k ON k.bot_id = b.id
+                JOIN agent_configs c ON c.bot_id = b.id
+                    AND c.harness IN ('in-memory', 'macro-inmem')
+                WHERE b.deleted_at IS NULL
+                    AND (
+                        b.owner_user_id = $1
+                        OR b.team_id IN (SELECT team_id FROM team_user WHERE user_id = $1)
+                    )
+            ) owned
+            ORDER BY place, bot_id
+            "#,
+            owner,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                let runs_on = match (row.place, row.provider.as_deref().and_then(Vendor::parse)) {
+                    (0, _) => OwnerBotRuns::Subscription,
+                    (1, Some(vendor)) => OwnerBotRuns::OwnKey(vendor),
+                    (2, Some(vendor)) => OwnerBotRuns::TeamKey(vendor),
+                    _ => return None,
+                };
+                Some(OwnerBot {
+                    bot: row.bot_id,
+                    model: row.model,
+                    runs_on,
+                })
+            })
+            .collect())
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -125,7 +202,8 @@ impl MachineRepository for PgRunRepository {
         sqlx::query!(
             r#"
             UPDATE factory_step
-            SET machine_id = $3, slot_wait_since = NULL, slot_wait_machines = NULL
+            SET machine_id = $3, slot_wait_since = NULL, slot_wait_machines = NULL,
+                slot_wait_reason = NULL
             WHERE run_id = $1 AND seq = $2
             "#,
             key.run_id.as_uuid(),
@@ -159,7 +237,8 @@ impl MachineRepository for PgRunRepository {
         sqlx::query!(
             r#"
             UPDATE factory_step
-            SET machine_id = NULL, slot_wait_since = NULL, slot_wait_machines = NULL
+            SET machine_id = NULL, slot_wait_since = NULL, slot_wait_machines = NULL,
+                slot_wait_reason = NULL
             WHERE run_id = $1 AND seq = $2
                 AND (machine_id IS NOT NULL OR slot_wait_since IS NOT NULL)
             "#,
@@ -176,17 +255,20 @@ impl MachineRepository for PgRunRepository {
         &self,
         key: StepKey,
         machines: &[String],
+        reason: Option<&str>,
     ) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
             UPDATE factory_step
             SET slot_wait_since = COALESCE(slot_wait_since, now()),
-                slot_wait_machines = $3
+                slot_wait_machines = $3,
+                slot_wait_reason = $4
             WHERE run_id = $1 AND seq = $2 AND ended_at IS NULL
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
             machines,
+            reason,
         )
         .execute(&self.pool)
         .await?;

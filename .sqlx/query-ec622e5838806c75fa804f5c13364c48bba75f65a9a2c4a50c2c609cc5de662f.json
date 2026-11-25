@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT h.id, h.name, h.step_slots, h.tags,\n                COALESCE(h.owner_user_id, h.created_by) AS \"owner!\",\n                h.computer_id IS NOT NULL AS \"on_computer!\",\n                EXISTS (\n                    SELECT 1 FROM harness_account_logins login\n                    WHERE login.harness_id = h.id AND login.signed_out_at IS NULL\n                ) AS \"signed_in!\"\n            FROM agent_configs c\n            JOIN harnesses h ON h.id = c.harness_id AND h.deleted_at IS NULL\n            WHERE c.bot_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "step_slots",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "tags",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "on_computer!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "signed_in!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ec622e5838806c75fa804f5c13364c48bba75f65a9a2c4a50c2c609cc5de662f"
+}

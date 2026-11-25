@@ -61,16 +61,22 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   a Step worked in, those it left included.
 - `src/domain/machines.rs` and
   `src/outbound/pg_run_repository/machines.rs`: `MachineRepository`, the
-  Machine (harness) an agent's bot is bound to with its `step_slots` and
-  `tags`, the slot each Step holds on one (`factory_step.machine_id`, counted
+  Machine (harness) an agent's bot is bound to with its `step_slots`,
+  `tags` and whose provider login it runs on (`MachineLogin`: a macrod
+  machine's owner, a Macro computer's Macro credits, or a sign-in made on a
+  computer through Macro, `harness_account_logins`), an owner's own bots
+  for an Agent that names a `Vendor` (`owner_bots`: coding agents on
+  macrod machines they paired, then their own in-memory agents with an
+  `agent_api_keys` key, then their teams'), the slot each Step holds on one (`factory_step.machine_id`, counted
   while the Step and its Run have not ended and for at most
   `SLOT_HELD_AT_MOST` after the Step started, under a transaction-scoped
   advisory lock per Machine; a Step past `take_within` that finds the
   Machine full is `SlotTake::TooLate`, and still takes a free slot), whether
   a Step's current session opened (`session_opened`), letting go of a slot
   (`release_machine_slot`), and a
-  Step's wait for a slot (`slot_wait_since`, `slot_wait_machines`, cleared
-  when it takes or lets go of one).
+  Step's wait for a slot (`slot_wait_since`, `slot_wait_machines`, and
+  `slot_wait_reason` while it waits for a Machine or key it may run on at
+  all, cleared when it takes or lets go of one).
 - `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
   `RunBoardRepository`, the board's read of Runs across tasks, and of the
   Runs that opened some pull requests.

@@ -494,6 +494,8 @@ struct StepRow {
     agent_name: Option<String>,
     waiting_for_slot_since: Option<DateTime<Utc>>,
     waiting_on_machines: Option<Vec<String>>,
+    waiting_reason: Option<String>,
+    api_key: Option<String>,
 }
 
 impl StepRow {
@@ -739,6 +741,8 @@ impl TryFrom<StepRow> for Step {
                 agent_name: row.agent_name,
                 waiting_for_slot_since: row.waiting_for_slot_since,
                 waiting_on_machines: row.waiting_on_machines.unwrap_or_default(),
+                waiting_reason: row.waiting_reason,
+                api_key: row.api_key,
             },
         })
     }
@@ -1667,10 +1671,19 @@ impl RunRepository for PgRunRepository {
                 s.machine,
                 b.name AS "agent_name?",
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,
-                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines,
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_reason END AS waiting_reason,
+                k.provider AS "api_key?"
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             LEFT JOIN bots b ON b.id = s.bot_id
+            -- An agent's own key pays for its calls only on Macro's
+            -- in-memory runtime (crates/agent_api_keys).
+            LEFT JOIN agent_api_keys k ON k.bot_id = s.bot_id
+                AND EXISTS (
+                    SELECT 1 FROM agent_configs c
+                    WHERE c.bot_id = s.bot_id AND c.harness IN ('in-memory', 'macro-inmem')
+                )
             WHERE s.run_id = $1
             ORDER BY s.seq
             "#,
@@ -1882,10 +1895,19 @@ impl RunRepository for PgRunRepository {
                 s.machine,
                 b.name AS "agent_name?",
                 CASE WHEN s.ended_at IS NULL THEN s.slot_wait_since END AS waiting_for_slot_since,
-                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_machines END AS waiting_on_machines,
+                CASE WHEN s.ended_at IS NULL THEN s.slot_wait_reason END AS waiting_reason,
+                k.provider AS "api_key?"
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             LEFT JOIN bots b ON b.id = s.bot_id
+            -- An agent's own key pays for its calls only on Macro's
+            -- in-memory runtime (crates/agent_api_keys).
+            LEFT JOIN agent_api_keys k ON k.bot_id = s.bot_id
+                AND EXISTS (
+                    SELECT 1 FROM agent_configs c
+                    WHERE c.bot_id = s.bot_id AND c.harness IN ('in-memory', 'macro-inmem')
+                )
             WHERE s.run_id = ANY($1)
             ORDER BY s.run_id, s.seq
             "#,

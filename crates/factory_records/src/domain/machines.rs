@@ -4,6 +4,9 @@
 //! holds it until it ends; while every Machine its Agents may run on is
 //! full, it waits, and its Run says so.
 
+#[cfg(test)]
+mod test;
+
 use std::future::Future;
 use std::time::Duration;
 
@@ -22,6 +25,98 @@ pub struct StepMachine {
     pub step_slots: Option<u16>,
     /// Its tags, lower case and sorted.
     pub tags: Vec<String>,
+    /// Whose provider login its sessions run on.
+    pub login: MachineLogin,
+}
+
+/// Whose provider login a Machine's agent sessions run on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MachineLogin {
+    /// A macrod machine a person paired: its provider CLI runs on the login
+    /// of this person, its owner, on their own computer.
+    Owner(String),
+    /// A Macro computer with no provider sign-in of its own: its sessions
+    /// call their model through Macro's gateway, on Macro credits.
+    MacroCredits,
+    /// A Macro computer signed in to a provider through Macro.
+    HostedSignIn,
+}
+
+/// A bot a Run's owner may run an agent Step on, for an Agent that names a
+/// vendor rather than a bot (`MachineRepository::owner_bots`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerBot {
+    /// The bot.
+    pub bot: Uuid,
+    /// Its default model, which says the vendor of a Machine's CLI.
+    pub model: String,
+    /// What it runs on.
+    pub runs_on: OwnerBotRuns,
+}
+
+/// What an [`OwnerBot`] runs on, in the order a Step takes them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OwnerBotRuns {
+    /// A Machine the owner paired: their own provider CLI login.
+    Subscription,
+    /// An agent of the owner's own with its own API key, of this provider.
+    OwnKey(Vendor),
+    /// An agent of a team the owner is a member of, with its own API key.
+    TeamKey(Vendor),
+}
+
+/// A model vendor whose official CLI or API an agent Step runs on: an
+/// Agent may name one instead of a bot, and an agent's own API key is for
+/// one (`agent_api_keys.provider`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Vendor {
+    /// Anthropic: Claude Code, or an Anthropic API key.
+    Anthropic,
+    /// OpenAI: Codex, or an OpenAI API key.
+    #[serde(rename = "openai")]
+    OpenAi,
+}
+
+impl Vendor {
+    /// The vendor as `agent_api_keys.provider` names it.
+    pub fn parse(provider: &str) -> Option<Self> {
+        match provider {
+            "anthropic" => Some(Self::Anthropic),
+            "openai" => Some(Self::OpenAi),
+            _ => None,
+        }
+    }
+
+    /// The vendor of the model `model`, as an agent's configuration names
+    /// it: a routed `provider/model` id by its provider, else a model's own
+    /// id by its family (`claude-…` is Anthropic's, `gpt-…` OpenAI's). None
+    /// for a model of neither, or one written as no known family.
+    pub fn of_model(model: &str) -> Option<Self> {
+        let model = model.trim().to_ascii_lowercase();
+        if let Some((provider, _)) = model.split_once('/') {
+            return Self::parse(provider);
+        }
+        let anthropic = ["claude", "opus", "sonnet", "haiku", "fable"];
+        let openai = ["gpt", "codex", "o3", "o4"];
+        if anthropic.iter().any(|family| model.starts_with(family)) {
+            Some(Self::Anthropic)
+        } else if openai.iter().any(|family| model.starts_with(family)) {
+            Some(Self::OpenAi)
+        } else {
+            None
+        }
+    }
+
+    /// The vendor's name as people know it.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Anthropic => "Anthropic",
+            Self::OpenAi => "OpenAI",
+        }
+    }
 }
 
 /// How long after it started a Step that has not ended still holds its
@@ -56,6 +151,17 @@ pub trait MachineRepository: Send + Sync + 'static {
         bot: Uuid,
     ) -> impl Future<Output = Result<Option<StepMachine>, Self::Err>> + Send;
 
+    /// The bots `owner`'s agent Steps may run on for an Agent that names a
+    /// vendor: each coding agent bound to a macrod machine `owner` paired
+    /// (never a Macro computer, nor a machine shared with them), then each
+    /// in-memory agent of `owner`'s own with its own API key, then each of a
+    /// team `owner` is a member of. Each kind in the order its bots were
+    /// made.
+    fn owner_bots(
+        &self,
+        owner: &str,
+    ) -> impl Future<Output = Result<Vec<OwnerBot>, Self::Err>> + Send;
+
     /// Take a slot on the Machine `machine` for the Step `key`, unless every
     /// slot is held by another running Step: then [`SlotTake::Full`], or
     /// [`SlotTake::TooLate`] when the Step started more than `take_within`
@@ -85,10 +191,12 @@ pub trait MachineRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record that the Step `key` waits for a slot on the full Machines
-    /// `machines`, by name, keeping when it first started to wait.
+    /// `machines`, by name, or, with `reason`, for a Machine or an API key
+    /// it may run on at all, keeping when it first started to wait.
     fn wait_for_machine_slot(
         &self,
         key: StepKey,
         machines: &[String],
+        reason: Option<&str>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }

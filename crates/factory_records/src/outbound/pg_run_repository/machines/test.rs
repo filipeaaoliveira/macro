@@ -8,7 +8,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::test::{entry, insert, key, outcome};
-use crate::domain::machines::{MachineRepository, SlotTake, StepMachine};
+use crate::domain::machines::{
+    MachineLogin, MachineRepository, OwnerBot, OwnerBotRuns, SlotTake, StepMachine, Vendor,
+};
 use crate::domain::models::RunId;
 use crate::domain::ports::RunRepository;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -73,6 +75,7 @@ async fn a_bot_reads_the_machine_it_is_bound_to(pool: PgPool) {
             name: "m4".to_string(),
             step_slots: Some(2),
             tags: vec!["gpu".to_string(), "rust-build".to_string()],
+            login: MachineLogin::Owner("macro|julia@example.com".to_string()),
         })
     );
     assert_eq!(repo.bot_machine(CLOUD).await.expect("read"), None);
@@ -109,7 +112,7 @@ async fn a_full_machine_makes_the_next_step_wait_until_a_slot_frees(pool: PgPool
     );
     assert_eq!(take(&repo, key(second, 1), M4).await, SlotTake::Full);
 
-    repo.wait_for_machine_slot(key(second, 1), &["m4".to_string()])
+    repo.wait_for_machine_slot(key(second, 1), &["m4".to_string()], None)
         .await
         .expect("wait");
     let waiting = repo.list_steps(second).await.expect("steps")[0]
@@ -117,7 +120,7 @@ async fn a_full_machine_makes_the_next_step_wait_until_a_slot_frees(pool: PgPool
         .clone();
     let since = waiting.waiting_for_slot_since.expect("waiting");
     assert_eq!(waiting.waiting_on_machines, ["m4"]);
-    repo.wait_for_machine_slot(key(second, 1), &["m4".to_string()])
+    repo.wait_for_machine_slot(key(second, 1), &["m4".to_string()], None)
         .await
         .expect("wait again");
     assert_eq!(
@@ -220,7 +223,7 @@ async fn old_steps_hold_no_slot_and_late_steps_take_none(pool: PgPool) {
         "a Step keeps the slot it holds"
     );
 
-    repo.wait_for_machine_slot(key(late, 1), &["m4".to_string()])
+    repo.wait_for_machine_slot(key(late, 1), &["m4".to_string()], None)
         .await
         .expect("wait");
     repo.release_machine_slot(key(holder, 1))
@@ -313,4 +316,219 @@ async fn a_late_step_takes_a_free_slot(pool: PgPool) {
     let unlimited = started(&repo).await;
     started_ago(&pool, key(unlimited, 1), 100).await;
     assert_eq!(take(&repo, key(unlimited, 1), M4).await, SlotTake::Taken);
+}
+
+/// Julia's Macro computer `c1`, bound to her agent Runner (`b3`).
+const RUNNER: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00b3);
+/// The team Release's agent Shared (`b4`), on an in-memory runtime.
+const SHARED: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_00b4);
+
+/// Make `m3` a Macro computer and bind Runner to it.
+async fn computer(pool: &PgPool) {
+    sqlx::query!(
+        r#"
+        UPDATE harnesses SET computer_id = '00000000-0000-7000-8000-0000000000c1'
+        WHERE id = '00000000-0000-7000-8000-0000000000a2'
+        "#
+    )
+    .execute(pool)
+    .await
+    .expect("computer");
+    sqlx::query!(
+        r#"
+        INSERT INTO bots (id, kind, owner_user_id, name, handle, has_agent)
+        VALUES ($1, 'owned', 'macro|julia@example.com', 'Runner', 'runner', true)
+        "#,
+        RUNNER,
+    )
+    .execute(pool)
+    .await
+    .expect("bot");
+    sqlx::query!(
+        r#"
+        INSERT INTO agent_configs
+            (bot_id, instructions, harness, default_model, channel_scope, is_coding, harness_id)
+        VALUES ($1, '', 'macrod', 'claude-opus-4-5', 'all', true,
+                '00000000-0000-7000-8000-0000000000a2')
+        "#,
+        RUNNER,
+    )
+    .execute(pool)
+    .await
+    .expect("agent");
+}
+
+/// A macrod machine runs on its owner's login; a Macro computer on Macro
+/// credits until a provider sign-in is made on it through Macro, and on that
+/// sign-in after.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "agents"))
+)]
+async fn a_machine_says_whose_login_it_runs_on(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    computer(&pool).await;
+    let login = |machine: Option<StepMachine>| machine.expect("machine").login;
+
+    assert_eq!(
+        login(repo.bot_machine(WRITER).await.expect("read")),
+        MachineLogin::Owner("macro|julia@example.com".to_string())
+    );
+    assert_eq!(
+        login(repo.bot_machine(RUNNER).await.expect("read")),
+        MachineLogin::MacroCredits
+    );
+
+    sqlx::query!(
+        r#"
+        INSERT INTO provider_accounts (id, provider, external_account_id)
+        VALUES ('00000000-0000-7000-8000-0000000000d1', 'claude', 'account-1')
+        "#
+    )
+    .execute(&pool)
+    .await
+    .expect("account");
+    sqlx::query!(
+        r#"
+        INSERT INTO harness_account_logins (id, harness_id, provider_account_id, provider)
+        VALUES ('00000000-0000-7000-8000-0000000000d2', '00000000-0000-7000-8000-0000000000a2',
+                '00000000-0000-7000-8000-0000000000d1', 'claude')
+        "#
+    )
+    .execute(&pool)
+    .await
+    .expect("login");
+    assert_eq!(
+        login(repo.bot_machine(RUNNER).await.expect("read")),
+        MachineLogin::HostedSignIn
+    );
+}
+
+/// Give `bot` an API key of `provider`'s; only its prefix and a fake
+/// ciphertext are stored.
+async fn give_key(pool: &PgPool, bot: Uuid, provider: &str, prefix: &str) {
+    sqlx::query!(
+        r#"
+        INSERT INTO agent_api_keys
+            (bot_id, provider, key_prefix, key_ciphertext, encryption_version, kms_key_id)
+        VALUES ($1, $2, $3, '\x00', 1, 'test-key')
+        "#,
+        bot,
+        provider,
+        prefix,
+    )
+    .execute(pool)
+    .await
+    .expect("key");
+}
+
+/// An owner's bots for a vendor Agent: the coding agents on the macrod
+/// machines they paired, then their own agents with a key, then their
+/// teams'. A Macro computer is never one, and a machine someone else
+/// paired is not theirs, even shared with them: Teo reads only the team's
+/// agent.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team", "agents"))
+)]
+async fn an_owner_reads_their_machines_then_their_keys_then_their_teams(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    computer(&pool).await;
+    sqlx::query!(
+        r#"
+        INSERT INTO bots (id, kind, team_id, name, handle, has_agent)
+        VALUES ($1, 'owned', '00000000-0000-7000-8000-000000000201', 'Shared', 'shared', true)
+        "#,
+        SHARED,
+    )
+    .execute(&pool)
+    .await
+    .expect("team bot");
+    sqlx::query!(
+        r#"
+        INSERT INTO agent_configs
+            (bot_id, instructions, harness, default_model, channel_scope, is_coding)
+        VALUES ($1, '', 'in-memory', 'openai/gpt-5.5', 'all', false)
+        "#,
+        SHARED,
+    )
+    .execute(&pool)
+    .await
+    .expect("team agent");
+    give_key(&pool, CLOUD, "anthropic", "sk-ant-").await;
+    give_key(&pool, SHARED, "openai", "sk-").await;
+    // Julia's machine m4 is shared with Teo: still not his to spend.
+    sqlx::query!(
+        r#"
+        INSERT INTO entity_access (entity_id, entity_type, source_id, source_type, access_level)
+        VALUES ($1, 'harness', 'macro|teo@example.com', 'user', 'edit')
+        "#,
+        M4,
+    )
+    .execute(&pool)
+    .await
+    .expect("share");
+
+    assert_eq!(
+        repo.owner_bots("macro|julia@example.com")
+            .await
+            .expect("read"),
+        vec![
+            OwnerBot {
+                bot: WRITER,
+                model: "claude-opus-4-5".to_string(),
+                runs_on: OwnerBotRuns::Subscription,
+            },
+            OwnerBot {
+                bot: CLOUD,
+                model: "claude-sonnet-4-5".to_string(),
+                runs_on: OwnerBotRuns::OwnKey(Vendor::Anthropic),
+            },
+            OwnerBot {
+                bot: SHARED,
+                model: "openai/gpt-5.5".to_string(),
+                runs_on: OwnerBotRuns::TeamKey(Vendor::OpenAi),
+            },
+        ]
+    );
+    assert_eq!(
+        repo.owner_bots("macro|teo@example.com")
+            .await
+            .expect("read"),
+        vec![OwnerBot {
+            bot: SHARED,
+            model: "openai/gpt-5.5".to_string(),
+            runs_on: OwnerBotRuns::TeamKey(Vendor::OpenAi),
+        }]
+    );
+}
+
+/// A Step waiting for a Machine or key it may run on says why while it
+/// waits, and stops saying so once it takes a slot.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "agents"))
+)]
+async fn a_step_waiting_for_a_machine_or_key_says_why(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let run = started(&repo).await;
+
+    repo.wait_for_machine_slot(key(run, 1), &[], Some("no machine of yours"))
+        .await
+        .expect("wait");
+    let waiting = repo.list_steps(run).await.expect("steps")[0]
+        .runtime
+        .clone();
+    assert!(waiting.waiting_for_slot_since.is_some());
+    assert_eq!(
+        waiting.waiting_reason.as_deref(),
+        Some("no machine of yours")
+    );
+
+    assert_eq!(take(&repo, key(run, 1), M4).await, SlotTake::Taken);
+    let placed = repo.list_steps(run).await.expect("steps")[0]
+        .runtime
+        .clone();
+    assert_eq!(placed.waiting_for_slot_since, None);
+    assert_eq!(placed.waiting_reason, None);
 }
