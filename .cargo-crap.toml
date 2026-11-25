@@ -1,0 +1,11 @@
+# Settings for `cargo crap`, which `cargo x crap-rust` (the `crap-rust` check)
+# and tooling/scripts/factory-crap.sh run from the repository's root. See
+# docs/development/factory-crap.md for how both were chosen.
+
+# A touched function new or more complex than at the base fails above this.
+threshold = 30.0
+
+# A `?` adds nothing to a function's complexity. Its branch is an error
+# returned to the caller, which unit tests rarely reach; counted, it fails
+# code that only wires calls together.
+try-weight = 0.0

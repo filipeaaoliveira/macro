@@ -39,4 +39,4 @@ Agent session activity: [correlation and visibility](architecture/agent-activity
 
 CRM: [selective email contribution design](design/crm-selective-email-contribution.md).
 
-Factory code quality: [CRAP baseline and what measuring it costs](development/factory-crap.md).
+Factory code quality: [CRAP baseline, what measuring it costs, and the `crap-rust` check](development/factory-crap.md).
