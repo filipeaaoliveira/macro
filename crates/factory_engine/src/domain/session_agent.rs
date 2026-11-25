@@ -212,6 +212,12 @@ pub enum SessionAgentError {
     /// Machines' names.
     #[error("every machine the step may run on is full: {}", .0.join(", "))]
     WaitingForSlot(Vec<String>),
+    /// The Step started too long ago to take a slot, and every Machine it
+    /// may run on was full ([`placement::TAKE_SLOT_WITHIN`]): too little of
+    /// its time is left for the work, so it is not retried, and its Run
+    /// ends `infrastructure`. It holds the full Machines' names.
+    #[error("the step waited too long for a slot on {}", .0.join(", "))]
+    SlotTimeRanOut(Vec<String>),
 }
 
 impl Retryable for SessionAgentError {
@@ -262,7 +268,8 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::SetupFailed(_)
             | SessionAgentError::SetupUnsupported(_)
             | SessionAgentError::Refused(_)
-            | SessionAgentError::NoMachine(_) => false,
+            | SessionAgentError::NoMachine(_)
+            | SessionAgentError::SlotTimeRanOut(_) => false,
         }
     }
 }
@@ -309,7 +316,10 @@ impl AgentFailure for SessionAgentError {
     }
 
     fn waits_for_machine(&self) -> bool {
-        matches!(self, SessionAgentError::WaitingForSlot(_))
+        matches!(
+            self,
+            SessionAgentError::WaitingForSlot(_) | SessionAgentError::SlotTimeRanOut(_)
+        )
     }
 
     fn setup_failed(&self) -> Option<&str> {
@@ -1227,12 +1237,16 @@ impl<
         );
         self.delete(&action).await;
         let agent = Self::agent_name(agents, &session, &task.role)?;
+        // The first Agent of the Role whose Machine has the tags it asks
+        // for; its slot is taken as its session opens.
+        let listed = self.role_agents(agents, task).await?;
+        if listed.is_empty() {
+            return Err(SessionAgentError::UnfilledRole(task.role.clone()));
+        }
         let first = self
-            .role_agents(agents, task)
+            .next_fitting(agents, &listed, None)
             .await?
-            .first()
-            .cloned()
-            .ok_or_else(|| SessionAgentError::UnfilledRole(task.role.clone()))?;
+            .ok_or_else(|| SessionAgentError::NoMachine(placement::no_machine(agents, &listed)))?;
         let fresh = Self::new_session(agents, &first)?;
         let passed = PassedOver {
             agent,
@@ -1339,15 +1353,13 @@ impl<
             // one too.
             let (action, started) = loop {
                 let agent = Self::agent_name(agents, &session, &task.role)?;
-                // The Agent after this one in the Role's list, or its first
-                // when the definition no longer lists this one for the Role.
-                let next = listed
-                    .iter()
-                    .position(|name| *name == agent)
-                    .map_or(0, |place| place + 1);
-                let to = listed
-                    .get(next)
-                    .map(|name| Self::new_session(agents, name))
+                // The Agent after this one in the Role's list whose Machine
+                // has the tags it asks for, or the first such when the
+                // definition no longer lists this one for the Role.
+                let to = self
+                    .next_fitting(agents, &listed, Some(&agent))
+                    .await?
+                    .map(|name| Self::new_session(agents, &name))
                     .transpose()?;
 
                 // An Agent its owner's quota refused lately is passed over
@@ -1359,6 +1371,9 @@ impl<
                 let refusal = if skipped {
                     None
                 } else {
+                    // The Step's slot follows the Agent that opens its
+                    // session.
+                    self.hold_slot(agents, task, &agent, deadline).await?;
                     match self.start(agents, task, &session, &agent, deadline).await {
                         Ok(action) => {
                             self.quota.started(&task.owner, &agent);
@@ -1484,13 +1499,10 @@ impl<
         agent: &AgentName,
         action: &RoutineSessionAction,
     ) -> Result<Option<(StepSession, bool)>, SessionAgentError> {
-        let next = listed
-            .iter()
-            .position(|name| name == agent)
-            .map_or(0, |place| place + 1);
-        let Some(to) = listed
-            .get(next)
-            .map(|name| Self::new_session(agents, name))
+        let Some(to) = self
+            .next_fitting(agents, listed, Some(agent))
+            .await?
+            .map(|name| Self::new_session(agents, &name))
             .transpose()?
         else {
             return Ok(None);

@@ -186,8 +186,9 @@ pub(super) fn failure(error: StepError) -> ActivityError {
         | StepError::NoSuchRun
         | StepError::RunEnded
         | StepError::Final(_) => ApplicationFailure::non_retryable(error).into(),
-        StepError::WaitingForMachine(_) => ApplicationFailure::builder(error)
+        StepError::WaitingForMachine { last, .. } => ApplicationFailure::builder(error)
             .type_name(WAITING_FOR_MACHINE_FAILURE.to_string())
+            .non_retryable(last)
             .build()
             .into(),
         StepError::Internal(_) => ApplicationFailure::new(error).into(),

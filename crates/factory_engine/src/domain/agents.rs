@@ -279,6 +279,18 @@ pub enum AgentDefinitionError {
          (services/factory_service/AGENTS.md)"
     )]
     RetiredAgentId,
+    /// An Agent asks its Machine for a tag no Machine can have, or for too
+    /// many.
+    #[error(
+        "agent {agent} asks for machine tag {tag:?}: machine_tags are at most {MAX_MACHINE_TAGS} tags, \
+         each 1 to {MAX_MACHINE_TAG_CHARS} letters, digits, `-`, `_` or `.`, starting with a letter or digit"
+    )]
+    MachineTag {
+        /// The Agent.
+        agent: AgentName,
+        /// The tag it asks for, as written.
+        tag: String,
+    },
     /// Agents whose bots are still placeholder ids, as the Definition
     /// template ships them ([`is_placeholder_bot`]), in the order the
     /// definition lists them.
@@ -292,6 +304,48 @@ pub enum AgentDefinitionError {
     /// (`--agent codex`).
     #[error("{}", cloud_codex_message(.0))]
     CloudCodex(Vec<AgentName>),
+}
+
+/// The most tags an Agent asks of its Machine, as a Machine has at most.
+pub const MAX_MACHINE_TAGS: usize = 16;
+
+/// The longest tag an Agent asks of its Machine, in characters, as a
+/// Machine's.
+pub const MAX_MACHINE_TAG_CHARS: usize = 32;
+
+/// `agent`'s `machine_tags` as a Machine keeps its own (the harnesses
+/// service's rule): trimmed, lowered, each kept once and sorted, each 1 to
+/// [`MAX_MACHINE_TAG_CHARS`] letters, digits, `-`, `_` or `.` starting with
+/// a letter or digit, at most [`MAX_MACHINE_TAGS`]. A tag no Machine can
+/// have fails the definition, not the Run that asks for it.
+fn machine_tags(agent: &AgentName, tags: &[String]) -> Result<Vec<String>, AgentDefinitionError> {
+    let mut kept = Vec::with_capacity(tags.len());
+    for written in tags {
+        let tag = written.trim().to_lowercase();
+        let starts_well = tag
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric());
+        let well_formed = tag
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if !starts_well || !well_formed || tag.chars().count() > MAX_MACHINE_TAG_CHARS {
+            return Err(AgentDefinitionError::MachineTag {
+                agent: agent.clone(),
+                tag: written.clone(),
+            });
+        }
+        kept.push(tag);
+    }
+    kept.sort();
+    kept.dedup();
+    if let Some(extra) = kept.get(MAX_MACHINE_TAGS) {
+        return Err(AgentDefinitionError::MachineTag {
+            agent: agent.clone(),
+            tag: extra.clone(),
+        });
+    }
+    Ok(kept)
 }
 
 /// What [`AgentDefinitionError::CloudCodex`] says about `agents`.
@@ -342,6 +396,11 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
     type Error = AgentDefinitionError;
 
     fn try_from(fields: AgentDefinitionFields) -> Result<Self, Self::Error> {
+        let mut fields = fields;
+        for (name, agent) in &mut fields.agents {
+            agent.machine_tags = machine_tags(name, &agent.machine_tags)?;
+        }
+
         for (role, listed) in &fields.roles {
             if listed.is_empty() {
                 return Err(AgentDefinitionError::NoAgent(role.clone()));

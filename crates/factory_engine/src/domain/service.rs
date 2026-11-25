@@ -2601,7 +2601,10 @@ where
                 } else if overdue {
                     StepError::Overdue(report)
                 } else if waits_for_machine {
-                    StepError::WaitingForMachine(report)
+                    StepError::WaitingForMachine {
+                        report,
+                        last: final_failure,
+                    }
                 } else if final_failure {
                     StepError::Final(report)
                 } else {

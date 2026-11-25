@@ -6,16 +6,20 @@
 use agent_session::domain::routines::RoutineActionStatus;
 use bot_id::BotId;
 use chrono::Utc;
-use factory_records::domain::machines::{MachineRepository, StepMachine};
+use factory_records::domain::machines::{MachineRepository, SlotTake, StepMachine};
 use factory_records::domain::models::{EntryId, Outcome, Role, StepKey};
 use factory_records::domain::ports::RunRepository;
 use uuid::Uuid;
 
-use super::{BACKUP, FakeSessions, PRIMARY, SPARE, agent, name, plan_task, recorded, the_plan};
+use super::{
+    BACKUP, FakeSessions, PRIMARY, SPARE, agent, agents, name, no_quota, plan_task, recorded,
+    the_plan,
+};
 use crate::domain::fakes::FakeRepo;
 use crate::domain::flow::StepName;
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
-use crate::domain::session_agent::SessionAgentError;
+use crate::domain::session_agent::placement::TAKE_SLOT_WITHIN;
+use crate::domain::session_agent::{SessionAgent, SessionAgentError};
 
 const M4: Uuid = Uuid::from_u128(0x0a4);
 const M3: Uuid = Uuid::from_u128(0x0a3);
@@ -111,8 +115,13 @@ async fn a_full_machine_makes_a_step_wait_for_a_slot() {
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let busy_m4 = plan_task(&repo).await.key;
     let busy_m3 = plan_task(&repo).await.key;
-    assert!(repo.take_machine_slot(busy_m4, M4).await.expect("take"));
-    assert!(repo.take_machine_slot(busy_m3, M3).await.expect("take"));
+    for (busy, machine) in [(busy_m4, M4), (busy_m3, M3)] {
+        let taken = repo
+            .take_machine_slot(busy, machine, TAKE_SLOT_WITHIN)
+            .await
+            .expect("take");
+        assert_eq!(taken, SlotTake::Taken);
+    }
     let mut task = plan_task(&repo).await;
     task.answer_by = Some(Utc::now() + chrono::Duration::seconds(60));
     let key = task.key;
@@ -168,10 +177,130 @@ async fn a_step_no_machine_has_the_tags_for_fails_saying_why() {
 
     assert!(!error.retryable());
     assert!(
-        error
-            .refused()
-            .is_some_and(|why| why.contains("GPU") && why.contains("gpu")),
+        error.refused().is_some_and(|why| why.contains("(gpu)")),
         "{error:?}"
     );
+    assert!(prepared_bots(&sessions).is_empty());
+}
+
+const M5: Uuid = Uuid::from_u128(0x0a5);
+
+/// A Definition whose planners all ask for a `gpu` Machine: `primary`, then
+/// `backup`, then `spare`.
+fn gpu_planners() -> serde_json::Value {
+    serde_json::json!({
+        "agents": {
+            "primary": { "bot": PRIMARY.as_uuid(), "machine_tags": ["gpu"] },
+            "backup": { "bot": BACKUP.as_uuid(), "machine_tags": ["gpu"] },
+            "spare": { "bot": SPARE.as_uuid(), "machine_tags": ["gpu"] }
+        },
+        "roles": { "planner": ["primary", "backup", "spare"] }
+    })
+}
+
+/// When the Agent a Step was placed on cannot start for lack of quota, the
+/// Step passes over the next Agent, whose Machine lacks the tag, to the one
+/// after it, and its slot moves to that Agent's Machine.
+#[tokio::test]
+async fn a_pass_over_skips_an_agent_whose_machine_lacks_the_tags() {
+    let repo = FakeRepo::default();
+    bind(&repo, PRIMARY, M3, "m3", Some(1), &["gpu"]);
+    bind(&repo, BACKUP, M4, "m4", Some(1), &["rust-build"]);
+    bind(&repo, SPARE, M5, "m5", Some(1), &["gpu"]);
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    repo.definition_agents
+        .lock()
+        .expect("definition agents")
+        .insert(task.key.run_id, gpu_planners());
+    let key = task.key;
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    assert_eq!(prepared_bots(&sessions), [PRIMARY, SPARE]);
+    assert_eq!(recorded(&repo, key).1, Some(name("spare")));
+    assert_eq!(
+        repo.machine_slots.lock().expect("slots").get(&key),
+        Some(&M5)
+    );
+}
+
+/// An Agent its owner's quota refused lately is passed over by placement as
+/// its start would pass it over: the Step's slot is booked on the Agent
+/// that opens its session, never on the one skipped.
+#[tokio::test]
+async fn placement_books_no_slot_on_an_agent_the_quota_refused_lately() {
+    let repo = FakeRepo::default();
+    bind(&repo, PRIMARY, M3, "m3", Some(1), &["gpu"]);
+    bind(&repo, BACKUP, M5, "m5", Some(2), &["gpu"]);
+    let refused = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let planner = agent(&refused, &repo);
+    let first = plan_task(&repo).await;
+    repo.definition_agents
+        .lock()
+        .expect("definition agents")
+        .insert(first.key.run_id, gpu_planners());
+    planner.answer(first).await.expect("first");
+
+    let next = plan_task(&repo).await;
+    repo.definition_agents
+        .lock()
+        .expect("definition agents")
+        .insert(next.key.run_id, gpu_planners());
+    let key = next.key;
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let planner = SessionAgent {
+        sessions: sessions.clone(),
+        repo: repo.clone(),
+        agents: agents(),
+        quota: planner.quota.clone(),
+        pause_notices: None,
+    };
+    planner.answer(next).await.expect("next");
+
+    assert_eq!(prepared_bots(&sessions), [BACKUP]);
+    assert_eq!(recorded(&repo, key).1, Some(name("backup")));
+    assert_eq!(
+        repo.machine_slots.lock().expect("slots").get(&key),
+        Some(&M5)
+    );
+}
+
+/// A Step that started too long ago to take a slot, with every Machine
+/// full, fails for good as one whose Machines stayed full.
+#[tokio::test]
+async fn a_step_too_late_for_a_slot_fails_for_good() {
+    let repo = FakeRepo::default();
+    bind(&repo, PRIMARY, M4, "m4", Some(1), &[]);
+    bind(&repo, BACKUP, M3, "m3", None, &["gpu"]);
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let busy = plan_task(&repo).await.key;
+    let taken = repo
+        .take_machine_slot(busy, M4, TAKE_SLOT_WITHIN)
+        .await
+        .expect("take");
+    assert_eq!(taken, SlotTake::Taken);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    repo.steps
+        .lock()
+        .expect("steps")
+        .iter_mut()
+        .filter(|(run, step)| *run == key.run_id && step.seq == key.seq)
+        .for_each(|(_, step)| step.started_at = Utc::now() - chrono::Duration::minutes(100));
+
+    let error = agent(&sessions, &repo)
+        .answer(task)
+        .await
+        .expect_err("too late for a slot");
+
+    assert!(
+        matches!(&error, SessionAgentError::SlotTimeRanOut(full) if full == &["m4"]),
+        "{error:?}"
+    );
+    assert!(!error.retryable());
+    assert!(error.waits_for_machine());
     assert!(prepared_bots(&sessions).is_empty());
 }

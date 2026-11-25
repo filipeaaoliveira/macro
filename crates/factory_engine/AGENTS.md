@@ -321,29 +321,50 @@ its Agent's bot is bound, a macrod machine or a Macro computer (a harness).
 Its owner gives each Machine `step_slots`, how many factory Steps run on it
 at once (none, the default, for no limit), and `tags` in Settings, Machines
 (`PATCH /harnesses/{id}`). An Agent of a Definition may ask its Machine for
-tags (`machine_tags`, ignoring case). Before a Step claims its session it is
-placed (`SessionAgent::place`): its Role's Agents, in the order a Step takes
-them (arm, rule, the Role's own), are passed over while their Machine lacks
-a tag they ask for (a bot on no Machine has no tags), and the first whose
-Machine has a free slot takes the Step, which holds the slot
-(`factory_step.machine_id`, `MachineRepository::take_machine_slot`, under a
-lock per Machine) until it ends or its Run does. An Agent on no Machine that
-asks no tag takes it at once. While every matching Machine is full the Step
-waits, looking every 10 s, and records on which and since when
-(`wait_for_machine_slot`), which the Run API shows on the Step as
-`runtime.waitingForSlotSince` and `runtime.waitingOnMachines` (the names for
-the Run's owner only, as `machine`); an attempt out of time fails
-`WaitingForSlot` (`StepError::WaitingForMachine`, type
-`FactoryWaitingForMachine`), retried, and a Step whose whole time runs out
-so ends its Run `infrastructure`. A Step whose Agents no Machine with their
-tags runs fails at once as a refusal (`SessionAgentError::NoMachine`), its
-output saying which tags. A Step that claimed its session is not placed
-again, so a retry keeps its slot. Not placed yet: a Step that goes on
-after a question works in the asking Step's session, whose slot ended with
-that Step, and an Agent that takes a Step on another's lack of quota opens
-on its own Machine without a slot. Deploy every worker before a
-Definition adds `machine_tags`: `Agent` denies unknown fields, so an older
-worker fails the agent Steps of a Run that kept one.
+tags (`machine_tags`), which the definition's read keeps as a Machine keeps
+its own (trimmed, lowered, once each, sorted, 1 to 32 letters, digits, `-`,
+`_` or `.`, at most 16): a tag no Machine can have fails the definition
+(`AgentDefinitionError::MachineTag`), not a Run. An Agent fits a Step while
+its Machine has every tag it asks for; a bot on no Machine has none.
+
+A Step's slot follows the Agent that opens its session: just before an
+Agent's session opens (`SessionAgent::hold_slot`, in `answer_in`), the Step
+takes a slot on that Agent's Machine (`MachineRepository::take_machine_slot`,
+under a lock per Machine), moving any slot it held, or lets go of it for an
+Agent on no Machine. It holds the slot until it or its Run ends, or for at
+most `SLOT_HELD_AT_MOST` (125 minutes, past the two hours a Step's work has)
+after it started, so a Step whose Run's workflow is gone without recording
+its end frees its slot then. Before a Step claims its first session it is
+placed (`SessionAgent::place`): the first of its Role's Agents, in the order
+a Step takes them (arm, rule, the Role's own), that fits and whose Machine
+has a free slot. An Agent the owner's quota refused lately, with a fitting
+Agent after it, is claimed with no slot booked: its start passes it over,
+recording why, and the next fitting Agent holds the slot. Every pass to
+another Agent (lack of quota, a usage limit, a session lost after a
+question) goes to the next fitting Agent (`next_fitting`).
+
+While every fitting Machine is full the Step waits, looking every 10 s, and
+records on which and since when (`wait_for_machine_slot`), which the Run API
+shows as `runtime.waitingForSlotSince` and `runtime.waitingOnMachines` (the
+names for the Run's owner only, as `machine`). An attempt out of time fails
+`WaitingForSlot`, retried (`StepError::WaitingForMachine`, type
+`FactoryWaitingForMachine`). A Step does not take a slot more than
+`TAKE_SLOT_WITHIN` (90 minutes) after it started, so one that takes a slot
+has at least half an hour left: past it a Step that holds none fails for
+good (`SlotTimeRanOut`, the same type, not retried). Either way a Step whose
+time runs out so ends its Run `infrastructure`. A Step whose Agents none
+fits fails at once as a refusal (`SessionAgentError::NoMachine`), its output
+naming the tags.
+
+Known limits: a Step that goes on after a question is prompted in the
+asking Step's session and holds no slot (that Step's slot ended with it); a
+session lost then is placed again as it opens afresh. Overlapping Temporal
+attempts of one Step can briefly split its slot and its session: an attempt
+that moved the slot to another Agent's Machine, then found another attempt
+had handed the Step on, goes on in that attempt's session, and the slot is
+held where the last attempt to open a session took it. Deploy every worker
+before a Definition adds `machine_tags`: `Agent` denies unknown fields, so
+an older worker fails the agent Steps of a Run that kept one.
 
 Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
 `deny_unknown_fields`, and an agent Step reads its Run's kept Agents

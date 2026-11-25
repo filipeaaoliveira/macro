@@ -1631,10 +1631,16 @@ pub enum StepError {
     #[error("the step's agents are out of quota: {0:?}")]
     OutOfQuota(rootcause::Report),
     /// Every Machine the Step's Agents may run on stayed full through the
-    /// attempt: a retry waits on. Should the Step's time run out so, its
-    /// Run ends `infrastructure`.
-    #[error("every machine the step may run on stayed full: {0:?}")]
-    WaitingForMachine(rootcause::Report),
+    /// attempt: a retry waits on, unless `last` says too little of the
+    /// Step's time is left. Should the Step's time run out so, its Run ends
+    /// `infrastructure`.
+    #[error("every machine the step may run on stayed full: {report:?}")]
+    WaitingForMachine {
+        /// Why.
+        report: rootcause::Report,
+        /// Whether no attempt is left to wait in.
+        last: bool,
+    },
     /// Any other internal error.
     #[error("internal step error: {0:?}")]
     Internal(rootcause::Report),
