@@ -613,6 +613,8 @@ async fn update_harness_changes_only_the_named_columns(pool: PgPool) {
             HarnessChanges {
                 name: None,
                 allow_permission_bypass: Some(true),
+                step_slots: None,
+                tags: None,
             },
         )
         .await
@@ -627,6 +629,8 @@ async fn update_harness_changes_only_the_named_columns(pool: PgPool) {
             HarnessChanges {
                 name: Some("studio".to_owned()),
                 allow_permission_bypass: None,
+                step_slots: None,
+                tags: None,
             },
         )
         .await
@@ -646,6 +650,73 @@ async fn update_harness_changes_only_the_named_columns(pool: PgPool) {
             .unwrap()
             .is_none()
     );
+}
+
+/// A Machine's factory Step slots and tags are kept, read back on every
+/// listing, and left alone by a change that does not name them; `Some(None)`
+/// clears the slot limit.
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn update_harness_keeps_step_slots_and_tags(pool: PgPool) {
+    let repo = PgHarnessRepo::new(pool.clone());
+    insert_user(&pool, OWNER_ID).await;
+    repo.insert_pairing(new_pairing("AAAA-BBBB", "secret"))
+        .await
+        .unwrap();
+    let harness = repo
+        .approve_pairing("AAAA-BBBB", new_harness())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(harness.step_slots, None);
+    assert!(harness.tags.is_empty());
+
+    let placed = repo
+        .update_harness(
+            harness.id,
+            HarnessChanges {
+                step_slots: Some(Some(3)),
+                tags: Some(vec!["gpu".to_owned(), "rust-build".to_owned()]),
+                ..HarnessChanges::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(placed.step_slots, Some(3));
+    assert_eq!(placed.tags, ["gpu", "rust-build"]);
+
+    let renamed = repo
+        .update_harness(
+            harness.id,
+            HarnessChanges {
+                name: Some("studio".to_owned()),
+                ..HarnessChanges::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(renamed.step_slots, Some(3));
+    assert_eq!(renamed.tags, ["gpu", "rust-build"]);
+    let listed = repo.list_usable_harnesses(caller()).await.unwrap();
+    let listed = listed.iter().find(|item| item.id == harness.id).unwrap();
+    assert_eq!(listed.step_slots, Some(3));
+    assert_eq!(listed.tags, ["gpu", "rust-build"]);
+
+    let unlimited = repo
+        .update_harness(
+            harness.id,
+            HarnessChanges {
+                step_slots: Some(None),
+                tags: Some(Vec::new()),
+                ..HarnessChanges::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(unlimited.step_slots, None);
+    assert!(unlimited.tags.is_empty());
 }
 
 fn hosted_pairing(pairing_id: PairingId, secret: &str) -> NewPairing {
@@ -726,6 +797,8 @@ async fn hosted_pairing_is_born_approved_rotates_on_retry_and_claims_once(pool: 
             HarnessChanges {
                 name: Some("Renamed computer".to_owned()),
                 allow_permission_bypass: Some(true),
+                step_slots: None,
+                tags: None,
             },
         )
         .await

@@ -18,8 +18,8 @@ use super::{
         ApprovePairingRequest, ClaimOutcome, ClaimPairingRequest, ClaimedPairing,
         CreateHostedPairing, CreatePairingRequest, CreatedPairing, Harness, HarnessAccess,
         HarnessAgent, HarnessOwner, HarnessPermission, HarnessResident, HarnessSession,
-        HostedPairing, PairingDetails, PairingStatus, PatchHarnessRequest,
-        SetHarnessTeamAccessRequest,
+        HostedPairing, MAX_STEP_SLOTS, MAX_TAG_CHARS, MAX_TAGS, PairingDetails, PairingStatus,
+        PatchHarnessRequest, SetHarnessTeamAccessRequest,
     },
     ports::{
         ComputerTeamAgents, HarnessChanges, HarnessError, HarnessRepo, HarnessService,
@@ -52,6 +52,49 @@ fn validated_name(name: &str) -> Result<String, HarnessError> {
         )));
     }
     Ok(name.to_owned())
+}
+
+/// Factory Step slots within the limit: 1 to [`MAX_STEP_SLOTS`].
+fn validated_step_slots(slots: Option<u16>) -> Result<Option<u16>, HarnessError> {
+    match slots {
+        Some(slots) if slots == 0 || slots > MAX_STEP_SLOTS => Err(HarnessError::BadRequest(
+            format!("step_slots must be 1..={MAX_STEP_SLOTS}, or null for no limit"),
+        )),
+        slots => Ok(slots),
+    }
+}
+
+/// A Machine's tags as kept: lowered, each kept once and sorted. Each is 1
+/// to [`MAX_TAG_CHARS`] letters, digits, `-`, `_` or `.`, starting with a
+/// letter or digit, so a Definition names it the same way wherever it is
+/// written; at most [`MAX_TAGS`] of them.
+fn validated_tags(tags: &[String]) -> Result<Vec<String>, HarnessError> {
+    let mut kept = Vec::with_capacity(tags.len());
+    for tag in tags {
+        let tag = tag.trim().to_lowercase();
+        let starts_well = tag
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric());
+        let well_formed = tag
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if !starts_well || !well_formed || tag.chars().count() > MAX_TAG_CHARS {
+            return Err(HarnessError::BadRequest(format!(
+                "tag {tag:?} must be 1..={MAX_TAG_CHARS} letters, digits, `-`, `_` or `.`, \
+                 starting with a letter or digit"
+            )));
+        }
+        kept.push(tag);
+    }
+    kept.sort();
+    kept.dedup();
+    if kept.len() > MAX_TAGS {
+        return Err(HarnessError::BadRequest(format!(
+            "a machine has at most {MAX_TAGS} tags"
+        )));
+    }
+    Ok(kept)
 }
 
 /// Harness service backed by a repository.
@@ -469,6 +512,8 @@ where
         let changes = HarnessChanges {
             name: req.name.as_deref().map(validated_name).transpose()?,
             allow_permission_bypass: req.allow_permission_bypass,
+            step_slots: req.step_slots.map(validated_step_slots).transpose()?,
+            tags: req.tags.as_deref().map(validated_tags).transpose()?,
         };
         if changes == HarnessChanges::default() {
             return self.with_team_agent(harness).await;

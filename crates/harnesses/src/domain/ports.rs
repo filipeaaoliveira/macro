@@ -45,6 +45,10 @@ pub struct HarnessChanges {
     pub name: Option<String>,
     /// New permission-bypass setting.
     pub allow_permission_bypass: Option<bool>,
+    /// New factory Step slots: `Some(None)` for no limit.
+    pub step_slots: Option<Option<u16>>,
+    /// New tags, already checked, lowered, unique and sorted.
+    pub tags: Option<Vec<String>>,
 }
 
 /// A harness row to create at approval.

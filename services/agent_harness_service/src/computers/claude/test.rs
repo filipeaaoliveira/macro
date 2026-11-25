@@ -118,6 +118,8 @@ async fn computer_route_access(
                 )),
                 team_agent_user_id: None,
                 claude_mode: ClaudeMode::OwnAccount,
+                step_slots: None,
+                tags: Vec::new(),
             }))
         })
     });
@@ -501,6 +503,8 @@ async fn claude_sign_in_follows_the_computer_teams_admins_not_its_buyer() {
                 )),
                 team_agent_user_id: None,
                 claude_mode: ClaudeMode::MacroCredits,
+                step_slots: None,
+                tags: Vec::new(),
             }))
         })
     });

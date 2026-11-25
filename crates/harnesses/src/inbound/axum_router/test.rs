@@ -23,6 +23,8 @@ fn harness(connected: bool) -> Harness {
         computer_id: None,
         team_agent_user_id: None,
         claude_mode: ClaudeMode::MacroCredits,
+        step_slots: None,
+        tags: Vec::new(),
     }
 }
 

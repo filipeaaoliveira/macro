@@ -38,6 +38,8 @@ fn short_config_keeps_selected_settings_and_web_owned_values_visible() {
         computer_id: None,
         team_agent_user_id: None,
         claude_mode: ClaudeMode::MacroCredits,
+        step_slots: None,
+        tags: Vec::new(),
         id: HarnessId::TEST_A,
         kind: "macrod".to_owned(),
         name: "Desk".to_owned(),
