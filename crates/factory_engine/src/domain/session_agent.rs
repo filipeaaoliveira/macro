@@ -100,6 +100,18 @@ const MAX_FAILED_READS: u8 = 5;
 /// the failure says why.
 const SESSION_DEADLINE: Duration = Duration::from_secs(29 * 60);
 
+/// An Agent of a Step's Role on a bot that runs its sessions for the Run's
+/// owner: the bot the Agent names, or, for an Agent that names a vendor,
+/// one of the owner's Machines or API keys for it. An Agent that names a
+/// vendor may come several times in a Step's order, once per bot.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct AgentBot {
+    /// The Agent.
+    pub(crate) agent: AgentName,
+    /// The bot whose harness runs its session.
+    pub(crate) bot: BotId,
+}
+
 /// Why a Step's session did not hand back a result.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionAgentError {
@@ -218,6 +230,13 @@ pub enum SessionAgentError {
     /// ends `infrastructure`. It holds the full Machines' names.
     #[error("the step waited too long for a slot on {}", .0.join(", "))]
     SlotTimeRanOut(Vec<String>),
+    /// No Agent of the Step's Role has a Machine or an API key it may run
+    /// on for the Run's owner, until the attempt's time ran out: its
+    /// Machine is someone else's, or its owner has none for the vendor it
+    /// names. A retry waits on, as for a slot. It holds what the Run's owner
+    /// is shown.
+    #[error("{0}")]
+    WaitingForMachineOrKey(String),
 }
 
 impl Retryable for SessionAgentError {
@@ -249,7 +268,8 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::Superseded
             | SessionAgentError::NotOpened
             | SessionAgentError::MayStillOpen
-            | SessionAgentError::WaitingForSlot(_) => true,
+            | SessionAgentError::WaitingForSlot(_)
+            | SessionAgentError::WaitingForMachineOrKey(_) => true,
             SessionAgentError::Session(error) => error.is_transient(),
             SessionAgentError::TurnFailed(_)
             | SessionAgentError::NoQuota(_)
@@ -318,7 +338,9 @@ impl AgentFailure for SessionAgentError {
     fn waits_for_machine(&self) -> bool {
         matches!(
             self,
-            SessionAgentError::WaitingForSlot(_) | SessionAgentError::SlotTimeRanOut(_)
+            SessionAgentError::WaitingForSlot(_)
+                | SessionAgentError::SlotTimeRanOut(_)
+                | SessionAgentError::WaitingForMachineOrKey(_)
         )
     }
 
@@ -401,12 +423,37 @@ impl<
     /// cannot start for lack of quota. A Benchmark trial takes only its
     /// first, so every trial runs on its suite's configuration: one that
     /// cannot start, or that the definition no longer has, fails. An arm's
-    /// choice the definition no longer has is passed over, and logged.
+    /// choice the definition no longer has is passed over, and logged. Each
+    /// on the bots that run it for the Run's owner (`on_bots`).
     async fn role_agents(
         &self,
         agents: &AgentDefinition,
         task: &AgentTask,
+    ) -> Result<Vec<AgentBot>, SessionAgentError> {
+        let (names, trial) = self.ordered_names(agents, task).await?;
+        let mut bots = self.on_bots(agents, task, &names).await?;
+        if trial {
+            bots.truncate(1);
+        }
+        Ok(bots)
+    }
+
+    /// The names of the Agents [`Self::role_agents`] takes, in order.
+    async fn role_names(
+        &self,
+        agents: &AgentDefinition,
+        task: &AgentTask,
     ) -> Result<Vec<AgentName>, SessionAgentError> {
+        Ok(self.ordered_names(agents, task).await?.0)
+    }
+
+    /// The names of the Agents [`Self::role_agents`] takes, in order, and
+    /// whether the Run is a Benchmark trial, which takes only its first.
+    async fn ordered_names(
+        &self,
+        agents: &AgentDefinition,
+        task: &AgentTask,
+    ) -> Result<(Vec<AgentName>, bool), SessionAgentError> {
         let run = self
             .repo
             .run_agents(task.key.run_id)
@@ -453,7 +500,7 @@ impl<
         if run.trial {
             ordered.truncate(1);
         }
-        Ok(ordered)
+        Ok((ordered, run.trial))
     }
 
     /// The Agent named `name`.
@@ -479,21 +526,35 @@ impl<
     ) -> Result<BotId, SessionAgentError> {
         match session.bot {
             Some(bot) => Ok(BotId::new_from_uuid(bot)),
-            None => Ok(Self::agent(agents, &Self::agent_name(agents, session, role)?)?.bot),
+            None => {
+                let name = Self::agent_name(agents, session, role)?;
+                Self::agent(agents, &name)?
+                    .bot
+                    .ok_or(SessionAgentError::UnknownAgent(name))
+            }
         }
     }
 
-    /// A new session of the Agent `name`, its ids made now.
-    fn new_session(
+    /// The Agent and bot of the session `session` of a Step of `role`.
+    fn agent_bot(
         agents: &AgentDefinition,
-        name: &AgentName,
-    ) -> Result<StepSession, SessionAgentError> {
-        Ok(StepSession {
+        session: &StepSession,
+        role: &Role,
+    ) -> Result<AgentBot, SessionAgentError> {
+        Ok(AgentBot {
+            agent: Self::agent_name(agents, session, role)?,
+            bot: Self::bot(agents, session, role)?,
+        })
+    }
+
+    /// A new session of the Agent on the bot `on`, its ids made now.
+    fn new_session(on: &AgentBot) -> StepSession {
+        StepSession {
             session_id: Uuid::now_v7(),
             action_id: Uuid::now_v7(),
-            agent: Some(name.clone()),
-            bot: Some(Self::agent(agents, name)?.bot.as_uuid()),
-        })
+            agent: Some(on.agent.clone()),
+            bot: Some(on.bot.as_uuid()),
+        }
     }
 
     /// The Agents of the Factory Definition the Run `run_id` started under,
@@ -593,7 +654,7 @@ impl<
             .prepare(PrepareRoutineSession {
                 selection: ValidateRoutineSession {
                     owner: task.owner.clone(),
-                    bot_id: agent.bot,
+                    bot_id: action.bot_id,
                     model: agent.model.clone(),
                     mcp_servers: Vec::new(),
                 },
@@ -1244,10 +1305,10 @@ impl<
             return Err(SessionAgentError::UnfilledRole(task.role.clone()));
         }
         let first = self
-            .next_fitting(agents, &listed, None)
+            .next_fitting(agents, task, &listed, None)
             .await?
             .ok_or_else(|| SessionAgentError::NoMachine(placement::no_machine(agents, &listed)))?;
-        let fresh = Self::new_session(agents, &first)?;
+        let fresh = Self::new_session(&first);
         let passed = PassedOver {
             agent,
             reason: SESSION_LOST.to_string(),
@@ -1352,35 +1413,34 @@ impl<
             // or none is left; the Step records each Agent passed over, the last
             // one too.
             let (action, started) = loop {
-                let agent = Self::agent_name(agents, &session, &task.role)?;
+                let on = Self::agent_bot(agents, &session, &task.role)?;
+                let agent = on.agent.clone();
                 // The Agent after this one in the Role's list whose Machine
                 // has the tags it asks for, or the first such when the
                 // definition no longer lists this one for the Role.
                 let to = self
-                    .next_fitting(agents, &listed, Some(&agent))
+                    .next_fitting(agents, task, &listed, Some(&on))
                     .await?
-                    .map(|name| Self::new_session(agents, &name))
-                    .transpose()?;
+                    .map(|next| Self::new_session(&next));
 
                 // An Agent its owner's quota refused lately is passed over
                 // without its session opened, while another Agent is left to
                 // take the Step; only in a session this attempt made, which no
                 // attempt can have started work in.
-                let skipped =
-                    fresh && to.is_some() && self.quota.refused_lately(&task.owner, &agent);
+                let skipped = fresh && to.is_some() && self.quota.refused_lately(&task.owner, &on);
                 let refusal = if skipped {
                     None
                 } else {
                     // The Step's slot follows the Agent that opens its
                     // session.
-                    self.hold_slot(agents, task, &agent, deadline).await?;
+                    self.hold_slot(agents, task, &on, deadline).await?;
                     match self.start(agents, task, &session, &agent, deadline).await {
                         Ok(action) => {
-                            self.quota.started(&task.owner, &agent);
-                            break (action, agent);
+                            self.quota.started(&task.owner, &on);
+                            break (action, on);
                         }
                         Err(SessionAgentError::NoQuota(reason)) => {
-                            self.quota.refused(&task.owner, &agent);
+                            self.quota.refused(&task.owner, &on);
                             Some(reason)
                         }
                         // An overlapping attempt handed the Step on while this
@@ -1494,16 +1554,15 @@ impl<
         &self,
         agents: &AgentDefinition,
         task: &AgentTask,
-        listed: &[AgentName],
+        listed: &[AgentBot],
         session: &StepSession,
-        agent: &AgentName,
+        agent: &AgentBot,
         action: &RoutineSessionAction,
     ) -> Result<Option<(StepSession, bool)>, SessionAgentError> {
         let Some(to) = self
-            .next_fitting(agents, listed, Some(agent))
+            .next_fitting(agents, task, listed, Some(agent))
             .await?
-            .map(|name| Self::new_session(agents, &name))
-            .transpose()?
+            .map(|next| Self::new_session(&next))
         else {
             return Ok(None);
         };
@@ -1522,7 +1581,7 @@ impl<
         // needs, and the Step stops pointing at it once handed on.
         self.delete(action).await;
         let passed = PassedOver {
-            agent: agent.clone(),
+            agent: agent.agent.clone(),
             reason: USAGE_LIMIT.to_string(),
         };
         let recorded = self
@@ -1532,7 +1591,7 @@ impl<
             .map_err(Self::records)?;
         if recorded {
             tracing::info!(
-                from = %agent,
+                from = %agent.agent,
                 reason = USAGE_LIMIT,
                 "a factory step's agent ran into its usage limit: the next agent takes it"
             );
@@ -1569,14 +1628,11 @@ impl<
         if let Some(asked) = task.resumes {
             return self.go_on(agents, &task, asked, deadline).await;
         }
-        let listed = self.role_agents(agents, &task).await?;
-        if listed.is_empty() {
-            return Err(SessionAgentError::UnfilledRole(task.role.clone()));
-        }
         // A Step that claimed no session yet is placed first: on the first
         // of its Agents whose Machine has the tags it asks for and a free
-        // slot, waiting while each such Machine is full.
-        let first = self.place(agents, &task, &listed, deadline).await?;
+        // slot, waiting while each such Machine is full, or while none it
+        // may run on for its owner is there.
+        let first = self.place(agents, &task, deadline).await?;
         // A retried Step goes on in the session its first attempt claimed,
         // or the one a later Agent took over, so the work is never started
         // twice.
@@ -1584,7 +1640,7 @@ impl<
             .repo
             .claim_session(
                 task.key,
-                Self::new_session(agents, &first)?,
+                Self::new_session(&first),
                 &task.role,
                 &task.outcomes,
             )

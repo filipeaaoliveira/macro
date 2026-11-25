@@ -46,6 +46,13 @@ Outside the files, all must be done:
   agent each member who starts Runs may use. The zero ids name no agent:
   until you replace them, the validator fails, naming `agents.json` and
   the Agent, team settings refuse the Definition, and no Run starts.
+- An agent on a macrod machine runs only the Runs of the person who paired
+  the machine: its CLI is signed in with their own login, which nobody
+  else's Run spends, even with the machine shared. For a team, give an
+  Agent a `vendor` (`anthropic` or `openai`) instead of a `bot`: each
+  member's Steps then run on their own machine whose agent runs that
+  vendor's CLI, else on an agent of theirs with an API key of the
+  vendor's, else on their team's. A Step with none waits and says why.
 - `model` (may): left out, the agent's own default model. It must be one
   the agent's runtime offers: a Claude Code agent's (`opus`, `sonnet`), a
   Codex agent's (`gpt-5.5`, as `codex` lists it). A model the runtime does
@@ -263,7 +270,7 @@ each trial with the tokens it used.
 | --- | --- |
 | `factory.json` | The format's `version` (1), a `description`, and the Flows, by name. |
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
-| `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). Optional `rules`: the Agent Rules (below). |
+| `agents.json` | The Agents (`bot` or `vendor`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). Optional `rules`: the Agent Rules (below). |
 | `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own, and the Queue limit and token budget. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. `knownFlakes`: the CI jobs known to be flaky. Each left out takes the factory's default. |
 | `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format, and when its failures start a self-improvement Run (below). Left out, the team has none, and the defaults apply. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |

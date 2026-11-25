@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use chrono::Utc;
-use factory_records::domain::machines::{MachineRepository, SlotTake, StepMachine};
+use factory_records::domain::machines::{MachineRepository, OwnerBot, SlotTake, StepMachine};
 use factory_records::domain::models::StepKey;
 use uuid::Uuid;
 
@@ -17,6 +17,19 @@ impl MachineRepository for FakeRepo {
             return Err(FakeError);
         }
         Ok(self.machines.lock().expect("machines").get(&bot).cloned())
+    }
+
+    async fn owner_bots(&self, owner: &str) -> Result<Vec<OwnerBot>, FakeError> {
+        if self.fails("owner_bots") {
+            return Err(FakeError);
+        }
+        Ok(self
+            .owner_bots
+            .lock()
+            .expect("owner bots")
+            .get(owner)
+            .cloned()
+            .unwrap_or_default())
     }
 
     /// As the records keep it: a Step keeps the slot it holds; the Steps
@@ -67,6 +80,7 @@ impl MachineRepository for FakeRepo {
         }
         held.insert(key, machine);
         self.slot_waits.lock().expect("waits").remove(&key);
+        self.slot_wait_reasons.lock().expect("reasons").remove(&key);
         Ok(SlotTake::Taken)
     }
 
@@ -82,6 +96,7 @@ impl MachineRepository for FakeRepo {
     async fn release_machine_slot(&self, key: StepKey) -> Result<(), FakeError> {
         self.machine_slots.lock().expect("slots").remove(&key);
         self.slot_waits.lock().expect("waits").remove(&key);
+        self.slot_wait_reasons.lock().expect("reasons").remove(&key);
         Ok(())
     }
 
@@ -89,11 +104,17 @@ impl MachineRepository for FakeRepo {
         &self,
         key: StepKey,
         machines: &[String],
+        reason: Option<&str>,
     ) -> Result<(), FakeError> {
         self.slot_waits
             .lock()
             .expect("waits")
             .insert(key, machines.to_vec());
+        let mut reasons = self.slot_wait_reasons.lock().expect("reasons");
+        match reason {
+            Some(reason) => reasons.insert(key, reason.to_string()),
+            None => reasons.remove(&key),
+        };
         Ok(())
     }
 }

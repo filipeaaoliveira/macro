@@ -717,3 +717,49 @@ fn machine_tags_are_read_as_machines_keep_theirs() {
         );
     }
 }
+
+/// An Agent names a bot or a vendor: one that names both, or neither, does
+/// not read, and one that names a vendor reads back as written.
+#[test]
+fn an_agent_names_a_bot_or_a_vendor() {
+    let both = read(json!({
+        "agents": { "claude": { "bot": PRIMARY_BOT, "vendor": "anthropic" } },
+        "roles": { "planner": ["claude"] }
+    }));
+    let neither = read(json!({
+        "agents": { "claude": { "model": "claude-opus-4-5" } },
+        "roles": { "planner": ["claude"] }
+    }));
+    let vendor = json!({
+        "agents": { "claude": { "vendor": "anthropic" } },
+        "roles": { "planner": ["claude"] }
+    });
+
+    let refusal = AgentDefinitionError::BotOrVendor(agent("claude")).to_string();
+    assert_eq!(both.expect_err("both"), refusal);
+    assert_eq!(neither.expect_err("neither"), refusal);
+    let read_back = read(vendor.clone()).expect("a vendor agent");
+    assert_eq!(serde_json::to_value(&read_back).expect("written"), vendor);
+}
+
+/// An Agent that names a vendor fills no Standing Role: a session of no
+/// bot of the owner's is not taken for it.
+#[test]
+fn a_vendor_agent_fills_no_standing_role() {
+    let definition = read(json!({
+        "agents": {
+            "claude": { "vendor": "anthropic" },
+            "primary": { "bot": PRIMARY_BOT }
+        },
+        "roles": { "planner": ["claude"] },
+        "standing": { "intake": { "acts": ["start"], "agents": ["claude"] } }
+    }))
+    .expect("a definition");
+
+    assert_eq!(
+        definition.standing_check(StandingAct::Start, None),
+        StandingCheck::Refused {
+            allowing: vec![standing_role("intake")]
+        }
+    );
+}

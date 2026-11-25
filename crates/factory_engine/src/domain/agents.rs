@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use bot_id::{BotId, CODEX_BOT_ID};
 use factory_records::domain::evaluation::{AgentChoices, RunAgentRule};
+use factory_records::domain::machines::Vendor;
 use factory_records::domain::models::{AgentName, Role};
 use factory_records::domain::standing_acts::{StandingAct, StandingRoleName};
 use serde::{Deserialize, Serialize};
@@ -60,8 +61,17 @@ fn defaults_to_reviewer(role: &Role) -> bool {
 #[serde(deny_unknown_fields)]
 pub struct Agent {
     /// The Macro agent whose sessions do the work: its harness runs them.
-    /// The Run's owner must be allowed to use it.
-    pub bot: BotId,
+    /// The Run's owner must be allowed to use it. An Agent names a bot or a
+    /// `vendor`, never both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot: Option<BotId>,
+    /// The vendor whose CLI or API the work runs on, for each Run's owner
+    /// their own: a Step takes, in order, the owner's coding agents on
+    /// macrod machines they paired whose model is the vendor's (their
+    /// subscription), then their own agents with an API key of the
+    /// vendor's, then their teams' (`MachineRepository::owner_bots`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<Vendor>,
     /// The model the sessions use; the agent's default when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -296,6 +306,9 @@ pub enum AgentDefinitionError {
     /// definition lists them.
     #[error("{}", placeholder_bots_message(.0))]
     PlaceholderBots(Vec<AgentName>),
+    /// An Agent names neither a bot nor a vendor, or both.
+    #[error("agent {0} must name a bot or a vendor (anthropic, openai), not both")]
+    BotOrVendor(AgentName),
     /// Agents a work Role lists whose bot is Codex's cloud agent
     /// ([`CODEX_BOT_ID`]), in the order the definition lists them: its
     /// sessions work in a cloud environment of their own, outside the Run's
@@ -398,6 +411,9 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
     fn try_from(fields: AgentDefinitionFields) -> Result<Self, Self::Error> {
         let mut fields = fields;
         for (name, agent) in &mut fields.agents {
+            if agent.bot.is_some() == agent.vendor.is_some() {
+                return Err(AgentDefinitionError::BotOrVendor(name.clone()));
+            }
             agent.machine_tags = machine_tags(name, &agent.machine_tags)?;
         }
 
@@ -524,7 +540,7 @@ impl AgentDefinition {
     pub fn placeholder_bots(&self) -> Vec<AgentName> {
         self.agents
             .iter()
-            .filter(|(_, agent)| is_placeholder_bot(agent.bot))
+            .filter(|(_, agent)| agent.bot.is_some_and(is_placeholder_bot))
             .map(|(name, _)| name.clone())
             .collect()
     }
@@ -537,7 +553,8 @@ impl AgentDefinition {
         self.agents
             .iter()
             .filter(|(name, agent)| {
-                agent.bot == CODEX_BOT_ID && self.roles.values().any(|listed| listed.contains(name))
+                agent.bot == Some(CODEX_BOT_ID)
+                    && self.roles.values().any(|listed| listed.contains(name))
             })
             .map(|(name, _)| name.clone())
             .collect()
@@ -584,7 +601,8 @@ impl AgentDefinition {
     /// a Run's owner, by the definition's Standing Roles: the first
     /// Standing Role, by name, that allows the act and lists an Agent of
     /// that bot fills it. A session with no bot of the owner's (`None`)
-    /// fills none.
+    /// fills none, and an Agent that names a vendor rather than a bot
+    /// fills none either.
     pub fn standing_check(&self, act: StandingAct, bot: Option<BotId>) -> StandingCheck {
         let Some(standing) = &self.standing else {
             return StandingCheck::Open;
@@ -598,7 +616,7 @@ impl AgentDefinition {
             let filled_by = role.agents.iter().find(|agent| {
                 self.agents
                     .get(*agent)
-                    .is_some_and(|known| Some(known.bot) == bot)
+                    .is_some_and(|known| known.bot.is_some() && known.bot == bot)
             });
             if let Some(agent) = filled_by {
                 return StandingCheck::Filled {

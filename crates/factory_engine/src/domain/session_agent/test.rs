@@ -39,6 +39,7 @@ mod run_check;
 mod said_breaks;
 mod setup;
 mod step_terminal;
+mod subscriptions;
 mod usage_limit;
 
 /// What happens to one call: it works, or fails with this error. A call

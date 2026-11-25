@@ -913,6 +913,7 @@ impl RunDetail {
             for step in &mut self.steps {
                 step.runtime.machine = None;
                 step.runtime.waiting_on_machines = Vec::new();
+                step.runtime.waiting_reason = None;
             }
         }
         self

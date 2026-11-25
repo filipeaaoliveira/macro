@@ -8,8 +8,8 @@ use super::{
 };
 use crate::domain::fakes::FakeRepo;
 use crate::domain::ports::StepAgent;
-use crate::domain::session_agent::SessionAgent;
 use crate::domain::session_agent::quota_memory::{NO_QUOTA_LATELY, QUOTA_COOL_DOWN};
+use crate::domain::session_agent::{AgentBot, SessionAgent};
 
 /// The agent over `sessions` that shares what `earlier` remembers of
 /// refusals, as one worker's agent does from Step to Step.
@@ -141,8 +141,10 @@ async fn a_retried_step_goes_on_with_its_agent_however_lately_refused() {
     let task = plan_task(&repo).await;
     repo.claim_session(
         task.key,
-        SessionAgent::<FakeSessions, FakeRepo>::new_session(&agents(), &name("primary"))
-            .expect("a session"),
+        SessionAgent::<FakeSessions, FakeRepo>::new_session(&AgentBot {
+            agent: name("primary"),
+            bot: PRIMARY,
+        }),
         &planner(),
         &task.outcomes,
     )

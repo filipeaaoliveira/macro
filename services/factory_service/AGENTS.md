@@ -141,6 +141,12 @@ worker that walks each Run's Flow, in one process.
   }
   ```
 
+  An Agent may name a `vendor` (`anthropic`, `openai`) instead of a `bot`:
+  each Run's owner's own macrod machine for it, then their own and their
+  teams' agents with an API key of the vendor's
+  (`crates/factory_engine/AGENTS.md`, Subscriptions and API keys). A
+  machine's provider login runs only its owner's Runs.
+
   An Agent may run on Codex: its `bot` is the agent of a machine whose
   macrod runs Codex (`--agent codex`, signed in with the owner's own Codex
   login) and its `model` one Codex lists (`docs/runbooks/factory-codex-role.md`).

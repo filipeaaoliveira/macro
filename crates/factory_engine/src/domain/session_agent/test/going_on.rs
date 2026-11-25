@@ -191,7 +191,7 @@ async fn a_session_lost_with_nothing_to_go_on_afresh_with_fails_for_good() {
 /// the Step holds a slot on the Machine its new session opens on.
 #[tokio::test(start_paused = true)]
 async fn a_lost_session_goes_on_afresh_with_an_agent_whose_machine_has_the_tags() {
-    use factory_records::domain::machines::StepMachine;
+    use factory_records::domain::machines::{MachineLogin, StepMachine};
     use uuid::Uuid;
 
     use super::{BACKUP, PRIMARY};
@@ -204,6 +204,7 @@ async fn a_lost_session_goes_on_afresh_with_an_agent_whose_machine_has_the_tags(
         name: name.to_string(),
         step_slots: Some(1),
         tags: tags.iter().map(ToString::to_string).collect(),
+        login: MachineLogin::Owner("macro|julia@example.com".to_string()),
     };
     repo.machines
         .lock()
