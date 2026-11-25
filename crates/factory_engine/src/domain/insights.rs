@@ -394,6 +394,25 @@ pub struct UsageInsight {
     pub tokens: TokenCounts,
     /// The Runs that used the most tokens, most first.
     pub heaviest: Vec<RunTokens>,
+    /// What the calls billed to agents' own API keys cost, per key, most
+    /// first, a key whose cost is unknown last. Calls on a Machine's provider login (a subscription) or on
+    /// Macro credits are on no key.
+    pub api_keys: Vec<ApiKeyCost>,
+}
+
+/// What the period's agent sessions' calls on one agent's own API key
+/// cost.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyCost {
+    /// The key, by the agent that holds it (its bot id). The key itself is
+    /// never read.
+    pub key: Uuid,
+    /// The sessions with calls on it.
+    pub sessions: u32,
+    /// What those calls cost, in US dollars; none when one of them had no
+    /// price.
+    pub cost_usd: Option<f64>,
 }
 
 /// How a person's Runs went over a period.
@@ -636,12 +655,24 @@ fn summarize(
         .collect();
     let mut measured_steps: HashSet<(RunId, u16)> = HashSet::new();
     let mut counted: HashSet<(RunId, &str, Uuid)> = HashSet::new();
+    // What each key's calls cost, how many had no price, and in how many
+    // sessions, each session once however many Steps shared it.
+    let mut key_cost: HashMap<Uuid, (f64, u64, u32)> = HashMap::new();
+    let mut keyed_sessions: HashSet<Uuid> = HashSet::new();
     for session in &records.sessions {
         let Some(used) = tokens_by_session.get(&session.session_id) else {
             entry_unmeasured.insert(session.entry.as_str());
             continue;
         };
         measured_steps.insert((session.run_id, session.seq));
+        if let Some(spend) = used.api_key
+            && keyed_sessions.insert(session.session_id)
+        {
+            let cost = key_cost.entry(spend.key).or_default();
+            cost.0 += spend.cost_usd;
+            cost.1 += spend.unpriced_calls;
+            cost.2 += 1;
+        }
         if !counted.insert((session.run_id, session.entry.as_str(), session.session_id)) {
             continue;
         }
@@ -672,6 +703,21 @@ fn summarize(
             .then_with(|| b.run.created_at.cmp(&a.run.created_at))
     });
     heaviest.truncate(HEAVIEST_RUNS);
+    let mut api_keys: Vec<ApiKeyCost> = key_cost
+        .into_iter()
+        .map(|(key, (usd, unpriced, sessions))| ApiKeyCost {
+            key,
+            sessions,
+            cost_usd: (unpriced == 0).then_some(usd),
+        })
+        .collect();
+    // Most first; a key whose cost is unknown last.
+    api_keys.sort_by(|a, b| {
+        b.cost_usd
+            .unwrap_or(f64::NEG_INFINITY)
+            .total_cmp(&a.cost_usd.unwrap_or(f64::NEG_INFINITY))
+            .then_with(|| a.key.cmp(&b.key))
+    });
 
     // Entries, with their outcomes, answers and troubled Runs.
     let mut outcomes: HashMap<&str, BTreeMap<String, u32>> = HashMap::new();
@@ -768,6 +814,7 @@ fn summarize(
             measured_runs: u32::try_from(run_tokens.len()).unwrap_or(u32::MAX),
             tokens: usage_total,
             heaviest,
+            api_keys,
         },
     }
 }

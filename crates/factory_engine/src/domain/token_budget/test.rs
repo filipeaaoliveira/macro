@@ -14,6 +14,7 @@ fn session(input: u64, output: u64, cache_read: u64, cache_write: u64) -> Sessio
         cost_usd: 0.0,
         unpriced_calls: 0,
         reported_by_runtime: false,
+        api_key: None,
     }
 }
 

@@ -27,6 +27,21 @@ pub struct SessionTokens {
     /// directly. Such a runtime's session with nothing reported is not
     /// known to have made no call.
     pub reported_by_runtime: bool,
+    /// What its calls billed to an agent's own API key used, when any
+    /// were: a session runs as one agent, so on one key at most.
+    pub api_key: Option<ApiKeySpend>,
+}
+
+/// What an agent session's model calls billed to an agent's own API key
+/// (`ai_usage.agent_api_key_id`) cost.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ApiKeySpend {
+    /// The key, by the agent that holds it (`agent_api_keys.bot_id`).
+    pub key: Uuid,
+    /// What its priced calls on the key cost, in US dollars.
+    pub cost_usd: f64,
+    /// How many of its calls on the key have no price.
+    pub unpriced_calls: u64,
 }
 
 /// Reads the usage recorded for agent sessions.

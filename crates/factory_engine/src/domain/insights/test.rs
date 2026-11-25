@@ -1,4 +1,4 @@
-use ai_usage::domain::session_usage::SessionTokens;
+use ai_usage::domain::session_usage::{ApiKeySpend, SessionTokens};
 use chrono::{DateTime, NaiveDate, Utc};
 use factory_records::domain::insights::{
     DurationSpread, EntryCount, EntryCountKind, EntrySummary, EntryTrouble, InsightsRecords,
@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::fakes::{FakeRecords, FakeUsage};
 use super::{
-    DurationStats, INSIGHTS_RUN_CAP, InsightsError, InsightsQuery, InsightsService,
+    ApiKeyCost, DurationStats, INSIGHTS_RUN_CAP, InsightsError, InsightsQuery, InsightsService,
     InsightsServiceImpl, NamedCount, OutcomeCounts, TokenCounts,
 };
 
@@ -440,6 +440,7 @@ async fn usage_is_summed_by_entry_and_run_for_the_caller() {
         cost_usd: 0.0,
         unpriced_calls: 0,
         reported_by_runtime: false,
+        api_key: None,
     };
     let service = service(records, vec![used(1, 100, 10), used(2, 50, 5)]);
 
@@ -507,6 +508,7 @@ async fn an_entry_costs_its_priced_calls_when_every_call_was_priced() {
         cost_usd,
         unpriced_calls,
         reported_by_runtime: false,
+        api_key: None,
     };
     let service = service(
         records,
@@ -580,6 +582,7 @@ async fn a_step_counts_once_however_many_sessions_it_worked_in() {
         cost_usd: 0.0,
         unpriced_calls: 0,
         reported_by_runtime: false,
+        api_key: None,
     };
     let service = service(
         records,
@@ -679,4 +682,81 @@ async fn a_period_with_more_runs_than_the_cap_says_so() {
 
     assert!(insights.capped);
     assert_eq!(insights.run_cap, INSIGHTS_RUN_CAP);
+}
+
+/// What calls on agents' own API keys cost is summed per key, each session
+/// once however many Steps shared it, most first; a key with an unpriced
+/// call gives no cost, and a session on no key counts for none.
+#[tokio::test]
+async fn api_keys_cost_what_their_calls_cost() {
+    let session = |n: u128| Uuid::from_u128(200 + n);
+    let own_key = Uuid::from_u128(0xb1);
+    let team_key = Uuid::from_u128(0xb2);
+    let step = |seq: u16, id: &str, n: u128| StepSessionRef {
+        run_id: run_id(1),
+        seq,
+        entry: entry(id),
+        session_id: session(n),
+    };
+    let records = InsightsRecords {
+        runs: vec![summary(1, Some("code"), "2026-11-10T10:00:00Z", None)],
+        entries: vec![entry_summary("plan", 2), entry_summary("write", 2)],
+        sessions: vec![
+            step(1, "plan", 1),
+            // A Step that went on in the same session.
+            step(2, "plan", 1),
+            step(3, "write", 2),
+            step(4, "write", 3),
+            step(5, "write", 4),
+        ],
+        ..InsightsRecords::default()
+    };
+    let used = |n, api_key: Option<ApiKeySpend>| SessionTokens {
+        session_id: session(n),
+        input: 100,
+        output: 10,
+        cache_read: 0,
+        cache_write: 0,
+        cost_usd: 1.0,
+        unpriced_calls: 0,
+        reported_by_runtime: false,
+        api_key,
+    };
+    let spend = |key, cost_usd, unpriced_calls| {
+        Some(ApiKeySpend {
+            key,
+            cost_usd,
+            unpriced_calls,
+        })
+    };
+    let service = service(
+        records,
+        vec![
+            used(1, spend(own_key, 0.25, 0)),
+            used(2, spend(own_key, 0.5, 0)),
+            used(3, spend(team_key, 0.75, 1)),
+            used(4, None),
+        ],
+    );
+
+    let insights = service
+        .insights(&julia(), query("2026-11-10", "2026-11-12", "UTC"))
+        .await
+        .expect("insights");
+
+    assert_eq!(
+        insights.usage.api_keys,
+        vec![
+            ApiKeyCost {
+                key: own_key,
+                sessions: 2,
+                cost_usd: Some(0.75),
+            },
+            ApiKeyCost {
+                key: team_key,
+                sessions: 1,
+                cost_usd: None,
+            },
+        ]
+    );
 }

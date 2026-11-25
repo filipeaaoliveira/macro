@@ -7,7 +7,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use macro_uuid::Uuid;
 use sqlx::PgPool;
 
-use crate::domain::session_usage::{SessionTokens, SessionUsageReader};
+use crate::domain::session_usage::{ApiKeySpend, SessionTokens, SessionUsageReader};
 
 /// The most sessions one read sums up. Callers read at most this many at a
 /// time.
@@ -80,11 +80,20 @@ impl SessionUsageReader for PgSessionUsageReader {
                 sum(calls.cache_read_input_tokens)::bigint AS "cache_read!",
                 sum(calls.cache_write_input_tokens)::bigint AS "cache_write!",
                 coalesce(sum(calls.total::float8), 0)::float8 AS "cost_usd!",
-                count(*) FILTER (WHERE calls.total IS NULL) AS "unpriced_calls!"
+                count(*) FILTER (WHERE calls.total IS NULL) AS "unpriced_calls!",
+                (array_agg(calls.agent_api_key_id)
+                    FILTER (WHERE calls.agent_api_key_id IS NOT NULL))[1] AS api_key,
+                coalesce(
+                    sum(calls.total::float8) FILTER (WHERE calls.agent_api_key_id IS NOT NULL),
+                    0
+                )::float8 AS "api_key_cost_usd!",
+                count(*) FILTER (
+                    WHERE calls.agent_api_key_id IS NOT NULL AND calls.total IS NULL
+                ) AS "api_key_unpriced_calls!"
             FROM unnest($1::uuid[]) AS sessions(id)
             CROSS JOIN LATERAL (
                 SELECT user_id, input_tokens, output_tokens, cache_read_input_tokens,
-                       cache_write_input_tokens, total
+                       cache_write_input_tokens, total, agent_api_key_id
                 FROM ai_usage
                 WHERE agent_session_id = sessions.id
                 OFFSET 0
@@ -110,6 +119,11 @@ impl SessionUsageReader for PgSessionUsageReader {
                 cost_usd: row.cost_usd,
                 unpriced_calls: tokens(row.unpriced_calls),
                 reported_by_runtime: false,
+                api_key: row.api_key.map(|key| ApiKeySpend {
+                    key,
+                    cost_usd: row.api_key_cost_usd,
+                    unpriced_calls: tokens(row.api_key_unpriced_calls),
+                }),
             })
             .collect())
     }

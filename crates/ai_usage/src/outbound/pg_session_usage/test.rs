@@ -44,6 +44,7 @@ async fn each_session_sums_the_tokens_its_calls_used(pool: PgPool) {
                 cost_usd: 0.75,
                 unpriced_calls: 0,
                 reported_by_runtime: false,
+                api_key: None,
             },
             SessionTokens {
                 session_id: session(WRITE),
@@ -54,6 +55,7 @@ async fn each_session_sums_the_tokens_its_calls_used(pool: PgPool) {
                 cost_usd: 0.0,
                 unpriced_calls: 1,
                 reported_by_runtime: false,
+                api_key: None,
             },
         ]
     );
@@ -85,4 +87,58 @@ async fn a_read_of_too_many_sessions_is_refused(pool: PgPool) {
         read,
         Err(SessionUsageError::TooManySessions(count)) if count == MAX_SESSIONS + 1
     ));
+}
+
+/// Julia's agent Keyed (`b1`), with its own Anthropic API key: only its
+/// prefix and a fake ciphertext are stored.
+const KEYED: &str = "00000000-0000-7000-8000-0000000000b1";
+/// A session of Keyed's.
+const KEYED_SESSION: &str = "00000000-0000-7000-8000-000000000305";
+
+/// A session's calls billed to an agent's own API key are summed apart, by
+/// the key, beside the session's whole usage.
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_sessions_calls_on_an_api_key_are_summed_by_the_key(pool: PgPool) {
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO macro_user (id, username, email, stripe_customer_id) VALUES
+            ('00000000-0000-7000-8000-000000000001', 'julia@example.com', 'julia@example.com', 'stripe_julia');
+        INSERT INTO "User" (id, email, macro_user_id) VALUES
+            ('macro|julia@example.com', 'julia@example.com', '00000000-0000-7000-8000-000000000001');
+        INSERT INTO bots (id, kind, owner_user_id, name, handle, has_agent) VALUES
+            ('00000000-0000-7000-8000-0000000000b1', 'owned', 'macro|julia@example.com', 'Keyed', 'keyed', true);
+        INSERT INTO agent_configs (bot_id, instructions, harness, default_model, channel_scope, is_coding)
+        VALUES ('00000000-0000-7000-8000-0000000000b1', '', 'in-memory', 'anthropic/claude-sonnet-4-5', 'all', false);
+        INSERT INTO agent_api_keys
+            (bot_id, provider, key_prefix, key_ciphertext, encryption_version, kms_key_id)
+        VALUES ('00000000-0000-7000-8000-0000000000b1', 'anthropic', 'sk-ant-', '\x00', 1, 'test-key');
+        INSERT INTO ai_usage (id, feature, user_id, model, input_tokens, output_tokens,
+                              cache_read_input_tokens, cache_write_input_tokens,
+                              agent_session_id, total, agent_api_key_id)
+        VALUES
+            ('00000000-0000-7000-8000-000000000411', 'agent_session', 'macro|julia@example.com', 'm', 10, 1, 0, 0,
+             '00000000-0000-7000-8000-000000000305', 0.4, '00000000-0000-7000-8000-0000000000b1'),
+            ('00000000-0000-7000-8000-000000000412', 'agent_session', 'macro|julia@example.com', 'm', 20, 2, 0, 0,
+             '00000000-0000-7000-8000-000000000305', 0.1, '00000000-0000-7000-8000-0000000000b1'),
+            ('00000000-0000-7000-8000-000000000413', 'agent_session', 'macro|julia@example.com', 'm', 30, 3, 0, 0,
+             '00000000-0000-7000-8000-000000000305', 0.2, NULL);
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("fixtures");
+    let reader = PgSessionUsageReader::new(pool);
+
+    let read = reader
+        .session_tokens(&julia(), &[session(KEYED_SESSION)])
+        .await
+        .expect("read");
+
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].input, 60);
+    assert!((read[0].cost_usd - 0.7).abs() < 1e-6);
+    let spend = read[0].api_key.expect("spent on the key");
+    assert_eq!(spend.key, session(KEYED));
+    assert!((spend.cost_usd - 0.5).abs() < 1e-6);
+    assert_eq!(spend.unpriced_calls, 0);
 }

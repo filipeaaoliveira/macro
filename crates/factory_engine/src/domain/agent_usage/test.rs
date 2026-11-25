@@ -46,6 +46,7 @@ fn logged(n: u128, input: u64, cost_usd: f64) -> SessionTokens {
         cost_usd,
         unpriced_calls: 0,
         reported_by_runtime: false,
+        api_key: None,
     }
 }
 
@@ -57,13 +58,19 @@ async fn kept(usage: &[SessionUsage]) -> FakeRepo {
     repo
 }
 
-/// A session whose runtime reported its usage reads as it reported it,
-/// and only the others are read from the usage log, so none counts twice.
+/// A session the usage log recorded reads from the log, priced; one it has
+/// nothing for reads as its runtime reported it, in tokens only, whatever
+/// cost the runtime reported: so none counts twice, and a subscription's
+/// estimated cost is never spend.
 #[tokio::test]
-async fn kept_usage_is_read_and_the_rest_from_the_usage_log() {
-    let repo = kept(&[reported(1, 6, 1165, Some(0.27))]).await;
-    // The usage log has session 1 too, as a runtime on the model router
-    // would record it: it is not read for it.
+async fn logged_usage_is_read_and_the_rest_as_reported_in_tokens_only() {
+    let repo = kept(&[
+        reported(1, 6, 1165, Some(0.27)),
+        reported(3, 7, 70, Some(1.5)),
+    ])
+    .await;
+    // The usage log has session 1 too, as a session on Macro's gateway
+    // records it: it is read from the log.
     let log = FakeUsage::new(vec![logged(1, 999, 9.0), logged(2, 40, 0.01)]);
     let reader = AgentUsageReader::new(log, repo);
 
@@ -76,20 +83,22 @@ async fn kept_usage_is_read_and_the_rest_from_the_usage_log() {
     assert_eq!(
         read,
         vec![
+            logged(1, 999, 9.0),
+            logged(2, 40, 0.01),
             SessionTokens {
-                session_id: session(1),
-                input: 6,
-                output: 1165,
+                session_id: session(3),
+                input: 7,
+                output: 70,
                 cache_read: 1000,
                 cache_write: 10,
-                cost_usd: 0.27,
-                unpriced_calls: 0,
+                cost_usd: 0.0,
+                unpriced_calls: 1,
                 reported_by_runtime: true,
+                api_key: None,
             },
-            logged(2, 40, 0.01),
         ]
     );
-    assert_eq!(*reader.log.asked.lock().expect("asked"), vec![(julia(), 2)]);
+    assert_eq!(*reader.log.asked.lock().expect("asked"), vec![(julia(), 3)]);
 }
 
 /// A session whose runtime reported tokens and no cost, and whose calls the
@@ -189,10 +198,11 @@ fn query() -> InsightsQuery {
     .expect("valid query")
 }
 
-/// Insights sum the usage Steps' runtimes reported: tokens per entry and
-/// in all, and each entry's cost.
+/// Insights sum the usage Steps' runtimes reported in tokens, per entry and
+/// in all, and give no cost for it: what a runtime on its owner's own
+/// login reports is its estimate, not spend.
 #[tokio::test]
-async fn insights_sum_the_kept_usage() {
+async fn insights_sum_the_kept_usage_in_tokens_only() {
     let repo = kept(&[
         reported(1, 6, 1165, Some(0.27)),
         reported(2, 20, 2287, Some(0.14)),
@@ -224,8 +234,8 @@ async fn insights_sum_the_kept_usage() {
             .expect("entry")
             .cost_usd
     };
-    assert_eq!(cost("plan"), Some(0.27));
-    assert_eq!(cost("write"), Some(0.14));
+    assert_eq!(cost("plan"), None);
+    assert_eq!(cost("write"), None);
 }
 
 /// An entry with a session whose runtime reported no cost gives no cost,

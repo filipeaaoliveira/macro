@@ -22,7 +22,7 @@ use model_error_response::ErrorResponse;
 use serde::Deserialize;
 
 use crate::domain::insights::{
-    DurationStats, EntryInsight, FlowInsight, GateInsight, InsightDay, InsightsError,
+    ApiKeyCost, DurationStats, EntryInsight, FlowInsight, GateInsight, InsightDay, InsightsError,
     InsightsQuery, InsightsService, NamedCount, OutcomeCounts, RunInsights, RunLink, RunTokens,
     TokenCounts, TroubleRun, UsageInsight,
 };
@@ -235,6 +235,7 @@ impl IntoResponse for InsightsError {
         RunTokens,
         TokenCounts,
         UsageInsight,
+        ApiKeyCost,
         QualityInsights,
         CiHealth,
         CiCause,
