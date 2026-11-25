@@ -8,6 +8,7 @@
 #[cfg(test)]
 pub(crate) mod test;
 
+mod placement;
 mod quota_memory;
 pub(crate) mod reminder;
 mod said_breaks;
@@ -27,6 +28,7 @@ use agent_session::domain::routines::{
 use ai_billing::DenyReason;
 use bot_id::BotId;
 use factory_records::domain::evaluation::EvaluationRepository;
+use factory_records::domain::machines::MachineRepository;
 use factory_records::domain::models::{
     AgentName, HandedBack, Outcome, PassedOver, Role, RunId, StepKey, StepSession,
 };
@@ -199,6 +201,17 @@ pub enum SessionAgentError {
     /// a retry goes on once it ended.
     #[error("another run of setup command {0} still holds the checkout's setup lock")]
     SetupLockBusy(String),
+    /// No Machine any Agent of the Step's Role runs on has the tags the
+    /// Agent asks for: waiting would not change that. It holds what the
+    /// Run's owner is shown.
+    #[error("{0}")]
+    NoMachine(String),
+    /// Every Machine an Agent of the Step's Role may run on was full until
+    /// the attempt's time ran out: a retry waits on, and should the Step's
+    /// time run out so, its Run ends `infrastructure`. It holds the full
+    /// Machines' names.
+    #[error("every machine the step may run on is full: {}", .0.join(", "))]
+    WaitingForSlot(Vec<String>),
 }
 
 impl Retryable for SessionAgentError {
@@ -229,7 +242,8 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::Overdue
             | SessionAgentError::Superseded
             | SessionAgentError::NotOpened
-            | SessionAgentError::MayStillOpen => true,
+            | SessionAgentError::MayStillOpen
+            | SessionAgentError::WaitingForSlot(_) => true,
             SessionAgentError::Session(error) => error.is_transient(),
             SessionAgentError::TurnFailed(_)
             | SessionAgentError::NoQuota(_)
@@ -247,7 +261,8 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::PausedTooLong
             | SessionAgentError::SetupFailed(_)
             | SessionAgentError::SetupUnsupported(_)
-            | SessionAgentError::Refused(_) => false,
+            | SessionAgentError::Refused(_)
+            | SessionAgentError::NoMachine(_) => false,
         }
     }
 }
@@ -281,11 +296,20 @@ impl AgentFailure for SessionAgentError {
         }
     }
 
+    /// A Machine that refused the session, and a Role whose Agents no
+    /// Machine with the tags they ask for runs: either way asking again
+    /// changes nothing, and the Run's owner is shown why.
     fn refused(&self) -> Option<&str> {
         match self {
-            SessionAgentError::Refused(reason) => Some(reason),
+            SessionAgentError::Refused(reason) | SessionAgentError::NoMachine(reason) => {
+                Some(reason)
+            }
             _ => None,
         }
+    }
+
+    fn waits_for_machine(&self) -> bool {
+        matches!(self, SessionAgentError::WaitingForSlot(_))
     }
 
     fn setup_failed(&self) -> Option<&str> {
@@ -318,8 +342,10 @@ impl std::fmt::Debug for Notices {
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
-    SessionAgent<S, R>
+impl<
+    S: RoutineSessions,
+    R: RunRepository + EvaluationRepository + SessionUsageRepository + MachineRepository,
+> SessionAgent<S, R>
 {
     /// The Agents of `agents`, reached through `sessions`, with their
     /// sessions recorded in `repo`.
@@ -887,8 +913,10 @@ pub(super) struct Waited {
     pub(super) deadline: tokio::time::Instant,
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
-    SessionAgent<S, R>
+impl<
+    S: RoutineSessions,
+    R: RunRepository + EvaluationRepository + SessionUsageRepository + MachineRepository,
+> SessionAgent<S, R>
 {
     /// Wait on the turn of the Step `task`'s own prompt `action` ([`Self::wait_turn`]),
     /// unless an earlier attempt already took the Step on to a later prompt
@@ -916,8 +944,10 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
-    SessionAgent<S, R>
+impl<
+    S: RoutineSessions,
+    R: RunRepository + EvaluationRepository + SessionUsageRepository + MachineRepository,
+> SessionAgent<S, R>
 {
     /// Open the Step's `session` and prompt it, as the session's Agent, and
     /// the action to wait on. An Agent whose quota is used up refuses either
@@ -1004,8 +1034,10 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
-    SessionAgent<S, R>
+impl<
+    S: RoutineSessions,
+    R: RunRepository + EvaluationRepository + SessionUsageRepository + MachineRepository,
+> SessionAgent<S, R>
 {
     /// Run the repository's `setup` in the Step's new session `session`,
     /// through its bot (`action`), before its first prompt: each command not
@@ -1120,8 +1152,10 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository>
-    SessionAgent<S, R>
+impl<
+    S: RoutineSessions,
+    R: RunRepository + EvaluationRepository + SessionUsageRepository + MachineRepository,
+> SessionAgent<S, R>
 {
     /// Do the Step `task`, which goes on from the question of the Step at
     /// `asked`, in that Step's session: the agent has the Step's
@@ -1501,8 +1535,10 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageRepository> StepAgent
-    for SessionAgent<S, R>
+impl<
+    S: RoutineSessions,
+    R: RunRepository + EvaluationRepository + SessionUsageRepository + MachineRepository,
+> StepAgent for SessionAgent<S, R>
 {
     type Err = SessionAgentError;
 
@@ -1522,9 +1558,13 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
             return self.go_on(agents, &task, asked, deadline).await;
         }
         let listed = self.role_agents(agents, &task).await?;
-        let first = listed
-            .first()
-            .ok_or_else(|| SessionAgentError::UnfilledRole(task.role.clone()))?;
+        if listed.is_empty() {
+            return Err(SessionAgentError::UnfilledRole(task.role.clone()));
+        }
+        // A Step that claimed no session yet is placed first: on the first
+        // of its Agents whose Machine has the tags it asks for and a free
+        // slot, waiting while each such Machine is full.
+        let first = self.place(agents, &task, &listed, deadline).await?;
         // A retried Step goes on in the session its first attempt claimed,
         // or the one a later Agent took over, so the work is never started
         // twice.
@@ -1532,7 +1572,7 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository + SessionUsageR
             .repo
             .claim_session(
                 task.key,
-                Self::new_session(agents, first)?,
+                Self::new_session(agents, &first)?,
                 &task.role,
                 &task.outcomes,
             )

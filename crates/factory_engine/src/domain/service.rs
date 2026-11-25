@@ -2593,12 +2593,15 @@ where
                 }
                 let out_of_quota = error.out_of_quota();
                 let overdue = error.overdue();
+                let waits_for_machine = error.waits_for_machine();
                 let final_failure = !error.retryable();
                 let report = internal(error);
                 if out_of_quota {
                     StepError::OutOfQuota(report)
                 } else if overdue {
                     StepError::Overdue(report)
+                } else if waits_for_machine {
+                    StepError::WaitingForMachine(report)
                 } else if final_failure {
                     StepError::Final(report)
                 } else {

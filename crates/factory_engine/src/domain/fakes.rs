@@ -7,6 +7,7 @@ mod evaluation;
 mod flaws;
 mod gate_owner;
 mod gate_replies;
+mod machines;
 mod main_hold;
 mod merge_queue;
 pub(crate) mod self_improvement;
@@ -279,6 +280,12 @@ pub(crate) struct FakeRepo {
     /// What each agent session's runtime reported it used, by session.
     pub(crate) session_usage:
         Arc<Mutex<BTreeMap<Uuid, factory_records::domain::session_usage::SessionUsage>>>,
+    /// The Machine each bot is bound to, by the bot's id.
+    pub(crate) machines: Arc<Mutex<BTreeMap<Uuid, factory_records::domain::machines::StepMachine>>>,
+    /// The Machine whose slot each Step holds.
+    pub(crate) machine_slots: Arc<Mutex<HashMap<StepKey, Uuid>>>,
+    /// The full Machines each waiting Step waits on, by name.
+    pub(crate) slot_waits: Arc<Mutex<HashMap<StepKey, Vec<String>>>>,
 }
 
 /// A firing: its Automation and its key.

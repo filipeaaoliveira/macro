@@ -316,6 +316,35 @@ is private to whoever paired it, so `machine` is blank for anyone but the
 Run's owner (`RunDetail::as_seen_by`): a team member reading the Run or
 the team board sees the model and agent only.
 
+Machines (`src/domain/session_agent/placement.rs`): an agent Step runs where
+its Agent's bot is bound, a macrod machine or a Macro computer (a harness).
+Its owner gives each Machine `step_slots`, how many factory Steps run on it
+at once (none, the default, for no limit), and `tags` in Settings, Machines
+(`PATCH /harnesses/{id}`). An Agent of a Definition may ask its Machine for
+tags (`machine_tags`, ignoring case). Before a Step claims its session it is
+placed (`SessionAgent::place`): its Role's Agents, in the order a Step takes
+them (arm, rule, the Role's own), are passed over while their Machine lacks
+a tag they ask for (a bot on no Machine has no tags), and the first whose
+Machine has a free slot takes the Step, which holds the slot
+(`factory_step.machine_id`, `MachineRepository::take_machine_slot`, under a
+lock per Machine) until it ends or its Run does. An Agent on no Machine that
+asks no tag takes it at once. While every matching Machine is full the Step
+waits, looking every 10 s, and records on which and since when
+(`wait_for_machine_slot`), which the Run API shows on the Step as
+`runtime.waitingForSlotSince` and `runtime.waitingOnMachines` (the names for
+the Run's owner only, as `machine`); an attempt out of time fails
+`WaitingForSlot` (`StepError::WaitingForMachine`, type
+`FactoryWaitingForMachine`), retried, and a Step whose whole time runs out
+so ends its Run `infrastructure`. A Step whose Agents no Machine with their
+tags runs fails at once as a refusal (`SessionAgentError::NoMachine`), its
+output saying which tags. A Step that claimed its session is not placed
+again, so a retry keeps its slot. Not placed yet: a Step that goes on
+after a question works in the asking Step's session, whose slot ended with
+that Step, and an Agent that takes a Step on another's lack of quota opens
+on its own Machine without a slot. Deploy every worker before a
+Definition adds `machine_tags`: `Agent` denies unknown fields, so an older
+worker fails the agent Steps of a Run that kept one.
+
 Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
 `deny_unknown_fields`, and an agent Step reads its Run's kept Agents
 (`SessionAgent::run_agents`). A worker from before them fails every agent Step

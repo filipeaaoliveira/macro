@@ -32,6 +32,7 @@ use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
 mod agent_rules;
 mod follow_up;
 mod going_on;
+mod machines;
 mod quota_memory;
 mod reminder;
 mod run_check;

@@ -20,7 +20,7 @@ use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::inbound::temporal::activities::{
-    FactoryActivities, INFRASTRUCTURE_FAILURE, REFUSED_FAILURE,
+    FactoryActivities, INFRASTRUCTURE_FAILURE, REFUSED_FAILURE, WAITING_FOR_MACHINE_FAILURE,
 };
 
 /// Why a Step's work failed for good, as the workflow reads it.
@@ -57,7 +57,8 @@ impl WorkFailure {
 /// failure, which the workflow's history keeps, so a replay reads it the
 /// same way. Only what is surely the factory's counts as infrastructure;
 /// when unsure, the failure is the work's. Infrastructure's are: agents out
-/// of quota (`FactoryInfrastructure`), and timeouts no slow agent explains
+/// of quota (`FactoryInfrastructure`), a Step whose Machines stayed full
+/// (`FactoryWaitingForMachine`, a type no history before it carries), and timeouts no slow agent explains
 /// ([`timeout_failure`]). Attempts whose time ran out after a failure
 /// Temporal retried come back as that last failure, not as a timeout: one
 /// of no known kind, as an agent still at work (`FactoryAgentOverdue`) or a
@@ -97,10 +98,14 @@ fn known_failure(failure: &IncomingError) -> Option<WorkFailure> {
     }
 }
 
-/// Whether `failure` is agents out of quota.
+/// Whether `failure` is agents out of quota, or a Step whose Machines
+/// stayed full: either way infrastructure's.
 fn out_of_quota(failure: &IncomingError) -> bool {
     match failure {
-        IncomingError::Application(failure) => failure.type_name() == Some(INFRASTRUCTURE_FAILURE),
+        IncomingError::Application(failure) => {
+            failure.type_name() == Some(INFRASTRUCTURE_FAILURE)
+                || failure.type_name() == Some(WAITING_FOR_MACHINE_FAILURE)
+        }
         _ => false,
     }
 }

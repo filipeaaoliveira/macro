@@ -68,6 +68,11 @@ pub struct Agent {
     /// What every session of it is told before the Step's prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    /// The tags the Machine its bot is bound to must have, such as
+    /// `rust-build` or `gpu`, ignoring case: a Step passes over the Agent
+    /// while its Machine lacks one. None asks nothing of the Machine.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub machine_tags: Vec<String>,
 }
 
 /// The Agents, and the ones each Role takes, in order. It is written as it
