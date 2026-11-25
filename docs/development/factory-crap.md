@@ -49,8 +49,11 @@ Not scored:
 - Postgres migrated at `DATABASE_URL` with `SQLX_OFFLINE` unset, as for
   `cargo test -p factory_records`. `just setup_macrodb` creates and migrates
   it (see [Database development](database.md)).
-- `@vitest/coverage-v8` at the installed vitest's version, a dev dependency
-  of `apps/web`. `crap4ts` runs through `bunx` at a pinned version.
+- `@vitest/coverage-v8` at the installed vitest's version. It is not a
+  dependency of the repository: install it without saving it
+  (`bun add -d --exact @vitest/coverage-v8@<vitest's version>` in
+  `apps/web`, then restore `package.json` and `bun.lock`) before measuring.
+  `crap4ts` runs through `bunx` at a pinned version.
 
 ## Baseline (base `bb371ab93`)
 
@@ -152,9 +155,11 @@ same output as the Rust check:
   comparison never fails the round.
 - The changed paths are `MACRO_CHECK_CHANGED`'s list when its first line is
   `complete`, else every TypeScript path in the package that
-  `git diff <base> HEAD` names. It leaves out tests (`*.test.*`, `*.spec.*`,
-  `__tests__/`, `test/`, `tests/`, `browser-test/`), declarations, configs,
-  `generated/` folders and files marked `@generated`.
+  `git diff <base> HEAD` names. It scores files under the package's `src/`
+  only, so root files such as `vite.config.ts` or `codegen.ts` are left
+  out, and leaves out tests (`*.test.*`, `*.spec.*`, `__tests__/`, `test/`,
+  `tests/`, `browser-test/`), declarations, configs, `generated/` folders
+  and files marked `@generated`.
 
 It reads each function's cyclomatic complexity with the TypeScript compiler
 API, at the change and in the base's version of the file. It scores the
@@ -167,23 +172,29 @@ it. Counting it there would put 28 of the factory-runs feature's 399
 functions above 30 instead of 7.
 
 Coverage comes from vitest with the v8 provider and Istanbul JSON, limited
-to the touched files (`--coverage.include`). It runs the tests in the
-folders of the files holding a touched function, cut to three levels under
-the package (`src/features/factory-runs`), with `vitest run <folders>`.
-Vitest's `related` mode follows imports transitively, and most of
+to the touched files (`--coverage.include`, glob characters such as
+`[id]` escaped). For a file holding a touched function at least three
+folders under the package, it runs the tests under its folder cut to that
+depth (`src/features/factory-runs/`). For a shallower file
+(`src/index.ts`) it runs only the test files beside it, and none when there
+are none: never the whole package. Vitest's `related` mode follows imports transitively, and most of
 `apps/web`'s tests import most of the app: for a change to one
 factory-runs component it ran unrelated database tests and ran out of
 memory after 4.5 minutes, and a change to a locale file ran for more than
 11 minutes. A function covered only by tests in another folder counts as
 uncovered.
-A function's coverage is the share of the statements starting in its own
-lines that ran, which corrects crap4ts's miss on wrapped signatures.
+A function's coverage is the share of the statements starting inside its
+body that ran. The variable or class property holding an arrow is a
+statement of its own that runs on import, so it is left out, or an arrow
+no test calls would look covered. Counting the body also corrects
+crap4ts's miss on wrapped signatures. A Solid component's compiled
+templates add no statement of their own.
 
 It prints one JSON line per function whose lines meet a diff hunk, then a
 summary line:
 
 ```json
-{"path":"apps/web/src/features/factory-runs/components/run-timeline.tsx","name":"BreakOutput","line":618,"complexity":5,"coverage":100,"score":5,"change":"new","base_complexity":null,"fails":false}
+{"path":"apps/web/src/features/factory-runs/components/run-timeline.tsx","name":"BreakOutput","line":618,"complexity":3,"coverage":100,"score":3,"change":"new","base_complexity":null,"fails":false}
 ```
 
 The fields are the Rust rows'. `change` is `new`, `rose`, `same` or `fell`. A
@@ -199,14 +210,22 @@ last, the worst last. Exit code: 0 passed or skipped, 1 a function failed,
 exits 2 with the command that installs them.
 
 A failing test does not stop it: vitest writes the coverage anyway
-(`--coverage.reportOnFailure`). The summary then says the tests failed,
-and each row with no coverage carries `"unproven":true` and does not fail,
-since a test that failed may be the one covering it. The tests' own check
-reports the failure.
+(`--coverage.reportOnFailure`). When vitest's JSON test report shows a
+failed test, the summary says so, and each row with no coverage carries
+`"unproven":true` and does not fail, since a test that failed may be the
+one covering it. The tests' own check reports the failure. A run that
+fails with no failed test (a crash, a worker out of memory, an import
+error, an unhandled error) measured nothing, and the check exits 2. So
+does a vitest still running after `--vitest-timeout` seconds (240): the
+check stops its whole process group, workers included. A touched file no
+test reached while the tests passed scores 0%.
 
-On the M3, a change to `run-timeline.tsx` (two touched functions) took 59
-seconds wall, 270 CPU-seconds and 0.9 GB peak memory, 35 test files and 304
-tests in `src/features/factory-runs`.
+It scores and tests the working tree but diffs the committed `HEAD`, and
+warns when the working tree has uncommitted changes.
+
+On the M3, a change to `run-timeline.tsx` (two touched functions) took 36
+to 59 seconds wall, up to 270 CPU-seconds and 0.9 GB peak memory, 35 test
+files and 304 tests in `src/features/factory-runs`.
 
 ### Scores of the factory-runs feature (base `f161f92334`)
 
@@ -223,7 +242,8 @@ check leaves them alone until a change makes one more complex.
 The fork's own `.macro/checks.json` does not run it. A product repository
 whose TypeScript the factory changes copies `tooling/crap-ts/` into its own
 tree, adds `vitest`, `@vitest/coverage-v8` at the same version and
-`typescript` as dev dependencies of the package, and declares the check:
+`typescript` as dev dependencies of the package, keeps its source under
+the package's `src/`, and declares the check:
 
 ```json
 {
@@ -232,12 +252,14 @@ tree, adds `vitest`, `@vitest/coverage-v8` at the same version and
       "name": "crap-ts",
       "run": "bun tooling/crap-ts/crap-ts.ts --package apps/web",
       "paths": ["apps/web", "tooling/crap-ts"],
-      "timeout": 600
+      "timeout": 300
     }
   ]
 }
 ```
 
-`paths` keeps it to changes in the package, `timeout` leaves room for a
-large feature's tests (the recommendation above is 5 minutes for one
-feature). `--threshold` changes the score above which a function fails.
+`paths` keeps it to changes in the package. `timeout` is the 5 minutes
+recommended above; the check stops vitest after 240 seconds
+(`--vitest-timeout`), so a slow test run ends as "could not run" with
+time to say so, not as a killed check. `--threshold` changes the score
+above which a function fails.
