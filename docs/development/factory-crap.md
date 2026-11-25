@@ -157,7 +157,9 @@ using it.
    `crap-rust: skipped: no base commit to compare with` and exits 0: a
    comparison that fails never fails the round.
 2. Tools: `cargo llvm-cov`, `cargo nextest` and `cargo crap` must answer
-   `--version`; otherwise it exits 2 at once with the install command.
+   `--version`, and rustup must list the `llvm-tools-preview` component for
+   the repository's toolchain; otherwise it exits 2 at once, before any
+   build, with the install command.
 3. Changed files: those `MACRO_CHECK_CHANGED` lists when its first line is
    `complete`, else every `*.rs` path `git diff <base> HEAD` names. Tests,
    generated code, migrations, the SQLx cache, build scripts and
@@ -166,9 +168,11 @@ using it.
    `cargo llvm-cov nextest --ignore-run-fail`. Each test is ended after
    three minutes. The build goes to `CARGO_LLVM_COV_TARGET_DIR`, else
    cargo-llvm-cov's folder in `CARGO_TARGET_DIR`, else
-   `${XDG_CACHE_HOME:-$HOME/.cache}/macro-check/crap-target`: outside the
-   round's worktree, so only the first round on a machine builds cold.
-   Rounds on one machine take turns on it.
+   `${XDG_CACHE_HOME:-$HOME/.cache}/macro-check/crap-target/<repository>`,
+   named after the repository's `origin` URL (`github.com-acme-app`):
+   outside the round's worktree, so only the first round on a machine
+   builds cold, and apart from every other repository's build. Rounds of
+   one repository take turns on it; one that waits says so on stderr.
 5. Scores: `cargo crap -p <those>`, and the base versions of the changed
    and removed files for their complexity.
 6. Pairing: a function pairs with the base function of its name whose line
@@ -192,10 +196,12 @@ crap-rust: 1 touched functions; 0 new or more complex above 30 (failing); 0 unpr
 - A row `fails` when the function is `new` or `rose` and scores above
   `threshold` in `.cargo-crap.toml` (30 without one); the check then exits 1.
   Other touched functions above 30 are listed without failing.
-- When tests failed, the summary names how many and the first three, every
-  row has `"coverage_uncertain":true`, and a row that would fail only
-  because it is 0% covered has `"unproven":true` and does not fail. A
-  function whose complexity alone is above 30 still fails.
+- When tests failed, the summary names how many and the first three, and
+  every row has `"coverage_uncertain":true`. A row that would fail only
+  because it is 0% covered has `"unproven":true` and does not fail: a test
+  failed, so its coverage cannot be trusted. The tests check (below) is what
+  fails the round then; this one does not judge such a row until the tests
+  pass. A function whose complexity alone is above 30 still fails.
 - Failing rows come last, the worst last, since the round keeps only the
   last 4 KiB of a check's output.
 - Exit code: 0 passed or skipped, 1 a row fails, 2 the check could not run.
@@ -211,15 +217,23 @@ Install the tools on each machine that runs the checks:
 ```sh
 cargo install --locked cargo-llvm-cov cargo-nextest cargo-crap
 rustup component add llvm-tools-preview
-cargo install --locked --git https://github.com/filipeaaoliveira/macro --branch feat/factory xtask_crap
+cargo install --locked --git https://github.com/filipeaaoliveira/macro \
+  --rev e95b3ac48e21bd6a69db9eca47e9d513e2173c08 xtask_crap
 ```
 
 Then add the check to the repository's `.macro/checks.json`, with `paths`
-naming its Rust folders:
+naming its Rust folders, beside a check that runs the tests. `crap-rust`
+measures coverage even when tests fail and does not fail the round for
+them, so without a tests check a failing test fails nothing:
 
 ```json
 {
   "checks": [
+    {
+      "name": "tests",
+      "run": "cargo nextest run --workspace",
+      "paths": ["crates", "src"]
+    },
     {
       "name": "crap-rust",
       "run": "xtask_crap",
@@ -232,6 +246,11 @@ naming its Rust folders:
 
 It runs from the root of a repository whose Cargo workspace is at its root.
 An optional `.cargo-crap.toml` there sets `threshold` and `try-weight`.
+
+Pin `--rev` to the commit to run, and install again to take a newer one.
+To free the disk a repository's coverage build takes, remove its folder
+when no round runs: `rm -rf ~/.cache/macro-check/crap-target/<repository>`
+(under `$XDG_CACHE_HOME` when that is set). The next round builds cold.
 
 ### Try-weight
 
